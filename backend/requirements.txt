@@ -1,39 +1,20 @@
-# AI智能视频剪辑后端依赖
-# FastAPI核心框架
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-
-# 数据验证和序列化
-pydantic==2.5.0
-
-# HTTP客户端
-httpx==0.25.2
-
-# 异步支持
-asyncio-mqtt==0.13.0
-
-# 视频处理相关
-opencv-python==4.8.1.78
-ffmpeg-python==0.2.0
-
-# AI/ML相关
-torch==2.1.1
-torchvision==0.16.1
-numpy==1.24.3
-Pillow==10.1.0
-
-# 工具库
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-
-# 日志和配置
-python-dotenv==1.0.0
-loguru==0.7.2
-
-# 开发工具
-pytest==7.4.3
-pytest-asyncio==0.21.1
-
-# 打包工具
-pyinstaller==6.2.0
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+httpx>=0.25.0
+asyncio-mqtt>=0.13.0
+opencv-python>=4.8.0
+ffmpeg-python>=0.2.0
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+Pillow>=10.0.0
+python-multipart>=0.0.6
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+loguru>=0.7.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pyinstaller>=6.0.0
+psutil>=5.9.0

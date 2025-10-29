@@ -20,6 +20,13 @@ export interface ApiResponse<T = any> {
   timestamp: string
 }
 
+export interface ServerInfoData {
+  host: string;
+  port: number;
+  started_at: string;
+  status: string;
+}
+
 export interface TaskStatus {
   task_id: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
@@ -381,5 +388,58 @@ export const utils = {
     }
     
     throw lastError!
+  },
+
+  // 端口发现功能
+  async discoverBackendPort(
+    host: string = DEFAULT_HOST,
+    startPort: number = DEFAULT_PORT,
+    maxAttempts: number = 10
+  ): Promise<{ port: number; host: string } | null> {
+    for (let i = 0; i < maxAttempts; i++) {
+      const port = startPort + i
+      const testUrl = `http://${host}:${port}/api/server/info`
+      
+      try {
+        const response = await fetch(testUrl, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(2000) // 2秒超时
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.data && data.data.port) {
+            console.log(`发现后端服务运行在 ${host}:${port}`)
+            return { port: data.data.port, host }
+          }
+        }
+      } catch (error) {
+        // 忽略连接错误，继续尝试下一个端口
+        console.debug(`端口 ${port} 连接失败:`, error)
+      }
+    }
+    
+    console.warn(`无法在 ${host}:${startPort}-${startPort + maxAttempts - 1} 范围内发现后端服务`)
+    return null
+  }
+}
+
+// 自动配置后端连接
+export async function autoConfigureBackend(
+  host: string = DEFAULT_HOST,
+  startPort: number = DEFAULT_PORT
+): Promise<boolean> {
+  try {
+    const discovered = await utils.discoverBackendPort(host, startPort)
+    if (discovered) {
+      configureBackend(discovered.port, discovered.host)
+      console.log(`自动配置后端连接: ${discovered.host}:${discovered.port}`)
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('自动配置后端连接失败:', error)
+    return false
   }
 }

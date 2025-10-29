@@ -1,0 +1,41 @@
+{
+  "active_config_id": null,
+  "configs": {
+    "qwen_video_analysis": {
+      "provider": "qwen",
+      "api_key": "your_qwen_api_key_here",
+      "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+      "model_name": "qwen-vl-plus",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "通义千问视频分析模型"
+    },
+    "doubao_video_analysis": {
+      "provider": "doubao",
+      "api_key": "your_doubao_api_key_here",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "model_name": "doubao-vision-pro",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "豆包视频分析模型"
+    },
+    "deepseek_video_analysis": {
+      "provider": "deepseek",
+      "api_key": "your_deepseek_api_key_here",
+      "base_url": "https://api.deepseek.com/chat/completions",
+      "model_name": "deepseek-vl-chat",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "DeepSeek视频分析模型"
+    }
+  }
+}

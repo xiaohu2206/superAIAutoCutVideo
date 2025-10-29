@@ -1,0 +1,82 @@
+{
+  "templates": {
+    "video_content_analysis": {
+      "id": "video_content_analysis",
+      "name": "视频内容分析",
+      "description": "分析视频内容，提取关键信息",
+      "category": "video_analysis",
+      "template": "请分析以下视频内容：\n\n视频信息：\n- 时长：${duration}\n- 分辨率：${resolution}\n- 文件大小：${file_size}\n\n请从以下几个方面进行分析：\n1. 视频主题和内容概要\n2. 关键场景和时间点\n3. 适合剪辑的片段建议\n4. 音频质量评估\n5. 画面质量评估\n\n分析结果请以JSON格式返回。",
+      "variables": [
+        "duration",
+        "resolution",
+        "file_size"
+      ],
+      "system_prompt": "你是一个专业的视频分析师，擅长分析视频内容并提供剪辑建议。",
+      "user_prompt_template": null,
+      "examples": [],
+      "tags": [
+        "video",
+        "analysis",
+        "content"
+      ],
+      "version": "1.0",
+      "created_at": "2025-10-29T15:18:14.528623",
+      "updated_at": "2025-10-29T15:18:14.528623",
+      "enabled": true
+    },
+    "highlight_detection": {
+      "id": "highlight_detection",
+      "name": "精彩片段检测",
+      "description": "检测视频中的精彩片段",
+      "category": "video_analysis",
+      "template": "请分析视频并检测精彩片段：\n\n视频描述：${video_description}\n检测类型：${detection_type}\n时长限制：${duration_limit}\n\n请识别以下类型的精彩片段：\n1. 高潮部分\n2. 有趣的对话\n3. 视觉效果突出的场景\n4. 情感高涨的时刻\n\n对每个片段，请提供：\n- 开始时间\n- 结束时间\n- 片段描述\n- 精彩程度评分（1-10）\n- 推荐理由",
+      "variables": [
+        "video_description",
+        "detection_type",
+        "duration_limit"
+      ],
+      "system_prompt": "你是一个视频剪辑专家，能够准确识别视频中的精彩片段。",
+      "user_prompt_template": null,
+      "examples": [],
+      "tags": [
+        "video",
+        "highlight",
+        "detection"
+      ],
+      "version": "1.0",
+      "created_at": "2025-10-29T15:18:14.528623",
+      "updated_at": "2025-10-29T15:18:14.528623",
+      "enabled": true
+    },
+    "auto_cut_suggestion": {
+      "id": "auto_cut_suggestion",
+      "name": "自动剪辑建议",
+      "description": "提供自动剪辑的建议方案",
+      "category": "video_editing",
+      "template": "基于视频分析结果，请提供自动剪辑建议：\n\n原视频时长：${original_duration}\n目标时长：${target_duration}\n剪辑风格：${editing_style}\n目标受众：${target_audience}\n\n请提供以下剪辑建议：\n1. 保留片段列表（开始时间-结束时间）\n2. 删除片段的理由\n3. 转场效果建议\n4. 音频处理建议\n5. 字幕添加建议\n\n请确保剪辑后的视频：\n- 保持内容连贯性\n- 符合目标时长要求\n- 适合目标受众",
+      "variables": [
+        "original_duration",
+        "target_duration",
+        "editing_style",
+        "target_audience"
+      ],
+      "system_prompt": "你是一个专业的视频剪辑师，能够提供高质量的剪辑建议。",
+      "user_prompt_template": null,
+      "examples": [],
+      "tags": [
+        "video",
+        "editing",
+        "auto-cut"
+      ],
+      "version": "1.0",
+      "created_at": "2025-10-29T15:18:14.528623",
+      "updated_at": "2025-10-29T15:18:14.528623",
+      "enabled": true
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "updated_at": "2025-10-29T15:18:14.528623",
+    "total_templates": 3
+  }
+}

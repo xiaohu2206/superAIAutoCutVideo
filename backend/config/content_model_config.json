@@ -1,0 +1,41 @@
+{
+  "active_config_id": null,
+  "configs": {
+    "qwen_content_generation": {
+      "provider": "qwen",
+      "api_key": "your_qwen_api_key_here",
+      "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+      "model_name": "qwen-turbo",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "通义千问文案生成模型"
+    },
+    "doubao_content_generation": {
+      "provider": "doubao",
+      "api_key": "your_doubao_api_key_here",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "model_name": "doubao-lite-4k",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "豆包文案生成模型"
+    },
+    "deepseek_content_generation": {
+      "provider": "deepseek",
+      "api_key": "your_deepseek_api_key_here",
+      "base_url": "https://api.deepseek.com/chat/completions",
+      "model_name": "deepseek-chat",
+      "max_tokens": 4000,
+      "temperature": 0.7,
+      "timeout": 30,
+      "extra_params": {},
+      "enabled": false,
+      "description": "DeepSeek文案生成模型"
+    }
+  }
+}

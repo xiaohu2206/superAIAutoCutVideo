@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sys
 import time
 from datetime import datetime
@@ -20,6 +21,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# 导入AI路由
+from routes import ai_router, health_router
+from routes.video_model_routes import router as video_model_router
 
 # 配置日志
 logging.basicConfig(
@@ -43,6 +48,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 注册路由
+app.include_router(ai_router)
+app.include_router(health_router)
+app.include_router(video_model_router)
 
 # WebSocket连接管理器
 class ConnectionManager:
@@ -95,6 +105,36 @@ class TaskStatus(BaseModel):
 # 全局任务状态存储
 tasks_status: Dict[str, TaskStatus] = {}
 
+# 全局变量存储当前服务器配置
+current_server_config = {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "started_at": None
+}
+
+
+def is_port_available(host: str, port: int) -> bool:
+    """检查端口是否可用"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)
+            # 尝试绑定端口，如果成功则端口可用
+            sock.bind((host, port))
+            return True
+    except OSError:
+        # 端口被占用或其他错误
+        return False
+
+
+def find_available_port(host: str, start_port: int, max_attempts: int = 10) -> int:
+    """查找可用端口，从start_port开始累加重试"""
+    for i in range(max_attempts):
+        port = start_port + i
+        if is_port_available(host, port):
+            return port
+    raise RuntimeError(f"无法找到可用端口，已尝试从 {start_port} 到 {start_port + max_attempts - 1}")
+
+
 # API路由
 @app.get("/")
 async def root():
@@ -115,6 +155,20 @@ async def get_status():
         "version": "1.0.0",
         "active_connections": len(manager.active_connections),
         "tasks_count": len(tasks_status),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/server/info")
+async def get_server_info():
+    """获取服务器信息，包括当前使用的端口"""
+    return {
+        "message": "服务器信息",
+        "data": {
+            "host": current_server_config["host"],
+            "port": current_server_config["port"],
+            "started_at": current_server_config["started_at"],
+            "status": "running"
+        },
         "timestamp": datetime.now().isoformat()
     }
 
@@ -269,16 +323,34 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     # 获取端口配置
-    port = int(os.getenv("PORT", 8000))
+    initial_port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "127.0.0.1")
     
-    logger.info(f"启动FastAPI服务器: {host}:{port}")
-    
-    # 启动服务器：直接传递 app 对象，避免 PyInstaller 环境下字符串导入失败（ModuleNotFoundError: 'main'）
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        reload=False,  # 生产环境不使用reload
-        log_level="info"
-    )
+    try:
+        # 查找可用端口
+        port = find_available_port(host, initial_port)
+        
+        # 更新全局配置
+        current_server_config["host"] = host
+        current_server_config["port"] = port
+        current_server_config["started_at"] = datetime.now().isoformat()
+        
+        if port != initial_port:
+            logger.info(f"端口 {initial_port} 被占用，自动切换到端口 {port}")
+        
+        logger.info(f"启动FastAPI服务器: {host}:{port}")
+        
+        # 启动服务器：直接传递 app 对象，避免 PyInstaller 环境下字符串导入失败（ModuleNotFoundError: 'main'）
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            reload=False,  # 生产环境不使用reload
+            log_level="info"
+        )
+    except RuntimeError as e:
+        logger.error(f"启动失败: {e}")
+        sys.exit(1)
+
+
+# 删除重复的全局变量和接口定义
