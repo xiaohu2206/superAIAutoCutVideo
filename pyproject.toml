@@ -1,0 +1,224 @@
+# AI智能视频剪辑应用 - Python 项目配置
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "super-auto-cut-video"
+version = "1.0.0"
+description = "AI智能视频剪辑应用 - 基于深度学习的自动视频编辑工具"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "SuperAutoCutVideo Team", email = "team@superautocutvideo.com"}
+]
+maintainers = [
+    {name = "SuperAutoCutVideo Team", email = "team@superautocutvideo.com"}
+]
+keywords = [
+    "video-editing",
+    "ai",
+    "computer-vision",
+    "opencv",
+    "ffmpeg",
+    "tauri",
+    "react",
+    "fastapi"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Conversion",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "python-multipart>=0.0.6",
+    "websockets>=12.0",
+    "aiofiles>=23.2.1",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.2",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "httpx>=0.25.0",
+    "asyncio-mqtt>=0.16.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.9.0",
+    "flake8>=6.1.0",
+    "mypy>=1.6.0",
+    "isort>=5.12.0",
+    "pre-commit>=3.5.0",
+    "watchdog>=3.0.0",
+]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.25.0",
+    "faker>=19.12.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.4.0",
+    "mkdocstrings[python]>=0.23.0",
+]
+gpu = [
+    "opencv-contrib-python>=4.8.0",
+    "tensorflow>=2.13.0",
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/superautocutvideo/super-auto-cut-video"
+Documentation = "https://docs.superautocutvideo.com"
+Repository = "https://github.com/superautocutvideo/super-auto-cut-video.git"
+"Bug Tracker" = "https://github.com/superautocutvideo/super-auto-cut-video/issues"
+Changelog = "https://github.com/superautocutvideo/super-auto-cut-video/blob/main/CHANGELOG.md"
+
+[project.scripts]
+super-auto-cut-video = "backend.main:main"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["backend*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt"]
+
+# ========================================
+# 代码质量工具配置
+# ========================================
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["backend"]
+known_third_party = ["fastapi", "pydantic", "opencv", "numpy"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*",
+    "numpy.*",
+    "PIL.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = [
+    "backend/tests",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    ".tox",
+]
+
+# ========================================
+# 构建配置
+# ========================================
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.dynamic]
+version = {attr = "backend.__version__"}
+
+[tool.wheel]
+universal = false

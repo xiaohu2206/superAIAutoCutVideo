@@ -1,0 +1,138 @@
+# AI智能视频剪辑应用 - 开发环境 Docker Compose 配置
+version: '3.8'
+
+services:
+  # ========================================
+  # 开发环境后端服务
+  # ========================================
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: super-auto-cut-video-backend-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8000
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - HOT_RELOAD=true
+      - TEMP_DIR=/app/temp
+      - OUTPUT_DIR=/app/output
+    volumes:
+      # 代码热重载
+      - ./backend:/app/backend
+      - ./temp:/app/temp
+      - ./output:/app/output
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - dev-network
+    restart: unless-stopped
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ========================================
+  # 开发环境前端服务
+  # ========================================
+  frontend-dev:
+    image: node:18-alpine
+    container_name: super-auto-cut-video-frontend-dev
+    working_dir: /app
+    ports:
+      - "1420:1420"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000/ws
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - dev-network
+    restart: unless-stopped
+    command: >
+      sh -c "npm install &&
+             npm run dev -- --host 0.0.0.0 --port 1420"
+
+  # ========================================
+  # 开发数据库服务
+  # ========================================
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: super-auto-cut-video-db-dev
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=video_app_dev
+      - POSTGRES_USER=dev_user
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - dev-network
+    restart: unless-stopped
+
+  # ========================================
+  # 开发 Redis 服务
+  # ========================================
+  redis-dev:
+    image: redis:7-alpine
+    container_name: super-auto-cut-video-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - dev-network
+    restart: unless-stopped
+
+  # ========================================
+  # 开发工具 - pgAdmin (数据库管理)
+  # ========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: super-auto-cut-video-pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - dev-network
+    restart: unless-stopped
+
+  # ========================================
+  # 开发工具 - Redis Commander (Redis 管理)
+  # ========================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: super-auto-cut-video-redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis-dev:6379
+    networks:
+      - dev-network
+    restart: unless-stopped
+
+# ========================================
+# 开发网络配置
+# ========================================
+networks:
+  dev-network:
+    driver: bridge
+
+# ========================================
+# 开发数据卷配置
+# ========================================
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+  pgadmin_data:
+    driver: local
