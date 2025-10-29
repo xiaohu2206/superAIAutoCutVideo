@@ -13,7 +13,7 @@ import {
   XCircle
 } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
-import { TauriCommands, WebSocketMessage, apiClient, wsClient, configureBackend } from './api/client'
+import { TauriCommands, WebSocketMessage, apiClient, wsClient, configureBackend, autoConfigureBackend, ApiResponse, ServerInfoData } from './api/client'
 import Navigation from './components/Navigation'
 import SettingsPage from './components/SettingsPage'
 import StatusPanel from './components/StatusPanel'
@@ -103,18 +103,38 @@ const App: React.FC = () => {
       // 检查是否在Tauri环境中
       if (typeof (window as any).__TAURI_IPC__ === 'function') {
         status = await TauriCommands.getBackendStatus()
+        // 根据返回端口动态配置 API 与 WS 端点
+        if (status?.port) {
+          configureBackend(status.port)
+        }
       } else {
-        // 在浏览器环境中，假设后端正在运行
-        status = { running: true, port: 8000 }
+        // 在浏览器环境中，尝试自动发现后端端口
+        console.log('浏览器环境，尝试自动发现后端端口...')
+        const discovered = await autoConfigureBackend()
+        if (discovered) {
+          // 获取实际配置的端口信息
+          try {
+            const serverInfo = await apiClient.get<ApiResponse<ServerInfoData>>('/api/server/info')
+            if (serverInfo.data && serverInfo.data.port) {
+              status = { running: true, port: serverInfo.data.port }
+            } else {
+              status = { running: true, port: 8000 }
+            }
+          } catch (error) {
+            console.warn('获取服务器信息失败，使用默认端口:', error)
+            status = { running: true, port: 8000 }
+          }
+        } else {
+          console.warn('无法发现后端服务，使用默认配置')
+          status = { running: false, port: 8000 }
+        }
       }
       setBackendStatus(status)
-      // 根据返回端口动态配置 API 与 WS 端点
-      if (status?.port) {
-        configureBackend(status.port)
-      }
+      setConnectionStatus(prev => ({ ...prev, backend: status.running }))
       return status
     } catch (error) {
       console.error('检查后端状态失败:', error)
+      setConnectionStatus(prev => ({ ...prev, backend: false }))
       return null
     }
   }
