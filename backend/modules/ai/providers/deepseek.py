@@ -21,6 +21,10 @@ class DeepSeekProvider(AIProviderBase):
         # 设置默认配置
         if not config.base_url:
             config.base_url = "https://api.deepseek.com/chat/completions"
+        else:
+            # 确保base_url末尾有/chat/completions
+            if not config.base_url.endswith('/chat/completions'):
+                config.base_url = config.base_url.rstrip('/') + '/chat/completions'
         
         if not config.model_name:
             config.model_name = "deepseek-chat"

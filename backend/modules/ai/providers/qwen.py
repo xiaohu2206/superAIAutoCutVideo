@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Qwen AI模型提供商实现
-支持通义千问系列模型
+Qwen AI模型提供商实现（OpenAI兼容模式）
+支持通义千问系列模型（DashScope Compatible Mode）
 """
 
 from typing import Dict, List, Any, Optional
@@ -18,12 +18,16 @@ class QwenProvider(AIProviderBase):
     """Qwen AI模型提供商"""
     
     def __init__(self, config: AIModelConfig):
-        # 设置默认配置
+        # 设置默认配置（OpenAI兼容端点）
         if not config.base_url:
-            config.base_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+            config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        else:
+            # 确保base_url末尾有/chat/completions
+            if not config.base_url.endswith('/chat/completions'):
+                config.base_url = config.base_url.rstrip('/') + '/chat/completions'
         
         if not config.model_name:
-            config.model_name = "qwen-turbo"
+            config.model_name = "qwen-plus"
             
         super().__init__(config)
     
@@ -36,7 +40,7 @@ class QwenProvider(AIProviderBase):
         }
     
     def _format_messages(self, messages: List[ChatMessage]) -> Dict[str, Any]:
-        """格式化消息为Qwen API格式"""
+        """格式化消息为OpenAI兼容格式"""
         formatted_messages = []
         for msg in messages:
             formatted_messages.append({
@@ -46,42 +50,37 @@ class QwenProvider(AIProviderBase):
         
         payload = {
             "model": self.config.model_name,
-            "input": {
-                "messages": formatted_messages
-            },
-            "parameters": {
-                "max_tokens": self.config.max_tokens or 4000,
-                "temperature": self.config.temperature or 0.7,
-                "top_p": 0.8,
-                "repetition_penalty": 1.1
-            }
+            "messages": formatted_messages,
+            "max_tokens": self.config.max_tokens or 4000,
+            "temperature": self.config.temperature or 0.7,
         }
         
-        # 添加额外参数
+        # 添加额外参数（顶层OpenAI兼容参数）
         if self.config.extra_params:
-            payload["parameters"].update(self.config.extra_params)
+            payload.update(self.config.extra_params)
         
         return payload
     
     def _parse_response(self, response_data: Dict[str, Any]) -> ChatResponse:
-        """解析Qwen API响应"""
+        """解析Qwen响应（OpenAI兼容格式）"""
         try:
-            output = response_data.get("output", {})
-            content = output.get("text", "")
-            
+            choices = response_data.get("choices", [])
+            if not choices:
+                raise ValueError("响应中没有choices字段")
+            choice = choices[0]
+            message = choice.get("message", {})
+            content = message.get("content", "")
             usage = response_data.get("usage", {})
-            
             return ChatResponse(
                 content=content,
                 usage={
-                    "prompt_tokens": usage.get("input_tokens", 0),
-                    "completion_tokens": usage.get("output_tokens", 0),
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
                     "total_tokens": usage.get("total_tokens", 0)
                 },
-                model=self.config.model_name,
-                finish_reason=output.get("finish_reason")
+                model=response_data.get("model", self.config.model_name),
+                finish_reason=choice.get("finish_reason")
             )
-            
         except Exception as e:
             logger.error(f"解析Qwen响应失败: {e}")
             raise ValueError(f"解析响应失败: {e}")
@@ -89,10 +88,11 @@ class QwenProvider(AIProviderBase):
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """发送请求到Qwen API"""
         try:
+            constant_headers = self._get_headers()
             response = await self.client.post(
                 self.config.base_url,
                 json=payload,
-                headers=self._get_headers()
+                headers=constant_headers
             )
             response.raise_for_status()
             
@@ -110,10 +110,13 @@ class QwenProvider(AIProviderBase):
             raise
     
     def _extract_stream_content(self, chunk_data: Dict[str, Any]) -> Optional[str]:
-        """从Qwen流式响应块中提取内容"""
+        """从Qwen流式响应块中提取内容（OpenAI兼容）"""
         try:
-            output = chunk_data.get("output", {})
-            return output.get("text", "")
+            choices = chunk_data.get("choices", [])
+            if choices:
+                delta = choices[0].get("delta", {})
+                return delta.get("content", "")
+            return None
         except:
             return None
     
@@ -136,8 +139,8 @@ class QwenProvider(AIProviderBase):
         """获取默认配置"""
         return {
             "provider": "qwen",
-            "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
-            "model_name": "qwen-turbo",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "model_name": "qwen-plus",
             "max_tokens": 4000,
             "temperature": 0.7,
             "timeout": 30

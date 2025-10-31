@@ -1,23 +1,22 @@
 {
-  "active_config_id": null,
   "configs": {
     "qwen_video_analysis": {
       "provider": "qwen",
-      "api_key": "your_qwen_api_key_here",
-      "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+      "api_key": "sk-498b3bf4eeb14ca58159b4bb9a07fbae",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "model_name": "qwen-vl-plus",
       "max_tokens": 4000,
       "temperature": 0.7,
       "timeout": 30,
       "extra_params": {},
-      "enabled": false,
+      "enabled": true,
       "description": "通义千问视频分析模型"
     },
     "doubao_video_analysis": {
       "provider": "doubao",
-      "api_key": "your_doubao_api_key_here",
-      "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-      "model_name": "doubao-vision-pro",
+      "api_key": "e17d47bf-bacc-45d1-aea7-88c8f1a08706",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "model_name": "doubao-seed-1-6-251015",
       "max_tokens": 4000,
       "temperature": 0.7,
       "timeout": 30,
@@ -27,9 +26,9 @@
     },
     "deepseek_video_analysis": {
       "provider": "deepseek",
-      "api_key": "your_deepseek_api_key_here",
+      "api_key": "sk-b0c90153e5434fb6a4bcac32b97138ee",
       "base_url": "https://api.deepseek.com/chat/completions",
-      "model_name": "deepseek-vl-chat",
+      "model_name": "deepseek-chat",
       "max_tokens": 4000,
       "temperature": 0.7,
       "timeout": 30,

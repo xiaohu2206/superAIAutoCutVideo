@@ -37,24 +37,26 @@ class ModelTestRequest(BaseModel):
 
 # ==================== 视频分析模型配置接口 ====================
 
+def safe_config_dict_hide_apikey(config: VideoModelConfig) -> dict:
+    """
+    转换为 dict 且隐藏 api_key 的中间部分，仅用于返回给前端
+    """
+    config_dict = config.dict()
+    api_key = config_dict.get("api_key")
+    if api_key and len(api_key) > 8:
+        config_dict["api_key"] = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:]
+    return config_dict
+
 @router.get("/video-analysis/configs", summary="获取视频分析模型配置")
 async def get_video_analysis_configs():
     """获取所有视频分析模型配置"""
     try:
         configs = video_model_config_manager.get_all_configs()
         active_config_id = video_model_config_manager.get_active_config_id()
-        
+
         # 转换为字典格式，隐藏API密钥
-        config_data = {}
-        for config_id, config in configs.items():
-            config_dict = config.dict()
-            # 隐藏API密钥的敏感部分
-            if config_dict.get("api_key"):
-                api_key = config_dict["api_key"]
-                if len(api_key) > 8:
-                    config_dict["api_key"] = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:]
-            config_data[config_id] = config_dict
-        
+        config_data = {config_id: safe_config_dict_hide_apikey(config) for config_id, config in configs.items()}
+
         return {
             "success": True,
             "data": {
@@ -72,7 +74,15 @@ async def get_video_analysis_configs():
 async def update_video_analysis_config(config_id: str, request: VideoModelConfigRequest):
     """更新视频分析模型配置"""
     try:
-        success = video_model_config_manager.update_config(config_id, request.config)
+        # --------- 修正前端带马赛克串时自动用老明文 ---------
+        old_config = video_model_config_manager.get_config(config_id)
+        new_config = request.config
+        if old_config and new_config.api_key and "*" in new_config.api_key and old_config.api_key[:4] == new_config.api_key[:4] and old_config.api_key[-4:] == new_config.api_key[-4:]:
+            # 只要头尾能对上 且中间是星号，则还用老密钥
+            new_config.api_key = old_config.api_key
+        # ------------------------------------------
+
+        success = video_model_config_manager.update_config(config_id, new_config)
         if success:
             return {
                 "success": True,
@@ -87,51 +97,30 @@ async def update_video_analysis_config(config_id: str, request: VideoModelConfig
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/video-analysis/configs", summary="创建视频分析模型配置")
-async def create_video_analysis_config(config_id: str, request: VideoModelConfigRequest):
-    """创建新的视频分析模型配置"""
+
+@router.post("/video-analysis/test", summary="测试当前激活的视频分析模型配置")
+async def test_active_video_analysis_config():
+    """测试当前激活的视频分析模型配置的连接（enabled=True的配置）"""
     try:
-        success = video_model_config_manager.add_config(config_id, request.config)
-        if success:
-            return {
-                "success": True,
-                "message": f"视频分析模型配置 '{config_id}' 创建成功"
-            }
-        else:
-            raise HTTPException(status_code=400, detail="配置创建失败")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"创建视频分析模型配置失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/video-analysis/configs/{config_id}/activate", summary="激活视频分析模型配置")
-async def activate_video_analysis_config(config_id: str):
-    """激活指定的视频分析模型配置"""
-    try:
-        success = video_model_config_manager.set_active_config(config_id)
-        if success:
-            return {
-                "success": True,
-                "message": f"视频分析模型配置 '{config_id}' 激活成功"
-            }
-        else:
-            raise HTTPException(status_code=400, detail="配置激活失败")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"激活视频分析模型配置失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/video-analysis/test/{config_id}", summary="测试视频分析模型配置")
-async def test_video_analysis_config(config_id: str):
-    """测试指定视频分析模型配置的连接"""
-    try:
-        result = video_model_config_manager.test_connection(config_id)
+        result = await video_model_config_manager.test_active_connection()
+        
         return {
-            "success": result["success"],
+            "success": result.get("success", False),
+            "data": result,
+            "message": result.get("message", "测试完成")
+        }
+    except Exception as e:
+        logger.error(f"测试视频分析模型配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/video-analysis/test/{config_id}", summary="测试指定的视频分析模型配置")
+async def test_video_analysis_config(config_id: str):
+    """测试指定的视频分析模型配置的连接"""
+    try:
+        result = await video_model_config_manager.test_connection(config_id)
+        return {
+            "success": result.get("success", False),
             "data": result
         }
     except Exception as e:

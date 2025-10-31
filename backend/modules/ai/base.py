@@ -30,7 +30,7 @@ class AIModelConfig(BaseModel):
 class ChatMessage(BaseModel):
     """聊天消息"""
     role: str  # system, user, assistant
-    content: str  # 消息内容
+    content: Any  # 消息内容，支持字符串或多模态内容块列表
 
 
 class ChatResponse(BaseModel):

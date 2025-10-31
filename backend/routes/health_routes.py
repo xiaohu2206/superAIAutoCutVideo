@@ -14,9 +14,6 @@ from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from modules.config import ai_config_manager
-from services import ai_service
-
 logger = logging.getLogger(__name__)
 
 # 创建路由器
@@ -54,9 +51,7 @@ class DetailedHealthResponse(BaseModel):
     overall_status: str = Field(..., description="总体状态")
     timestamp: str = Field(..., description="检查时间")
     uptime: float = Field(..., description="运行时间")
-    services: List[ServiceStatus] = Field(..., description="服务状态列表")
     system_info: Optional[SystemInfo] = Field(None, description="系统信息")
-    ai_configs: Dict[str, Any] = Field(..., description="AI配置状态")
 
 
 # 全局变量记录启动时间
