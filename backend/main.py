@@ -23,8 +23,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # 导入AI路由
-from routes import ai_router, health_router
+from routes import health_router
 from routes.video_model_routes import router as video_model_router
+from routes.content_model_routes import router as content_model_router
 
 # 配置日志
 logging.basicConfig(
@@ -50,9 +51,9 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(ai_router)
 app.include_router(health_router)
 app.include_router(video_model_router)
+app.include_router(content_model_router)
 
 # WebSocket连接管理器
 class ConnectionManager:

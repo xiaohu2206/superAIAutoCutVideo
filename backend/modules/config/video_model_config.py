@@ -6,9 +6,8 @@
 """
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from pydantic import BaseModel, Field, validator
 import logging
 
@@ -61,7 +60,6 @@ class VideoModelConfigManager:
         
         self.config_file = Path(config_file)
         self.configs: Dict[str, VideoModelConfig] = {}
-        self.active_config_id: Optional[str] = None
         
         # 加载配置
         self.load_configs()
@@ -81,9 +79,6 @@ class VideoModelConfigManager:
                     except Exception as e:
                         logger.error(f"加载视频分析模型配置 {config_id} 失败: {e}")
                 
-                # 设置活跃配置
-                self.active_config_id = data.get('active_config_id')
-                
                 logger.info(f"成功加载 {len(self.configs)} 个视频分析模型配置")
             else:
                 # 创建默认配置
@@ -101,7 +96,6 @@ class VideoModelConfigManager:
             
             # 准备数据
             data = {
-                'active_config_id': self.active_config_id,
                 'configs': {}
             }
             
@@ -126,7 +120,7 @@ class VideoModelConfigManager:
                 'config': VideoModelConfig(
                     provider='qwen',
                     api_key='your_qwen_api_key_here',
-                    base_url='https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
                     model_name='qwen-vl-plus',
                     description='通义千问视频分析模型',
                     enabled=False
@@ -138,7 +132,7 @@ class VideoModelConfigManager:
                     provider='doubao',
                     api_key='your_doubao_api_key_here',
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-                    model_name='doubao-vision-pro',
+                    model_name='doubao-seed-1-6-vision-250815',
                     description='豆包视频分析模型',
                     enabled=False
                 )
@@ -149,7 +143,7 @@ class VideoModelConfigManager:
                     provider='deepseek',
                     api_key='your_deepseek_api_key_here',
                     base_url='https://api.deepseek.com/chat/completions',
-                    model_name='deepseek-vl-chat',
+                    model_name='deepseek-chat',
                     description='DeepSeek视频分析模型',
                     enabled=False
                 )
@@ -162,34 +156,9 @@ class VideoModelConfigManager:
         # 保存默认配置
         self.save_configs()
 
-    def add_config(self, config_id: str, config: VideoModelConfig) -> bool:
-        """
-        添加新配置
-        
-        Args:
-            config_id: 配置ID
-            config: 配置对象
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        try:
-            if config_id in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 已存在")
-            
-            self.configs[config_id] = config
-            self.save_configs()
-            
-            logger.info(f"添加视频分析模型配置成功: {config_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"添加视频分析模型配置失败: {e}")
-            return False
-
     def update_config(self, config_id: str, config: VideoModelConfig) -> bool:
         """
-        更新配置
+        更新配置，确保同时只有一个配置被启用
         
         Args:
             config_id: 配置ID
@@ -202,6 +171,15 @@ class VideoModelConfigManager:
             if config_id not in self.configs:
                 raise ValueError(f"配置ID '{config_id}' 不存在")
             
+            # 如果当前配置被设置为启用，则禁用其他所有配置
+            if config.enabled:
+                for other_id, other_config in self.configs.items():
+                    if other_id != config_id and other_config.enabled:
+                        # 创建新的配置对象，将enabled设置为False
+                        updated_config = other_config.copy(update={'enabled': False})
+                        self.configs[other_id] = updated_config
+                        logger.info(f"自动禁用配置: {other_id}")
+            
             self.configs[config_id] = config
             self.save_configs()
             
@@ -210,34 +188,6 @@ class VideoModelConfigManager:
             
         except Exception as e:
             logger.error(f"更新视频分析模型配置失败: {e}")
-            return False
-
-    def delete_config(self, config_id: str) -> bool:
-        """
-        删除配置
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            bool: 是否删除成功
-        """
-        try:
-            if config_id not in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 不存在")
-            
-            # 如果删除的是活跃配置，清除活跃配置
-            if self.active_config_id == config_id:
-                self.active_config_id = None
-            
-            del self.configs[config_id]
-            self.save_configs()
-            
-            logger.info(f"删除视频分析模型配置成功: {config_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"删除视频分析模型配置失败: {e}")
             return False
 
     def get_config(self, config_id: str) -> Optional[VideoModelConfig]:
@@ -256,52 +206,21 @@ class VideoModelConfigManager:
         """获取所有配置"""
         return self.configs.copy()
     
-    def get_enabled_configs(self) -> Dict[str, VideoModelConfig]:
-        """获取所有启用的配置"""
-        return {
-            config_id: config 
-            for config_id, config in self.configs.items() 
-            if config.enabled
-        }
-
-    def set_active_config(self, config_id: str) -> bool:
-        """
-        设置活跃配置
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            bool: 是否设置成功
-        """
-        try:
-            if config_id not in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 不存在")
-            
-            if not self.configs[config_id].enabled:
-                raise ValueError(f"配置 '{config_id}' 未启用")
-            
-            self.active_config_id = config_id
-            self.save_configs()
-            
-            logger.info(f"设置活跃视频分析模型配置: {config_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"设置活跃视频分析模型配置失败: {e}")
-            return False
-
     def get_active_config(self) -> Optional[VideoModelConfig]:
-        """获取当前活跃配置"""
-        if self.active_config_id:
-            return self.configs.get(self.active_config_id)
+        """获取当前启用的配置（只会有一个）"""
+        for config in self.configs.values():
+            if config.enabled:
+                return config
         return None
     
     def get_active_config_id(self) -> Optional[str]:
-        """获取当前活跃配置ID"""
-        return self.active_config_id
+        """获取当前启用的配置ID（只会有一个）"""
+        for config_id, config in self.configs.items():
+            if config.enabled:
+                return config_id
+        return None
 
-    def test_connection(self, config_id: str) -> Dict[str, Any]:
+    async def test_connection(self, config_id: str) -> Dict[str, Any]:
         """
         测试指定配置的连接
         
@@ -315,25 +234,82 @@ class VideoModelConfigManager:
         if not config:
             return {
                 "success": False,
+                "config_id": config_id,
                 "error": f"配置 '{config_id}' 不存在"
             }
         
         try:
-            # 这里可以实现实际的连接测试逻辑
-            # 暂时返回模拟结果
-            return {
-                "success": True,
-                "config_id": config_id,
-                "provider": config.provider,
-                "model_name": config.model_name,
-                "message": "连接测试成功"
-            }
+            # 导入必要的模块
+            from modules.ai import get_provider_class, AIModelConfig
+            
+            # 获取提供商类
+            provider_class = get_provider_class(config.provider)
+            if not provider_class:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "error": f"不支持的AI提供商: {config.provider}"
+                }
+            
+            # 转换为AIModelConfig
+            ai_model_config = AIModelConfig(
+                provider=config.provider,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model_name=config.model_name,
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                timeout=config.timeout,
+                extra_params=config.extra_params or {}
+            )
+            
+            # 创建提供商实例并测试连接
+            provider = provider_class(ai_model_config)
+            result = await provider.test_connection()
+            
+            # 添加配置信息
+            result["config_id"] = config_id
+            result["description"] = config.description
+            
+            # 关闭连接
+            await provider.close()
+            
+            return result
+            
         except Exception as e:
+            logger.error(f"测试配置 {config_id} 连接失败: {e}")
             return {
                 "success": False,
                 "config_id": config_id,
+                "provider": config.provider,
+                "model_name": config.model_name,
                 "error": str(e)
             }
+    
+    async def test_active_connection(self) -> Dict[str, Any]:
+        """
+        测试当前激活配置的连接（enabled=True的配置，永远只有一个）
+        
+        Returns:
+            Dict: 测试结果
+        """
+        # 获取当前激活的配置ID
+        active_config_id = self.get_active_config_id()
+        
+        if not active_config_id:
+            return {
+                "success": False,
+                "message": "没有找到激活的配置",
+                "error": "当前没有启用的视频分析模型配置"
+            }
+        
+        active_config = self.get_active_config()
+        logger.info(f"正在测试激活配置: {active_config_id} ({active_config.provider} - {active_config.model_name})")
+        
+        # 测试连接
+        result = await self.test_connection(active_config_id)
+        return result
 
 
 # 全局视频分析模型配置管理器实例

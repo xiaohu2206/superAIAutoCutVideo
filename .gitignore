@@ -62,9 +62,10 @@ venv.bak/
 
 # PyInstaller
 *.manifest
-*.spec
 build/
 dist/
+*.exe
+*.app
 
 # 单元测试
 .tox/
@@ -126,7 +127,12 @@ dmypy.json
 # Rust / Tauri
 # ========================================
 target/
-Cargo.lock
+# 保留Cargo.lock以确保依赖版本一致
+# Cargo.lock
+
+# Tauri resources（打包的后端程序）
+src-tauri/resources/*.exe
+src-tauri/resources/*.dll
 
 # ========================================
 # 应用特定文件
@@ -174,6 +180,10 @@ config/production.json
 test_videos/
 test_outputs/
 test_data/
+**/test_*.py
+**/test_*.html
+**/*_test.py
+**/*_test.html
 
 # 文档生成
 docs/_build/
@@ -282,3 +292,35 @@ secrets/
 local/
 dev/
 development/
+
+# ========================================
+# 安装程序和工具
+# ========================================
+rustup-init.exe
+rustup-init
+msys2-installer.exe
+vs_buildtools.exe
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# ========================================
+# 项目特定忽略
+# ========================================
+# PyInstaller spec文件（如需自定义配置请取消注释）
+# backend/*.spec
+
+# 后端数据目录
+backend/data/
+
+# 后端配置（如果包含敏感信息）
+# backend/config/*.json
+
+# Tauri生成文件
+src-tauri/gen/
+
+# 调试和分析文件
+*.pdb
+*.map
