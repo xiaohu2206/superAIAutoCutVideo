@@ -51,11 +51,7 @@ class DoubaoProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_tokens": self.config.max_tokens or 4000,
-            "temperature": self.config.temperature or 0.7,
-            "top_p": 0.9,
-            "frequency_penalty": 0,
-            "presence_penalty": 0
+            "max_completion_tokens": 65535,
         }
         
         # 添加额外参数
@@ -95,10 +91,11 @@ class DoubaoProvider(AIProviderBase):
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """发送请求到Doubao API"""
         try:
+            headers = self._get_headers()
             response = await self.client.post(
                 self.config.base_url,
                 json=payload,
-                headers=self._get_headers()
+                headers=headers
             )
             response.raise_for_status()
             
@@ -146,7 +143,4 @@ class DoubaoProvider(AIProviderBase):
             "provider": "doubao",
             "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
             "model_name": "doubao-lite-4k",
-            "max_tokens": 4000,
-            "temperature": 0.7,
-            "timeout": 30
         }

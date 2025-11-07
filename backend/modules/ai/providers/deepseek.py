@@ -51,8 +51,8 @@ class DeepSeekProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_tokens": self.config.max_tokens or 4000,
-            "temperature": self.config.temperature or 0.7,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
             "top_p": 0.95,
             "frequency_penalty": 0,
             "presence_penalty": 0,
@@ -142,7 +142,4 @@ class DeepSeekProvider(AIProviderBase):
             "provider": "deepseek",
             "base_url": "https://api.deepseek.com/chat/completions",
             "model_name": "deepseek-chat",
-            "max_tokens": 4000,
-            "temperature": 0.7,
-            "timeout": 30
         }

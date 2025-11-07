@@ -1,6 +1,6 @@
 // 项目管理API服务层
 
-import { apiClient } from "../api/client";
+import { apiClient, type ApiResponse } from "../api/client";
 import type {
   Project,
   CreateProjectRequest,
@@ -70,30 +70,71 @@ export class ProjectService {
   }
 
   /**
+   * 删除项目视频文件
+   */
+  async deleteVideo(projectId: string): Promise<boolean> {
+    const response = await apiClient.post<{ data?: { removed?: boolean } }>(
+      `/api/projects/${projectId}/delete/video`
+    );
+    return response?.data?.removed ?? true;
+  }
+
+  /**
+   * 删除项目字幕文件
+   */
+  async deleteSubtitle(projectId: string): Promise<boolean> {
+    const response = await apiClient.post<{ data?: { removed?: boolean } }>(
+      `/api/projects/${projectId}/delete/subtitle`
+    );
+    return response?.data?.removed ?? true;
+  }
+
+  /**
    * 上传视频文件
    */
   async uploadVideo(
     projectId: string,
-    file: File
+    file: File,
+    onProgress?: (percent: number) => void
   ): Promise<FileUploadResponse> {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("project_id", projectId);
 
-    const response = await fetch(
-      `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/video`,
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
+    // 使用 XMLHttpRequest 以支持上传进度回调
+    return new Promise<FileUploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/video`
+      );
 
-    if (!response.ok) {
-      throw new Error(`上传视频失败: ${response.statusText}`);
-    }
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
 
-    const result = await response.json();
-    return result.data;
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            resolve(result.data as FileUploadResponse);
+          } catch (e) {
+            reject(new Error("解析响应失败"));
+          }
+        } else {
+          reject(new Error(`上传视频失败: ${xhr.statusText || xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error("网络错误，上传视频失败"));
+      };
+
+      xhr.send(formData);
+    });
   }
 
   /**
@@ -101,37 +142,59 @@ export class ProjectService {
    */
   async uploadSubtitle(
     projectId: string,
-    file: File
+    file: File,
+    onProgress?: (percent: number) => void
   ): Promise<FileUploadResponse> {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("project_id", projectId);
 
-    const response = await fetch(
-      `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/subtitle`,
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
+    // 使用 XMLHttpRequest 以支持上传进度回调
+    return new Promise<FileUploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/subtitle`
+      );
 
-    if (!response.ok) {
-      throw new Error(`上传字幕失败: ${response.statusText}`);
-    }
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
 
-    const result = await response.json();
-    return result.data;
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            resolve(result.data as FileUploadResponse);
+          } catch (e) {
+            reject(new Error("解析响应失败"));
+          }
+        } else {
+          reject(new Error(`上传字幕失败: ${xhr.statusText || xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error("网络错误，上传字幕失败"));
+      };
+
+      xhr.send(formData);
+    });
   }
 
   /**
    * 生成解说脚本
    */
   async generateScript(data: GenerateScriptRequest): Promise<VideoScript> {
-    const response = await apiClient.post<{ data: VideoScript }>(
-      "/api/projects/generate-script",
-      data
-    );
-    return response.data;
+    const response = await apiClient.post<
+      ApiResponse<{ script: VideoScript; plot_analysis: string }>
+    >("/api/projects/generate-script", data);
+    // 后端返回形如 { message, data: { script, plot_analysis }, timestamp }
+    // 这里只提取脚本对象返回
+    return response.data?.script as VideoScript;
   }
 
   /**

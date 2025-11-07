@@ -51,8 +51,8 @@ class QwenProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_tokens": self.config.max_tokens or 4000,
-            "temperature": self.config.temperature or 0.7,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
         }
         
         # 添加额外参数（顶层OpenAI兼容参数）
@@ -141,7 +141,4 @@ class QwenProvider(AIProviderBase):
             "provider": "qwen",
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             "model_name": "qwen-plus",
-            "max_tokens": 4000,
-            "temperature": 0.7,
-            "timeout": 30
         }

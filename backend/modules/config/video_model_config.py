@@ -20,9 +20,9 @@ class VideoModelConfig(BaseModel):
     api_key: str = Field(..., description="API密钥")
     base_url: str = Field(..., description="API基础地址")
     model_name: str = Field(..., description="模型名称")
-    max_tokens: Optional[int] = Field(4000, description="最大token数")
+    max_tokens: Optional[int] = Field(100000, description="最大token数")
     temperature: Optional[float] = Field(0.7, description="温度参数", ge=0.0, le=2.0)
-    timeout: Optional[int] = Field(30, description="超时时间（秒）", ge=1, le=300)
+    timeout: Optional[int] = Field(600, description="超时时间（秒）", ge=1, le=10000)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外参数")
     enabled: bool = Field(True, description="是否启用")
     description: Optional[str] = Field(None, description="配置描述")
@@ -134,17 +134,6 @@ class VideoModelConfigManager:
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
                     model_name='doubao-seed-1-6-vision-250815',
                     description='豆包视频分析模型',
-                    enabled=False
-                )
-            },
-            {
-                'id': 'deepseek_video_analysis',
-                'config': VideoModelConfig(
-                    provider='deepseek',
-                    api_key='your_deepseek_api_key_here',
-                    base_url='https://api.deepseek.com/chat/completions',
-                    model_name='deepseek-chat',
-                    description='DeepSeek视频分析模型',
                     enabled=False
                 )
             }

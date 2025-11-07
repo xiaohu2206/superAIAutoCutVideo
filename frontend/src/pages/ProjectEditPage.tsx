@@ -35,6 +35,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     updateProject,
     uploadVideo,
     uploadSubtitle,
+    deleteVideo,
+    deleteSubtitle,
     generateScript,
     saveScript,
   } = useProjectDetail(projectId);
@@ -47,6 +49,15 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const videoInputRef = useRef<HTMLInputElement>(null);
   const subtitleInputRef = useRef<HTMLInputElement>(null);
 
+  // 拖拽上传状态
+  const [isDraggingVideo, setIsDraggingVideo] = useState(false);
+  const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
+  // 上传进度与状态
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadingSubtitle, setUploadingSubtitle] = useState(false);
+  const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
+  const [subtitleUploadProgress, setSubtitleUploadProgress] = useState<number>(0);
+
   /**
    * 处理视频文件选择
    */
@@ -58,12 +69,17 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
     setSuccessMessage(null);
 
+    setUploadingVideo(true);
+    setVideoUploadProgress(0);
     try {
-      await uploadVideo(file);
+      await uploadVideo(file, (p) => setVideoUploadProgress(p));
       setSuccessMessage("视频文件上传成功！");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       console.error("上传视频失败:", err);
+    } finally {
+      setUploadingVideo(false);
+      setTimeout(() => setVideoUploadProgress(0), 800);
     }
   };
 
@@ -83,12 +99,122 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
     setSuccessMessage(null);
 
+    setUploadingSubtitle(true);
+    setSubtitleUploadProgress(0);
     try {
-      await uploadSubtitle(file);
+      await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
       setSuccessMessage("字幕文件上传成功！");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       console.error("上传字幕失败:", err);
+    } finally {
+      setUploadingSubtitle(false);
+      setTimeout(() => setSubtitleUploadProgress(0), 800);
+    }
+  };
+
+  /**
+   * 视频拖拽上传
+   */
+  const handleVideoDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingVideo(true);
+  };
+
+  const handleVideoDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingVideo(false);
+  };
+
+  const handleVideoDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingVideo(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    setSuccessMessage(null);
+
+    setUploadingVideo(true);
+    setVideoUploadProgress(0);
+    try {
+      await uploadVideo(file, (p) => setVideoUploadProgress(p));
+      setSuccessMessage("视频文件上传成功！");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("上传视频失败:", err);
+    } finally {
+      setUploadingVideo(false);
+      setTimeout(() => setVideoUploadProgress(0), 800);
+    }
+  };
+
+  /**
+   * 字幕拖拽上传
+   */
+  const handleSubtitleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(true);
+  };
+
+  const handleSubtitleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(false);
+  };
+
+  const handleSubtitleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith(".srt")) {
+      alert("请上传 .srt 格式的字幕文件");
+      return;
+    }
+
+    setSuccessMessage(null);
+
+    setUploadingSubtitle(true);
+    setSubtitleUploadProgress(0);
+    try {
+      await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
+      setSuccessMessage("字幕文件上传成功！");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("上传字幕失败:", err);
+    } finally {
+      setUploadingSubtitle(false);
+      setTimeout(() => setSubtitleUploadProgress(0), 800);
+    }
+  };
+
+  /**
+   * 删除视频文件
+   */
+  const handleDeleteVideo = async () => {
+    if (!project?.video_path) return;
+    setSuccessMessage(null);
+    try {
+      await deleteVideo();
+      setSuccessMessage("视频文件已删除！");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("删除视频失败:", err);
+    }
+  };
+
+  /**
+   * 删除字幕文件
+   */
+  const handleDeleteSubtitle = async () => {
+    if (!project?.subtitle_path) return;
+    setSuccessMessage(null);
+    try {
+      await deleteSubtitle();
+      setSuccessMessage("字幕文件已删除！");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("删除字幕失败:", err);
     }
   };
 
@@ -112,7 +238,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         narration_type: project.narration_type,
       });
 
-      setEditedScript(JSON.stringify(script, null, 2));
+      if (script) {
+        setEditedScript(JSON.stringify(script, null, 2));
+      } else if (project.script) {
+        // 兜底：如果返回值为空，使用项目中的脚本
+        setEditedScript(JSON.stringify(project.script, null, 2));
+      }
       setSuccessMessage("解说脚本生成成功！");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -256,10 +387,19 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           <label className="block text-sm font-medium text-gray-700 mb-2">
             视频文件
           </label>
-          <div className="flex items-center space-x-4">
+          <div
+            onDragOver={handleVideoDragOver}
+            onDragLeave={handleVideoDragLeave}
+            onDrop={handleVideoDrop}
+            className={`flex items-center space-x-4 border-2 border-dashed rounded-lg p-4 transition-colors ${
+              isDraggingVideo ? "border-blue-500 bg-blue-50" : "border-gray-200"
+            }`}
+            aria-label="拖拽视频文件到此区域或点击上传"
+          >
             <button
               onClick={() => videoInputRef.current?.click()}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              disabled={uploadingVideo}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Upload className="h-4 w-4 mr-2" />
               上传视频
@@ -271,15 +411,36 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               onChange={handleVideoFileChange}
               className="hidden"
             />
+            <span className="text-xs text-gray-500">拖拽视频到此或点击“上传视频”</span>
             {project.video_path && (
               <div className="flex items-center text-sm text-gray-600">
                 <FileVideo className="h-4 w-4 mr-2 text-green-500" />
                 <span className="truncate max-w-md">
                   {project.video_path.split("/").pop()}
                 </span>
+                <button
+                  onClick={handleDeleteVideo}
+                  className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                >
+                  删除视频
+                </button>
               </div>
             )}
           </div>
+          {uploadingVideo && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>上传进度</span>
+                <span>{videoUploadProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-blue-600 rounded transition-all"
+                  style={{ width: `${videoUploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 字幕文件上传 */}
@@ -287,10 +448,19 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           <label className="block text-sm font-medium text-gray-700 mb-2">
             上传字幕（.srt 格式）
           </label>
-          <div className="flex items-center space-x-4">
+          <div
+            onDragOver={handleSubtitleDragOver}
+            onDragLeave={handleSubtitleDragLeave}
+            onDrop={handleSubtitleDrop}
+            className={`flex items-center space-x-4 border-2 border-dashed rounded-lg p-4 transition-colors ${
+              isDraggingSubtitle ? "border-blue-500 bg-blue-50" : "border-gray-200"
+            }`}
+            aria-label="拖拽字幕文件到此区域或点击上传"
+          >
             <button
               onClick={() => subtitleInputRef.current?.click()}
-              className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+              disabled={uploadingSubtitle}
+              className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Upload className="h-4 w-4 mr-2" />
               上传字幕
@@ -302,15 +472,36 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               onChange={handleSubtitleFileChange}
               className="hidden"
             />
+            <span className="text-xs text-gray-500">拖拽 .srt 字幕到此或点击“上传字幕”</span>
             {project.subtitle_path && (
               <div className="flex items-center text-sm text-gray-600">
                 <FileText className="h-4 w-4 mr-2 text-green-500" />
                 <span className="truncate max-w-md">
                   {project.subtitle_path.split("/").pop()}
                 </span>
+                <button
+                  onClick={handleDeleteSubtitle}
+                  className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                >
+                  删除字幕
+                </button>
               </div>
             )}
           </div>
+          {uploadingSubtitle && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>上传进度</span>
+                <span>{subtitleUploadProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-blue-600 rounded transition-all"
+                  style={{ width: `${subtitleUploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 生成解说脚本按钮 */}

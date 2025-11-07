@@ -21,9 +21,9 @@ class AIModelConfig(BaseModel):
     api_key: str  # API密钥
     base_url: str  # API基础地址
     model_name: str  # 模型名称
-    max_tokens: Optional[int] = 4000  # 最大token数
+    max_tokens: Optional[int] = 100000  # 最大token数
     temperature: Optional[float] = 0.7  # 温度参数
-    timeout: Optional[int] = 30  # 超时时间（秒）
+    timeout: Optional[int] = 600  # 超时时间（秒）
     extra_params: Optional[Dict[str, Any]] = {}  # 额外参数
 
 
@@ -47,7 +47,7 @@ class AIProviderBase(ABC):
     def __init__(self, config: AIModelConfig):
         self.config = config
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(config.timeout or 30),
+            timeout=httpx.Timeout(config.timeout or 600),
             headers=self._get_headers()
         )
     

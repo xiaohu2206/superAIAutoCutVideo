@@ -73,8 +73,8 @@ export const getContentDefaultBaseUrl = (provider: string): string => {
  */
 export const getContentDefaultModelName = (provider: string): string => {
   const defaults: Record<string, string> = {
-    qwen: "qwen-max",
-    doubao: "doubao-pro-32k",
+    qwen: "qwen3-max",
+    doubao: "doubao-seed-1-6-251015",
     deepseek: "deepseek-chat",
   };
   return defaults[provider] || "";

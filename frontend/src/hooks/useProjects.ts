@@ -110,9 +110,11 @@ export interface UseProjectDetailReturn {
   error: string | null;
   fetchProject: (projectId: string) => Promise<void>;
   updateProject: (data: UpdateProjectRequest) => Promise<void>;
-  uploadVideo: (file: File) => Promise<void>;
-  uploadSubtitle: (file: File) => Promise<void>;
-  generateScript: (data: GenerateScriptRequest) => Promise<void>;
+  uploadVideo: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
+  uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
+  deleteVideo: () => Promise<void>;
+  deleteSubtitle: () => Promise<void>;
+  generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   refreshProject: () => Promise<void>;
 }
@@ -168,14 +170,14 @@ export const useProjectDetail = (
    * 上传视频
    */
   const uploadVideo = useCallback(
-    async (file: File) => {
+    async (file: File, onProgress?: (percent: number) => void) => {
       if (!project) return;
       setError(null);
       setLoading(true);
       try {
-        const response = await projectService.uploadVideo(project.id, file);
-        // 更新项目视频路径
-        await updateProject({ video_path: response.file_path });
+        const response = await projectService.uploadVideo(project.id, file, onProgress);
+        // 直接更新本地状态，避免额外的API调用
+        setProject((prev) => (prev ? { ...prev, video_path: response.file_path } : null));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "上传视频失败";
         setError(errorMessage);
@@ -184,21 +186,21 @@ export const useProjectDetail = (
         setLoading(false);
       }
     },
-    [project, updateProject]
+    [project]
   );
 
   /**
    * 上传字幕
    */
   const uploadSubtitle = useCallback(
-    async (file: File) => {
+    async (file: File, onProgress?: (percent: number) => void) => {
       if (!project) return;
       setError(null);
       setLoading(true);
       try {
-        const response = await projectService.uploadSubtitle(project.id, file);
-        // 更新项目字幕路径
-        await updateProject({ subtitle_path: response.file_path });
+        const response = await projectService.uploadSubtitle(project.id, file, onProgress);
+        // 直接更新本地状态，避免额外的API调用
+        setProject((prev) => (prev ? { ...prev, subtitle_path: response.file_path } : null));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "上传字幕失败";
         setError(errorMessage);
@@ -207,20 +209,63 @@ export const useProjectDetail = (
         setLoading(false);
       }
     },
-    [project, updateProject]
+    [project]
   );
+
+  /**
+   * 删除视频
+   */
+  const deleteVideo = useCallback(async () => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await projectService.deleteVideo(project.id);
+      // 本地状态清理视频路径
+      setProject((prev) => (prev ? { ...prev, video_path: undefined } : null));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "删除视频失败";
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
+
+  /**
+   * 删除字幕
+   */
+  const deleteSubtitle = useCallback(async () => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await projectService.deleteSubtitle(project.id);
+      // 本地状态清理字幕路径
+      setProject((prev) => (prev ? { ...prev, subtitle_path: undefined } : null));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "删除字幕失败";
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
 
   /**
    * 生成解说脚本
    */
   const generateScript = useCallback(
-    async (data: GenerateScriptRequest) => {
-      if (!project) return;
+    async (data: GenerateScriptRequest): Promise<VideoScript> => {
+      if (!project) {
+        throw new Error("项目不存在或未加载");
+      }
       setError(null);
       setLoading(true);
       try {
         const script = await projectService.generateScript(data);
         setProject((prev) => (prev ? { ...prev, script } : null));
+        return script;
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "生成解说脚本失败";
         setError(errorMessage);
@@ -275,6 +320,8 @@ export const useProjectDetail = (
     updateProject,
     uploadVideo,
     uploadSubtitle,
+    deleteVideo,
+    deleteSubtitle,
     generateScript,
     saveScript,
     refreshProject,

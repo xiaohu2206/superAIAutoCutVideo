@@ -1,414 +1,253 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 """
-提示词管理模块
-支持模板化提示词管理和动态配置
+提示词管理器
+负责：
+- 管理静态模板（来自 config/prompts.json）与动态模块化提示词（如 short_drama_editing）
+- 统一注册、查询、渲染与消息构建
+- 自动发现并注册各提示词子模块（支持后续扩展如 short_drama_narration）
+- 使用示例：prompt_manager.build_chat_messages("short_drama_editing:subtitle_analysis", {"subtitle_content": "...", "custom_clips": 3})
 """
 
+from __future__ import annotations
+
+import importlib
 import json
-import os
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
 import logging
+import pkgutil
+from pathlib import Path
 from string import Template
-from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from pydantic import BaseModel, Field, ConfigDict
+
+from .base import BasePrompt
 
 logger = logging.getLogger(__name__)
 
 
 class PromptTemplate(BaseModel):
-    """提示词模板"""
-    id: str = Field(..., description="模板ID")
-    name: str = Field(..., description="模板名称")
-    description: Optional[str] = Field(None, description="模板描述")
-    category: str = Field("general", description="模板分类")
-    template: str = Field(..., description="模板内容")
-    variables: List[str] = Field(default_factory=list, description="模板变量列表")
-    system_prompt: Optional[str] = Field(None, description="系统提示词")
-    user_prompt_template: Optional[str] = Field(None, description="用户提示词模板")
-    examples: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="示例")
-    tags: List[str] = Field(default_factory=list, description="标签")
-    version: str = Field("1.0", description="版本号")
-    created_at: Optional[str] = Field(None, description="创建时间")
-    updated_at: Optional[str] = Field(None, description="更新时间")
-    enabled: bool = Field(True, description="是否启用")
+    """通用提示词模板（来自配置文件或代码动态创建）"""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    template: str
+    variables: List[str] = Field(default_factory=list)
+    system_prompt: Optional[str] = None
+    user_prompt_template: Optional[str] = None
+    examples: List[Dict[str, Any]] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    version: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    enabled: bool = True
+
+    def render(self, variables: Dict[str, Any]) -> str:
+        """渲染模板，使用 `${var}` 占位符"""
+        missing = [v for v in self.variables if v not in variables]
+        if missing:
+            raise ValueError(f"缺少必要的模板变量: {', '.join(missing)}")
+        return Template(self.template).substitute(**variables)
 
 
 class VideoAnalysisPrompts:
-    """视频分析相关的预定义提示词"""
-    
-    VIDEO_CONTENT_ANALYSIS = PromptTemplate(
-        id="video_content_analysis",
-        name="视频内容分析",
-        description="分析视频内容，提取关键信息",
-        category="video_analysis",
-        template="""请分析以下视频内容：
-
-视频信息：
-- 时长：${duration}
-- 分辨率：${resolution}
-- 文件大小：${file_size}
-
-请从以下几个方面进行分析：
-1. 视频主题和内容概要
-2. 关键场景和时间点
-3. 适合剪辑的片段建议
-4. 音频质量评估
-5. 画面质量评估
-
-分析结果请以JSON格式返回。""",
-        variables=["duration", "resolution", "file_size"],
-        system_prompt="你是一个专业的视频分析师，擅长分析视频内容并提供剪辑建议。",
-        tags=["video", "analysis", "content"]
-    )
-    
-    HIGHLIGHT_DETECTION = PromptTemplate(
-        id="highlight_detection",
-        name="精彩片段检测",
-        description="检测视频中的精彩片段",
-        category="video_analysis",
-        template="""请分析视频并检测精彩片段：
-
-视频描述：${video_description}
-检测类型：${detection_type}
-时长限制：${duration_limit}
-
-请识别以下类型的精彩片段：
-1. 高潮部分
-2. 有趣的对话
-3. 视觉效果突出的场景
-4. 情感高涨的时刻
-
-对每个片段，请提供：
-- 开始时间
-- 结束时间
-- 片段描述
-- 精彩程度评分（1-10）
-- 推荐理由""",
-        variables=["video_description", "detection_type", "duration_limit"],
-        system_prompt="你是一个视频剪辑专家，能够准确识别视频中的精彩片段。",
-        tags=["video", "highlight", "detection"]
-    )
-    
-    AUTO_CUT_SUGGESTION = PromptTemplate(
-        id="auto_cut_suggestion",
-        name="自动剪辑建议",
-        description="提供自动剪辑的建议方案",
-        category="video_editing",
-        template="""基于视频分析结果，请提供自动剪辑建议：
-
-原视频时长：${original_duration}
-目标时长：${target_duration}
-剪辑风格：${editing_style}
-目标受众：${target_audience}
-
-请提供以下剪辑建议：
-1. 保留片段列表（开始时间-结束时间）
-2. 删除片段的理由
-3. 转场效果建议
-4. 音频处理建议
-5. 字幕添加建议
-
-请确保剪辑后的视频：
-- 保持内容连贯性
-- 符合目标时长要求
-- 适合目标受众""",
-        variables=["original_duration", "target_duration", "editing_style", "target_audience"],
-        system_prompt="你是一个专业的视频剪辑师，能够提供高质量的剪辑建议。",
-        tags=["video", "editing", "auto-cut"]
-    )
+    """内置的常用提示词键集合（可扩展）"""
+    # 完整键（category:name）便于跨分类检索
+    SUBTITLE_ANALYSIS = "short_drama_editing:subtitle_analysis"
+    PLOT_EXTRACTION = "short_drama_editing:plot_extraction"
 
 
 class PromptManager:
-    """提示词管理器"""
-    
-    def __init__(self, prompts_file: Optional[str] = None):
-        """
-        初始化提示词管理器
-        
-        Args:
-            prompts_file: 提示词文件路径，默认为 backend/config/prompts.json
-        """
-        if prompts_file is None:
-            # 默认提示词文件路径
+    """提示词管理器：统一管理模板与模块化提示词"""
+
+    def __init__(self, config_file: Optional[str] = None):
+        # 建立单例引用，便于类方法在初始化期间正常工作
+        type(self)._instance = self
+        self._templates: Dict[str, PromptTemplate] = {}
+        self._prompts: Dict[str, BasePrompt] = {}
+        self._category_index: Dict[str, List[str]] = {}
+        self._default_by_category: Dict[str, str] = {}
+
+        # 配置文件路径（可选）
+        if config_file is None:
             backend_dir = Path(__file__).parent.parent.parent
-            config_dir = backend_dir / "config"
-            config_dir.mkdir(exist_ok=True)
-            prompts_file = config_dir / "prompts.json"
-        
-        self.prompts_file = Path(prompts_file)
-        self.templates: Dict[str, PromptTemplate] = {}
-        
-        # 加载提示词模板
-        self.load_templates()
-    
-    def load_templates(self):
-        """从文件加载提示词模板"""
-        try:
-            if self.prompts_file.exists():
-                with open(self.prompts_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # 加载模板
-                templates_data = data.get('templates', {})
-                for template_id, template_data in templates_data.items():
-                    try:
-                        self.templates[template_id] = PromptTemplate(**template_data)
-                    except Exception as e:
-                        logger.error(f"加载提示词模板 {template_id} 失败: {e}")
-                
-                logger.info(f"成功加载 {len(self.templates)} 个提示词模板")
-            else:
-                # 创建默认模板
-                self._create_default_templates()
-                
-        except Exception as e:
-            logger.error(f"加载提示词模板失败: {e}")
-            self._create_default_templates()
-    
-    def save_templates(self):
-        """保存提示词模板到文件"""
-        try:
-            # 确保目录存在
-            self.prompts_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # 准备数据
-            data = {
-                'templates': {},
-                'metadata': {
-                    'version': '1.0',
-                    'updated_at': datetime.now().isoformat(),
-                    'total_templates': len(self.templates)
-                }
-            }
-            
-            for template_id, template in self.templates.items():
-                data['templates'][template_id] = template.dict()
-            
-            # 写入文件
-            with open(self.prompts_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            logger.info("提示词模板保存成功")
-            
-        except Exception as e:
-            logger.error(f"保存提示词模板失败: {e}")
-            raise
-    
-    def _create_default_templates(self):
-        """创建默认提示词模板"""
-        # 添加预定义的视频分析提示词
-        default_templates = [
-            VideoAnalysisPrompts.VIDEO_CONTENT_ANALYSIS,
-            VideoAnalysisPrompts.HIGHLIGHT_DETECTION,
-            VideoAnalysisPrompts.AUTO_CUT_SUGGESTION
-        ]
-        
-        for template in default_templates:
-            # 设置创建时间
-            template.created_at = datetime.now().isoformat()
-            template.updated_at = template.created_at
-            self.templates[template.id] = template
-        
-        # 保存默认模板
-        self.save_templates()
-    
-    def add_template(self, template: PromptTemplate) -> bool:
-        """
-        添加新的提示词模板
-        
-        Args:
-            template: 提示词模板
-            
-        Returns:
-            bool: 是否添加成功
-        """
-        try:
-            if template.id in self.templates:
-                raise ValueError(f"模板ID '{template.id}' 已存在")
-            
-            # 设置时间戳
-            template.created_at = datetime.now().isoformat()
-            template.updated_at = template.created_at
-            
-            self.templates[template.id] = template
-            self.save_templates()
-            
-            logger.info(f"添加提示词模板成功: {template.id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"添加提示词模板失败: {e}")
-            return False
-    
-    def update_template(self, template_id: str, template: PromptTemplate) -> bool:
-        """
-        更新提示词模板
-        
-        Args:
-            template_id: 模板ID
-            template: 新的模板对象
-            
-        Returns:
-            bool: 是否更新成功
-        """
-        try:
-            if template_id not in self.templates:
-                raise ValueError(f"模板ID '{template_id}' 不存在")
-            
-            # 保留创建时间，更新修改时间
-            old_template = self.templates[template_id]
-            template.created_at = old_template.created_at
-            template.updated_at = datetime.now().isoformat()
-            
-            self.templates[template_id] = template
-            self.save_templates()
-            
-            logger.info(f"更新提示词模板成功: {template_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"更新提示词模板失败: {e}")
-            return False
-    
-    def delete_template(self, template_id: str) -> bool:
-        """
-        删除提示词模板
-        
-        Args:
-            template_id: 模板ID
-            
-        Returns:
-            bool: 是否删除成功
-        """
-        try:
-            if template_id not in self.templates:
-                raise ValueError(f"模板ID '{template_id}' 不存在")
-            
-            del self.templates[template_id]
-            self.save_templates()
-            
-            logger.info(f"删除提示词模板成功: {template_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"删除提示词模板失败: {e}")
-            return False
-    
+            config_file = backend_dir / "config" / "prompts.json"
+        self._config_file = Path(config_file)
+
+        # 加载模板 + 自动发现模块
+        self._load_templates_from_config()
+        self._auto_discover_and_register()
+
+    # ------------------------
+    # 注册与查询
+    # ------------------------
+    def add_template(self, template: PromptTemplate) -> None:
+        if not template.enabled:
+            logger.debug(f"模板未启用，跳过注册: {template.id}")
+            return
+        self._templates[template.id] = template
+        if template.category:
+            self._category_index.setdefault(template.category, []).append(template.id)
+        logger.info(f"已注册模板: {template.id}")
+
+    def register_prompt(self, prompt: BasePrompt, is_default: bool = False) -> None:
+        key = f"{prompt.metadata.category}:{prompt.metadata.name}"
+        self._prompts[key] = prompt
+        self._category_index.setdefault(prompt.metadata.category, []).append(key)
+        if is_default:
+            self._default_by_category[prompt.metadata.category] = key
+        logger.info(f"已注册提示词模块: {key}")
+
     def get_template(self, template_id: str) -> Optional[PromptTemplate]:
+        return self._templates.get(template_id)
+
+    def get_prompt(self, key_or_name: str, category: Optional[str] = None) -> Optional[BasePrompt]:
         """
-        获取指定提示词模板
-        
-        Args:
-            template_id: 模板ID
-            
-        Returns:
-            PromptTemplate: 模板对象，如果不存在返回None
+        获取提示词模块：支持两种键形式
+        - 完整键："category:name"
+        - 简单名："name"（需提供 category 或从默认表中解析）
         """
-        return self.templates.get(template_id)
-    
-    def get_all_templates(self) -> Dict[str, PromptTemplate]:
-        """获取所有提示词模板"""
-        return self.templates.copy()
-    
-    def get_templates_by_category(self, category: str) -> Dict[str, PromptTemplate]:
+        if ":" in key_or_name:
+            return self._prompts.get(key_or_name)
+        if category:
+            return self._prompts.get(f"{category}:{key_or_name}")
+        # 尝试在各分类中唯一匹配
+        candidates = [k for k in self._prompts if k.endswith(f":{key_or_name}")]
+        if len(candidates) == 1:
+            return self._prompts[candidates[0]]
+        return None
+
+    def list_categories(self) -> List[str]:
+        return sorted(self._category_index.keys())
+
+    def list_items(self, category: Optional[str] = None) -> Dict[str, List[str]]:
+        """列出所有模板与模块键（按分类）"""
+        if category:
+            return {category: self._category_index.get(category, [])}
+        return {c: sorted(items) for c, items in self._category_index.items()}
+
+    def get_default(self, category: str) -> Optional[str]:
+        return self._default_by_category.get(category)
+
+    # ------------------------
+    # 渲染与消息构建
+    # ------------------------
+    def render_prompt(self, key_or_id: str, variables: Dict[str, Any], category: Optional[str] = None) -> Dict[str, Any]:
         """
-        根据分类获取提示词模板
-        
-        Args:
-            category: 分类名称
-            
-        Returns:
-            Dict: 该分类下的所有模板
-        """
-        return {
-            template_id: template 
-            for template_id, template in self.templates.items() 
-            if template.category == category
+        渲染提示词（模板或模块），返回统一结构：
+        {
+          "system": Optional[str],
+          "user": str
         }
-    
-    def get_enabled_templates(self) -> Dict[str, PromptTemplate]:
-        """获取所有启用的提示词模板"""
-        return {
-            template_id: template 
-            for template_id, template in self.templates.items() 
-            if template.enabled
-        }
-    
-    def render_template(self, template_id: str, variables: Dict[str, Any]) -> Optional[str]:
         """
-        渲染提示词模板
-        
-        Args:
-            template_id: 模板ID
-            variables: 模板变量字典
-            
-        Returns:
-            str: 渲染后的提示词，如果失败返回None
+        # 先尝试模板
+        tpl = self.get_template(key_or_id)
+        if tpl:
+            user_text = tpl.render(variables)
+            return {"system": tpl.system_prompt, "user": user_text}
+
+        # 再尝试模块化提示词
+        prompt = self.get_prompt(key_or_id, category=category)
+        if not prompt:
+            raise KeyError(f"未找到提示词或模板: {key_or_id}")
+        user_text = prompt.render(variables)
+        return {"system": prompt.get_system_prompt(), "user": user_text}
+
+    def build_chat_messages(self, key_or_id: str, variables: Dict[str, Any], category: Optional[str] = None) -> List[Dict[str, Any]]:
         """
+        构建适配聊天接口的 messages 列表
+        [{"role": "system", "content": ...}, {"role": "user", "content": ...}]
+        """
+        rendered = self.render_prompt(key_or_id, variables, category)
+        messages: List[Dict[str, Any]] = []
+        if rendered.get("system"):
+            messages.append({"role": "system", "content": rendered["system"]})
+        messages.append({"role": "user", "content": rendered["user"]})
+        return messages
+
+    # ------------------------
+    # 内部：加载配置与自动发现
+    # ------------------------
+    def _load_templates_from_config(self) -> None:
+        if not self._config_file.exists():
+            logger.debug(f"未找到提示词配置文件，跳过加载: {self._config_file}")
+            return
         try:
-            template = self.get_template(template_id)
-            if not template:
-                raise ValueError(f"模板不存在: {template_id}")
-            
-            if not template.enabled:
-                raise ValueError(f"模板未启用: {template_id}")
-            
-            # 使用Python的Template类进行渲染
-            template_obj = Template(template.template)
-            rendered = template_obj.safe_substitute(variables)
-            
-            return rendered
-            
+            data = json.loads(self._config_file.read_text(encoding="utf-8"))
+            templates = data.get("templates", {})
+            for tid, t in templates.items():
+                try:
+                    tpl = PromptTemplate(**t)
+                    self.add_template(tpl)
+                except Exception as e:
+                    logger.warning(f"模板加载失败: {tid}, error={e}")
+            logger.info(f"提示词配置加载完成，共 {len(self._templates)} 个模板")
         except Exception as e:
-            logger.error(f"渲染提示词模板失败: {e}")
-            return None
-    
-    def get_template_variables(self, template_id: str) -> List[str]:
+            logger.error(f"读取提示词配置失败: {self._config_file}, error={e}")
+
+    def _auto_discover_and_register(self) -> None:
         """
-        获取模板所需的变量列表
-        
-        Args:
-            template_id: 模板ID
-            
-        Returns:
-            List[str]: 变量列表
+        自动发现并注册子模块（需在其包内实现 `register_prompts()`）
+        约定：目录为 <当前包前缀>.prompts.*，并强制使用与本模块一致的包前缀，避免出现多实例导致注册丢失。
         """
-        template = self.get_template(template_id)
-        if template:
-            return template.variables
-        return []
-    
-    def search_templates(self, keyword: str) -> Dict[str, PromptTemplate]:
-        """
-        搜索提示词模板
-        
-        Args:
-            keyword: 搜索关键词
-            
-        Returns:
-            Dict: 匹配的模板
-        """
-        keyword = keyword.lower()
-        results = {}
-        
-        for template_id, template in self.templates.items():
-            # 在名称、描述、标签中搜索
-            if (keyword in template.name.lower() or 
-                (template.description and keyword in template.description.lower()) or
-                any(keyword in tag.lower() for tag in template.tags)):
-                results[template_id] = template
-        
-        return results
-    
-    def get_categories(self) -> List[str]:
-        """获取所有分类列表"""
-        categories = set()
-        for template in self.templates.values():
-            categories.add(template.category)
-        return sorted(list(categories))
+        base_path = Path(__file__).parent
+        # 统一使用当前模块的包前缀（例如 'modules.prompts' 或 'backend.modules.prompts'）
+        base_pkg = __package__ or "modules.prompts"
+        if base_pkg.endswith(".prompt_manager"):
+            base_pkg = base_pkg.rsplit(".", 1)[0]
+
+        discovered: List[str] = []
+        for finder, name, ispkg in pkgutil.iter_modules([str(base_path)]):
+            # 跳过自身与私有包
+            if name in {"__pycache__", "__init__", "prompt_manager", "base"}:
+                continue
+            full_name = f"{base_pkg}.{name}"
+            try:
+                module = importlib.import_module(full_name)
+                if hasattr(module, "register_prompts"):
+                    module.register_prompts()  # 期望其内部调用 PromptManager.register_prompt
+                    logger.info(f"已自动注册子模块提示词: {full_name}")
+                    discovered.append(full_name)
+                else:
+                    logger.debug(f"子模块 {full_name} 未提供 register_prompts，跳过自动注册")
+            except Exception as e:
+                logger.warning(f"自动发现提示词子模块失败: {full_name}, error={e}")
+
+        if discovered:
+            logger.info(f"提示词子模块自动发现完成，共注册 {len(discovered)} 个: {discovered}")
+        else:
+            logger.info("提示词子模块自动发现完成，但未发现可注册的子模块")
+
+    # ------------------------
+    # 类方法代理（便于模块内直接使用）
+    # ------------------------
+    # 注意：为避免与实例方法同名产生覆盖，这里采用不同的方法名
+    @classmethod
+    def register_prompt_cls(cls, prompt: BasePrompt, is_default: bool = False) -> None:
+        instance = getattr(cls, "_instance", None)
+        if instance is None:
+            raise RuntimeError("PromptManager 未初始化，无法注册提示词模块")
+        # 调用实例方法
+        instance.register_prompt(prompt, is_default=is_default)
+
+    @classmethod
+    def add_template_cls(cls, template: PromptTemplate) -> None:
+        instance = getattr(cls, "_instance", None)
+        if instance is None:
+            raise RuntimeError("PromptManager 未初始化，无法添加模板")
+        instance.add_template(template)
+
+    @classmethod
+    def build_chat_messages_cls(cls, key_or_id: str, variables: Dict[str, Any], category: Optional[str] = None) -> List[Dict[str, Any]]:
+        instance = getattr(cls, "_instance", None)
+        if instance is None:
+            raise RuntimeError("PromptManager 未初始化，无法构建消息")
+        return instance.build_chat_messages(key_or_id, variables, category)
 
 
-# 全局提示词管理器实例
+# 全局管理器实例
 prompt_manager = PromptManager()
