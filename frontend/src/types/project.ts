@@ -54,6 +54,7 @@ export interface Project {
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   subtitle_path?: string; // 字幕文件路径
+  output_video_path?: string; // 输出视频文件路径
   script?: VideoScript; // 视频脚本
   created_at: string; // 创建时间
   updated_at: string; // 更新时间
@@ -78,6 +79,7 @@ export interface UpdateProjectRequest {
   status?: ProjectStatus;
   video_path?: string;
   subtitle_path?: string;
+  output_video_path?: string;
   script?: VideoScript;
 }
 

@@ -28,6 +28,7 @@ class Project(BaseModel):
     status: str = Field(default="draft")  # draft | processing | completed | failed
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
+    output_video_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
     created_at: str
     updated_at: str
@@ -89,6 +90,7 @@ class ProjectsStore:
             status="draft",
             video_path=None,
             subtitle_path=None,
+            output_video_path=None,
             script=None,
             created_at=now,
             updated_at=now,
@@ -112,6 +114,7 @@ class ProjectsStore:
                 "status",
                 "video_path",
                 "subtitle_path",
+                "output_video_path",
                 "script",
             ]:
                 if key in updates and updates[key] is not None:

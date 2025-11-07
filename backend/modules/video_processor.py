@@ -23,239 +23,117 @@ class VideoProcessor:
     def __init__(self):
         self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
     
-    def validate_video_file(self, video_path: str) -> bool:
-        """验证视频文件是否有效"""
-        try:
-            path = Path(video_path)
-            if not path.exists():
-                logger.error(f"视频文件不存在: {video_path}")
-                return False
-            
-            if path.suffix.lower() not in self.supported_formats:
-                logger.error(f"不支持的视频格式: {path.suffix}")
-                return False
-            
-            # 使用OpenCV验证视频文件
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                logger.error(f"无法打开视频文件: {video_path}")
-                return False
-            
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            cap.release()
-            
-            if frame_count <= 0:
-                logger.error(f"视频文件无有效帧: {video_path}")
-                return False
-            
-            logger.info(f"视频文件验证成功: {video_path}, 帧数: {frame_count}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"验证视频文件时出错: {e}")
-            return False
-    
-    def get_video_info(self, video_path: str) -> Dict:
-        """获取视频信息"""
-        try:
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                raise ValueError(f"无法打开视频文件: {video_path}")
-            
-            info = {
-                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                'fps': cap.get(cv2.CAP_PROP_FPS),
-                'frame_count': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-                'duration': 0,
-                'size_mb': 0
-            }
-            
-            # 计算时长
-            if info['fps'] > 0:
-                info['duration'] = info['frame_count'] / info['fps']
-            
-            # 获取文件大小
-            file_size = os.path.getsize(video_path)
-            info['size_mb'] = round(file_size / (1024 * 1024), 2)
-            
-            cap.release()
-            logger.info(f"获取视频信息成功: {info}")
-            return info
-            
-        except Exception as e:
-            logger.error(f"获取视频信息失败: {e}")
-            raise
-    
-    async def extract_frames(self, video_path: str, output_dir: str, 
-                           frame_interval: int = 30) -> List[str]:
-        """提取视频帧"""
-        try:
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                raise ValueError(f"无法打开视频文件: {video_path}")
-            
-            frame_paths = []
-            frame_count = 0
-            saved_count = 0
-            
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # 按间隔保存帧
-                if frame_count % frame_interval == 0:
-                    frame_filename = f"frame_{saved_count:06d}.jpg"
-                    frame_path = output_path / frame_filename
-                    
-                    cv2.imwrite(str(frame_path), frame)
-                    frame_paths.append(str(frame_path))
-                    saved_count += 1
-                
-                frame_count += 1
-                
-                # 每处理100帧休眠一下，避免阻塞
-                if frame_count % 100 == 0:
-                    await asyncio.sleep(0.01)
-            
-            cap.release()
-            logger.info(f"提取帧完成: 总帧数 {frame_count}, 保存帧数 {saved_count}")
-            return frame_paths
-            
-        except Exception as e:
-            logger.error(f"提取视频帧失败: {e}")
-            raise
-    
-    async def compress_video(self, input_path: str, output_path: str, 
-                           quality: str = "medium") -> bool:
-        """压缩视频"""
-        try:
-            # 质量设置
-            quality_settings = {
-                "low": {"crf": "28", "preset": "fast"},
-                "medium": {"crf": "23", "preset": "medium"},
-                "high": {"crf": "18", "preset": "slow"}
-            }
-            
-            settings = quality_settings.get(quality, quality_settings["medium"])
-            
-            # FFmpeg命令
-            cmd = [
-                "ffmpeg", "-i", input_path,
-                "-c:v", "libx264",
-                "-crf", settings["crf"],
-                "-preset", settings["preset"],
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-y",  # 覆盖输出文件
-                output_path
-            ]
-            
-            logger.info(f"开始压缩视频: {input_path} -> {output_path}")
-            
-            # 异步执行FFmpeg
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                logger.info(f"视频压缩成功: {output_path}")
-                return True
-            else:
-                logger.error(f"视频压缩失败: {stderr.decode()}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"压缩视频时出错: {e}")
-            return False
-    
     async def cut_video_segment(self, input_path: str, output_path: str,
                               start_time: float, duration: float) -> bool:
-        """剪切视频片段"""
+        """剪切视频片段
+        说明：为减少后续拼接处出现非关键帧引起的卡顿，将 `-ss` 前置到 `-i` 之前，
+        以便按关键帧就近截取（仍使用 `-c copy` 保持高效）。
+        """
         try:
             cmd = [
-                "ffmpeg", "-i", input_path,
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
                 "-ss", str(start_time),
                 "-t", str(duration),
-                "-c", "copy",  # 不重新编码，快速剪切
+                "-i", input_path,
+                "-c", "copy",  # 不重新编码，快速剪切（关键帧对齐更稳定）
                 "-y",
                 output_path
             ]
-            
-            logger.info(f"剪切视频片段: {start_time}s-{start_time+duration}s")
-            
+
+            logger.info(f"剪切视频片段(关键帧对齐): {start_time}s-{start_time+duration}s -> {output_path}")
+
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            
+
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
                 logger.info(f"视频剪切成功: {output_path}")
                 return True
             else:
-                logger.error(f"视频剪切失败: {stderr.decode()}")
+                err = stderr.decode(errors="ignore")
+                logger.error(f"视频剪切失败: {err}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"剪切视频时出错: {e}")
             return False
-    
-    def detect_scene_changes(self, video_path: str, threshold: float = 0.3) -> List[float]:
-        """检测场景变化点（简单实现）"""
+
+    async def concat_videos(self, inputs: List[str], output_path: str) -> bool:
+        """稳健拼接多个视频片段，解决拼接处卡顿问题。
+        原因分析：此前使用 concat demuxer + `-c copy` 要求片段参数完全一致且必须从关键帧开始，
+        如果某段不是关键帧起始或存在时间戳不连续，播放器可能在拼接处卡顿（等待下一个关键帧）。
+
+        修复策略：改为使用 filter_complex 的 concat 过滤器并重编码输出，统一时间戳，避免GOP跨段依赖。
+        - 对每段视频/音频先 reset PTS（setpts/asetpts）
+        - 通过 concat 滤镜合并，再使用 libx264 + aac 重编码输出
+        - 输出包含 `-movflags +faststart` 以优化播放体验
+        """
         try:
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                raise ValueError(f"无法打开视频文件: {video_path}")
-            
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            scene_changes = []
-            
-            ret, prev_frame = cap.read()
-            if not ret:
-                cap.release()
-                return scene_changes
-            
-            prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-            frame_count = 1
-            
-            while True:
-                ret, curr_frame = cap.read()
-                if not ret:
-                    break
-                
-                curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
-                
-                # 计算帧差
-                diff = cv2.absdiff(prev_gray, curr_gray)
-                diff_score = np.mean(diff) / 255.0
-                
-                # 如果差异超过阈值，认为是场景变化
-                if diff_score > threshold:
-                    timestamp = frame_count / fps
-                    scene_changes.append(timestamp)
-                    logger.debug(f"检测到场景变化: {timestamp:.2f}s, 差异: {diff_score:.3f}")
-                
-                prev_gray = curr_gray
-                frame_count += 1
-            
-            cap.release()
-            logger.info(f"场景变化检测完成，共检测到 {len(scene_changes)} 个变化点")
-            return scene_changes
-            
+            if not inputs:
+                logger.error("拼接视频失败: 输入列表为空")
+                return False
+
+            # 构造输入参数
+            cmd: List[str] = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+            ]
+            for p in inputs:
+                cmd.extend(["-i", str(p)])
+
+            n = len(inputs)
+            # 为每个输入构建 reset 语句
+            vf_parts = []
+            for i in range(n):
+                vf_parts.append(f"[{i}:v:0]setpts=PTS-STARTPTS[v{i}]")
+                vf_parts.append(f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]")
+
+            # 拼接 concat 段
+            concat_inputs = "".join([f"[v{i}][a{i}]" for i in range(n)])
+            filter_complex = ";".join(vf_parts) + f";{concat_inputs}concat=n={n}:v=1:a=1[v][a]"
+
+            cmd.extend([
+                "-filter_complex", filter_complex,
+                "-map", "[v]", "-map", "[a]",
+                # 视频编码参数（质量与速度折中）
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-pix_fmt", "yuv420p",
+                # 音频编码参数
+                "-c:a", "aac", "-b:a", "192k",
+                # 提升网络播放体验
+                "-movflags", "+faststart",
+                "-y", output_path
+            ])
+
+            logger.info(f"开始稳健拼接（重编码），共 {n} 段 -> {output_path}")
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                logger.info(f"视频拼接成功: {output_path}")
+                return True
+            else:
+                err = stderr.decode(errors="ignore")
+                logger.error(f"视频拼接失败: {err}")
+                return False
+
         except Exception as e:
-            logger.error(f"检测场景变化失败: {e}")
-            return []
+            logger.error(f"拼接视频时出错: {e}")
+            return False
+    
 
 # 全局视频处理器实例
 video_processor = VideoProcessor()

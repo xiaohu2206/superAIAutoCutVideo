@@ -8,6 +8,8 @@ import {
   FileText,
   Sparkles,
   Save,
+  Download,
+  Video,
   CheckCircle,
   AlertCircle,
   Loader,
@@ -39,11 +41,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     deleteSubtitle,
     generateScript,
     saveScript,
+    generateVideo,
+    downloadVideo,
   } = useProjectDetail(projectId);
 
   const [editedScript, setEditedScript] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -282,6 +287,44 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   };
 
   /**
+   * 处理生成输出视频
+   */
+  const handleGenerateVideo = async () => {
+    if (!project?.script) {
+      alert("请先生成并保存脚本");
+      return;
+    }
+    if (!project?.video_path) {
+      alert("请先上传原始视频文件");
+      return;
+    }
+    setIsGeneratingVideo(true);
+    setSuccessMessage(null);
+    try {
+      const outputPath = await generateVideo();
+      if (outputPath) {
+        setSuccessMessage("视频生成成功！");
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
+    } catch (err) {
+      console.error("生成视频失败:", err);
+    } finally {
+      setIsGeneratingVideo(false);
+    }
+  };
+
+  /**
+   * 处理下载输出视频
+   */
+  const handleDownloadVideo = () => {
+    if (!project?.output_video_path) {
+      alert("尚未生成输出视频");
+      return;
+    }
+    downloadVideo();
+  };
+
+  /**
    * 处理解说类型变更
    */
   const handleNarrationTypeChange = async (
@@ -504,8 +547,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           )}
         </div>
 
-        {/* 生成解说脚本按钮 */}
-        <div className="pt-4 border-t border-gray-200">
+        {/* 操作按钮：生成脚本 / 生成视频 / 下载视频 */}
+        <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
           <button
             onClick={handleGenerateScript}
             disabled={!project.video_path || isGenerating}
@@ -523,6 +566,34 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               </>
             )}
           </button>
+          <button
+            onClick={handleGenerateVideo}
+            disabled={!project.script || !project.video_path || isGeneratingVideo}
+            className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingVideo ? (
+              <>
+                <Loader className="h-5 w-5 mr-2 animate-spin" />
+                生成视频中...
+              </>
+            ) : (
+              <>
+                <Video className="h-5 w-5 mr-2" />
+                生成视频
+              </>
+            )}
+          </button>
+          <button
+            onClick={handleDownloadVideo}
+            disabled={!project.output_video_path}
+            className="flex items-center px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="h-5 w-5 mr-2" />
+            下载视频
+          </button>
+          {project.output_video_path && (
+            <span className="text-xs text-gray-600">已生成：{project.output_video_path.split("/").pop()}</span>
+          )}
         </div>
       </div>
 

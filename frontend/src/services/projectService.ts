@@ -210,6 +210,35 @@ export class ProjectService {
     );
     return response.data;
   }
+
+  /**
+   * 根据脚本生成输出视频
+   */
+  async generateVideo(projectId: string): Promise<{ output_path: string; segments_count: number } | null> {
+    const response = await apiClient.post<
+      ApiResponse<{ output_path: string; segments_count: number }>
+    >(`/api/projects/${projectId}/generate-video`);
+    return response.data ?? null;
+  }
+
+  /**
+   * 获取输出视频下载链接（后端直接返回文件）
+   */
+  getOutputVideoDownloadUrl(projectId: string): string {
+    return `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video`;
+  }
+
+  /**
+   * 下载输出视频为 Blob（可选）
+   */
+  async downloadOutputVideoBlob(projectId: string): Promise<Blob> {
+    const url = this.getOutputVideoDownloadUrl(projectId);
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`下载视频失败: ${res.statusText}`);
+    }
+    return await res.blob();
+  }
 }
 
 // 导出单例实例

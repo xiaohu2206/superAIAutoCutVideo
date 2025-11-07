@@ -116,6 +116,8 @@ export interface UseProjectDetailReturn {
   deleteSubtitle: () => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
+  generateVideo: () => Promise<string | null>;
+  downloadVideo: () => void;
   refreshProject: () => Promise<void>;
 }
 
@@ -297,6 +299,42 @@ export const useProjectDetail = (
   );
 
   /**
+   * 根据脚本生成视频
+   */
+  const generateVideo = useCallback(async (): Promise<string | null> => {
+    if (!project) return null;
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await projectService.generateVideo(project.id);
+      const outputPath = result?.output_path ?? null;
+      if (outputPath) {
+        setProject((prev) => (prev ? { ...prev, output_video_path: outputPath, status: "completed" as any } : null));
+      }
+      return outputPath;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "生成视频失败";
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
+
+  /**
+   * 下载生成的视频
+   */
+  const downloadVideo = useCallback(() => {
+    if (!project) return;
+    if (!project.output_video_path) {
+      alert("尚未生成输出视频");
+      return;
+    }
+    const url = projectService.getOutputVideoDownloadUrl(project.id);
+    window.open(url, "_blank");
+  }, [project]);
+
+  /**
    * 刷新项目
    */
   const refreshProject = useCallback(async () => {
@@ -324,6 +362,8 @@ export const useProjectDetail = (
     deleteSubtitle,
     generateScript,
     saveScript,
+    generateVideo,
+    downloadVideo,
     refreshProject,
   };
 };

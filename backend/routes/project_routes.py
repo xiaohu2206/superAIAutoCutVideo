@@ -23,11 +23,12 @@ from typing import Dict, Any, Optional, List
 
 import cv2
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from modules.projects_store import projects_store, Project
 from services.script_generation_service import ScriptGenerationService
+from services.video_generation_service import video_generation_service
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -462,3 +463,53 @@ async def save_script(project_id: str, req: SaveScriptRequest):
         "data": script,
         "timestamp": now_ts(),
     }
+
+
+# ========================= 视频生成与下载 =========================
+
+@router.post("/{project_id}/generate-video")
+async def generate_video(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    if not p.script or not isinstance(p.script, dict):
+        raise HTTPException(status_code=400, detail="请先生成并保存脚本")
+    if not p.video_path:
+        raise HTTPException(status_code=400, detail="请先上传原始视频文件")
+
+    # 状态置为 processing
+    projects_store.update_project(project_id, {"status": "processing"})
+
+    try:
+        result = await video_generation_service.generate_from_script(project_id)
+        return {
+            "message": "视频生成成功",
+            "data": result,
+            "timestamp": now_ts(),
+        }
+    except Exception as e:
+        projects_store.update_project(project_id, {"status": "failed"})
+        raise HTTPException(status_code=500, detail=f"生成视频失败: {str(e)}")
+
+
+@router.get("/{project_id}/output-video")
+async def download_output_video(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.output_video_path:
+        raise HTTPException(status_code=404, detail="尚未生成输出视频")
+
+    root = project_root_dir()
+    path_str = p.output_video_path.strip()
+    abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="输出视频文件不存在")
+
+    filename = abs_path.name
+    return FileResponse(
+        path=str(abs_path),
+        filename=filename,
+        media_type="video/mp4"
+    )
