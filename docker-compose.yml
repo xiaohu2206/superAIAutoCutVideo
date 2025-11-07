@@ -1,0 +1,118 @@
+# AI智能视频剪辑应用 - Docker Compose 配置
+version: '3.8'
+
+services:
+  # ========================================
+  # 主应用服务
+  # ========================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: super-auto-cut-video
+    ports:
+      - "8000:8000"
+    environment:
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - TEMP_DIR=/app/temp
+      - OUTPUT_DIR=/app/output
+      - MAX_CONCURRENT_TASKS=2
+      - PROCESSING_TIMEOUT=3600
+    volumes:
+      # 持久化数据
+      - ./data:/app/data
+      - ./temp:/app/temp
+      - ./output:/app/output
+      - ./logs:/app/logs
+      # 输入视频文件 (可选，用于批处理)
+      - ./input:/app/input:ro
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ========================================
+  # 数据库服务 (可选)
+  # ========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: super-auto-cut-video-db
+    environment:
+      - POSTGRES_DB=video_app
+      - POSTGRES_USER=video_user
+      - POSTGRES_PASSWORD=video_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video_user -d video_app"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================================
+  # Redis 缓存服务 (可选)
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: super-auto-cut-video-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================================
+  # Nginx 反向代理 (可选)
+  # ========================================
+  nginx:
+    image: nginx:alpine
+    container_name: super-auto-cut-video-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - app
+    networks:
+      - app-network
+    restart: unless-stopped
+
+# ========================================
+# 网络配置
+# ========================================
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ========================================
+# 数据卷配置
+# ========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

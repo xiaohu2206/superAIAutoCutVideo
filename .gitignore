@@ -1,0 +1,326 @@
+# ========================================
+# AI智能视频剪辑应用 - Git 忽略配置
+# ========================================
+
+# ========================================
+# 通用文件
+# ========================================
+.env
+.env.local
+.env.production
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================================
+# Node.js / Frontend
+# ========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 构建输出
+dist/
+dist-ssr/
+build/
+
+# 编辑器和IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ========================================
+# Python / Backend
+# ========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyInstaller
+*.manifest
+build/
+dist/
+*.exe
+*.app
+
+# 单元测试
+.tox/
+.nox/
+.coverage
+.pytest_cache/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# ========================================
+# Rust / Tauri
+# ========================================
+target/
+# 保留Cargo.lock以确保依赖版本一致
+# Cargo.lock
+
+# Tauri resources（打包的后端程序）
+src-tauri/resources/*.exe
+src-tauri/resources/*.dll
+
+# ========================================
+# 应用特定文件
+# ========================================
+
+# 临时文件和缓存
+temp/
+cache/
+logs/
+
+# 用户数据
+data/
+uploads/
+downloads/
+output/
+
+# 配置文件 (包含敏感信息)
+config/local.json
+config/production.json
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 媒体文件
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+*.mp3
+*.wav
+*.aac
+
+# 大文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 测试文件
+test_videos/
+test_outputs/
+test_data/
+**/test_*.py
+**/test_*.html
+**/*_test.py
+**/*_test.html
+
+# 文档生成
+docs/_build/
+docs/build/
+
+# ========================================
+# 开发工具
+# ========================================
+
+# ESLint
+.eslintcache
+
+# Prettier
+.prettierignore
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# Rollup
+.rollup.cache/
+
+# Parcel
+.parcel-cache/
+
+# Next.js
+.next/
+out/
+
+# Nuxt.js
+.nuxt/
+.output/
+
+# Gatsby
+.cache/
+public/
+
+# Storybook
+.storybook/
+storybook-static/
+
+# ========================================
+# 部署和CI/CD
+# ========================================
+
+# Vercel
+.vercel/
+
+# Netlify
+.netlify/
+
+# AWS
+.aws/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Kubernetes
+*.kubeconfig
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ========================================
+# 安全和密钥
+# ========================================
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+.secrets/
+
+# ========================================
+# 备份文件
+# ========================================
+*.bak
+*.backup
+*.old
+*.orig
+
+# ========================================
+# 压缩文件
+# ========================================
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.gz
+*.bz2
+*.xz
+*.rar
+*.7z
+
+# ========================================
+# 本地开发
+# ========================================
+.local/
+local/
+dev/
+development/
+
+# ========================================
+# 安装程序和工具
+# ========================================
+rustup-init.exe
+rustup-init
+msys2-installer.exe
+vs_buildtools.exe
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# ========================================
+# 项目特定忽略
+# ========================================
+# PyInstaller spec文件（如需自定义配置请取消注释）
+# backend/*.spec
+
+# 后端数据目录
+backend/data/
+
+# 后端配置（如果包含敏感信息）
+# backend/config/*.json
+
+# Tauri生成文件
+src-tauri/gen/
+
+# 调试和分析文件
+*.pdb
+*.map

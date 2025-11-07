@@ -1,0 +1,41 @@
+[package]
+name = "super-auto-cut-video"
+version = "1.0.0"
+description = "AI智能视频剪辑桌面应用"
+authors = ["SuperAutoCutVideo Team"]
+license = "MIT"
+repository = "https://github.com/your-username/super-auto-cut-video"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-opener = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-dialog = "2.0"
+tauri-plugin-http = "2.0"
+tauri-plugin-notification = "2.0"
+tauri-plugin-os = "2.0"
+tauri-plugin-process = "2.0"
+tauri-plugin-updater = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

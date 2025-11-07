@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI智能视频剪辑</title>
+    <meta name="description" content="基于AI技术的智能视频剪辑桌面应用" />
+    
+    <!-- 预加载字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+      /* 加载动画 */
+      .loading-spinner {
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+        border: 3px solid #f3f3f3;
+        border-radius: 50%;
+        border-top-color: #3498db;
+        animation: spin 1s ease-in-out infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      /* 初始加载样式 */
+      #loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        color: white;
+        font-family: 'Inter', sans-serif;
+      }
+      
+      #loading h1 {
+        margin-top: 20px;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      
+      #loading p {
+        margin-top: 10px;
+        font-size: 14px;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 初始加载界面 -->
+    <div id="loading">
+      <div class="loading-spinner"></div>
+      <h1>AI智能视频剪辑</h1>
+      <p>正在加载应用...</p>
+    </div>
+    
+    <!-- React应用挂载点 -->
+    <div id="root"></div>
+    
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <script>
+      // 隐藏加载界面
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loading = document.getElementById('loading');
+          if (loading) {
+            loading.style.opacity = '0';
+            loading.style.transition = 'opacity 0.5s ease-out';
+            setTimeout(() => {
+              loading.style.display = 'none';
+            }, 500);
+          }
+        }, 1000);
+      });
+    </script>
+  </body>
+</html>
