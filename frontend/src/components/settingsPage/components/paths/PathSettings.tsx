@@ -1,6 +1,6 @@
 import { Folder } from "lucide-react";
 import React from "react";
-import type { AppSettings } from "../types";
+import type { AppSettings } from "../../types";
 
 interface PathSettingsProps {
   settings: AppSettings;

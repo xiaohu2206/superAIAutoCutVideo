@@ -1,4 +1,4 @@
-import { Cpu, FileText, Folder, Server } from "lucide-react";
+import { Cpu, FileText, Folder, Server, Mic } from "lucide-react";
 import type { AppSettings, SettingsSection } from "./types";
 
 /**
@@ -25,6 +25,7 @@ export const sections: SettingsSection[] = [
   { id: "backend", label: "后端设置", icon: Server },
   { id: "videoModel", label: "视频生成模型", icon: Cpu },
   { id: "contentModel", label: "文案生成模型", icon: FileText },
+  { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "paths", label: "路径设置", icon: Folder },
 ];
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TauriCommands } from "../../../api/client";
+import { TauriCommands } from "../../../services/clients";
 import { defaultSettings } from "../constants";
 import type { AppSettings } from "../types";
 

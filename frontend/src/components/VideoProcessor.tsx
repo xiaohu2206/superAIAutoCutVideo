@@ -12,7 +12,7 @@ import {
   Zap
 } from 'lucide-react'
 import React, { useCallback, useRef, useState } from 'react'
-import { TauriCommands, apiClient } from '../api/client'
+import { TauriCommands, apiClient } from '../services/clients'
 
 interface VideoFile {
   name: string

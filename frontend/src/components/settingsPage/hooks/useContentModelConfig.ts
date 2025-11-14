@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { TauriCommands, apiClient } from "../../../api/client";
+import { TauriCommands } from "../../../services/tauriService";
+import { contentModelService } from "../../../services/contentModelService";
 import type { ContentModelConfig, TestResult } from "../types";
 import {
   getContentConfigIdByProvider,
@@ -39,7 +40,7 @@ export const useContentModelConfig = () => {
 
   const loadContentGenerationConfigs = async () => {
     try {
-      const response = await apiClient.getContentGenerationConfigs();
+      const response = await contentModelService.getConfigs();
       if (response.success) {
         const configs = response.data.configs;
         setContentModelConfigs(configs);
@@ -74,7 +75,7 @@ export const useContentModelConfig = () => {
       const config = { ...contentModelConfigs[newConfigId], enabled: true };
       setCurrentContentConfig(config);
       // 更新配置，将 enabled 设置为 true
-      await apiClient.updateContentGenerationConfig(newConfigId, config);
+      await contentModelService.updateConfig(newConfigId, config);
       // 重新加载配置以保持状态同步
       await loadContentGenerationConfigs();
     } else {
@@ -112,7 +113,7 @@ export const useContentModelConfig = () => {
       const configId = getContentConfigIdByProvider(config.provider);
 
       // 更新配置
-      const response = await apiClient.updateContentGenerationConfig(
+      const response = await contentModelService.updateConfig(
         configId,
         config
       );
@@ -133,7 +134,7 @@ export const useContentModelConfig = () => {
       setContentTestResult(null);
 
       const configId = getContentConfigIdByProvider(contentSelectedProvider);
-      const response = await apiClient.testContentGenerationConfig(configId);
+      const response = await contentModelService.testConnection(configId);
 
       if (response.success) {
         setContentTestResult({ success: true, message: "连接测试成功！" });

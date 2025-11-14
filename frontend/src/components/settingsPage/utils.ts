@@ -92,3 +92,20 @@ export const getContentDefaultDescription = (provider: string): string => {
   return defaults[provider] || "";
 };
 
+/**
+ * TTS（音色设置）相关工具函数
+ */
+
+// 根据提供商获取TTS配置ID（后端默认示例为 tencent_tts_default）
+export const getTtsConfigIdByProvider = (provider: string): string => {
+  if (provider === "tencent_tts") return "tencent_tts_default";
+  return `${provider}_default`;
+};
+
+// 语速标签映射
+export const getSpeedLabel = (speed: number): string => {
+  if (speed < 0.8) return "较慢";
+  if (speed <= 1.2) return "正常";
+  return "较快";
+};
+
