@@ -28,20 +28,6 @@ export interface ContentModelConfig {
  * 应用设置接口
  */
 export interface AppSettings {
-  // 后端设置
-  backend: {
-    autoStart: boolean;
-    port: number;
-    timeout: number;
-    maxRetries: number;
-  };
-
-  // 文件路径设置
-  paths: {
-    defaultInputDir: string;
-    defaultOutputDir: string;
-    tempDir: string;
-  };
 }
 
 /**

@@ -1,13 +1,10 @@
-import React from 'react'
-import { 
-  Home, 
-  Video, 
-  Settings, 
-  Activity, 
-  Info,
+import {
   Github,
-  ExternalLink
+  Home,
+  Settings,
+  Video
 } from 'lucide-react'
+import React from 'react'
 
 interface NavigationProps {
   activeTab: string
@@ -28,28 +25,10 @@ const Navigation: React.FC<NavigationProps> = ({
       description: '应用概览和快速操作'
     },
     {
-      id: 'video',
-      label: '视频处理',
-      icon: Video,
-      description: '上传和处理视频文件'
-    },
-    {
-      id: 'monitor',
-      label: '系统监控',
-      icon: Activity,
-      description: '查看系统状态和日志'
-    },
-    {
       id: 'settings',
       label: '设置',
       icon: Settings,
       description: '应用配置和偏好设置'
-    },
-    {
-      id: 'about',
-      label: '关于',
-      icon: Info,
-      description: '应用信息和帮助'
     }
   ]
 
@@ -98,20 +77,11 @@ const Navigation: React.FC<NavigationProps> = ({
           <div className="flex items-center space-x-3">
             {/* GitHub链接 */}
             <button
-              onClick={() => window.open('https://github.com', '_blank')}
+              onClick={() => window.open('https://github.com/xiaohu2206/superAIAutoCutVideo', '_blank')}
               className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
               title="查看源代码"
             >
               <Github className="h-5 w-5" />
-            </button>
-
-            {/* 帮助链接 */}
-            <button
-              onClick={() => window.open('https://docs.example.com', '_blank')}
-              className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
-              title="查看文档"
-            >
-              <ExternalLink className="h-5 w-5" />
             </button>
           </div>
         </div>

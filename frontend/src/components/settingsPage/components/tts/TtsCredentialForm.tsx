@@ -1,6 +1,6 @@
+import { KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import type { TtsEngineConfig, TtsTestResult } from "../../types";
-import { CheckCircle, KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 
 interface Props {
   configId: string | null;
@@ -11,6 +11,7 @@ interface Props {
   testing: boolean;
   testDurationMs: number | null;
   testResult: TtsTestResult | null;
+  activeConfigId: string | null;
 }
 
 export const TtsCredentialForm: React.FC<Props> = ({
@@ -22,6 +23,7 @@ export const TtsCredentialForm: React.FC<Props> = ({
   testing,
   testDurationMs,
   testResult,
+  activeConfigId,
 }) => {
   const [secretIdInput, setSecretIdInput] = useState<string>("");
   const [secretKeyInput, setSecretKeyInput] = useState<string>("");
@@ -115,6 +117,30 @@ export const TtsCredentialForm: React.FC<Props> = ({
               : `鉴权失败，请检查 SecretId/SecretKey`}
           </div>
         )}
+      </div>
+
+      <div className="mt-4 text-sm text-gray-700 space-y-1">
+        <div>当前配置ID：<span className="font-mono">{configId}</span></div>
+        <div>激活配置：<span className="font-mono">{activeConfigId || "无"}</span></div>
+        <div>
+          连通性：
+          {(() => {
+            const statusText = hasCredentials
+              ? testResult?.success === false
+                ? "异常"
+                : "健康"
+              : "降级";
+            const cls = statusText === "健康" ? "text-green-600" : statusText === "降级" ? "text-orange-600" : "text-red-600";
+            return (
+              <span className={cls}>
+                {statusText}
+              </span>
+            );
+          })()}
+          {testDurationMs != null && (
+            <span className="text-gray-500 ml-2">响应 {testDurationMs}ms</span>
+          )}
+        </div>
       </div>
     </div>
   );
