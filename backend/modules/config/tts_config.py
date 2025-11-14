@@ -93,7 +93,7 @@ class TtsEngineConfigManager:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
             data = {'configs': {}}
             for config_id, config in self.configs.items():
-                data['configs'][config_id] = config.dict()
+                data['configs'][config_id] = config.dict(exclude={'secret_id', 'secret_key'})
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.info("TTS引擎配置保存成功")
@@ -220,9 +220,9 @@ class TtsEngineConfigManager:
         if not config:
             return {"success": False, "config_id": config_id, "error": f"配置 '{config_id}' 不存在"}
 
-        # 先检查是否填写凭据（去除两端空格）
-        secret_id = (config.secret_id or "").strip()
-        secret_key = (config.secret_key or "").strip()
+        import os
+        secret_id = (os.getenv("TENCENTCLOUD_SECRET_ID") or (config.secret_id or "")).strip()
+        secret_key = (os.getenv("TENCENTCLOUD_SECRET_KEY") or (config.secret_key or "")).strip()
         if not (secret_id and secret_key):
             return {
                 "success": False,
