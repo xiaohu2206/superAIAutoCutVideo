@@ -315,8 +315,8 @@ vs_buildtools.exe
 # 后端数据目录
 backend/data/
 
-# 后端配置（如果包含敏感信息）
-backend/config/*.json
+# 后端配置目录（包含敏感信息，整体忽略）
+backend/config/
 
 # Tauri生成文件
 src-tauri/gen/
