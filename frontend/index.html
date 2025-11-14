@@ -59,32 +59,8 @@
     </style>
   </head>
   <body>
-    <!-- 初始加载界面 -->
-    <div id="loading">
-      <div class="loading-spinner"></div>
-      <h1>AI智能视频剪辑</h1>
-      <p>正在加载应用...</p>
-    </div>
-    
     <!-- React应用挂载点 -->
     <div id="root"></div>
-    
     <script type="module" src="/src/main.tsx"></script>
-    
-    <script>
-      // 隐藏加载界面
-      window.addEventListener('load', () => {
-        setTimeout(() => {
-          const loading = document.getElementById('loading');
-          if (loading) {
-            loading.style.opacity = '0';
-            loading.style.transition = 'opacity 0.5s ease-out';
-            setTimeout(() => {
-              loading.style.display = 'none';
-            }, 500);
-          }
-        }, 1000);
-      });
-    </script>
   </body>
 </html>

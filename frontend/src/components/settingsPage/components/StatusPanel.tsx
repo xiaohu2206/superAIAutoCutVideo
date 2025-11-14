@@ -1,6 +1,6 @@
-import { Activity, ChevronDown, ChevronUp, Clock, Server, Wifi } from 'lucide-react'
+import { Activity, AlertCircle, CheckCircle, ChevronDown, ChevronUp, Clock, Server, Wifi } from 'lucide-react'
 import React, { useState } from 'react'
-import { WebSocketMessage } from '../services/clients'
+import { WebSocketMessage } from '../../../services/clients'
 
 interface StatusPanelProps {
   messages: WebSocketMessage[]
@@ -56,9 +56,9 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
       case 'progress':
         return <Clock className="h-4 w-4 text-blue-500" />
       case 'completed':
-        return <div className="h-4 w-4 bg-green-500 rounded-full" />
+        return <CheckCircle className="h-4 w-4 text-green-500" />
       case 'error':
-        return <div className="h-4 w-4 bg-red-500 rounded-full" />
+        return <AlertCircle className="h-4 w-4 text-red-500" />
       default:
         return <div className="h-4 w-4 bg-gray-400 rounded-full" />
     }
@@ -68,32 +68,32 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
   const getMessageTypeColor = (type: string) => {
     switch (type) {
       case 'heartbeat':
-        return 'text-green-600 bg-green-50'
+        return 'text-green-700 bg-green-50 ring-1 ring-green-200'
       case 'progress':
-        return 'text-blue-600 bg-blue-50'
+        return 'text-blue-700 bg-blue-50 ring-1 ring-blue-200'
       case 'completed':
-        return 'text-green-600 bg-green-50'
+        return 'text-green-700 bg-green-50 ring-1 ring-green-200'
       case 'error':
-        return 'text-red-600 bg-red-50'
+        return 'text-red-700 bg-red-50 ring-1 ring-red-200'
       case 'pong':
-        return 'text-purple-600 bg-purple-50'
+        return 'text-purple-700 bg-purple-50 ring-1 ring-purple-200'
       default:
-        return 'text-gray-600 bg-gray-50'
+        return 'text-gray-700 bg-gray-50 ring-1 ring-gray-200'
     }
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden">
+    <div className="bg-white/80 backdrop-blur rounded-xl border shadow-sm overflow-hidden">
       {/* 面板头部 */}
       <div 
-        className="px-6 py-4 bg-gray-50 border-b cursor-pointer hover:bg-gray-100 transition-colors"
+        className="px-6 py-4 bg-gradient-to-r from-gray-50 to-white border-b cursor-pointer hover:from-gray-100 hover:to-gray-50 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <Activity className="h-5 w-5 text-gray-600" />
             <h3 className="text-lg font-medium text-gray-900">系统状态监控</h3>
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full ring-1 ring-blue-200">
               {messages.length} 条消息
             </span>
           </div>
@@ -106,10 +106,10 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
       </div>
 
       {/* 状态概览 */}
-      <div className="px-6 py-4 border-b bg-gray-50">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="px-6 py-4 border-b bg-white">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
           {/* 后端状态 */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
             <Server className={`h-5 w-5 ${backendStatus.running ? 'text-green-500' : 'text-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">后端服务</p>
@@ -120,7 +120,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
           </div>
 
           {/* API连接状态 */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
             <div className={`h-5 w-5 rounded-full ${connections.api ? 'bg-green-500' : 'bg-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">HTTP API</p>
@@ -131,7 +131,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
           </div>
 
           {/* WebSocket连接状态 */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
             <Wifi className={`h-5 w-5 ${connections.websocket ? 'text-green-500' : 'text-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">WebSocket</p>
@@ -153,8 +153,8 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
                 onClick={() => setSelectedMessageType('all')}
                 className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                   selectedMessageType === 'all'
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 ring-1 ring-gray-200'
                 }`}
               >
                 全部 ({messages.length})
@@ -166,7 +166,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
                   className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                     selectedMessageType === type
                       ? getMessageTypeColor(type)
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 ring-1 ring-gray-200'
                   }`}
                 >
                   {type} ({count})
@@ -176,22 +176,22 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
           </div>
 
           {/* 消息列表 */}
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <div className="max-h-80 overflow-y-auto rounded-lg border divide-y divide-gray-100 bg-white">
             {filteredMessages.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <div className="text-center py-10 text-gray-500">
+                <Activity className="h-8 w-8 mx-auto mb-2 opacity-60" />
                 <p>暂无消息</p>
               </div>
             ) : (
               filteredMessages.slice(-20).reverse().map((message, index) => (
                 <div
                   key={`${message.timestamp}-${index}`}
-                  className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="flex items-start space-x-3 p-3 hover:bg-gray-50 transition-colors"
                 >
                   {getMessageIcon(message.type)}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2 mb-1">
-                      <span className={`px-2 py-0.5 text-xs font-medium rounded ${getMessageTypeColor(message.type)}`}>
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getMessageTypeColor(message.type)}`}>
                         {message.type}
                       </span>
                       <span className="text-xs text-gray-500">
@@ -226,7 +226,7 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
                         return null
                       }
                       return (
-                        <div key={key} className="text-xs text-gray-500 mt-1">
+                        <div key={key} className="text-xs text-gray-500 mt-1 break-words">
                           <span className="font-medium">{key}:</span> {String(value)}
                         </div>
                       )

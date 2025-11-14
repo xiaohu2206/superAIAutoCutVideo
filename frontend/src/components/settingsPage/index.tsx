@@ -1,31 +1,31 @@
-import { Info, RotateCcw, Save, Settings } from "lucide-react";
+import { Settings } from "lucide-react";
 import React, { useState } from "react";
-import { BackendSettings } from "./components/backend/BackendSettings";
+import { WebSocketMessage } from "../../services/clients";
+import AboutSection from "./components/AboutSection";
 import { ContentModelSettings } from "./components/models/content/ContentModelSettings";
-import { PathSettings } from "./components/paths/PathSettings";
-import { TtsSettings } from "./components/tts/TtsSettings";
 import { VideoModelSettings } from "./components/models/video/VideoModelSettings";
+import MonitorSection from "./components/MonitorSection";
+import { TtsSettings } from "./components/tts/TtsSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
-import { useSettings } from "./hooks/useSettings";
 import { useVideoModelConfig } from "./hooks/useVideoModelConfig";
 
 /**
  * 设置页面主组件
  */
-const SettingsPage: React.FC = () => {
-  const [activeSection, setActiveSection] = useState("backend");
+interface SettingsPageProps {
+  messages?: WebSocketMessage[];
+  backendStatus?: { running: boolean; port: number; pid?: number };
+  connections?: { api: boolean; websocket: boolean };
+}
 
-  // 使用自定义 Hooks
-  const {
-    settings,
-    hasChanges,
-    isSaving,
-    saveSettings,
-    resetSettings,
-    updateSetting,
-    selectDirectory,
-  } = useSettings();
+const SettingsPage: React.FC<SettingsPageProps> = ({
+  messages = [],
+  backendStatus = { running: false, port: 8000 },
+  connections = { api: false, websocket: false },
+}) => {
+  const [activeSection, setActiveSection] = useState("videoModel");
+
 
   const {
     selectedProvider,
@@ -56,13 +56,6 @@ const SettingsPage: React.FC = () => {
   // 渲染当前激活的设置区域内容
   const renderSectionContent = () => {
     switch (activeSection) {
-      case "backend":
-        return (
-          <BackendSettings
-            settings={settings}
-            updateSetting={updateSetting}
-          />
-        );
       case "videoModel":
         return (
           <VideoModelSettings
@@ -95,14 +88,16 @@ const SettingsPage: React.FC = () => {
         );
       case "tts":
         return <TtsSettings />;
-      case "paths":
+      case "monitor":
         return (
-          <PathSettings
-            settings={settings}
-            updateSetting={updateSetting}
-            selectDirectory={selectDirectory}
+          <MonitorSection
+            messages={messages as any}
+            backendStatus={backendStatus}
+            connections={connections}
           />
         );
+      case "about":
+        return <AboutSection />;
       default:
         return null;
     }
@@ -116,33 +111,7 @@ const SettingsPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Settings className="h-6 w-6 text-gray-600" />
-              <h2 className="text-xl font-semibold text-gray-900">应用设置</h2>
-            </div>
-
-            <div className="flex items-center space-x-3">
-              {hasChanges && (
-                <span className="text-sm text-orange-600 flex items-center">
-                  <Info className="h-4 w-4 mr-1" />
-                  有未保存的更改
-                </span>
-              )}
-
-              <button
-                onClick={resetSettings}
-                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
-              >
-                <RotateCcw className="h-4 w-4 mr-1" />
-                重置
-              </button>
-
-              <button
-                onClick={saveSettings}
-                disabled={!hasChanges || isSaving}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {isSaving ? "保存中..." : "保存设置"}
-              </button>
+              <h2 className="text-xl font-semibold text-gray-900">设置</h2>
             </div>
           </div>
         </div>

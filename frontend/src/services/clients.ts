@@ -309,8 +309,6 @@ export class WebSocketClient {
 
   // 处理消息
   private handleMessage(message: WebSocketMessage) {
-    console.log("收到WebSocket消息:", message);
-
     // 触发对应类型的监听器
     const typeListeners = this.listeners.get(message.type);
     if (typeListeners) {

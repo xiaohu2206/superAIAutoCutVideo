@@ -1,15 +1,14 @@
 import { TauriCommands } from "@/services/tauriService";
 import { ttsService } from "@/services/ttsService";
-import { AlertCircle, CheckCircle, Clock, Loader, Mic, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle, Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TtsCredentialForm } from "../../components/tts/TtsCredentialForm";
 import { TtsEngineSelect } from "../../components/tts/TtsEngineSelect";
-import { TtsPreviewPlayer } from "../../components/tts/TtsPreviewPlayer";
 import { TtsSpeedSlider } from "../../components/tts/TtsSpeedSlider";
 import { TtsVoiceGallery } from "../../components/tts/TtsVoiceGallery";
 import type { TtsEngineConfig, TtsEngineMeta, TtsTestResult, TtsVoice } from "../../types";
 import { getSpeedLabel, getTtsConfigIdByProvider } from "../../utils";
-import { TtsActivationSwitch } from "./TtsActivationSwitch";
+ 
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
@@ -28,7 +27,7 @@ export const TtsSettings: React.FC = () => {
 
   // 保存状态
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [lastSavedAt, setLastSavedAt] = useState<string>("");
+ 
   const latestPatchSeq = useRef<number>(0);
 
   // 连通性状态
@@ -121,7 +120,6 @@ export const TtsSettings: React.FC = () => {
 
   const markSaved = () => {
     setSaveState("saved");
-    setLastSavedAt(new Date().toLocaleTimeString());
     setTimeout(() => setSaveState("idle"), 800);
   };
 
@@ -213,22 +211,7 @@ export const TtsSettings: React.FC = () => {
     }, 300);
   };
 
-  // 事件：激活开关
-  const handleActivate = async () => {
-    try {
-      setSaveState("saving");
-      const res = await ttsService.activateConfig(currentConfigId!);
-      if (res?.success) {
-        await refreshConfigs();
-        markSaved();
-      } else {
-        markFailed();
-      }
-    } catch (error) {
-      console.error("激活配置失败:", error);
-      markFailed();
-    }
-  };
+  
 
   // 事件：测试连通性
   const handleTestConnection = async () => {
@@ -278,19 +261,11 @@ export const TtsSettings: React.FC = () => {
     }
   };
 
-  // 右侧状态文案
-  const statusText = hasCredentials
-    ? testResult?.success === false
-      ? "异常"
-      : "健康"
-    : "降级";
-
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* 左侧主内容 */}
-      <div className="lg:col-span-2 space-y-8">
+    <div className="grid grid-cols-1 gap-6">
+      <div className="space-y-8">
         {/* 引擎选择 */}
-        <section className="bg-white border rounded-lg p-4">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
           <TtsEngineSelect
             engines={engines}
             provider={provider}
@@ -299,7 +274,7 @@ export const TtsSettings: React.FC = () => {
         </section>
 
         {/* 凭据设置 */}
-        <section className="bg-white border rounded-lg p-4">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
           <TtsCredentialForm
             configId={currentConfigId}
             config={currentConfig}
@@ -309,11 +284,12 @@ export const TtsSettings: React.FC = () => {
             testing={testing}
             testDurationMs={testDurationMs}
             testResult={testResult}
+            activeConfigId={activeConfigId}
           />
         </section>
 
         {/* 音色库 */}
-        <section className="bg-white border rounded-lg p-4">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-md font-semibold text-gray-900">音色库</h4>
             <input
@@ -321,22 +297,24 @@ export const TtsSettings: React.FC = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索音色..."
-              className="px-3 py-2 border border-gray-300 rounded-md w-56"
+              className="px-3 py-2 border border-gray-300 rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </div>
-          <TtsVoiceGallery
-            voices={voices.filter((v) =>
-              (v.name + v.id + (v.description || "")).toLowerCase().includes(search.toLowerCase())
-            )}
-            activeVoiceId={currentConfig?.active_voice_id || ""}
-            configId={currentConfigId}
-            hasCredentials={hasCredentials}
-            onSetActive={handleSetActiveVoice}
-          />
+          <div className="h-80 overflow-y-auto pr-1">
+            <TtsVoiceGallery
+              voices={voices.filter((v) =>
+                (v.name + v.id + (v.description || "")).toLowerCase().includes(search.toLowerCase())
+              )}
+              activeVoiceId={currentConfig?.active_voice_id || ""}
+              configId={currentConfigId}
+              hasCredentials={hasCredentials}
+              onSetActive={handleSetActiveVoice}
+            />
+          </div>
         </section>
 
         {/* 语速 */}
-        <section className="bg-white border rounded-lg p-4">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
           <TtsSpeedSlider
             speedRatio={currentConfig?.speed_ratio ?? 1.0}
             onChange={handleSpeedChangeDebounced}
@@ -345,19 +323,7 @@ export const TtsSettings: React.FC = () => {
           />
         </section>
 
-        {/* 预览 */}
-        <section className="bg-white border rounded-lg p-4">
-          <TtsPreviewPlayer
-            provider={provider}
-            configId={currentConfigId}
-            voices={voices}
-            activeVoiceId={currentConfig?.active_voice_id || ""}
-            hasCredentials={hasCredentials}
-          />
-        </section>
-
         {/* 底部状态 */}
-        <section className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2">
             {saveState === "saving" && (
               <span className="flex items-center text-gray-600">
@@ -375,58 +341,7 @@ export const TtsSettings: React.FC = () => {
               </span>
             )}
           </div>
-          <div className="text-gray-500 flex items-center">
-            <Clock className="h-4 w-4 mr-1" /> 最近保存时间：{lastSavedAt || "--"}
-          </div>
-        </section>
       </div>
-
-      {/* 右侧状态面板 */}
-      <aside className="space-y-4">
-        <div className="bg-white border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Mic className="h-5 w-5 text-gray-700" />
-            <span className="text-sm font-medium text-gray-900">TTS状态</span>
-          </div>
-          <div className="space-y-2 text-sm text-gray-700">
-            <div>当前配置ID：<span className="font-mono">{currentConfigId}</span></div>
-            <div>激活配置：<span className="font-mono">{activeConfigId || "无"}</span></div>
-            <div>
-              连通性：
-              <span className={
-                statusText === "健康"
-                  ? "text-green-600"
-                  : statusText === "降级"
-                  ? "text-orange-600"
-                  : "text-red-600"
-              }>
-                {statusText}
-              </span>
-              {testDurationMs != null && (
-                <span className="text-gray-500 ml-2">响应 {testDurationMs}ms</span>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <TtsActivationSwitch
-              enabled={Boolean(currentConfig?.enabled)}
-              onActivate={handleActivate}
-            />
-          </div>
-
-          <div className="mt-2">
-            <button
-              className="inline-flex items-center px-3 py-2 text-xs bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700"
-              onClick={() => handleTestConnection()}
-              disabled={testing}
-            >
-              {testing ? <Loader className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-              重新测试
-            </button>
-          </div>
-        </div>
-      </aside>
     </div>
   );
 };
