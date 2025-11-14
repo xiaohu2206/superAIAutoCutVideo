@@ -1,6 +1,6 @@
+import { Activity, ChevronDown, ChevronUp, Clock, Server, Wifi } from 'lucide-react'
 import React, { useState } from 'react'
-import { ChevronDown, ChevronUp, Activity, Wifi, Server, Clock } from 'lucide-react'
-import { WebSocketMessage } from '../api/client'
+import { WebSocketMessage } from '../services/clients'
 
 interface StatusPanelProps {
   messages: WebSocketMessage[]

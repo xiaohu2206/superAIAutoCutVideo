@@ -61,3 +61,54 @@ export interface SettingsSection {
   icon: any;
 }
 
+/**
+ * TTS 引擎元信息
+ */
+export interface TtsEngineMeta {
+  provider: string;
+  display_name: string;
+  description?: string;
+  required_fields?: string[];
+  optional_fields?: string[];
+}
+
+/**
+ * TTS 音色信息
+ */
+export interface TtsVoice {
+  id: string;
+  name: string;
+  description?: string;
+  sample_wav_url?: string;
+  language?: string;
+  gender?: string;
+  tags?: string[];
+}
+
+/**
+ * TTS 引擎配置
+ */
+export interface TtsEngineConfig {
+  provider: string;
+  secret_id?: string | null;
+  secret_key?: string | null;
+  region?: string | null;
+  description?: string | null;
+  enabled: boolean;
+  active_voice_id?: string | null;
+  speed_ratio: number;
+  extra_params?: Record<string, any>;
+}
+
+export interface TtsConfigsData {
+  configs: Record<string, TtsEngineConfig>;
+  active_config_id?: string | null;
+}
+
+export interface TtsTestResult {
+  success: boolean;
+  config_id: string;
+  provider: string;
+  message: string;
+}
+

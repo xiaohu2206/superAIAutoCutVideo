@@ -1,19 +1,19 @@
 import { CheckCircle, Info, RefreshCw } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import {
-  TauriCommands,
-  WebSocketMessage,
-  apiClient,
-  wsClient,
-  configureBackend,
-  autoConfigureBackend,
-} from "./api/client";
 import Navigation from "./components/Navigation";
 import SettingsPage from "./components/settingsPage";
 import StatusPanel from "./components/StatusPanel";
 import VideoProcessor from "./components/VideoProcessor";
-import ProjectManagementPage from "./pages/ProjectManagementPage";
 import ProjectEditPage from "./pages/ProjectEditPage";
+import ProjectManagementPage from "./pages/ProjectManagementPage";
+import {
+  TauriCommands,
+  WebSocketMessage,
+  apiClient,
+  autoConfigureBackend,
+  configureBackend,
+  wsClient,
+} from "./services/clients";
 
 interface BackendStatus {
   running: boolean;

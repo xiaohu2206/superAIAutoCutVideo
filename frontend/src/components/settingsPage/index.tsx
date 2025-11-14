@@ -1,9 +1,10 @@
 import { Info, RotateCcw, Save, Settings } from "lucide-react";
 import React, { useState } from "react";
-import { BackendSettings } from "./components/BackendSettings";
-import { ContentModelSettings } from "./components/ContentModelSettings";
-import { PathSettings } from "./components/PathSettings";
-import { VideoModelSettings } from "./components/VideoModelSettings";
+import { BackendSettings } from "./components/backend/BackendSettings";
+import { ContentModelSettings } from "./components/models/content/ContentModelSettings";
+import { PathSettings } from "./components/paths/PathSettings";
+import { TtsSettings } from "./components/tts/TtsSettings";
+import { VideoModelSettings } from "./components/models/video/VideoModelSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
 import { useSettings } from "./hooks/useSettings";
@@ -92,6 +93,8 @@ const SettingsPage: React.FC = () => {
             testContentModelConnection={testContentModelConnection}
           />
         );
+      case "tts":
+        return <TtsSettings />;
       case "paths":
         return (
           <PathSettings

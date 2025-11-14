@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 
 from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
+from modules.tts_service import tts_service
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ class VideoGenerationService:
         input_abs = VideoGenerationService._resolve_path(p.video_path)
         if not input_abs.exists():
             raise ValueError("原始视频文件不存在")
+        input_dur = await video_processor._ffprobe_duration(str(input_abs), "format") or 0.0
 
         # 片段输出与最终输出路径
         uploads_root = _uploads_dir()
@@ -99,6 +101,9 @@ class VideoGenerationService:
         # 片段临时目录：uploads/videos/tmp/{project_id}_{ts}
         tmp_dir = uploads_root / "videos" / "tmp" / f"{p.id}_{ts}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
+        # 配音临时目录：uploads/audios/tmp/{project_id}_{ts}
+        aud_tmp_dir = uploads_root / "audios" / "tmp" / f"{p.id}_{ts}"
+        aud_tmp_dir.mkdir(parents=True, exist_ok=True)
 
         # 逐段剪切
         clip_paths: List[str] = []
@@ -118,7 +123,43 @@ class VideoGenerationService:
                     str(input_abs), str(clip_abs), start, duration
                 )
                 if ok:
-                    clip_paths.append(str(clip_abs))
+                    text = str(seg.get("text", "") or "").strip()
+                    if text.startswith("播放原片"):
+                        clip_paths.append(str(clip_abs))
+                    else:
+                        try:
+                            seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                            sy = await tts_service.synthesize(text, str(seg_audio), None)
+                            if sy.get("success"):
+                                adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                                if adur > 0.0 and input_dur > 0.0 and adur > duration:
+                                    ext = adur - duration
+                                    fwd = max(0.0, input_dur - end)
+                                    if fwd >= ext:
+                                        new_start = start
+                                        new_dur = duration + ext
+                                    else:
+                                        shortage = ext - fwd
+                                        new_start = max(0.0, start - shortage)
+                                        new_dur = input_dur - new_start
+                                    ok2 = await video_processor.cut_video_segment(
+                                        str(input_abs), str(clip_abs), new_start, new_dur
+                                    )
+                                    if not ok2:
+                                        logger.warning(f"片段延长失败，使用原片段: {idx}")
+                                clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
+                                rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
+                                if rep_ok:
+                                    clip_paths.append(str(clip_nar_abs))
+                                else:
+                                    logger.warning(f"片段配音替换失败，保留原片段: {idx}")
+                                    clip_paths.append(str(clip_abs))
+                            else:
+                                logger.warning(f"TTS合成失败，保留原片段: {idx} - {sy.get('error')}")
+                                clip_paths.append(str(clip_abs))
+                        except Exception as e:
+                            logger.warning(f"生成配音或替换失败（保留原片段） idx={idx}: {e}")
+                            clip_paths.append(str(clip_abs))
                 else:
                     logger.warning(f"剪切片段失败，已跳过: {idx}")
             except Exception as e:
@@ -138,8 +179,10 @@ class VideoGenerationService:
                 pass
             raise RuntimeError("拼接视频失败")
 
-        # 保存到项目
-        web_output = _to_web_path(output_abs)
+        norm_abs = outputs_dir / f"{p.id}_output_{ts}_normalized.mp4"
+        ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(str(output_abs), str(norm_abs))
+        final_abs = norm_abs if ok_norm else output_abs
+        web_output = _to_web_path(final_abs)
         projects_store.update_project(project_id, {"output_video_path": web_output, "status": "completed"})
 
         # # 清理临时片段缓存

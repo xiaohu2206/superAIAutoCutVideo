@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -27,6 +28,7 @@ from routes import health_router
 from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
+from routes.tts_routes import router as tts_router
 
 # 配置日志
 logging.basicConfig(
@@ -56,6 +58,14 @@ app.include_router(health_router)
 app.include_router(video_model_router)
 app.include_router(content_model_router)
 app.include_router(project_router)
+app.include_router(tts_router)
+
+project_root = Path(__file__).resolve().parent.parent
+uploads_dir = project_root / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+service_data_dir = project_root / "backend" / "serviceData"
+app.mount("/backend/serviceData", StaticFiles(directory=str(service_data_dir)), name="serviceData")
 
 # WebSocket连接管理器
 class ConnectionManager:

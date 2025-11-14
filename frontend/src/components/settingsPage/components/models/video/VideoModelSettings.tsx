@@ -1,36 +1,34 @@
 import { AlertCircle, CheckCircle, Eye, EyeOff } from "lucide-react";
 import React from "react";
-import type { ContentModelConfig, TestResult } from "../types";
+import type { TestResult, VideoModelConfig } from "../../../types";
 
-interface ContentModelSettingsProps {
-  contentSelectedProvider: string;
-  currentContentConfig: ContentModelConfig;
-  setCurrentContentConfig: React.Dispatch<
-    React.SetStateAction<ContentModelConfig>
-  >;
-  testingContentConnection: boolean;
-  contentTestResult: TestResult | null;
-  showContentPassword: boolean;
-  setShowContentPassword: React.Dispatch<React.SetStateAction<boolean>>;
-  handleContentProviderChange: (provider: string) => void;
-  updateCurrentContentConfig: (field: string, value: any) => void;
-  testContentModelConnection: () => void;
+interface VideoModelSettingsProps {
+  selectedProvider: string;
+  currentConfig: VideoModelConfig;
+  setCurrentConfig: React.Dispatch<React.SetStateAction<VideoModelConfig>>;
+  testingConnection: boolean;
+  testResult: TestResult | null;
+  showPassword: boolean;
+  setShowPassword: React.Dispatch<React.SetStateAction<boolean>>;
+  handleProviderChange: (provider: string) => void;
+  updateCurrentConfig: (field: string, value: any) => void;
+  testModelConnection: () => void;
 }
 
 /**
- * 文案生成模型设置组件
+ * 视频生成模型设置组件
  */
-export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
-  contentSelectedProvider,
-  currentContentConfig,
-  setCurrentContentConfig,
-  testingContentConnection,
-  contentTestResult,
-  showContentPassword,
-  setShowContentPassword,
-  handleContentProviderChange,
-  updateCurrentContentConfig,
-  testContentModelConnection,
+export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
+  selectedProvider,
+  currentConfig,
+  setCurrentConfig,
+  testingConnection,
+  testResult,
+  showPassword,
+  setShowPassword,
+  handleProviderChange,
+  updateCurrentConfig,
+  testModelConnection,
 }) => {
   return (
     <div className="space-y-6">
@@ -40,8 +38,8 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           选择模型提供商
         </label>
         <select
-          value={contentSelectedProvider}
-          onChange={(e) => handleContentProviderChange(e.target.value)}
+          value={selectedProvider}
+          onChange={(e) => handleProviderChange(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="qwen">通义千问 (Qwen)</option>
@@ -49,7 +47,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           <option value="deepseek">DeepSeek</option>
         </select>
         <p className="text-xs text-gray-500 mt-1">
-          选择用于文案生成的AI模型提供商
+          选择用于视频生成的AI模型提供商
         </p>
       </div>
 
@@ -60,26 +58,21 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         </label>
         <div className="relative">
           <input
-            type={showContentPassword ? "text" : "password"}
-            value={currentContentConfig.api_key}
+            type={showPassword ? "text" : "password"}
+            value={currentConfig.api_key}
             onChange={(e) =>
-              setCurrentContentConfig((prev) => ({
-                ...prev,
-                api_key: e.target.value,
-              }))
+              setCurrentConfig((prev) => ({ ...prev, api_key: e.target.value }))
             }
-            onBlur={(e) =>
-              updateCurrentContentConfig("api_key", e.target.value)
-            }
+            onBlur={(e) => updateCurrentConfig("api_key", e.target.value)}
             placeholder="请输入API密钥"
             className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             type="button"
-            onClick={() => setShowContentPassword(!showContentPassword)}
+            onClick={() => setShowPassword(!showPassword)}
             className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
           >
-            {showContentPassword ? (
+            {showPassword ? (
               <EyeOff className="h-4 w-4" />
             ) : (
               <Eye className="h-4 w-4" />
@@ -96,14 +89,11 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         </label>
         <input
           type="text"
-          value={currentContentConfig.base_url}
+          value={currentConfig.base_url}
           onChange={(e) =>
-            setCurrentContentConfig((prev) => ({
-              ...prev,
-              base_url: e.target.value,
-            }))
+            setCurrentConfig((prev) => ({ ...prev, base_url: e.target.value }))
           }
-          onBlur={(e) => updateCurrentContentConfig("base_url", e.target.value)}
+          onBlur={(e) => updateCurrentConfig("base_url", e.target.value)}
           placeholder="请输入接口地址"
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -117,16 +107,14 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         </label>
         <input
           type="text"
-          value={currentContentConfig.model_name}
+          value={currentConfig.model_name}
           onChange={(e) =>
-            setCurrentContentConfig((prev) => ({
+            setCurrentConfig((prev) => ({
               ...prev,
               model_name: e.target.value,
             }))
           }
-          onBlur={(e) =>
-            updateCurrentContentConfig("model_name", e.target.value)
-          }
+          onBlur={(e) => updateCurrentConfig("model_name", e.target.value)}
           placeholder="请输入模型名称"
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -136,27 +124,27 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
       {/* 测试连接 */}
       <div className="pt-4 border-t">
         <button
-          onClick={testContentModelConnection}
-          disabled={testingContentConnection || !currentContentConfig.api_key}
+          onClick={testModelConnection}
+          disabled={testingConnection || !currentConfig.api_key}
           className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {testingContentConnection ? "测试中..." : "测试连接"}
+          {testingConnection ? "测试中..." : "测试连接"}
         </button>
 
-        {contentTestResult && (
+        {testResult && (
           <div
             className={`mt-3 p-3 rounded-lg flex items-center ${
-              contentTestResult.success
+              testResult.success
                 ? "bg-green-50 text-green-700"
                 : "bg-red-50 text-red-700"
             }`}
           >
-            {contentTestResult.success ? (
+            {testResult.success ? (
               <CheckCircle className="h-5 w-5 mr-2 flex-shrink-0" />
             ) : (
               <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
             )}
-            <span className="text-sm">{contentTestResult.message}</span>
+            <span className="text-sm">{testResult.message}</span>
           </div>
         )}
       </div>

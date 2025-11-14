@@ -1,14 +1,12 @@
-// 项目管理API服务层
-
-import { apiClient, type ApiResponse } from "../api/client";
 import type {
-  Project,
   CreateProjectRequest,
-  UpdateProjectRequest,
-  GenerateScriptRequest,
   FileUploadResponse,
+  GenerateScriptRequest,
+  Project,
+  UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
+import { apiClient, type ApiResponse } from "./clients";
 
 /**
  * 项目管理服务类

@@ -200,6 +200,46 @@ export class ApiClient {
   async testContentGenerationConfig(configId: string): Promise<any> {
     return this.post(`/api/models/content-generation/test/${configId}`);
   }
+
+  // ===== TTS（音色设置）相关 API =====
+  // 获取TTS引擎列表
+  async getTtsEngines(): Promise<any> {
+    return this.get(`/api/tts/engines`);
+  }
+
+  // 获取音色列表
+  async getTtsVoices(provider: string): Promise<any> {
+    const p = encodeURIComponent(provider);
+    return this.get(`/api/tts/voices?provider=${p}`);
+  }
+
+  // 获取TTS配置
+  async getTtsConfigs(): Promise<any> {
+    return this.get(`/api/tts/configs`);
+  }
+
+  // 更新/创建TTS配置（实时保存，局部更新）
+  async patchTtsConfig(configId: string, partial: any): Promise<any> {
+    return this.request(`/api/tts/configs/${encodeURIComponent(configId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(partial),
+    });
+  }
+
+  // 激活指定TTS配置（保证唯一启用）
+  async activateTtsConfig(configId: string): Promise<any> {
+    return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/activate`);
+  }
+
+  // 测试TTS引擎连通性
+  async testTtsConnection(configId: string): Promise<any> {
+    return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/test`);
+  }
+
+  // 音色试听（优先使用凭据生成，其次回退 sample_wav_url）
+  async previewTtsVoice(voiceId: string, req?: { text?: string; provider?: string; config_id?: string }): Promise<any> {
+    return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {});
+  }
 }
 
 // WebSocket客户端类

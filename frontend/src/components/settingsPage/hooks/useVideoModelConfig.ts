@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { TauriCommands, apiClient } from "../../../api/client";
+import { TauriCommands } from "../../../services/tauriService";
+import { videoModelService } from "../../../services/videoModelService";
 import type { TestResult, VideoModelConfig } from "../types";
 import {
   getConfigIdByProvider,
@@ -34,7 +35,7 @@ export const useVideoModelConfig = () => {
 
   const loadVideoAnalysisConfigs = async () => {
     try {
-      const response = await apiClient.getVideoAnalysisConfigs();
+      const response = await videoModelService.getConfigs();
       if (response.success) {
         const configs = response.data.configs;
         setModelConfigs(configs);
@@ -69,7 +70,7 @@ export const useVideoModelConfig = () => {
       const config = { ...modelConfigs[newConfigId], enabled: true };
       setCurrentConfig(config);
       // 更新配置，将 enabled 设置为 true
-      await apiClient.updateVideoAnalysisConfig(newConfigId, config);
+      await videoModelService.updateConfig(newConfigId, config);
       // 重新加载配置以保持状态同步
       await loadVideoAnalysisConfigs();
     } else {
@@ -107,7 +108,7 @@ export const useVideoModelConfig = () => {
       const configId = getConfigIdByProvider(config.provider);
 
       // 更新配置
-      const response = await apiClient.updateVideoAnalysisConfig(
+      const response = await videoModelService.updateConfig(
         configId,
         config
       );
@@ -128,7 +129,7 @@ export const useVideoModelConfig = () => {
       setTestResult(null);
 
       const configId = getConfigIdByProvider(selectedProvider);
-      const response = await apiClient.testVideoAnalysisConfig(configId);
+      const response = await videoModelService.testConnection(configId);
 
       if (response.success) {
         setTestResult({ success: true, message: "连接测试成功！" });

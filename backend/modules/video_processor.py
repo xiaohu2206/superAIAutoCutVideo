@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+from .audio_normalizer import AudioNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class VideoProcessor:
     
     def __init__(self):
         self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
+        self.audio_normalizer = AudioNormalizer()
     
     async def cut_video_segment(self, input_path: str, output_path: str,
                               start_time: float, duration: float) -> bool:
@@ -132,6 +134,90 @@ class VideoProcessor:
 
         except Exception as e:
             logger.error(f"拼接视频时出错: {e}")
+            return False
+
+    async def _ffprobe_duration(self, path: str, stream_type: str = "format") -> Optional[float]:
+        try:
+            if stream_type == "audio":
+                cmd = [
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "a:0",
+                    "-show_entries", "stream=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ]
+            else:
+                cmd = [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, _ = await proc.communicate()
+            if proc.returncode == 0:
+                try:
+                    return float(out.decode().strip())
+                except Exception:
+                    return None
+            return None
+        except Exception:
+            return None
+
+    async def replace_audio_with_narration(self, video_path: str, narration_path: str, output_path: str) -> bool:
+        try:
+            narr_used = narration_path
+            vdur = await self._ffprobe_duration(video_path, "format") or 0.0
+            adur = await self._ffprobe_duration(narr_used, "audio") or 0.0
+            if vdur <= 0.0:
+                logger.error("无法获取视频时长")
+                return False
+            if adur <= 0.0:
+                logger.error("无法获取音频时长")
+                return False
+            if adur >= vdur:
+                pad = max(adur - vdur, 0.0)
+                pad_str = f"{pad:.3f}"
+                f = f"[0:v]tpad=stop_mode=clone:stop_duration={pad_str},setpts=PTS-STARTPTS[v];[1:a]asetpts=PTS-STARTPTS[a]"
+                filter_complex = f
+                map_args = ["-map", "[v]", "-map", "[a]"]
+                extra = []
+                vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+            else:
+                adur_str = f"{adur:.3f}"
+                f = f"[0:v]trim=start=0:end={adur_str},setpts=PTS-STARTPTS[v];[1:a]asetpts=PTS-STARTPTS[a]"
+                filter_complex = f
+                map_args = ["-map", "[v]", "-map", "[a]"]
+                extra = []
+                vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-i", narr_used,
+                "-filter_complex", filter_complex,
+                *map_args,
+                *vcodec_args,
+                "-c:a", "aac", "-b:a", "192k",
+                *extra,
+                "-y", output_path,
+            ]
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode == 0:
+                return True
+            else:
+                err = stderr.decode(errors="ignore")
+                logger.error(f"片段音频替换失败: {err}")
+                return False
+
+        except Exception as e:
+            logger.error(f"片段音频替换出错: {e}")
             return False
     
 
