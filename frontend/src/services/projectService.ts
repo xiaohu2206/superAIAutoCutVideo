@@ -78,6 +78,17 @@ export class ProjectService {
   }
 
   /**
+   * 删除指定视频项
+   */
+  async deleteVideoItem(projectId: string, filePath: string): Promise<boolean> {
+    const response = await apiClient.post<{ data?: { removed?: boolean } }>(
+      `/api/projects/${projectId}/delete/video`,
+      { file_path: filePath }
+    );
+    return response?.data?.removed ?? true;
+  }
+
+  /**
    * 删除项目字幕文件
    */
   async deleteSubtitle(projectId: string): Promise<boolean> {
@@ -133,6 +144,30 @@ export class ProjectService {
 
       xhr.send(formData);
     });
+  }
+
+  /**
+   * 合并多个视频
+   */
+  async startMergeVideos(projectId: string): Promise<{ task_id: string }> {
+    const response = await apiClient.post<{ data: { task_id: string } }>(
+      `/api/projects/${projectId}/merge/videos`
+    );
+    return response.data;
+  }
+
+  async getMergeStatus(projectId: string, taskId: string): Promise<{
+    task_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    file_path?: string;
+  }> {
+    const response = await apiClient.get<{ data: any }>(
+      `/api/projects/${projectId}/merge/videos/status/${taskId}`
+    );
+    console.log("getMergeStatus: ", response)
+    return response.data;
   }
 
   /**

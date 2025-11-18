@@ -69,6 +69,9 @@ export interface TtsVoice {
   language?: string;
   gender?: string;
   tags?: string[];
+  voice_quality?: string;
+  voice_type_tag?: string;
+  voice_human_style?: string;
 }
 
 /**

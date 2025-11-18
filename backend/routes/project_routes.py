@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import asyncio
 
 import cv2
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -27,6 +28,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from modules.projects_store import projects_store, Project
+from modules.video_processor import video_processor
 from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 
@@ -73,6 +75,19 @@ class UpdateProjectRequest(BaseModel):
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
+
+
+class DeleteVideoRequest(BaseModel):
+    file_path: Optional[str] = None
+
+class MergeTaskStatus(BaseModel):
+    task_id: str
+    status: str
+    progress: float
+    message: str
+    file_path: Optional[str] = None
+
+MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
 
 
 class GenerateScriptRequest(BaseModel):
@@ -307,9 +322,9 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
-    # 更新项目视频路径（使用web友好路径）
+    # 记录到项目的视频列表，并按规则更新生效路径
     web_path = to_web_path(out_path)
-    projects_store.update_project(project_id, {"video_path": web_path})
+    projects_store.append_video_path(project_id, web_path)
 
     return {
         "message": "视频上传成功",
@@ -368,17 +383,25 @@ async def upload_subtitle(project_id: str, file: UploadFile = File(...), project
 # ========================= 文件删除 =========================
 
 @router.post("/{project_id}/delete/video")
-async def delete_video_file(project_id: str):
+async def delete_video_file(project_id: str, req: Optional[DeleteVideoRequest] = None, file_path_form: str = Form(None)):
     p = projects_store.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    # 解析现有视频路径为绝对路径并尝试删除文件
+    # 选择目标删除路径：优先使用传入的 file_path，其次兼容旧逻辑（使用生效路径）
     removed = False
     removed_path = None
-    if p.video_path:
+    target_path = None
+    if req and req.file_path:
+        target_path = req.file_path
+    elif file_path_form:
+        target_path = file_path_form
+    else:
+        target_path = p.video_path
+
+    if target_path:
         root = project_root_dir()
-        path_str = p.video_path.strip()
+        path_str = target_path.strip()
         abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
         try:
             if abs_path.exists() and abs_path.is_file():
@@ -386,10 +409,13 @@ async def delete_video_file(project_id: str):
                 abs_path.unlink()
                 removed = True
         except Exception:
-            # 忽略删除文件失败的异常，继续清理项目字段
             pass
 
-    p2 = projects_store.clear_video_path(project_id)
+    # 从列表移除对应项；若未传入路径且是旧逻辑，清空生效路径
+    if target_path:
+        p2 = projects_store.remove_video_path(project_id, target_path)
+    else:
+        p2 = projects_store.clear_video_path(project_id)
     if not p2:
         raise HTTPException(status_code=500, detail="服务器错误")
 
@@ -399,6 +425,80 @@ async def delete_video_file(project_id: str):
             "removed": removed,
             "removed_path": to_web_path(Path(removed_path)) if removed_path else None,
         },
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/merge/videos")
+async def merge_videos(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.video_paths or len(p.video_paths) < 2:
+        raise HTTPException(status_code=400, detail="需要至少两个视频进行合并")
+
+    task_id = f"merge_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    MERGE_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备合并")
+
+    async def _run():
+        try:
+            MERGE_TASKS[task_id].status = "processing"
+            MERGE_TASKS[task_id].message = "正在合并"
+
+            root = project_root_dir()
+            inputs: List[Path] = []
+            for path_str in p.video_paths:
+                s = path_str.strip()
+                abs_path = root / s[1:] if s.startswith("/") else Path(s)
+                if not abs_path.exists():
+                    MERGE_TASKS[task_id].status = "failed"
+                    MERGE_TASKS[task_id].message = f"源视频不存在: {s}"
+                    return
+                inputs.append(abs_path)
+
+            out_dir = uploads_dir() / "videos" / "outputs" / p.name
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_name = f"{p.id}_merged_{ts}.mp4"
+            out_path = out_dir / out_name
+
+            async def on_progress(pct: float):
+                MERGE_TASKS[task_id].progress = float(f"{pct:.2f}")
+
+            ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
+            if not ok:
+                MERGE_TASKS[task_id].status = "failed"
+                MERGE_TASKS[task_id].message = "合并失败"
+                return
+
+            web_path = to_web_path(out_path)
+            MERGE_TASKS[task_id].file_path = web_path
+            MERGE_TASKS[task_id].progress = 100.0
+            MERGE_TASKS[task_id].status = "completed"
+            MERGE_TASKS[task_id].message = "合并完成"
+            projects_store.set_merged_video_path(project_id, web_path)
+        except Exception:
+            MERGE_TASKS[task_id].status = "failed"
+            MERGE_TASKS[task_id].message = "合并异常"
+
+    asyncio.create_task(_run())
+
+    return {
+        "message": "开始合并",
+        "data": {
+            "task_id": task_id,
+        },
+        "timestamp": now_ts(),
+    }
+
+@router.get("/{project_id}/merge/videos/status/{task_id}")
+async def merge_videos_status(project_id: str, task_id: str):
+    t = MERGE_TASKS.get(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "message": "获取合并进度",
+        "data": t.model_dump(),
         "timestamp": now_ts(),
     }
 

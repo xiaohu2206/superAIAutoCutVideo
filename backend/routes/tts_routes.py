@@ -58,9 +58,21 @@ async def get_tts_engines():
 async def get_tts_voices(provider: str = Query(..., description="提供商标识，如tencent_tts")):
     try:
         voices = tts_engine_config_manager.get_voices(provider)
+        data = []
+        for v in voices:
+            d = v.dict()
+            d.update({
+                "VoiceName": v.name,
+                "VoiceDesc": v.description,
+                "VoiceQuality": v.voice_quality,
+                "VoiceTypeTag": v.voice_type_tag,
+                "VoiceHumanStyle": v.voice_human_style,
+                "VoiceGender": v.gender,
+            })
+            data.append(d)
         return {
             "success": True,
-            "data": [v.dict() for v in voices],
+            "data": data,
             "message": f"获取到 {len(voices)} 个音色"
         }
     except Exception as e:
@@ -113,6 +125,15 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
             if vt_val is not None:
                 extra_params = dict(extra_params)
                 extra_params['VoiceType'] = vt_val
+                voices = tts_engine_config_manager.get_voices(provider)
+                mv = next((v for v in voices if isinstance(v.voice_type, int) and v.voice_type == vt_val), None)
+                if mv:
+                    extra_params['VoiceName'] = mv.name
+                    extra_params['VoiceDesc'] = mv.description
+                    extra_params['VoiceQuality'] = mv.voice_quality
+                    extra_params['VoiceTypeTag'] = mv.voice_type_tag
+                    extra_params['VoiceHumanStyle'] = mv.voice_human_style
+                    extra_params['VoiceGender'] = mv.gender
             base = TtsEngineConfig(
                 provider=provider,
                 secret_id=(req.secret_id.strip() if isinstance(req.secret_id, str) else req.secret_id),
@@ -159,6 +180,15 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
                 if isinstance(update_data.get('extra_params'), dict):
                     merged_ep.update(update_data['extra_params'])
                 merged_ep['VoiceType'] = vt_val
+                voices = tts_engine_config_manager.get_voices(provider)
+                mv = next((v for v in voices if isinstance(v.voice_type, int) and v.voice_type == vt_val), None)
+                if mv:
+                    merged_ep['VoiceName'] = mv.name
+                    merged_ep['VoiceDesc'] = mv.description
+                    merged_ep['VoiceQuality'] = mv.voice_quality
+                    merged_ep['VoiceTypeTag'] = mv.voice_type_tag
+                    merged_ep['VoiceHumanStyle'] = mv.voice_human_style
+                    merged_ep['VoiceGender'] = mv.gender
                 update_data['extra_params'] = merged_ep
             new_config = current.copy(update=update_data)
             ok = tts_engine_config_manager.update_config(config_id, new_config)

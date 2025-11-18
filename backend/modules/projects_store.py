@@ -25,8 +25,10 @@ class Project(BaseModel):
     name: str
     description: Optional[str] = None
     narration_type: str = Field(default="短剧解说")
-    status: str = Field(default="draft")  # draft | processing | completed | failed
+    status: str = Field(default="draft")
     video_path: Optional[str] = None
+    video_paths: List[str] = Field(default_factory=list)
+    merged_video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     output_video_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
@@ -54,7 +56,17 @@ class ProjectsStore:
                     data = json.loads(self.db_path.read_text(encoding="utf-8"))
                     for pid, p in data.items():
                         try:
-                            self._projects[pid] = Project(**p)
+                            # 兼容旧数据：填充缺失字段并将单视频并入列表
+                            if "video_paths" not in p:
+                                p["video_paths"] = []
+                            if p.get("video_path") and not p.get("merged_video_path"):
+                                vp = p.get("video_path")
+                                if vp and vp not in p["video_paths"]:
+                                    p["video_paths"].append(vp)
+                            proj = Project(**p)
+                            # 回填生效视频路径
+                            proj = self._refresh_effective_video_path(proj)
+                            self._projects[pid] = proj
                         except Exception as e:
                             logger.warning(f"项目数据解析失败（跳过）: {pid} - {e}")
                 except Exception as e:
@@ -89,6 +101,8 @@ class ProjectsStore:
             narration_type=narration_type or "短剧解说",
             status="draft",
             video_path=None,
+            video_paths=[],
+            merged_video_path=None,
             subtitle_path=None,
             output_video_path=None,
             script=None,
@@ -113,6 +127,8 @@ class ProjectsStore:
                 "narration_type",
                 "status",
                 "video_path",
+                "video_paths",
+                "merged_video_path",
                 "subtitle_path",
                 "output_video_path",
                 "script",
@@ -124,6 +140,7 @@ class ProjectsStore:
                 project = Project(**data)
             except Exception as e:
                 raise ValueError(f"更新数据格式无效: {e}")
+            project = self._refresh_effective_video_path(project)
             self._projects[project_id] = project
             self._persist()
             return project
@@ -146,11 +163,13 @@ class ProjectsStore:
                 return None
             data = project.model_dump()
             data["video_path"] = None
+            # 清空单视频兼容：不触动列表与合并路径
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)
             except Exception as e:
                 raise ValueError(f"更新数据格式无效: {e}")
+            project = self._refresh_effective_video_path(project)
             self._projects[project_id] = project
             self._persist()
             return project
@@ -170,6 +189,79 @@ class ProjectsStore:
             self._projects[project_id] = project
             self._persist()
             return project
+
+    def append_video_path(self, project_id: str, path: str) -> Optional[Project]:
+        with self._lock:
+            project = self._projects.get(project_id)
+            if not project:
+                return None
+            data = project.model_dump()
+            paths: List[str] = list(data.get("video_paths") or [])
+            if path not in paths:
+                paths.append(path)
+            data["video_paths"] = paths
+            # 如果没有合并视频且只有一个源视频，则设置生效路径
+            if not data.get("merged_video_path") and len(paths) == 1:
+                data["video_path"] = paths[0]
+            data["updated_at"] = datetime.now().isoformat()
+            project = Project(**data)
+            project = self._refresh_effective_video_path(project)
+            self._projects[project_id] = project
+            self._persist()
+            return project
+
+    def remove_video_path(self, project_id: str, path: str) -> Optional[Project]:
+        with self._lock:
+            project = self._projects.get(project_id)
+            if not project:
+                return None
+            data = project.model_dump()
+            paths: List[str] = list(data.get("video_paths") or [])
+            paths = [p for p in paths if p != path]
+            data["video_paths"] = paths
+            # 若没有合并视频，按剩余数量调整生效路径
+            if not data.get("merged_video_path"):
+                if len(paths) == 1:
+                    data["video_path"] = paths[0]
+                elif len(paths) == 0:
+                    data["video_path"] = None
+            data["updated_at"] = datetime.now().isoformat()
+            project = Project(**data)
+            project = self._refresh_effective_video_path(project)
+            self._projects[project_id] = project
+            self._persist()
+            return project
+
+    def set_merged_video_path(self, project_id: str, path: Optional[str]) -> Optional[Project]:
+        with self._lock:
+            project = self._projects.get(project_id)
+            if not project:
+                return None
+            data = project.model_dump()
+            data["merged_video_path"] = path
+            # 合并后使生效路径指向合并结果；清除时按规则回退
+            if path:
+                data["video_path"] = path
+            else:
+                # 回退到单源视频或空
+                paths: List[str] = list(data.get("video_paths") or [])
+                data["video_path"] = paths[0] if len(paths) == 1 else None
+            data["updated_at"] = datetime.now().isoformat()
+            project = Project(**data)
+            project = self._refresh_effective_video_path(project)
+            self._projects[project_id] = project
+            self._persist()
+            return project
+
+    def _refresh_effective_video_path(self, project: Project) -> Project:
+        data = project.model_dump()
+        merged = data.get("merged_video_path")
+        paths: List[str] = list(data.get("video_paths") or [])
+        if merged:
+            data["video_path"] = merged
+        else:
+            data["video_path"] = paths[0] if len(paths) == 1 else None
+        return Project(**data)
 
 
 # 单例实例供路由使用

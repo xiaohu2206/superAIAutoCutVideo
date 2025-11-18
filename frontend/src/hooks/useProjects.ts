@@ -1,12 +1,12 @@
 // 项目管理自定义Hook
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { projectService } from "../services/projectService";
 import type {
-  Project,
   CreateProjectRequest,
-  UpdateProjectRequest,
   GenerateScriptRequest,
+  Project,
+  UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
 
@@ -111,14 +111,18 @@ export interface UseProjectDetailReturn {
   fetchProject: (projectId: string) => Promise<void>;
   updateProject: (data: UpdateProjectRequest) => Promise<void>;
   uploadVideo: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
+  uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
   uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   deleteVideo: () => Promise<void>;
+  deleteVideoItem: (filePath: string) => Promise<void>;
   deleteSubtitle: () => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   generateVideo: () => Promise<string | null>;
   downloadVideo: () => void;
+  mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
+  mergeProgress: number;
 }
 
 /**
@@ -130,6 +134,7 @@ export const useProjectDetail = (
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeProgress, setMergeProgress] = useState<number>(0);
 
   /**
    * 获取项目详情
@@ -178,8 +183,14 @@ export const useProjectDetail = (
       setLoading(true);
       try {
         const response = await projectService.uploadVideo(project.id, file, onProgress);
-        // 直接更新本地状态，避免额外的API调用
-        setProject((prev) => (prev ? { ...prev, video_path: response.file_path } : null));
+        setProject((prev) => {
+          if (!prev) return null;
+          const paths = Array.isArray(prev.video_paths) ? [...prev.video_paths] : [];
+          if (!paths.includes(response.file_path)) paths.push(response.file_path);
+          const merged = prev.merged_video_path;
+          const effective = merged ? merged : (paths.length === 1 ? paths[0] : undefined);
+          return { ...prev, video_paths: paths, video_path: effective };
+        });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "上传视频失败";
         setError(errorMessage);
@@ -189,6 +200,16 @@ export const useProjectDetail = (
       }
     },
     [project]
+  );
+
+  const uploadVideos = useCallback(
+    async (files: FileList | File[], onProgress?: (percent: number) => void) => {
+      const arr: File[] = Array.from(files as any);
+      for (let i = 0; i < arr.length; i++) {
+        await uploadVideo(arr[i], onProgress);
+      }
+    },
+    [uploadVideo]
   );
 
   /**
@@ -224,7 +245,29 @@ export const useProjectDetail = (
     try {
       await projectService.deleteVideo(project.id);
       // 本地状态清理视频路径
-      setProject((prev) => (prev ? { ...prev, video_path: undefined } : null));
+      setProject((prev) => (prev ? { ...prev, video_path: undefined, video_paths: [] } : null));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "删除视频失败";
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
+
+  const deleteVideoItem = useCallback(async (filePath: string) => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await projectService.deleteVideoItem(project.id, filePath);
+      setProject((prev) => {
+        if (!prev) return null;
+        const paths = (prev.video_paths || []).filter((p) => p !== filePath);
+        const merged = prev.merged_video_path;
+        const effective = merged ? merged : (paths.length === 1 ? paths[0] : undefined);
+        return { ...prev, video_paths: paths, video_path: effective };
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "删除视频失败";
       setError(errorMessage);
@@ -334,6 +377,40 @@ export const useProjectDetail = (
     window.open(url, "_blank");
   }, [project]);
 
+  const mergeVideos = useCallback(async () => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      setMergeProgress(0);
+      const start = await projectService.startMergeVideos(project.id);
+      const taskId = start.task_id;
+      let done = false;
+      while (!done) {
+        const st = await projectService.getMergeStatus(project.id, taskId);
+        console.log("st", st)
+        setMergeProgress(Math.round(st.progress));
+        if (st.status === "completed") {
+          if (st.file_path) {
+            setProject((prev) => (prev ? { ...prev, merged_video_path: st.file_path, video_path: st.file_path } : null));
+          }
+          done = true;
+        } else if (st.status === "failed") {
+          throw new Error(st.message || "合并失败");
+        } else {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "合并视频失败";
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMergeProgress(0), 800);
+    }
+  }, [project]);
+
   /**
    * 刷新项目
    */
@@ -357,13 +434,17 @@ export const useProjectDetail = (
     fetchProject,
     updateProject,
     uploadVideo,
+    uploadVideos,
     uploadSubtitle,
     deleteVideo,
+    deleteVideoItem,
     deleteSubtitle,
     generateScript,
     saveScript,
     generateVideo,
     downloadVideo,
+    mergeVideos,
+    mergeProgress,
     refreshProject,
   };
 };

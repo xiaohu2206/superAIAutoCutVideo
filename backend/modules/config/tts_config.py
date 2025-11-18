@@ -25,6 +25,9 @@ class TtsVoice(BaseModel):
     tags: Optional[List[str]] = Field(default_factory=list, description="标签")
     voice_type: Optional[int] = Field(None, description="腾讯云TTS VoiceType")
     category: Optional[str] = Field(None, description="分类名称")
+    voice_quality: Optional[str] = Field(None, description="音色质量级别")
+    voice_type_tag: Optional[str] = Field(None, description="类型标签原文")
+    voice_human_style: Optional[str] = Field(None, description="风格描述原文")
 
 
 class TtsEngineConfig(BaseModel):
@@ -204,6 +207,9 @@ class TtsEngineConfigManager:
                                 tags=tags,
                                 voice_type=vt if isinstance(vt, int) else None,
                                 category=category_name,
+                                voice_quality=(item.get("VoiceQuality") or None),
+                                voice_type_tag=(item.get("VoiceTypeTag") or None),
+                                voice_human_style=(item.get("VoiceHumanStyle") or None),
                             )
                         )
             else:

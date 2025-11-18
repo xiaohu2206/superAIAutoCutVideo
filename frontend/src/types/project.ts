@@ -53,6 +53,8 @@ export interface Project {
   narration_type: NarrationType; // 解说类型
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
+  video_paths?: string[]; // 多个原始视频文件路径
+  merged_video_path?: string; // 合并后视频文件路径
   subtitle_path?: string; // 字幕文件路径
   output_video_path?: string; // 输出视频文件路径
   script?: VideoScript; // 视频脚本
@@ -78,6 +80,8 @@ export interface UpdateProjectRequest {
   narration_type?: NarrationType;
   status?: ProjectStatus;
   video_path?: string;
+  video_paths?: string[];
+  merged_video_path?: string;
   subtitle_path?: string;
   output_video_path?: string;
   script?: VideoScript;

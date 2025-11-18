@@ -1,22 +1,22 @@
 // 项目编辑页面（二级页面）
 
-import React, { useState, useRef } from "react";
 import {
-  ArrowLeft,
-  Upload,
-  FileVideo,
-  FileText,
-  Sparkles,
-  Save,
-  Download,
-  Video,
-  CheckCircle,
   AlertCircle,
+  ArrowLeft,
+  CheckCircle,
+  Download,
+  FileText,
+  FileVideo,
   Loader,
+  Save,
+  Sparkles,
+  Upload,
+  Video,
 } from "lucide-react";
+import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
-import { NarrationType } from "../types/project";
 import type { VideoScript } from "../types/project";
+import { NarrationType } from "../types/project";
 
 interface ProjectEditPageProps {
   projectId: string;
@@ -36,13 +36,17 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     error,
     updateProject,
     uploadVideo,
+    uploadVideos,
     uploadSubtitle,
     deleteVideo,
+    deleteVideoItem,
     deleteSubtitle,
     generateScript,
     saveScript,
     generateVideo,
     downloadVideo,
+    mergeVideos,
+    mergeProgress,
   } = useProjectDetail(projectId);
 
   const [editedScript, setEditedScript] = useState<string>("");
@@ -69,15 +73,15 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const handleVideoFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setSuccessMessage(null);
 
     setUploadingVideo(true);
     setVideoUploadProgress(0);
     try {
-      await uploadVideo(file, (p) => setVideoUploadProgress(p));
+      await uploadVideos(files, (p) => setVideoUploadProgress(p));
       setSuccessMessage("视频文件上传成功！");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -134,15 +138,15 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const handleVideoDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDraggingVideo(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
 
     setSuccessMessage(null);
 
     setUploadingVideo(true);
     setVideoUploadProgress(0);
     try {
-      await uploadVideo(file, (p) => setVideoUploadProgress(p));
+      await uploadVideos(files, (p) => setVideoUploadProgress(p));
       setSuccessMessage("视频文件上传成功！");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
@@ -361,7 +365,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       </div>
     );
   }
-
+  console.log("mergeProgress", mergeProgress)
   return (
     <div className="space-y-6">
       {/* 页面头部 */}
@@ -451,25 +455,73 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               ref={videoInputRef}
               type="file"
               accept="video/*"
+              multiple
               onChange={handleVideoFileChange}
               className="hidden"
             />
             <span className="text-xs text-gray-500">拖拽视频到此或点击“上传视频”</span>
-            {project.video_path && (
-              <div className="flex items-center text-sm text-gray-600">
-                <FileVideo className="h-4 w-4 mr-2 text-green-500" />
-                <span className="truncate max-w-md">
-                  {project.video_path.split("/").pop()}
-                </span>
-                <button
-                  onClick={handleDeleteVideo}
-                  className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
-                >
-                  删除视频
-                </button>
+            {Array.isArray(project.video_paths) && project.video_paths.length > 0 && (
+              <div className="flex-1">
+                <div className="flex flex-col space-y-1">
+                  {project.video_paths.map((vp) => (
+                    <div key={vp} className="flex items-center text-sm text-gray-600">
+                      <FileVideo className="h-4 w-4 mr-2 text-green-500" />
+                      <span className="truncate max-w-md">{vp.split("/").pop()}</span>
+                      <button
+                        onClick={() => deleteVideoItem(vp)}
+                        className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
+            {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && (
+              <button
+                onClick={mergeVideos}
+                disabled={uploadingVideo}
+                className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                合并视频
+              </button>
+            )}
           </div>
+          {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && !project.merged_video_path && mergeProgress > 0 && mergeProgress < 100 && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>合并进度</span>
+                <span>{mergeProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-purple-600 rounded transition-all"
+                  style={{ width: `${mergeProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {project.merged_video_path && (
+            <div className="mt-2 text-xs text-gray-700">
+              已合并视频：
+              <span className="ml-1 break-all">{project.merged_video_path}</span>
+            </div>
+          )}
+          {project.merged_video_path && mergeProgress > 0 && mergeProgress < 100 && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>合并进度</span>
+                <span>{mergeProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-purple-600 rounded transition-all"
+                  style={{ width: `${mergeProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
           {uploadingVideo && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-xs text-gray-600 mb-1">

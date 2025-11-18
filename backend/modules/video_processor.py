@@ -66,7 +66,7 @@ class VideoProcessor:
             logger.error(f"剪切视频时出错: {e}")
             return False
 
-    async def concat_videos(self, inputs: List[str], output_path: str) -> bool:
+    async def concat_videos(self, inputs: List[str], output_path: str, on_progress=None) -> bool:
         """稳健拼接多个视频片段，解决拼接处卡顿问题。
         原因分析：此前使用 concat demuxer + `-c copy` 要求片段参数完全一致且必须从关键帧开始，
         如果某段不是关键帧起始或存在时间戳不连续，播放器可能在拼接处卡顿（等待下一个关键帧）。
@@ -111,6 +111,7 @@ class VideoProcessor:
                 "-c:a", "aac", "-b:a", "192k",
                 # 提升网络播放体验
                 "-movflags", "+faststart",
+                "-progress", "pipe:1",
                 "-y", output_path
             ])
 
@@ -121,6 +122,35 @@ class VideoProcessor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
+
+            total_duration = 0.0
+            for p in inputs:
+                d = await self._ffprobe_duration(p, "format") or 0.0
+                total_duration += max(d, 0.0)
+
+            if on_progress:
+                try:
+                    while True:
+                        line = await process.stdout.readline()
+                        if not line:
+                            break
+                        s = line.decode(errors="ignore").strip()
+                        if s.startswith("out_time_ms="):
+                            try:
+                                ms = float(s.split("=", 1)[1])
+                                if total_duration > 0:
+                                    pct = (ms / (total_duration * 1000.0)) * 100.0
+                                    if pct < 0:
+                                        pct = 0.0
+                                    if pct > 100:
+                                        pct = 100.0
+                                    await on_progress(pct)
+                            except Exception:
+                                pass
+                        elif s.startswith("progress=") and s.endswith("end"):
+                            await on_progress(100.0)
+                except Exception:
+                    pass
 
             stdout, stderr = await process.communicate()
 

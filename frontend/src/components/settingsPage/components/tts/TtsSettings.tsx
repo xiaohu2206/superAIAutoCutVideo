@@ -9,6 +9,8 @@ import { TtsVoiceGallery } from "../../components/tts/TtsVoiceGallery";
 import type { TtsEngineConfig, TtsEngineMeta, TtsTestResult, TtsVoice } from "../../types";
 import { getSpeedLabel, getTtsConfigIdByProvider } from "../../utils";
  
+import { LabeledChip } from "./LabeledGroup";
+import { getGenderLabel } from "./utils";
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
@@ -118,6 +120,19 @@ export const TtsSettings: React.FC = () => {
     }
   };
 
+  const activeVoiceDetail = React.useMemo(() => {
+    const ep = currentConfig?.extra_params || {};
+    const aid = currentConfig?.active_voice_id || "";
+    const match = voices.find(v => v.id === aid);
+    const name = ep?.VoiceName ?? match?.name ?? "";
+    const desc = ep?.VoiceDesc ?? match?.description ?? "";
+    const quality = ep?.VoiceQuality ?? match?.voice_quality ?? "";
+    const typeTag = ep?.VoiceTypeTag ?? match?.voice_type_tag ?? "";
+    const style = ep?.VoiceHumanStyle ?? match?.voice_human_style ?? "";
+    const gender = ep?.VoiceGender ?? match?.gender ?? "";
+    return { name, desc, quality, typeTag, style, gender, id: aid };
+  }, [currentConfig, voices]);
+
   const markSaved = () => {
     setSaveState("saved");
     setTimeout(() => setSaveState("idle"), 800);
@@ -210,6 +225,7 @@ export const TtsSettings: React.FC = () => {
       }
     }, 300);
   };
+  
 
   
 
@@ -300,6 +316,39 @@ export const TtsSettings: React.FC = () => {
               className="px-3 py-2 border border-gray-300 rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </div>
+          {activeVoiceDetail.id && (
+            <div className="mb-3 border border-blue-100 bg-blue-50 rounded-lg p-3 text-xs text-gray-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">当前激活：</span>
+                {activeVoiceDetail.name && (
+                  <LabeledChip label="名称" value={activeVoiceDetail.name} variant="blue" />
+                )}
+                {activeVoiceDetail.gender && (
+                  <LabeledChip label="性别" value={getGenderLabel(activeVoiceDetail.gender)} variant="white" />
+                )}
+                {activeVoiceDetail.typeTag && (
+                  <LabeledChip label="类型标签" value={activeVoiceDetail.typeTag} variant="white" />
+                )}
+                {activeVoiceDetail.style && (
+                  <LabeledChip label="风格" value={activeVoiceDetail.style} variant="white" />
+                )}
+                {(() => {
+                  const statusText = hasCredentials
+                    ? (testResult?.success === false ? "异常" : "健康")
+                    : "降级";
+                  const cls = statusText === "健康" ? "text-green-600" : statusText === "降级" ? "text-orange-600" : "text-red-600";
+                  return (
+                    <>
+                      <LabeledChip label="连通性" value={<span className={cls}>{statusText}</span>} variant="white" />
+                      {typeof testDurationMs === "number" && (
+                        <span className="text-[11px] text-gray-500">响应 {testDurationMs}ms</span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
           <div className="h-80 overflow-y-auto pr-1">
             <TtsVoiceGallery
               voices={voices.filter((v) =>
@@ -308,6 +357,8 @@ export const TtsSettings: React.FC = () => {
               activeVoiceId={currentConfig?.active_voice_id || ""}
               configId={currentConfigId}
               hasCredentials={hasCredentials}
+              testResult={testResult}
+              testDurationMs={testDurationMs}
               onSetActive={handleSetActiveVoice}
             />
           </div>
