@@ -10,9 +10,12 @@ from typing import Dict, Tuple, Union
 
 import requests
 
-from .asr_data import ASRDataSeg
-from .asr_base import BaseASR
+from .ASRData import ASRDataSeg
+from .BaseASR import BaseASR
 
+
+# from ASRData import ASRDataSeg
+# from BaseASR import BaseASR
 
 class JianYingASR(BaseASR):
     # 新版接口参数常量
@@ -47,7 +50,7 @@ class JianYingASR(BaseASR):
         self.tdid = "3943278516897751" if datetime.datetime.now().year != 2024 else f"{uuid.getnode():012d}"
 
     def submit(self) -> str:
-        """提交识别任务"""
+        """Submit the task"""
         url = "https://lv-pc-api-sinfonlinec.ulikecam.com/lv/v1/audio_subtitle/submit"
         payload = {
             "adjust_endtime": 200,
@@ -64,12 +67,11 @@ class JianYingASR(BaseASR):
         x_ss_stub = self._calc_x_ss_stub(payload)
         headers = self._build_headers(device_time, sign, x_ss_stub)
         response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
         query_id = response.json()['data']['id']
         return query_id
 
     def upload(self):
-        """上传文件到字节 VOD"""
+        """Upload the file"""
         self._upload_sign()
         self._upload_auth()
         self._upload_file()
@@ -78,7 +80,7 @@ class JianYingASR(BaseASR):
         return uri
 
     def query(self, query_id: str):
-        """查询识别结果"""
+        """Query the task"""
         url = "https://lv-pc-api-sinfonlinec.ulikecam.com/lv/v1/audio_subtitle/query"
         payload = {
             "id": query_id,
@@ -89,7 +91,6 @@ class JianYingASR(BaseASR):
         x_ss_stub = self._calc_x_ss_stub(payload)
         headers = self._build_headers(device_time, sign, x_ss_stub)
         response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
         raw = response.json()
 
         # 规范化返回结构：抽取 data，确保 utterances 列表及字段一致
@@ -159,12 +160,9 @@ class JianYingASR(BaseASR):
             return resp_data
         except Exception as e:
             logging.warning(f"JianYingASR 失败，回退到 BcutASR: {e}")
-            try:
-                from .asr_bcut import BcutASR
-                return BcutASR(self.audio_path, use_cache=self.use_cache)._run()
-            except Exception as e2:
-                logging.error(f"BcutASR 回退也失败: {e2}")
-                raise
+            # from .BcutASR import BcutASR
+            # # 使用 BcutASR 的底层运行以返回原始响应数据
+            # return BcutASR(self.audio_path, use_cache=self.use_cache)._run()
 
     def _make_segments(self, resp_data: dict) -> list[ASRDataSeg]:
         # 统一获取 utterances
@@ -191,7 +189,7 @@ class JianYingASR(BaseASR):
 
     def _generate_sign_parameters(self, url: str, pf: str = '3', appvr: str = '5.9.0', tdid='') -> \
             Tuple[str, str]:
-        """通过辅助服务生成签名和时间戳"""
+        """Generate signature and timestamp via an HTTP request"""
         current_time = str(int(time.time()))
         data = {
             'url': url,
@@ -200,18 +198,23 @@ class JianYingASR(BaseASR):
             'appvr': appvr,
             'tdid': self.tdid
         }
-        # 替换为实际可用签名服务地址
+        # Replace with your actual endpoint URL
         get_sign_url = 'https://asrtools-update.bkfeng.top/sign'
-        response = requests.post(get_sign_url, json=data)
-        response.raise_for_status()
-        response_data = response.json()
-        sign = response_data.get('sign')
-        if not sign:
-            raise RuntimeError("签名服务响应缺少 sign 字段")
+        try:
+            response = requests.post(get_sign_url, json=data)
+            response.raise_for_status()
+            response_data = response.json()
+            sign = response_data.get('sign')
+            if not sign:
+                raise ValueError("No 'sign' in response")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"HTTP Request failed: {e}")
+        except ValueError as ve:
+            raise RuntimeError(f"Invalid response: {ve}")
         return sign.lower(), current_time
 
     def _build_headers(self, device_time: str, sign: str, x_ss_stub: str = '') -> Dict[str, str]:
-        """构建最新接口所需请求头"""
+        """Build headers for requests (updated to latest curl parameters)"""
         headers = {
             'User-Agent': self.USER_AGENT,
             'App-Sdk-Version': self.APP_SDK_VERSION,
@@ -244,7 +247,7 @@ class JianYingASR(BaseASR):
         return headers
 
     def _upload_sign(self):
-        """获取上传签名"""
+        """Get upload sign"""
         url = "https://lv-pc-api-sinfonlinec.ulikecam.com/lv/v1/upload_sign"
         payload = json.dumps({"biz": "pc-recognition"})
         sign, device_time = self._generate_sign_parameters(url='/lv/v1/upload_sign', pf=self.PF,
@@ -259,7 +262,7 @@ class JianYingASR(BaseASR):
         return self.access_key, self.secret_key, self.session_token
 
     def _upload_auth(self):
-        """获取上传授权"""
+        """Get upload authorization"""
         if isinstance(self.audio_path, bytes):
             file_size = len(self.audio_path)
         else:
@@ -277,7 +280,6 @@ class JianYingASR(BaseASR):
         authorization = f"AWS4-HMAC-SHA256 Credential={self.access_key}/{datestamp}/cn/vod/aws4_request, SignedHeaders=x-amz-date;x-amz-security-token, Signature={signature}"
         headers["authorization"] = authorization
         response = requests.get(f"https://vod.bytedanceapi.com/?{request_parameters}", headers=headers)
-        response.raise_for_status()
         store_infos = response.json()
 
         self.store_uri = store_infos['Result']['UploadAddress']['StoreInfos'][0]['StoreUri']
@@ -289,7 +291,7 @@ class JianYingASR(BaseASR):
         return store_infos
 
     def _upload_file(self):
-        """上传分片文件"""
+        """Upload the file"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?partNumber=1&uploadID={self.upload_id}"
         headers = self._uplosd_headers()
         response = requests.put(url, data=self.file_binary, headers=headers)
@@ -304,21 +306,19 @@ class JianYingASR(BaseASR):
         return resp_data
 
     def _upload_check(self):
-        """检查上传结果"""
+        """Check upload result"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?uploadID={self.upload_id}"
         payload = f"1:{self.crc32_hex}"
         headers = self._uplosd_headers()
         response = requests.post(url, data=payload, headers=headers)
-        response.raise_for_status()
         resp_data = response.json()
         return resp_data
 
     def _upload_commit(self):
-        """提交上传"""
+        """Commit the uploaded file"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?uploadID={self.upload_id}&partNumber=1&x-amz-security-token={self.session_token}"
         headers = self._uplosd_headers()
         response = requests.put(url, data=self.file_binary, headers=headers)
-        response.raise_for_status()
         return self.store_uri
 
 
@@ -356,4 +356,3 @@ def aws_signature(secret_key: str, request_parameters: str, headers: Dict[str, s
     signing_key = get_signature_key(secret_key, datestamp, region, service)
     signature = hmac.new(signing_key, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
     return signature
-   

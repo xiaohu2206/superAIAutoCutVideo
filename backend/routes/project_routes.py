@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import asyncio
-
+import logging
 import cv2
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
@@ -32,6 +32,9 @@ from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 from services.asr_jianying import JianYingASR
 from services.asr_utils import utterances_to_srt
+from modules.config.content_model_config import content_model_config_manager
+from modules.config.tts_config import tts_engine_config_manager
+from modules.config.video_model_config import video_model_config_manager
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -61,6 +64,45 @@ def to_web_path(p: Path) -> str:
     root = project_root_dir()
     rel = p.relative_to(root)
     return "/" + str(rel).replace("\\", "/")
+
+
+async def ensure_models_ready_for_script() -> None:
+    """在生成脚本前统一校验：
+    1) 当前激活的文案生成模型（大模型）是否就绪
+    2) 当前激活的 TTS 配置是否就绪
+    3) 可选：若存在激活的视频分析模型，打印连通性结果（不阻断脚本生成）
+
+    失败则抛出 HTTPException。
+    """
+    # 校验文案生成模型（用于剧情分析与脚本JSON生成）
+    active_content_id = content_model_config_manager.get_active_config_id()
+    if not active_content_id:
+        raise HTTPException(status_code=400, detail="未找到激活的文案生成模型配置，请在“模型配置”中启用一个配置")
+    content_result = await content_model_config_manager.test_connection(active_content_id)
+    if not content_result.get("success", False):
+        msg = content_result.get("error") or content_result.get("message") or "文案生成模型不可用"
+        raise HTTPException(status_code=400, detail=f"文案生成模型配置不可用：{msg}")
+
+    # 校验 TTS（用于后续配音合成）
+    active_tts_id = tts_engine_config_manager.get_active_config_id()
+    if not active_tts_id:
+        raise HTTPException(status_code=400, detail="未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据")
+    tts_result = await tts_engine_config_manager.test_connection(active_tts_id)
+    if not tts_result.get("success", False):
+        msg = tts_result.get("error") or tts_result.get("message") or "TTS配置不可用"
+        raise HTTPException(status_code=400, detail=f"TTS配置不可用：{msg}")
+
+    # 可选：视频分析模型（仅记录日志，不阻断）
+    try:
+        active_video_id = video_model_config_manager.get_active_config_id()
+        if active_video_id:
+            video_result = await video_model_config_manager.test_connection(active_video_id)
+            if video_result.get("success", False):
+                logging.info(f"视频分析模型连通性测试成功：{video_result}")
+            else:
+                logging.warning(f"视频分析模型连通性测试失败（不影响脚本生成）：{video_result}")
+    except Exception as e:
+        logging.warning(f"视频分析模型连通性测试异常（不阻断）：{e}")
 
 
 class CreateProjectRequest(BaseModel):
@@ -210,6 +252,9 @@ async def generate_script(req: GenerateScriptRequest):
     video_abs = resolve_path(req.video_path)
     if not video_abs.exists():
         raise HTTPException(status_code=400, detail="视频文件不存在")
+
+    # 生成脚本前，验证当前大模型与TTS是否已正确配置且连通
+    await ensure_models_ready_for_script()
 
     total_duration = read_video_duration(video_abs)
 

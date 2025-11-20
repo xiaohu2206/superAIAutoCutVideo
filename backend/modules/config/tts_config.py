@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 TTS引擎配置管理模块
@@ -96,7 +95,9 @@ class TtsEngineConfigManager:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
             data = {'configs': {}}
             for config_id, config in self.configs.items():
-                data['configs'][config_id] = config.dict(exclude={'secret_id', 'secret_key'})
+                # 持久化保存所有字段（包括 secret_id 与 secret_key）到配置文件
+                # 接口返回时仍通过路由层进行脱敏展示
+                data['configs'][config_id] = config.dict()
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.info("TTS引擎配置保存成功")

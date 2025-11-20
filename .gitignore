@@ -314,6 +314,7 @@ vs_buildtools.exe
 
 # 后端数据目录
 backend/data/
+backend/.venv/
 
 # 后端配置目录（包含敏感信息，整体忽略）
 backend/config/

@@ -10,6 +10,25 @@ import type {
   VideoScript,
 } from "../types/project";
 
+// 统一提取错误信息，优先使用后端提供的 detail/message
+const getErrorMessage = (err: unknown, fallback: string): string => {
+  try {
+    if (err && typeof err === "object") {
+      const anyErr = err as any;
+      if (typeof anyErr.message === "string" && anyErr.message) {
+        return anyErr.message;
+      }
+      if (typeof anyErr.detail === "string" && anyErr.detail) {
+        return anyErr.detail;
+      }
+    }
+    if (typeof err === "string" && err) {
+      return err;
+    }
+  } catch {}
+  return fallback;
+};
+
 /**
  * 项目管理Hook返回类型
  */
@@ -41,8 +60,7 @@ export const useProjects = (): UseProjectsReturn => {
       const data = await projectService.getProjects();
       setProjects(data);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "获取项目列表失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "获取项目列表失败"));
       console.error("获取项目列表失败:", err);
     } finally {
       setLoading(false);
@@ -60,8 +78,7 @@ export const useProjects = (): UseProjectsReturn => {
         setProjects((prev) => [newProject, ...prev]);
         return newProject;
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "创建项目失败";
-        setError(errorMessage);
+        setError(getErrorMessage(err, "创建项目失败"));
         throw err;
       }
     },
@@ -77,8 +94,7 @@ export const useProjects = (): UseProjectsReturn => {
       await projectService.deleteProject(projectId);
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "删除项目失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "删除项目失败"));
       throw err;
     }
   }, []);
@@ -144,8 +160,7 @@ export const useProjectDetail = (
       const data = await projectService.getProject(id);
       setProject(data);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "获取项目详情失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "获取项目详情失败"));
       console.error("获取项目详情失败:", err);
     } finally {
       setLoading(false);
@@ -163,8 +178,7 @@ export const useProjectDetail = (
         const updated = await projectService.updateProject(project.id, data);
         setProject(updated);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "更新项目失败";
-        setError(errorMessage);
+        setError(getErrorMessage(err, "更新项目失败"));
         throw err;
       }
     },
@@ -190,8 +204,7 @@ export const useProjectDetail = (
           return { ...prev, video_paths: paths, video_path: effective };
         });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "上传视频失败";
-        setError(errorMessage);
+        setError(getErrorMessage(err, "上传视频失败"));
         throw err;
       } finally {
         setLoading(false);
@@ -222,8 +235,7 @@ export const useProjectDetail = (
       // 本地状态清理视频路径
       setProject((prev) => (prev ? { ...prev, video_path: undefined, video_paths: [] } : null));
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "删除视频失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "删除视频失败"));
       throw err;
     } finally {
       setLoading(false);
@@ -244,8 +256,7 @@ export const useProjectDetail = (
         return { ...prev, video_paths: paths, video_path: effective };
       });
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "删除视频失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "删除视频失败"));
       throw err;
     } finally {
       setLoading(false);
@@ -267,8 +278,7 @@ export const useProjectDetail = (
         setProject((prev) => (prev ? { ...prev, script } : null));
         return script;
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "生成解说脚本失败";
-        setError(errorMessage);
+        setError(getErrorMessage(err, "生成解说脚本失败"));
         throw err;
       } finally {
         setLoading(false);
@@ -288,8 +298,7 @@ export const useProjectDetail = (
         const savedScript = await projectService.saveScript(project.id, script);
         setProject((prev) => (prev ? { ...prev, script: savedScript } : null));
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "保存脚本失败";
-        setError(errorMessage);
+        setError(getErrorMessage(err, "保存脚本失败"));
         throw err;
       }
     },
@@ -311,8 +320,7 @@ export const useProjectDetail = (
       }
       return outputPath;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "生成视频失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "生成视频失败"));
       throw err;
     } finally {
       setLoading(false);
@@ -357,8 +365,7 @@ export const useProjectDetail = (
         }
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "合并视频失败";
-      setError(errorMessage);
+      setError(getErrorMessage(err, "合并视频失败"));
       throw err;
     } finally {
       setLoading(false);

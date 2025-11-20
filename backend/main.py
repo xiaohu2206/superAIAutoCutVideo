@@ -43,6 +43,7 @@ app = FastAPI(
     description="提供视频处理、AI剪辑和实时进度推送服务",
     version="1.0.0"
 )
+logger.info(f"Python 解释器: {sys.executable}")
 
 # 配置CORS - 允许Tauri前端访问
 app.add_middleware(
@@ -338,7 +339,8 @@ if __name__ == "__main__":
     # 获取端口配置
     initial_port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "127.0.0.1")
-    
+    logger.info(f"启动使用的 Python 解释器: {sys.executable}")
+
     try:
         # 查找可用端口
         port = find_available_port(host, initial_port)

@@ -126,7 +126,23 @@ export class ProjectService {
             reject(new Error("解析响应失败"));
           }
         } else {
-          reject(new Error(`上传视频失败: ${xhr.statusText || xhr.status}`));
+          // 尝试解析错误响应中的具体提示信息（detail 或 message）
+          let msg = `上传视频失败: ${xhr.statusText || xhr.status}`;
+          try {
+            if (xhr.responseText) {
+              const errJson = JSON.parse(xhr.responseText);
+              if (typeof errJson === "string") {
+                msg = errJson;
+              } else if (errJson?.detail) {
+                msg = errJson.detail;
+              } else if (errJson?.message) {
+                msg = errJson.message;
+              }
+            }
+          } catch {
+            // 忽略解析错误，保留默认错误信息
+          }
+          reject(new Error(msg));
         }
       };
 
@@ -214,7 +230,27 @@ export class ProjectService {
     const url = this.getOutputVideoDownloadUrl(projectId);
     const res = await fetch(url);
     if (!res.ok) {
-      throw new Error(`下载视频失败: ${res.statusText}`);
+      // 尝试解析错误响应中的具体提示信息（detail 或 message）
+      let msg = `下载视频失败: ${res.statusText}`;
+      try {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const errJson = await res.json();
+          if (typeof errJson === "string") {
+            msg = errJson;
+          } else if (errJson?.detail) {
+            msg = errJson.detail;
+          } else if (errJson?.message) {
+            msg = errJson.message;
+          }
+        } else {
+          const text = await res.text();
+          if (text) msg = text;
+        }
+      } catch {
+        // 忽略解析错误，保留默认错误信息
+      }
+      throw new Error(msg);
     }
     return await res.blob();
   }

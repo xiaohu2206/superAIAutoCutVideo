@@ -102,11 +102,24 @@ cd frontend
 npm install
 ```
 
-2. **安装后端依赖**
+2. **安装后端依赖（推荐使用虚拟环境）**
 ```bash
 cd backend
+
+# 创建并启用虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate  # macOS/Linux
+# Windows：.venv\Scripts\activate
+
+# 升级 pip 并安装依赖
+pip install --upgrade pip
 pip install -r requirements.txt
+
+# 可选：安装运行时依赖（用于打包/部署，可能较慢）
+pip install -r requirements.runtime.txt
 ```
+
+提示：若安装 `requirements.runtime.txt` 较慢或需要从源码编译（如 `pydantic-core`），建议使用 Python 3.11/3.12 以更容易命中预编译轮子。
 
 3. **安装 Tauri 依赖**
 ```bash
@@ -121,6 +134,7 @@ cargo build
 1. **启动后端服务**
 ```bash
 cd backend
+source .venv/bin/activate
 python main.py
 ```
 
@@ -235,7 +249,9 @@ python --version
 pip list
 
 # 重新安装依赖
-pip install -r backend/requirements.txt
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ### 2. 前端编译错误

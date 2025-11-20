@@ -123,7 +123,7 @@ class VideoModelConfigManager:
                     base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
                     model_name='qwen-vl-plus',
                     description='通义千问视频分析模型',
-                    enabled=False
+                    enabled=True
                 )
             },
             {

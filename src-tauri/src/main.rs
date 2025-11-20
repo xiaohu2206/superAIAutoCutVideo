@@ -187,10 +187,38 @@ async fn start_backend(
             }
 
             println!("开发模式：使用Python运行后端脚本: {:?}", backend_script);
-            let mut c = Command::new("python");
+
+            // 优先选择 workspace backend/.venv 下的解释器；其次尝试 python3；最后回退到 python
+            let backend_dir = backend_script.parent().unwrap().to_path_buf();
+            let venv_py_unix = backend_dir.join(".venv").join("bin").join("python3");
+            let venv_py_unix_alt = backend_dir.join(".venv").join("bin").join("python");
+            let venv_py_win = backend_dir.join(".venv").join("Scripts").join("python.exe");
+
+            // 允许通过环境变量强制指定解释器
+            let env_override = std::env::var("BACKEND_PYTHON").ok();
+
+            let python_cmd: String = if let Some(p) = env_override {
+                p
+            } else if venv_py_unix.exists() {
+                venv_py_unix.to_string_lossy().to_string()
+            } else if venv_py_unix_alt.exists() {
+                venv_py_unix_alt.to_string_lossy().to_string()
+            } else if venv_py_win.exists() {
+                venv_py_win.to_string_lossy().to_string()
+            } else if which::which("python3").is_ok() {
+                "python3".to_string()
+            } else {
+                "python".to_string()
+            };
+
+            println!("选择的 Python 解释器: {}", python_cmd);
+
+            let mut c = Command::new(python_cmd);
             c.arg(backend_script);
             #[cfg(target_os = "windows")]
             { c.creation_flags(CREATE_NO_WINDOW); }
+            c.current_dir(backend_dir)
+             
             c
         } else {
             return Err("未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string());
@@ -202,7 +230,6 @@ async fn start_backend(
     let port: u16 = choose_available_port(8000);
     cmd.env("HOST", host)
         .env("PORT", port.to_string())
-        .current_dir(resource_dir.clone())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

@@ -123,7 +123,7 @@ class ContentModelConfigManager:
                     base_url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
                     model_name='qwen3-max',
                     description='通义千问文案生成模型',
-                    enabled=False
+                    enabled=True
                 )
             },
             {

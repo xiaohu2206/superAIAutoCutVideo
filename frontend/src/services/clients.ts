@@ -84,7 +84,27 @@ export class ApiClient {
       const response = await fetch(url, defaultOptions);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // 尝试从后端错误响应中提取更明确的提示信息（detail 或 message）
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const errJson = await response.json();
+            if (typeof errJson === "string") {
+              errorMessage = errJson;
+            } else if (errJson?.detail) {
+              errorMessage = errJson.detail;
+            } else if (errJson?.message) {
+              errorMessage = errJson.message;
+            }
+          } else {
+            const text = await response.text();
+            if (text) errorMessage = text;
+          }
+        } catch {
+          // 忽略解析错误，保留默认错误信息
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
