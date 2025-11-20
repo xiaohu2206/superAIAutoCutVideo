@@ -25,6 +25,7 @@ export const TtsCredentialForm: React.FC<Props> = ({
   testResult,
   activeConfigId,
 }) => {
+  void activeConfigId;
   const [secretIdInput, setSecretIdInput] = useState<string>("");
   const [secretKeyInput, setSecretKeyInput] = useState<string>("");
 

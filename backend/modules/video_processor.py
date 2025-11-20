@@ -249,7 +249,35 @@ class VideoProcessor:
         except Exception as e:
             logger.error(f"片段音频替换出错: {e}")
             return False
-    
+        
+
+    async def extract_audio_mp3(self, input_video: str, output_mp3: str) -> bool:
+        try:
+            cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-i", input_video,
+                "-vn",
+                "-acodec", "libmp3lame",
+                "-q:a", "2",
+                "-y", output_mp3,
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode == 0:
+                return True
+            else:
+                err = stderr.decode(errors="ignore")
+                logger.error(f"提取音频失败: {err}")
+                return False
+        except Exception as e:
+            logger.error(f"提取音频出错: {e}")
+            return False
 
 # 全局视频处理器实例
 video_processor = VideoProcessor()

@@ -5,13 +5,12 @@ import {
   ArrowLeft,
   CheckCircle,
   Download,
-  FileText,
   FileVideo,
   Loader,
   Save,
   Sparkles,
   Upload,
-  Video,
+  Video
 } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
@@ -35,12 +34,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     loading,
     error,
     updateProject,
-    uploadVideo,
     uploadVideos,
-    uploadSubtitle,
-    deleteVideo,
     deleteVideoItem,
-    deleteSubtitle,
     generateScript,
     saveScript,
     generateVideo,
@@ -56,16 +51,16 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const subtitleInputRef = useRef<HTMLInputElement>(null);
+  
 
   // 拖拽上传状态
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
-  const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
+  
   // 上传进度与状态
   const [uploadingVideo, setUploadingVideo] = useState(false);
-  const [uploadingSubtitle, setUploadingSubtitle] = useState(false);
+  
   const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
-  const [subtitleUploadProgress, setSubtitleUploadProgress] = useState<number>(0);
+  
 
   /**
    * 处理视频文件选择
@@ -92,35 +87,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
   };
 
-  /**
-   * 处理字幕文件选择
-   */
-  const handleSubtitleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.name.endsWith(".srt")) {
-      alert("请上传 .srt 格式的字幕文件");
-      return;
-    }
-
-    setSuccessMessage(null);
-
-    setUploadingSubtitle(true);
-    setSubtitleUploadProgress(0);
-    try {
-      await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
-      setSuccessMessage("字幕文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error("上传字幕失败:", err);
-    } finally {
-      setUploadingSubtitle(false);
-      setTimeout(() => setSubtitleUploadProgress(0), 800);
-    }
-  };
+  
+  
 
   /**
    * 视频拖拽上传
@@ -157,75 +125,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
   };
 
-  /**
-   * 字幕拖拽上传
-   */
-  const handleSubtitleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDraggingSubtitle(true);
-  };
+  
+  
 
-  const handleSubtitleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDraggingSubtitle(false);
-  };
+  
 
-  const handleSubtitleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDraggingSubtitle(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    if (!file.name.endsWith(".srt")) {
-      alert("请上传 .srt 格式的字幕文件");
-      return;
-    }
-
-    setSuccessMessage(null);
-
-    setUploadingSubtitle(true);
-    setSubtitleUploadProgress(0);
-    try {
-      await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
-      setSuccessMessage("字幕文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error("上传字幕失败:", err);
-    } finally {
-      setUploadingSubtitle(false);
-      setTimeout(() => setSubtitleUploadProgress(0), 800);
-    }
-  };
-
-  /**
-   * 删除视频文件
-   */
-  const handleDeleteVideo = async () => {
-    if (!project?.video_path) return;
-    setSuccessMessage(null);
-    try {
-      await deleteVideo();
-      setSuccessMessage("视频文件已删除！");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error("删除视频失败:", err);
-    }
-  };
-
-  /**
-   * 删除字幕文件
-   */
-  const handleDeleteSubtitle = async () => {
-    if (!project?.subtitle_path) return;
-    setSuccessMessage(null);
-    try {
-      await deleteSubtitle();
-      setSuccessMessage("字幕文件已删除！");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error("删除字幕失败:", err);
-    }
-  };
+  
+  
 
   /**
    * 处理生成解说脚本
@@ -243,7 +149,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       const script = await generateScript({
         project_id: project.id,
         video_path: project.video_path,
-        subtitle_path: project.subtitle_path,
         narration_type: project.narration_type,
       });
 
@@ -538,66 +443,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           )}
         </div>
 
-        {/* 字幕文件上传 */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            上传字幕（.srt 格式）
-          </label>
-          <div
-            onDragOver={handleSubtitleDragOver}
-            onDragLeave={handleSubtitleDragLeave}
-            onDrop={handleSubtitleDrop}
-            className={`flex items-center space-x-4 border-2 border-dashed rounded-lg p-4 transition-colors ${
-              isDraggingSubtitle ? "border-blue-500 bg-blue-50" : "border-gray-200"
-            }`}
-            aria-label="拖拽字幕文件到此区域或点击上传"
-          >
-            <button
-              onClick={() => subtitleInputRef.current?.click()}
-              disabled={uploadingSubtitle}
-              className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              上传字幕
-            </button>
-            <input
-              ref={subtitleInputRef}
-              type="file"
-              accept=".srt"
-              onChange={handleSubtitleFileChange}
-              className="hidden"
-            />
-            <span className="text-xs text-gray-500">拖拽 .srt 字幕到此或点击“上传字幕”</span>
-            {project.subtitle_path && (
-              <div className="flex items-center text-sm text-gray-600">
-                <FileText className="h-4 w-4 mr-2 text-green-500" />
-                <span className="truncate max-w-md">
-                  {project.subtitle_path.split("/").pop()}
-                </span>
-                <button
-                  onClick={handleDeleteSubtitle}
-                  className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
-                >
-                  删除字幕
-                </button>
-              </div>
-            )}
-          </div>
-          {uploadingSubtitle && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                <span>上传进度</span>
-                <span>{subtitleUploadProgress}%</span>
-              </div>
-              <div className="w-full h-2 bg-gray-200 rounded">
-                <div
-                  className="h-2 bg-blue-600 rounded transition-all"
-                  style={{ width: `${subtitleUploadProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        
 
         {/* 操作按钮：生成脚本 / 生成视频 / 下载视频 */}
         <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">

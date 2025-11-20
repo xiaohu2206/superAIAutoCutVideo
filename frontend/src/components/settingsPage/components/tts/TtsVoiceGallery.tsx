@@ -19,6 +19,8 @@ interface Props {
 export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, configId, hasCredentials, testResult, testDurationMs, onSetActive }) => {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const playingVoiceIdRef = React.useRef<string | null>(null);
+  void testResult;
+  void testDurationMs;
 
   const stopCurrent = () => {
     const a = audioRef.current;

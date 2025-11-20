@@ -112,10 +112,8 @@ export interface UseProjectDetailReturn {
   updateProject: (data: UpdateProjectRequest) => Promise<void>;
   uploadVideo: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
-  uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
-  deleteSubtitle: () => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   generateVideo: () => Promise<string | null>;
@@ -213,29 +211,6 @@ export const useProjectDetail = (
   );
 
   /**
-   * 上传字幕
-   */
-  const uploadSubtitle = useCallback(
-    async (file: File, onProgress?: (percent: number) => void) => {
-      if (!project) return;
-      setError(null);
-      setLoading(true);
-      try {
-        const response = await projectService.uploadSubtitle(project.id, file, onProgress);
-        // 直接更新本地状态，避免额外的API调用
-        setProject((prev) => (prev ? { ...prev, subtitle_path: response.file_path } : null));
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "上传字幕失败";
-        setError(errorMessage);
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [project]
-  );
-
-  /**
    * 删除视频
    */
   const deleteVideo = useCallback(async () => {
@@ -270,26 +245,6 @@ export const useProjectDetail = (
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "删除视频失败";
-      setError(errorMessage);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [project]);
-
-  /**
-   * 删除字幕
-   */
-  const deleteSubtitle = useCallback(async () => {
-    if (!project) return;
-    setError(null);
-    setLoading(true);
-    try {
-      await projectService.deleteSubtitle(project.id);
-      // 本地状态清理字幕路径
-      setProject((prev) => (prev ? { ...prev, subtitle_path: undefined } : null));
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "删除字幕失败";
       setError(errorMessage);
       throw err;
     } finally {
@@ -435,10 +390,8 @@ export const useProjectDetail = (
     updateProject,
     uploadVideo,
     uploadVideos,
-    uploadSubtitle,
     deleteVideo,
     deleteVideoItem,
-    deleteSubtitle,
     generateScript,
     saveScript,
     generateVideo,

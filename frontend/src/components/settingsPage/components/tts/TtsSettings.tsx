@@ -77,7 +77,6 @@ export const TtsSettings: React.FC = () => {
       }
     };
     init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadVoices = async (prov: string) => {

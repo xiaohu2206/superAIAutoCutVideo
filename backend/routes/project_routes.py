@@ -10,7 +10,6 @@
 - POST /api/projects/{project_id}   更新项目
 - POST /api/projects/{project_id}/delete  删除项目
 - POST /api/projects/{project_id}/upload/video    上传视频
-- POST /api/projects/{project_id}/upload/subtitle 上传字幕
 - POST /api/projects/generate-script               生成解说脚本（简化实现）
 - POST /api/projects/{project_id}/script          保存脚本
 """
@@ -31,6 +30,8 @@ from modules.projects_store import projects_store, Project
 from modules.video_processor import video_processor
 from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
+from services.asr_jianying import JianYingASR
+from services.asr_utils import utterances_to_srt
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -51,6 +52,7 @@ def uploads_dir() -> Path:
     up = root / "uploads"
     (up / "videos").mkdir(parents=True, exist_ok=True)
     (up / "subtitles").mkdir(parents=True, exist_ok=True)
+    (up / "audios").mkdir(parents=True, exist_ok=True)
     return up
 
 
@@ -212,19 +214,37 @@ async def generate_script(req: GenerateScriptRequest):
     total_duration = read_video_duration(video_abs)
 
     segments: List[Dict[str, Any]] = []
-    if req.subtitle_path:
-        sub_abs = resolve_path(req.subtitle_path)
-        if sub_abs.exists():
-            segments = parse_srt(sub_abs)
-    # 读取原始字幕文本（用于提示词输入）
     subtitle_text: str = ""
+    sub_abs: Optional[Path] = None
     if req.subtitle_path:
         sub_abs = resolve_path(req.subtitle_path)
-        if sub_abs.exists():
-            try:
-                subtitle_text = sub_abs.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                subtitle_text = ""
+        if not sub_abs.exists():
+            sub_abs = None
+    if not sub_abs:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        audio_out = uploads_dir() / "audios" / f"{req.project_id}_audio_{ts}.mp3"
+        ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
+        if not ok_audio:
+            raise HTTPException(status_code=500, detail="音频提取失败")
+        asr = JianYingASR(str(audio_out))
+        data = asr.run()
+        utterances = data.get("utterances") if isinstance(data, dict) else None
+        if not isinstance(utterances, list) or not utterances:
+            raise HTTPException(status_code=500, detail="语音识别失败")
+        srt_text = utterances_to_srt(utterances)
+        srt_out = uploads_dir() / "subtitles" / f"{req.project_id}_subtitle_{ts}.srt"
+        srt_out.write_text(srt_text, encoding="utf-8")
+        web_path = to_web_path(srt_out)
+        projects_store.update_project(req.project_id, {"subtitle_path": web_path})
+        sub_abs = srt_out
+        logging.info(f"asr识别结果保存到 {srt_out}")
+
+    if sub_abs and sub_abs.exists():
+        try:
+            subtitle_text = sub_abs.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            subtitle_text = ""
+        segments = parse_srt(sub_abs)
 
     # 状态变更为 processing
     projects_store.update_project(req.project_id, {"status": "processing"})
@@ -338,46 +358,7 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     }
 
 
-@router.post("/{project_id}/upload/subtitle")
-async def upload_subtitle(project_id: str, file: UploadFile = File(...), project_id_form: str = Form(None)):
-    p = projects_store.get_project(project_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    suffix = Path(file.filename).suffix.lower()
-    if suffix != ".srt":
-        raise HTTPException(status_code=400, detail="文件格式不支持")
-
-    up_dir = uploads_dir() / "subtitles"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_name = f"{project_id}_subtitle_{ts}{suffix}"
-    out_path = up_dir / out_name
-
-    size = 0
-    try:
-        with out_path.open("wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                f.write(chunk)
-    finally:
-        await file.close()
-
-    web_path = to_web_path(out_path)
-    projects_store.update_project(project_id, {"subtitle_path": web_path})
-
-    return {
-        "message": "字幕上传成功",
-        "data": {
-            "file_path": web_path,
-            "file_name": file.filename,
-            "file_size": size,
-            "upload_time": now_ts(),
-        },
-        "timestamp": now_ts(),
-    }
+    
 
 
 # ========================= 文件删除 =========================
