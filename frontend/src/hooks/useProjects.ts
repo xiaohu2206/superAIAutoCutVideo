@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { projectService } from "../services/projectService";
+import { wsClient, type WebSocketMessage } from "../services/clients";
 import type {
   CreateProjectRequest,
   GenerateScriptRequest,
@@ -130,6 +131,7 @@ export interface UseProjectDetailReturn {
   uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
+  reorderVideos: (orderedPaths: string[]) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   generateVideo: () => Promise<string | null>;
@@ -137,6 +139,7 @@ export interface UseProjectDetailReturn {
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
   mergeProgress: number;
+  merging: boolean;
 }
 
 /**
@@ -149,6 +152,7 @@ export const useProjectDetail = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mergeProgress, setMergeProgress] = useState<number>(0);
+  const [merging, setMerging] = useState(false);
 
   /**
    * 获取项目详情
@@ -199,9 +203,14 @@ export const useProjectDetail = (
           if (!prev) return null;
           const paths = Array.isArray(prev.video_paths) ? [...prev.video_paths] : [];
           if (!paths.includes(response.file_path)) paths.push(response.file_path);
+          const names = { ...(prev.video_names || {}) };
+          if (response.file_name) {
+            names[response.file_path] = response.file_name;
+          }
           const merged = prev.merged_video_path;
           const effective = merged ? merged : (paths.length === 1 ? paths[0] : undefined);
-          return { ...prev, video_paths: paths, video_path: effective };
+          const currentName = effective ? (names[effective] || effective.split("/").pop()) : undefined;
+          return { ...prev, video_paths: paths, video_path: effective, video_names: names, video_current_name: currentName };
         });
       } catch (err) {
         setError(getErrorMessage(err, "上传视频失败"));
@@ -251,12 +260,35 @@ export const useProjectDetail = (
       setProject((prev) => {
         if (!prev) return null;
         const paths = (prev.video_paths || []).filter((p) => p !== filePath);
+        const names = { ...(prev.video_names || {}) };
+        if (names[filePath]) {
+          delete names[filePath];
+        }
         const merged = prev.merged_video_path;
         const effective = merged ? merged : (paths.length === 1 ? paths[0] : undefined);
-        return { ...prev, video_paths: paths, video_path: effective };
+        const currentName = effective ? (names[effective] || effective.split("/").pop()) : undefined;
+        return { ...prev, video_paths: paths, video_path: effective, video_names: names, video_current_name: currentName };
       });
     } catch (err) {
       setError(getErrorMessage(err, "删除视频失败"));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
+
+  /**
+   * 重排视频顺序（持久化）
+   */
+  const reorderVideos = useCallback(async (orderedPaths: string[]) => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const updated = await projectService.updateVideoOrder(project.id, orderedPaths);
+      setProject(updated);
+    } catch (err) {
+      setError(getErrorMessage(err, "更新排序失败"));
       throw err;
     } finally {
       setLoading(false);
@@ -340,38 +372,92 @@ export const useProjectDetail = (
     window.open(url, "_blank");
   }, [project]);
 
+
   const mergeVideos = useCallback(async () => {
     if (!project) return;
     setError(null);
     setLoading(true);
     try {
       setMergeProgress(0);
+      setMerging(true);
       const start = await projectService.startMergeVideos(project.id);
       const taskId = start.task_id;
-      let done = false;
-      while (!done) {
-        const st = await projectService.getMergeStatus(project.id, taskId);
-        console.log("st", st)
-        setMergeProgress(Math.round(st.progress));
-        if (st.status === "completed") {
-          if (st.file_path) {
-            setProject((prev) => (prev ? { ...prev, merged_video_path: st.file_path, video_path: st.file_path } : null));
+
+      // 通过 WebSocket 监听该任务的进度与完成事件
+      await new Promise<void>((resolve, reject) => {
+        const handler = (message: WebSocketMessage & { [key: string]: any }) => {
+          if (
+            message &&
+            (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+            (message as any).scope === "merge_videos" &&
+            (message as any).project_id === project.id &&
+            (message as any).task_id === taskId
+          ) {
+            if (typeof message.progress === "number") {
+              setMergeProgress(Math.max(0, Math.min(100, Math.round(message.progress))));
+              setMerging(true);
+            }
+            if (message.type === "completed") {
+              const fp = (message as any).file_path as string | undefined;
+              if (fp) {
+                const fileName = fp.split("/").pop();
+                setProject((prev) => (prev ? { ...prev, merged_video_path: fp, video_path: fp, video_current_name: fileName } : null));
+              }
+              setMerging(false);
+              wsClient.off("*", handler);
+              resolve();
+            }
+            if (message.type === "error") {
+              const msg = message.message || "合并失败";
+              setMerging(false);
+              wsClient.off("*", handler);
+              reject(new Error(msg));
+            }
           }
-          done = true;
-        } else if (st.status === "failed") {
-          throw new Error(st.message || "合并失败");
-        } else {
-          await new Promise((r) => setTimeout(r, 500));
-        }
-      }
+        };
+        wsClient.on("*", handler);
+      });
     } catch (err) {
       setError(getErrorMessage(err, "合并视频失败"));
       throw err;
     } finally {
       setLoading(false);
+      setMerging(false);
       setTimeout(() => setMergeProgress(0), 800);
     }
   }, [project]);
+
+  // 订阅 WebSocket 消息以更新合并进度（页面存在时持续监听）
+  useEffect(() => {
+    const handler = (message: WebSocketMessage & { [key: string]: any }) => {
+      if (
+        message &&
+        (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+        (message as any).scope === "merge_videos" &&
+        (message as any).project_id === project?.id
+      ) {
+        if (typeof message.progress === "number") {
+          setMergeProgress(Math.max(0, Math.min(100, Math.round(message.progress))));
+          setMerging(true);
+        }
+        if (message.type === "completed") {
+          const fp = (message as any).file_path as string | undefined;
+          if (fp) {
+            const fileName = fp.split("/").pop();
+            setProject((prev) => (prev ? { ...prev, merged_video_path: fp, video_path: fp, video_current_name: fileName } : null));
+          }
+          setMerging(false);
+        }
+        if (message.type === "error") {
+          setMerging(false);
+        }
+      }
+    };
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id]);
 
   /**
    * 刷新项目
@@ -399,6 +485,7 @@ export const useProjectDetail = (
     uploadVideos,
     deleteVideo,
     deleteVideoItem,
+    reorderVideos,
     generateScript,
     saveScript,
     generateVideo,
@@ -406,6 +493,7 @@ export const useProjectDetail = (
     mergeVideos,
     mergeProgress,
     refreshProject,
+    merging,
   };
 };
 

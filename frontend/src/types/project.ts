@@ -55,6 +55,9 @@ export interface Project {
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
   merged_video_path?: string; // 合并后视频文件路径
+  // 新增：映射每个视频路径到原始文件名，以及当前生效视频的文件名
+  video_names?: Record<string, string>;
+  video_current_name?: string;
   subtitle_path?: string; // 字幕文件路径
   output_video_path?: string; // 输出视频文件路径
   script?: VideoScript; // 视频脚本

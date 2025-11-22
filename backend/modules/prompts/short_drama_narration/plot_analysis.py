@@ -2,10 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 """
-@Project: NarratoAI
 @File   : plot_analysis.py
-@Author : viccy同学
-@Date   : 2025/1/7
 @Description: 短剧剧情分析提示词
 """
 

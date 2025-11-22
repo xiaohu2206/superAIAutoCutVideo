@@ -81,7 +81,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
 
   return (
     <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 overflow-hidden">
-      {/* 卡片头部 */}
+      {/* 卡片内容 */}
       <div className="p-6">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center space-x-3">
@@ -120,14 +120,14 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
           </div>
 
           {/* 视频文件 */}
-          {project.video_path && (
+          {/* {project.video_path && (
             <div className="flex items-center text-sm text-gray-600">
               <Video className="h-4 w-4 mr-2 text-gray-400" />
               <span className="truncate">
-                {project.video_path.split("/").pop() || "视频文件"}
+                {project.video_current_name || project.video_path.split("/").pop() || "视频文件"}
               </span>
             </div>
-          )}
+          )} */}
 
           {/* 创建时间 */}
           <div className="flex items-center text-sm text-gray-600">
@@ -136,6 +136,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 分隔线 */}
+      <div className="h-px bg-gray-100" />
 
       {/* 卡片底部操作栏 */}
       <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">

@@ -6,6 +6,8 @@ TTS引擎与音色配置API路由
 """
 
 from typing import Dict, List, Optional, Any
+from pathlib import Path
+import time
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 import logging
@@ -251,8 +253,59 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
         provider = (req.provider or (tts_engine_config_manager.get_active_config() or TtsEngineConfig(provider='tencent_tts')).provider)
         voices = tts_engine_config_manager.get_voices(provider)
         match = next((v for v in voices if v.id == voice_id), None)
+        # Edge TTS：若缓存列表未包含该音色，仍允许尝试合成（避免误报不存在）
+        if provider == 'edge_tts':
+            try:
+                from modules.edge_tts_service import edge_tts_service, PREVIEWS_DIR
+                backend_dir = Path(__file__).resolve().parent.parent
+                # 缓存文件名：edge_<voice>_preview.mp3（若存在则直接复用）
+                vid = (match.id if match else voice_id)
+                cache_filename = f"edge_{vid}_preview.mp3"
+                cache_path = PREVIEWS_DIR / cache_filename
+                if cache_path.exists():
+                    audio_url = f"/backend/serviceData/tts/previews/{cache_filename}"
+                    return {
+                        "success": True,
+                        "data": {
+                            "voice_id": vid,
+                            "name": (match.name if match else vid),
+                            "audio_url": audio_url,
+                            "description": (match.description if match else None),
+                            "duration": None
+                        },
+                        "message": "已使用本地缓存试听音频"
+                    }
+
+                # 文本使用请求或默认（前端写死即可，这里保持回退）
+                text = req.text or "您好，欢迎使用智能配音。"
+                cfg = tts_engine_config_manager.get_active_config()
+                speed_ratio = (cfg.speed_ratio if cfg else 1.0)
+                res = await edge_tts_service.synthesize(text=text, voice_id=vid, speed_ratio=speed_ratio, out_path=cache_path)
+                if not res.get("success"):
+                    raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                audio_url = f"/backend/serviceData/tts/previews/{cache_filename}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": vid,
+                        "name": (match.name if match else vid),
+                        "audio_url": audio_url,
+                        "description": (match.description if match else None),
+                        "duration": res.get("duration")
+                    },
+                    "message": "已生成并保存 Edge TTS 试听音频"
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Edge TTS 试听失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # 非 Edge：严格校验音色存在
         if not match:
             raise HTTPException(status_code=404, detail=f"音色 '{voice_id}' 不存在")
+
+        # 默认（腾讯云）返回示例音频链接
         return {
             "success": True,
             "data": {

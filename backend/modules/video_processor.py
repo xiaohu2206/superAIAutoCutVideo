@@ -73,6 +73,8 @@ class VideoProcessor:
 
         修复策略：改为使用 filter_complex 的 concat 过滤器并重编码输出，统一时间戳，避免GOP跨段依赖。
         - 对每段视频/音频先 reset PTS（setpts/asetpts）
+        - 统一分辨率为偶数尺寸，统一帧率，提升通用播放器兼容性
+        - 对于没有音频轨的片段，自动填充与视频等长的静音音频，避免拼接失败
         - 通过 concat 滤镜合并，再使用 libx264 + aac 重编码输出
         - 输出包含 `-movflags +faststart` 以优化播放体验
         """
@@ -91,11 +93,38 @@ class VideoProcessor:
                 cmd.extend(["-i", str(p)])
 
             n = len(inputs)
-            # 为每个输入构建 reset 语句
+            # 预先探测每段时长与是否有音频
+            durations: List[float] = []
+            has_audio: List[bool] = []
+            for p in inputs:
+                # 优先使用视频流时长，其次用容器总时长，兜底为 0
+                d = await self._ffprobe_video_duration(p)
+                if d is None:
+                    d = await self._ffprobe_duration(p, "format")
+                d = d or 0.0
+                durations.append(max(d, 0.0))
+                # 探测是否存在音频流
+                a_dur = await self._ffprobe_duration(p, "audio")
+                has_audio.append(a_dur is not None and a_dur > 0.0)
+
+            # 为每个输入构建 reset 与统一参数语句
             vf_parts = []
             for i in range(n):
-                vf_parts.append(f"[{i}:v:0]setpts=PTS-STARTPTS[v{i}]")
-                vf_parts.append(f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]")
+                # 统一分辨率为偶数、统一帧率（避免兼容问题）
+                # 注意：格式统一到 yuv420p 以提升播放器兼容性
+                vf_parts.append(
+                    f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+                )
+                if has_audio[i]:
+                    # 统一采样率，重置时间戳
+                    vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
+                else:
+                    # 无音频：生成与视频等长的静音音轨
+                    dur = durations[i]
+                    # 使用 anullsrc 生成静音，并按时长裁剪
+                    vf_parts.append(
+                        f"anullsrc=r=48000:cl=stereo,atrim=0:{dur},asetpts=PTS-STARTPTS[a{i}]"
+                    )
 
             # 拼接 concat 段
             concat_inputs = "".join([f"[v{i}][a{i}]" for i in range(n)])
@@ -124,12 +153,13 @@ class VideoProcessor:
             )
 
             total_duration = 0.0
-            for p in inputs:
-                d = await self._ffprobe_duration(p, "format") or 0.0
-                total_duration += max(d, 0.0)
+            for d in durations:
+                total_duration += d
 
             if on_progress:
                 try:
+                    last_bucket = -1  # 控制日志输出频率（每 5% 一次）
+                    seen_end = False  # 在真正结束前不把进度提升到 100
                     while True:
                         line = await process.stdout.readline()
                         if not line:
@@ -144,11 +174,22 @@ class VideoProcessor:
                                         pct = 0.0
                                     if pct > 100:
                                         pct = 100.0
+                                    # 在未收到 progress=end 之前不显示 100%，避免“瞬间100%”误导
+                                    if not seen_end and pct >= 100.0:
+                                        pct = 99.0
+                                    # 发送回调
                                     await on_progress(pct)
+                                    # 限流打印日志（每 5% 打印一次）
+                                    bucket = int(pct // 5)
+                                    if bucket > last_bucket:
+                                        logger.info(f"拼接进度: {pct:.1f}%")
+                                        last_bucket = bucket
                             except Exception:
                                 pass
                         elif s.startswith("progress=") and s.endswith("end"):
+                            seen_end = True
                             await on_progress(100.0)
+                            logger.info("拼接进度: 100.0% (完成)")
                 except Exception:
                     pass
 
@@ -164,6 +205,50 @@ class VideoProcessor:
 
         except Exception as e:
             logger.error(f"拼接视频时出错: {e}")
+            return False
+
+    async def _ffprobe_video_duration(self, path: str) -> Optional[float]:
+        """读取视频流的时长，优先于容器总时长，避免音频缺失或容器元数据不准导致总时长偏差"""
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=duration",
+                "-of", "default=nk=1:nw=1",
+                path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode == 0:
+                try:
+                    return float(out.decode().strip())
+                except Exception:
+                    return None
+            return None
+        except Exception:
+            return None
+
+    async def _ffprobe_has_audio(self, path: str) -> bool:
+        """探测是否存在音频流"""
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=nk=1:nw=1",
+                path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode == 0:
+                s = out.decode().strip().lower()
+                return s == "audio"
+            return False
+        except Exception:
             return False
 
     async def _ffprobe_duration(self, path: str, stream_type: str = "format") -> Optional[float]:

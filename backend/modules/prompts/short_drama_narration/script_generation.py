@@ -2,10 +2,6 @@
 # -*- coding: UTF-8 -*-
 
 """
-@Project: NarratoAI
-@File   : script_generation.py
-@Author : viccy同学
-@Date   : 2025/1/7
 @Description: 短剧解说脚本生成提示词 - 优化版本
 """
 

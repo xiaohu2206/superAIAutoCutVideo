@@ -178,6 +178,17 @@ export class ProjectService {
     return response.data;
   }
 
+  /**
+   * 更新视频排序（按照用户提供的顺序）
+   */
+  async updateVideoOrder(projectId: string, orderedPaths: string[]): Promise<Project> {
+    const response = await apiClient.post<{ data: Project }>(
+      `/api/projects/${projectId}/videos/order`,
+      { ordered_paths: orderedPaths }
+    );
+    return response.data;
+  }
+
   
 
   /**
@@ -221,6 +232,13 @@ export class ProjectService {
    */
   getOutputVideoDownloadUrl(projectId: string): string {
     return `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video`;
+  }
+
+  /**
+   * 获取已合并视频播放链接（后端直接返回文件）
+   */
+  getMergedVideoUrl(projectId: string): string {
+    return `${apiClient.getBaseUrl()}/api/projects/${projectId}/merged-video`;
   }
 
   /**

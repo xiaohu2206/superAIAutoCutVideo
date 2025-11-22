@@ -54,6 +54,30 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
 class TencentTtsService:
     async def synthesize(self, text: str, out_path: str, voice_id: Optional[str] = None) -> Dict[str, Any]:
         cfg = tts_engine_config_manager.get_active_config()
+        provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
+
+        # Edge TTS 合成路径（免凭据）
+        if provider == "edge_tts":
+            try:
+                from modules.edge_tts_service import edge_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"edge_service_import_failed: {e}"}
+
+            vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
+            speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
+            out = Path(out_path)
+            try:
+                res = await edge_tts_service.synthesize(
+                    text=text,
+                    voice_id=vid,
+                    speed_ratio=speed_ratio,
+                    out_path=out,
+                )
+                return res
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        # 腾讯云 TTS 合成路径（需凭据）
         env_sid = (os.getenv("TENCENTCLOUD_SECRET_ID") or "").strip()
         env_skey = (os.getenv("TENCENTCLOUD_SECRET_KEY") or "").strip()
         secret_id = env_sid or ((cfg.secret_id or "").strip() if cfg else "")

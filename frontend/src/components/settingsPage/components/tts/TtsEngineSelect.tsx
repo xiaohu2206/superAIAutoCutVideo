@@ -30,10 +30,12 @@ export const TtsEngineSelect: React.FC<Props> = ({ engines, provider, onProvider
             <option value="tencent_tts">腾讯云 TTS</option>
           )}
         </select>
-        <span className="text-gray-500 text-sm">当前仅支持“腾讯云 TTS”</span>
+        {current && (
+          <span className="text-gray-500 text-sm">{current.display_name}</span>
+        )}
       </div>
       <p className="text-gray-700 text-sm mt-3">
-        {current?.description || "请选择引擎；该引擎需配置 SecretId 与 SecretKey。"}
+        {current?.description || "请选择引擎；部分引擎需配置密钥。"}
       </p>
     </div>
   );

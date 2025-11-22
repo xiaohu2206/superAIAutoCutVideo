@@ -32,6 +32,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // 初始加载项目列表
   useEffect(() => {
@@ -82,22 +83,40 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   return (
     <div className="space-y-6">
       {/* 页面头部 */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg">
-              <Folder className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">项目管理</h1>
-              <p className="text-sm text-gray-600 mt-1">
-                创建和管理您的视频剪辑项目
-              </p>
-            </div>
+      <div className="bg-white rounded-lg shadow-md">
+        {/* 统计信息 */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 ">
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <p className="text-sm text-gray-600">总项目数</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900">{projects.length}</p>
           </div>
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <p className="text-sm text-gray-600">草稿箱</p>
+            <p className="mt-2 text-3xl font-bold text-gray-500">{projects.filter((p) => p.status === "draft").length}</p>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <p className="text-sm text-gray-600">处理中</p>
+            <p className="mt-2 text-3xl font-bold text-blue-600">{projects.filter((p) => p.status === "processing").length}</p>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <p className="text-sm text-gray-600">已完成</p>
+            <p className="mt-2 text-3xl font-bold text-green-600">{projects.filter((p) => p.status === "completed").length}</p>
+          </div>
+        </div>
+      </div>
 
-          <div className="flex items-center space-x-3">
-            {/* 刷新按钮 */}
+      {/* 区块标题：最近项目 + 搜索 + 创建按钮 */}
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900">最近项目</h2>
+        <div className="flex items-center space-x-3">
+          <input
+            type="text"
+            placeholder="搜索项目..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-44 sm:w-64 px-3 py-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+          />
+           {/* 刷新按钮 */}
             <button
               onClick={handleRefresh}
               disabled={refreshing || loading}
@@ -108,44 +127,13 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
               />
               刷新
             </button>
-
-            {/* 创建项目按钮 */}
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              创建项目
-            </button>
-          </div>
-        </div>
-
-        {/* 统计信息 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-200">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">
-              {projects.length}
-            </div>
-            <div className="text-sm text-gray-600 mt-1">总项目数</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-gray-500">
-              {projects.filter((p) => p.status === "draft").length}
-            </div>
-            <div className="text-sm text-gray-600 mt-1">草稿</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {projects.filter((p) => p.status === "processing").length}
-            </div>
-            <div className="text-sm text-gray-600 mt-1">处理中</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {projects.filter((p) => p.status === "completed").length}
-            </div>
-            <div className="text-sm text-gray-600 mt-1">已完成</div>
-          </div>
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            创建项目
+          </button>
         </div>
       </div>
 
@@ -158,7 +146,9 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
       {/* 项目列表 */}
       <ProjectList
-        projects={projects}
+        projects={projects.filter((p) =>
+          p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+        )}
         loading={loading}
         onEdit={handleEditProject}
         onDelete={handleDeleteProject}

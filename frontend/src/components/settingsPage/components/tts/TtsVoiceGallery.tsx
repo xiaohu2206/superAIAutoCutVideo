@@ -10,13 +10,14 @@ interface Props {
   voices: TtsVoice[];
   activeVoiceId: string;
   configId: string | null;
+  provider?: string;
   hasCredentials: boolean;
   testResult?: TtsTestResult | null;
   testDurationMs?: number | null;
   onSetActive: (voiceId: string) => Promise<void> | void;
 }
 
-export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, configId, hasCredentials, testResult, testDurationMs, onSetActive }) => {
+export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, configId, provider, hasCredentials, testResult, testDurationMs, onSetActive }) => {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const playingVoiceIdRef = React.useRef<string | null>(null);
   void testResult;
@@ -61,10 +62,16 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
       return;
     }
     try {
+      // 仅保留中文试听文本（Edge TTS 固定使用中文）
+      const getDefaultPreviewText = (_v: TtsVoice, _prov?: string): string => {
+        return "您好，欢迎使用智能配音。";
+      };
+
       if (hasCredentials && configId) {
         const res = await ttsService.previewVoice(voice.id, {
           config_id: configId,
-          text: "您好，欢迎使用智能配音。",
+          provider,
+          text: getDefaultPreviewText(voice, provider),
         });
         const url = res?.data?.sample_wav_url || res?.data?.audio_url || voice.sample_wav_url;
         playUrl(url, voice.id);
@@ -84,15 +91,26 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
     return () => stopCurrent();
   }, []);
   
+  // 仅展示中文音色（Edge TTS）
+  const voicesForDisplay = React.useMemo(() => {
+    if (provider === "edge_tts") {
+      return voices.filter(v => {
+        const lang = (v.language || v.id || "").toLowerCase();
+        return lang.startsWith("zh");
+      });
+    }
+    return voices;
+  }, [voices, provider]);
+
   const grouped = React.useMemo(() => {
     const buckets: Record<string, TtsVoice[]> = {};
-    voices.forEach(v => {
+    voicesForDisplay.forEach(v => {
       const key = v.voice_quality || "未标注";
       if (!buckets[key]) buckets[key] = [];
       buckets[key].push(v);
     });
     return buckets;
-  }, [voices]);
+  }, [voicesForDisplay]);
 
   const groupNames = React.useMemo(() => {
     return Object.keys(grouped).sort((a, b) => {
@@ -190,7 +208,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
           </div>
         </div>
       ))}
-      {voices.length === 0 && (
+      {voicesForDisplay.length === 0 && (
         <div className="text-gray-500 text-sm">暂无音色，请选择引擎或检查网络。</div>
       )}
     </div>

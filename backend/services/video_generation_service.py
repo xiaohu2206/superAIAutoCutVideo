@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional
 from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.tts_service import tts_service
+from modules.ws_manager import manager
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,22 @@ class VideoGenerationService:
         if not p.script or not isinstance(p.script, dict):
             raise ValueError("项目未设置有效的脚本")
 
+        # 广播：开始生成视频
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "start",
+                    "message": "开始生成视频",
+                    "progress": 1,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         segments: List[Dict[str, Any]] = p.script.get("segments") or []
         if not segments:
             raise ValueError("脚本中没有可用的 segments")
@@ -105,7 +122,41 @@ class VideoGenerationService:
         aud_tmp_dir = uploads_root / "audios" / "tmp" / f"{p.id}_{ts}"
         aud_tmp_dir.mkdir(parents=True, exist_ok=True)
 
+        # 广播：准备输出目录
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "prepare_output",
+                    "message": "准备输出与临时目录",
+                    "progress": 10,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         # 逐段剪切
+        clip_paths: List[str] = []
+        total_segments = len(segments)
+        # 广播：开始剪切片段
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "cutting_segments_start",
+                    "message": "正在剪切视频片段并生成配音",
+                    "progress": 15,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         clip_paths: List[str] = []
         for idx, seg in enumerate(segments, start=1):
             try:
@@ -165,10 +216,44 @@ class VideoGenerationService:
             except Exception as e:
                 logger.warning(f"处理片段出错（跳过） idx={idx}: {e}")
 
+            # 广播：片段进度（15% -> 70% 区间）
+            try:
+                base = 15
+                span = 55
+                progress = base + int((idx / max(1, total_segments)) * span)
+                await manager.broadcast(
+                    __import__("json").dumps({
+                        "type": "progress",
+                        "scope": "generate_video",
+                        "project_id": project_id,
+                        "phase": "segment_processed",
+                        "message": f"已处理片段 {idx}/{total_segments}",
+                        "progress": min(70, progress),
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                )
+            except Exception:
+                pass
+
         if not clip_paths:
             raise ValueError("未生成任何有效片段，无法拼接")
 
         # 拼接
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "concat_start",
+                    "message": "正在拼接视频片段",
+                    "progress": 75,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         ok_concat = await video_processor.concat_videos(clip_paths, str(output_abs))
         if not ok_concat:
             # 失败也清理临时片段
@@ -179,11 +264,56 @@ class VideoGenerationService:
                 pass
             raise RuntimeError("拼接视频失败")
 
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "concat_done",
+                    "message": "片段拼接完成",
+                    "progress": 85,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         norm_abs = outputs_dir / f"{p.id}_output_{ts}_normalized.mp4"
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "normalize_start",
+                    "message": "正在统一响度标准化",
+                    "progress": 90,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
+
         ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(str(output_abs), str(norm_abs))
         final_abs = norm_abs if ok_norm else output_abs
         web_output = _to_web_path(final_abs)
         projects_store.update_project(project_id, {"output_video_path": web_output, "status": "completed"})
+
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "progress",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "normalize_done" if ok_norm else "normalize_skipped",
+                    "message": "响度标准化完成" if ok_norm else "跳过响度标准化，保留原拼接视频",
+                    "progress": 95,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            )
+        except Exception:
+            pass
 
         # # 清理临时片段缓存
         # try:
@@ -193,12 +323,30 @@ class VideoGenerationService:
         #     # 清理失败不影响主流程
         #     pass
 
-        return {
+        result = {
             "output_path": web_output,
             "segments_count": len(clip_paths),
             "started_at": datetime.now().isoformat(),
             "finished_at": datetime.now().isoformat(),
         }
+
+        try:
+            await manager.broadcast(
+                __import__("json").dumps({
+                    "type": "completed",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "phase": "done",
+                    "message": "视频生成成功",
+                    "progress": 100,
+                    "timestamp": datetime.now().isoformat(),
+                    "data": result,
+                })
+            )
+        except Exception:
+            pass
+
+        return result
 
 
 video_generation_service = VideoGenerationService()

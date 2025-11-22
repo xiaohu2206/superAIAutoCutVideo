@@ -17,7 +17,7 @@ type SaveState = "idle" | "saving" | "saved" | "failed";
 export const TtsSettings: React.FC = () => {
   // 引擎与配置
   const [engines, setEngines] = useState<TtsEngineMeta[]>([]);
-  const [provider, setProvider] = useState<string>("tencent_tts");
+  const [provider, setProvider] = useState<string>("edge_tts");
   const [configs, setConfigs] = useState<Record<string, TtsEngineConfig>>({});
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const currentConfigId = useMemo(() => getTtsConfigIdByProvider(provider), [provider]);
@@ -37,9 +37,12 @@ export const TtsSettings: React.FC = () => {
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
   const [testDurationMs, setTestDurationMs] = useState<number | null>(null);
 
-  const hasCredentials = Boolean(
-    currentConfig?.secret_id === "***" && currentConfig?.secret_key === "***"
-  );
+  const hasCredentials = useMemo(() => {
+    // Edge TTS 免凭据：只要当前提供商为 edge_tts，则视为具备“连通性测试许可”
+    if (provider === "edge_tts") return true;
+    // 腾讯云：后端返回时会将已设置的敏感值脱敏为“***”，以此判断是否已配置
+    return Boolean(currentConfig?.secret_id === "***" && currentConfig?.secret_key === "***");
+  }, [provider, currentConfig]);
 
   // 初始化：并发加载引擎与配置
   useEffect(() => {
@@ -54,23 +57,28 @@ export const TtsSettings: React.FC = () => {
         if (cfgRes?.success) {
           setConfigs(cfgRes.data?.configs || {});
           setActiveConfigId(cfgRes.data?.active_config_id || null);
-          // 推断提供商
+          // 推断提供商（优先使用后端激活配置；否则默认 edge_tts）
           const activeId = cfgRes.data?.active_config_id;
+          let resolvedProvider = "edge_tts";
           if (activeId && cfgRes.data?.configs?.[activeId]) {
-            setProvider(cfgRes.data.configs[activeId].provider);
-          } else {
-            setProvider("tencent_tts");
+            resolvedProvider = cfgRes.data.configs[activeId].provider;
           }
+          setProvider(resolvedProvider);
         }
 
-        // 若不存在当前配置，则创建默认配置
-        const cid = getTtsConfigIdByProvider(provider);
+        // 若不存在当前配置，则创建默认配置（使用已解析的提供商）
+        const initProvider = (cfgRes?.success && cfgRes?.data)
+          ? (cfgRes.data?.active_config_id && cfgRes.data?.configs?.[cfgRes.data.active_config_id]
+              ? cfgRes.data.configs[cfgRes.data.active_config_id].provider
+              : "edge_tts")
+          : "edge_tts";
+        const cid = getTtsConfigIdByProvider(initProvider);
         if (!cfgRes?.data?.configs?.[cid]) {
-          await createOrUpdateDefaultConfig(cid, provider);
+          await createOrUpdateDefaultConfig(cid, initProvider);
         }
 
-        // 加载音色
-        await loadVoices(provider);
+        // 加载音色（使用已解析的提供商）
+        await loadVoices(initProvider);
       } catch (error) {
         console.error("初始化TTS设置失败:", error);
         await TauriCommands.showNotification("错误", "初始化TTS设置失败");
@@ -231,7 +239,8 @@ export const TtsSettings: React.FC = () => {
   // 事件：测试连通性
   const handleTestConnection = async () => {
     try {
-      if (!hasCredentials || !currentConfigId) {
+      // Edge TTS 无需凭据；腾讯云需要凭据且需要存在配置ID
+      if (provider !== "edge_tts" && (!hasCredentials || !currentConfigId)) {
         setTestResult({
           success: false,
           config_id: currentConfigId || "",
@@ -349,17 +358,18 @@ export const TtsSettings: React.FC = () => {
             </div>
           )}
           <div className="h-80 overflow-y-auto pr-1">
-            <TtsVoiceGallery
-              voices={voices.filter((v) =>
-                (v.name + v.id + (v.description || "")).toLowerCase().includes(search.toLowerCase())
-              )}
-              activeVoiceId={currentConfig?.active_voice_id || ""}
-              configId={currentConfigId}
-              hasCredentials={hasCredentials}
-              testResult={testResult}
-              testDurationMs={testDurationMs}
-              onSetActive={handleSetActiveVoice}
-            />
+          <TtsVoiceGallery
+            voices={voices.filter((v) =>
+              (v.name + v.id + (v.description || "")).toLowerCase().includes(search.toLowerCase())
+            )}
+            activeVoiceId={currentConfig?.active_voice_id || ""}
+            configId={currentConfigId}
+            provider={provider}
+            hasCredentials={hasCredentials}
+            testResult={testResult}
+            testDurationMs={testDurationMs}
+            onSetActive={handleSetActiveVoice}
+          />
           </div>
         </section>
 

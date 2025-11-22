@@ -2,10 +2,6 @@
 # -*- coding: UTF-8 -*-
 
 """
-@Project: NarratoAI
-@File   : subtitle_analysis.py
-@Author : viccy同学
-@Date   : 2025/1/7
 @Description: 短剧字幕分析提示词
 """
 

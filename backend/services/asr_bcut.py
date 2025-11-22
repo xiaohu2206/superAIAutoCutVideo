@@ -136,15 +136,38 @@ class BcutASR(BaseASR):
         resp = resp.json()
         return resp["data"]
 
-    def _run(self):
+    def _run(self, callback: Optional[callable] = None):
+        if callback:
+            try:
+                callback(20, "正在上传音频到服务...")
+            except Exception:
+                pass
         self.upload()
+
+        if callback:
+            try:
+                callback(40, "上传完成，创建识别任务...")
+            except Exception:
+                pass
         self.create_task()
+
+        if callback:
+            try:
+                callback(55, "任务已创建，开始轮询结果...")
+            except Exception:
+                pass
         # 轮询检查任务状态
         for _ in range(500):
             task_resp = self.result()
-            if task_resp["state"] == 4:
+            if task_resp.get("state") == 4:
                 break
             time.sleep(1)
+
+        if callback:
+            try:
+                callback(95, "转换完成，解析结果...")
+            except Exception:
+                pass
         logging.info(f"转换成功")
         return json.loads(task_resp["result"])
 

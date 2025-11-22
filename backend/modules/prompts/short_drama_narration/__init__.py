@@ -2,10 +2,6 @@
 # -*- coding: UTF-8 -*-
 
 """
-@Project: NarratoAI
-@File   : __init__.py
-@Author : viccy同学
-@Date   : 2025/1/7
 @Description: 短剧解说提示词模块
 """
 

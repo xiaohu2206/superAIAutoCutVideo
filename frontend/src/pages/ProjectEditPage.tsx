@@ -6,16 +6,22 @@ import {
   CheckCircle,
   Download,
   FileVideo,
+  GripVertical,
   Loader,
   Save,
   Sparkles,
+  ChevronDown,
   Upload,
-  Video
+  Video,
+  DeleteIcon
 } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
 import type { VideoScript } from "../types/project";
 import { NarrationType } from "../types/project";
+import { wsClient } from "../services/clients";
+import type { WebSocketMessage } from "../services/clients";
+import { projectService } from "../services/projectService";
 
 interface ProjectEditPageProps {
   projectId: string;
@@ -36,12 +42,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     updateProject,
     uploadVideos,
     deleteVideoItem,
+    reorderVideos,
     generateScript,
     saveScript,
     generateVideo,
     downloadVideo,
     mergeVideos,
     mergeProgress,
+    merging,
   } = useProjectDetail(projectId);
 
   const [editedScript, setEditedScript] = useState<string>("");
@@ -49,8 +57,96 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // 生成脚本进度 & 日志
+  const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
+  const [scriptGenLogs, setScriptGenLogs] = useState<
+    { timestamp: string; message: string; phase?: string; type?: string }[]
+  >([]);
+  // 生成视频进度 & 日志
+  const [videoGenProgress, setVideoGenProgress] = useState<number>(0);
+  const [videoGenLogs, setVideoGenLogs] = useState<
+    { timestamp: string; message: string; phase?: string; type?: string }[]
+  >([]);
+  // 合并视频预览弹层
+  const [showMergedPreview, setShowMergedPreview] = useState(false);
+  // 输出视频预览弹层
+  const [showOutputPreview, setShowOutputPreview] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
+  
+  // 视频顺序（可拖拽排序）
+  const [videoOrder, setVideoOrder] = useState<string[]>([]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  React.useEffect(() => {
+    if (Array.isArray(project?.video_paths)) {
+      setVideoOrder(project!.video_paths);
+    } else {
+      setVideoOrder([]);
+    }
+  }, [project?.video_paths]);
+  
+  // 拖拽排序交互（列表项）
+  const handleItemDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleItemDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    overIndex: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragIndex === null || dragIndex === overIndex) return;
+    setVideoOrder((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(overIndex, 0, moved);
+      return next;
+    });
+    setDragIndex(overIndex);
+  };
+
+  const handleItemDrop = async (
+    e: React.DragEvent<HTMLDivElement>
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragIndex(null);
+    try {
+      if (project && Array.isArray(project.video_paths)) {
+        const before = project.video_paths.join("|");
+        const after = videoOrder.join("|");
+        if (before !== after) {
+          await reorderVideos(videoOrder);
+          setSuccessMessage("排序已保存！");
+          setTimeout(() => setSuccessMessage(null), 2000);
+        }
+      }
+    } catch (err) {
+      console.error("保存排序失败:", err);
+    }
+  };
+
+  const handleMergeClick = async () => {
+    if (
+      !project ||
+      !Array.isArray(project.video_paths) ||
+      project.video_paths.length < 2
+    ) {
+      return;
+    }
+    try {
+      // 若本地排序与项目不一致，先保存排序
+      const before = project.video_paths.join("|");
+      const after = videoOrder.join("|");
+      if (before !== after) {
+        await reorderVideos(videoOrder);
+      }
+      await mergeVideos();
+    } catch (err) {
+      console.error("合并视频失败:", err);
+    }
+  };
   
 
   // 拖拽上传状态
@@ -128,7 +224,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   
   
 
-  
+
 
   
   
@@ -143,6 +239,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
 
     setIsGenerating(true);
+    setScriptGenProgress(0);
+    setScriptGenLogs([]);
     setSuccessMessage(null);
 
     try {
@@ -166,6 +264,42 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       setIsGenerating(false);
     }
   };
+
+  // 订阅 WebSocket 消息，获取生成脚本的实时进度
+  React.useEffect(() => {
+    const handler = (message: WebSocketMessage) => {
+      if (
+        message &&
+        (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+        (message as any).scope === "generate_script" &&
+        (message as any).project_id === project?.id
+      ) {
+        const progress = typeof message.progress === "number" ? message.progress : scriptGenProgress;
+        if (typeof message.progress === "number") {
+          setScriptGenProgress(Math.max(0, Math.min(100, message.progress)));
+        }
+        const msgText = message.message || "";
+        setScriptGenLogs((prev) => [
+          ...prev,
+          {
+            timestamp: message.timestamp,
+            message: msgText,
+            phase: (message as any).phase,
+            type: message.type,
+          },
+        ]);
+        if (message.type === "completed") {
+          setSuccessMessage("解说脚本生成成功！");
+          setTimeout(() => setSuccessMessage(null), 3000);
+        }
+      }
+    };
+
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id, scriptGenProgress]);
 
   /**
    * 处理保存脚本
@@ -208,6 +342,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       return;
     }
     setIsGeneratingVideo(true);
+    setVideoGenProgress(0);
+    setVideoGenLogs([]);
     setSuccessMessage(null);
     try {
       const outputPath = await generateVideo();
@@ -221,6 +357,41 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       setIsGeneratingVideo(false);
     }
   };
+
+  // 订阅 WebSocket 消息，获取生成视频的实时进度
+  React.useEffect(() => {
+    const handler = (message: WebSocketMessage) => {
+      if (
+        message &&
+        (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+        (message as any).scope === "generate_video" &&
+        (message as any).project_id === project?.id
+      ) {
+        if (typeof message.progress === "number") {
+          setVideoGenProgress(Math.max(0, Math.min(100, message.progress)));
+        }
+        const msgText = message.message || "";
+        setVideoGenLogs((prev) => [
+          ...prev,
+          {
+            timestamp: message.timestamp,
+            message: msgText,
+            phase: (message as any).phase,
+            type: message.type,
+          },
+        ]);
+        if (message.type === "completed") {
+          setSuccessMessage("视频生成成功！");
+          setTimeout(() => setSuccessMessage(null), 3000);
+        }
+      }
+    };
+
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id, videoGenProgress]);
 
   /**
    * 处理下载输出视频
@@ -270,11 +441,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       </div>
     );
   }
-  console.log("mergeProgress", mergeProgress)
+
   return (
     <div className="space-y-6">
       {/* 页面头部 */}
-      <div className="bg-white rounded-lg shadow-md p-6">
+      <div className="bg-white rounded-lg shadow-md p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
@@ -289,7 +460,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
                 {project.name}
               </h1>
               <p className="text-sm text-gray-600 mt-1">
-                {project.description || "编辑项目详细信息"}
+                {project.description}
               </p>
             </div>
           </div>
@@ -316,7 +487,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">项目配置</h2>
 
-        {/* 解说类型 */}
+        {/* 解说类型（Figma 风格选择框）*/}
         <div>
           <label
             htmlFor="narration-type"
@@ -324,76 +495,110 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           >
             解说类型
           </label>
-          <select
-            id="narration-type"
-            value={project.narration_type}
-            onChange={handleNarrationTypeChange}
-            className="w-full md:w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-          >
-            <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
-          </select>
+          <div className="relative w-full md:w-1/2">
+            <select
+              id="narration-type"
+              value={project.narration_type}
+              onChange={handleNarrationTypeChange}
+              className="appearance-none w-full pr-10 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all bg-white"
+            >
+              <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          </div>
         </div>
 
-        {/* 视频文件上传 */}
+        {/* 视频源管理：上传 / 排序 / 合并（Figma 布局）*/}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            视频文件
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            视频源（上传、拖拽排序、合并）
           </label>
-          <div
-            onDragOver={handleVideoDragOver}
-            onDragLeave={handleVideoDragLeave}
-            onDrop={handleVideoDrop}
-            className={`flex items-center space-x-4 border-2 border-dashed rounded-lg p-4 transition-colors ${
-              isDraggingVideo ? "border-blue-500 bg-blue-50" : "border-gray-200"
-            }`}
-            aria-label="拖拽视频文件到此区域或点击上传"
-          >
-            <button
-              onClick={() => videoInputRef.current?.click()}
-              disabled={uploadingVideo}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          <div className="text-xs text-gray-500 mb-2 flex items-center space-x-2">
+            <span className="px-2 py-0.5 bg-gray-100 rounded">步骤 1：上传视频</span>
+            <span className="px-2 py-0.5 bg-gray-100 rounded">步骤 2：拖拽排序</span>
+            <span className="px-2 py-0.5 bg-gray-100 rounded">步骤 3：点击“合并视频”</span>
+          </div>
+          <div className="flex gap-6">
+            {/* 左侧：上传区域（紫色虚线卡片、居中内容）*/}
+            <div
+              onDragOver={handleVideoDragOver}
+              onDragLeave={handleVideoDragLeave}
+              onDrop={handleVideoDrop}
+              className={`flex-1 flex flex-col items-center justify-center text-center rounded-lg p-8 border border-dashed transition-colors ${
+                isDraggingVideo ? "border-violet-500 bg-violet-50" : "border-violet-300 bg-violet-50"
+              }`}
+              aria-label="点击或拖拽视频至此"
             >
-              <Upload className="h-4 w-4 mr-2" />
-              上传视频
-            </button>
-            <input
-              ref={videoInputRef}
-              type="file"
-              accept="video/*"
-              multiple
-              onChange={handleVideoFileChange}
-              className="hidden"
-            />
-            <span className="text-xs text-gray-500">拖拽视频到此或点击“上传视频”</span>
-            {Array.isArray(project.video_paths) && project.video_paths.length > 0 && (
-              <div className="flex-1">
-                <div className="flex flex-col space-y-1">
-                  {project.video_paths.map((vp) => (
-                    <div key={vp} className="flex items-center text-sm text-gray-600">
-                      <FileVideo className="h-4 w-4 mr-2 text-green-500" />
-                      <span className="truncate max-w-md">{vp.split("/").pop()}</span>
+              <Upload className="h-12 w-12 text-violet-500 mb-4" />
+              <div className="text-base font-semibold text-violet-600">点击或拖拽视频至此</div>
+              <div className="text-xs text-gray-500 mt-2">支持多文件上传，自动排序</div>
+              <button
+                onClick={() => videoInputRef.current?.click()}
+                disabled={uploadingVideo}
+                className="mt-4 px-6 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                选择文件
+              </button>
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                multiple
+                onChange={handleVideoFileChange}
+                className="hidden"
+              />
+            </div>
+
+            {/* 右侧：文件列表面板 */}
+            <div className="flex-[2] flex flex-col space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-base font-semibold text-gray-800">
+                  已上传视频 ({Array.isArray(videoOrder) ? videoOrder.length : (Array.isArray(project.video_paths) ? project.video_paths.length : 0)})
+                </div>
+                {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && (
+                  <button
+                    onClick={handleMergeClick}
+                    disabled={uploadingVideo}
+                    className="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    合并视频
+                  </button>
+                )}
+              </div>
+
+              {Array.isArray(videoOrder) && videoOrder.length > 0 ? (
+                <div className="max-h-72 overflow-auto space-y-2">
+                  {videoOrder.map((vp, idx) => (
+                    <div
+                      key={vp}
+                      className={`flex items-center justify-between text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2 ${dragIndex===idx?"ring-2 ring-violet-300":""}`}
+                      draggable
+                      onDragStart={() => handleItemDragStart(idx)}
+                      onDragOver={(e) => handleItemDragOver(e, idx)}
+                      onDrop={handleItemDrop}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <span className="text-gray-300 font-mono">::</span>
+                        <span className="truncate max-w-xs text-gray-800" title={vp}>{project.video_names?.[vp] || vp.split("/").pop()}</span>
+                        <span className="text-xs text-gray-400">#{idx+1}</span>
+                      </div>
                       <button
-                        onClick={() => deleteVideoItem(vp)}
-                        className="ml-3 px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                        onClick={(e) => { e.stopPropagation(); deleteVideoItem(vp); }}
+                        className="px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                        title="删除"
                       >
                         删除
                       </button>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-            {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && (
-              <button
-                onClick={mergeVideos}
-                disabled={uploadingVideo}
-                className="ml-auto px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                合并视频
-              </button>
-            )}
+              ) : (
+                <div className="text-xs text-gray-500">暂无视频文件，请先上传</div>
+              )}
+            </div>
           </div>
-          {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && !project.merged_video_path && mergeProgress > 0 && mergeProgress < 100 && (
+        </div>
+          {merging && Array.isArray(project.video_paths) && project.video_paths.length >= 2 && !project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
                 <span>合并进度</span>
@@ -408,12 +613,21 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             </div>
           )}
           {project.merged_video_path && (
-            <div className="mt-2 text-xs text-gray-700">
-              已合并视频：
-              <span className="ml-1 break-all">{project.merged_video_path}</span>
+            <div className="mt-3">
+              <div className="mt-2 text-xs text-gray-700">
+                已合并视频：
+                <button
+                  type="button"
+                  onClick={() => setShowMergedPreview(true)}
+                  className="ml-1 break-all text-blue-600 hover:underline"
+                  title="点击预览合并视频"
+                >
+                  {project.merged_video_path}
+                </button>
+              </div>
             </div>
           )}
-          {project.merged_video_path && mergeProgress > 0 && mergeProgress < 100 && (
+          {merging && project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
                 <span>合并进度</span>
@@ -441,16 +655,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               </div>
             </div>
           )}
-        </div>
-
         
 
-        {/* 操作按钮：生成脚本 / 生成视频 / 下载视频 */}
+        {/* 操作按钮：生成脚本 / 生成视频 / 下载视频（Figma 配色与风格） */}
         <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
           <button
             onClick={handleGenerateScript}
             disabled={!project.video_path || isGenerating}
-            className="flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-violet-600 mt-2 flex items-center px-6 py-3 bg-violet-300 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGenerating ? (
               <>
@@ -459,15 +671,103 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               </>
             ) : (
               <>
-                <Sparkles className="h-5 w-5 mr-2" />
                 生成解说脚本
               </>
             )}
           </button>
+          {/* 生成视频实时进度显示 */}
+          {(isGeneratingVideo || (videoGenProgress > 0 && videoGenProgress < 100)) && (
+            <div className="w-full mt-3">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>视频生成进度</span>
+                <span>{Math.round(videoGenProgress)}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-blue-600 rounded transition-all"
+                  style={{ width: `${Math.round(videoGenProgress)}%` }}
+                />
+              </div>
+              {/* 步骤日志 */}
+              {videoGenLogs.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {videoGenLogs.slice(-1).map((log, idx) => (
+                    <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
+                      {log.type === "error" ? (
+                        <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
+                      ) : (
+                        <Loader className="h-3 w-3 mr-1 text-blue-600" />
+                      )}
+                      <span className="break-all">{log.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 合并视频预览弹窗 */}
+          {showMergedPreview && project?.merged_video_path && (
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4">
+                <div className="flex items-center justify-between p-3 border-b">
+                  <div className="flex items-center text-sm font-medium text-gray-800">
+                    <FileVideo className="h-4 w-4 mr-1" /> 合并视频预览
+                  </div>
+                  <button
+                    onClick={() => setShowMergedPreview(false)}
+                    className="text-gray-600 hover:text-gray-900"
+                    title="关闭预览"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-3">
+                  <video
+                    key={project.merged_video_path}
+                    src={projectService.getMergedVideoUrl(project.id)}
+                    controls
+                    className="w-full rounded-lg bg-black max-h-[70vh]"
+                    preload="metadata"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {/* 生成脚本实时进度显示 */}
+          {(isGenerating || (scriptGenProgress > 0 && scriptGenProgress < 100)) && (
+            <div className="w-full ml-0 mt-3">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>脚本生成进度</span>
+                <span>{Math.round(scriptGenProgress)}%</span>
+              </div>
+              <div className="w-full h-2 mb-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-blue-600 rounded transition-all"
+                  style={{ width: `${Math.round(scriptGenProgress)}%` }}
+                />
+              </div>
+              {/* 步骤日志 */}
+              {scriptGenLogs.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {scriptGenLogs.slice(-1).map((log, idx) => (
+                    <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
+                      {log.type === "error" ? (
+                        <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
+                      ) : (
+                        <Loader className="h-3 w-3 mr-1 text-blue-600" />
+                      )}
+                      <span className="break-all">{log.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={handleGenerateVideo}
             disabled={!project.script || !project.video_path || isGeneratingVideo}
-            className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex mt-2 items-center px-6 py-3 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGeneratingVideo ? (
               <>
@@ -476,7 +776,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
               </>
             ) : (
               <>
-                <Video className="h-5 w-5 mr-2" />
                 生成视频
               </>
             )}
@@ -484,13 +783,49 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           <button
             onClick={handleDownloadVideo}
             disabled={!project.output_video_path}
-            className="flex items-center px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex mt-2 items-center px-6 py-3 bg-white text-green-600 border border-green-500 rounded-lg font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download className="h-5 w-5 mr-2" />
             下载视频
           </button>
           {project.output_video_path && (
-            <span className="text-xs text-gray-600">已生成：{project.output_video_path.split("/").pop()}</span>
+            <div className="mt-2 text-xs text-gray-600">
+              已生成：
+              <button
+                onClick={() => setShowOutputPreview(true)}
+                className="ml-1 break-all text-blue-600 hover:underline"
+                title="点击预览输出视频"
+              >
+                {project.output_video_path.split("/").pop()}
+              </button>
+            </div>
+          )}
+          {/* 输出视频预览弹窗 */}
+          {showOutputPreview && project?.output_video_path && (
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4">
+                <div className="flex items-center justify-between p-3 border-b">
+                  <div className="flex items-center text-sm font-medium text-gray-800">
+                    <FileVideo className="h-4 w-4 mr-1" /> 输出视频预览
+                  </div>
+                  <button
+                    onClick={() => setShowOutputPreview(false)}
+                    className="text-gray-600 hover:text-gray-900"
+                    title="关闭预览"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-3">
+                  <video
+                    key={project.output_video_path}
+                    src={projectService.getOutputVideoDownloadUrl(project.id)}
+                    controls
+                    className="w-full rounded-lg bg-black max-h-[70vh]"
+                    preload="metadata"
+                  />
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

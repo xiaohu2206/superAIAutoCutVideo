@@ -1,0 +1,298 @@
+{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "1:1",
+        "name": "Project Configuration Redesign",
+        "type": "FRAME",
+        "blendMode": "PASS_THROUGH",
+        "children": [
+          {
+            "id": "2:1",
+            "name": "Page Container",
+            "type": "FRAME",
+            "layoutMode": "VERTICAL",
+            "counterAxisSizingMode": "AUTO",
+            "primaryAxisSizingMode": "AUTO",
+            "paddingLeft": 40,
+            "paddingRight": 40,
+            "paddingTop": 40,
+            "paddingBottom": 40,
+            "itemSpacing": 24,
+            "fills": [{"type": "SOLID", "color": {"r": 0.96, "g": 0.97, "b": 0.98, "a": 1}}],
+            "children": [
+              {
+                "id": "3:1",
+                "name": "Header",
+                "type": "TEXT",
+                "characters": "项目配置",
+                "fontSize": 24,
+                "fontWeight": 700,
+                "fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.1, "b": 0.1, "a": 1}}]
+              },
+              {
+                "id": "4:1",
+                "name": "Main Content Card",
+                "type": "FRAME",
+                "layoutMode": "VERTICAL",
+                "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+                "cornerRadius": 12,
+                "paddingLeft": 32,
+                "paddingRight": 32,
+                "paddingTop": 32,
+                "paddingBottom": 32,
+                "itemSpacing": 32,
+                "effects": [{"type": "DROP_SHADOW", "color": {"r": 0, "g": 0, "b": 0, "a": 0.05}, "offset": {"x": 0, "y": 4}, "radius": 12}],
+                "children": [
+                  {
+                    "id": "5:1",
+                    "name": "Form Item: Type",
+                    "type": "FRAME",
+                    "layoutMode": "VERTICAL",
+                    "itemSpacing": 8,
+                    "children": [
+                      {
+                        "id": "5:2",
+                        "name": "Label",
+                        "type": "TEXT",
+                        "characters": "解说类型",
+                        "fontSize": 14,
+                        "fills": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.4, "b": 0.4, "a": 1}}]
+                      },
+                      {
+                        "id": "5:3",
+                        "name": "Select Input",
+                        "type": "FRAME",
+                        "layoutMode": "HORIZONTAL",
+                        "paddingLeft": 16,
+                        "paddingRight": 16,
+                        "paddingTop": 12,
+                        "paddingBottom": 12,
+                        "strokes": [{"type": "SOLID", "color": {"r": 0.9, "g": 0.9, "b": 0.9, "a": 1}}],
+                        "cornerRadius": 8,
+                        "primaryAxisAlignItems": "SPACE_BETWEEN",
+                        "children": [
+                          {"type": "TEXT", "characters": "短剧解说", "fontSize": 16},
+                          {"type": "VECTOR", "name": "ChevronDown", "visible": true}
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "6:1",
+                    "name": "Workspace Area",
+                    "type": "FRAME",
+                    "layoutMode": "HORIZONTAL",
+                    "itemSpacing": 24,
+                    "children": [
+                      {
+                        "id": "7:1",
+                        "name": "Left: Upload Zone",
+                        "type": "FRAME",
+                        "layoutMode": "VERTICAL",
+                        "layoutGrow": 1,
+                        "height": 400,
+                        "primaryAxisAlignItems": "CENTER",
+                        "counterAxisAlignItems": "CENTER",
+                        "strokes": [{"type": "SOLID", "color": {"r": 0.48, "g": 0.38, "b": 1, "a": 1}}],
+                        "strokeWeight": 1,
+                        "strokeDashes": [4, 4],
+                        "cornerRadius": 8,
+                        "fills": [{"type": "SOLID", "color": {"r": 0.97, "g": 0.96, "b": 1, "a": 1}}],
+                        "itemSpacing": 16,
+                        "children": [
+                          {
+                            "type": "VECTOR",
+                            "name": "UploadIcon_Large",
+                            "width": 48, 
+                            "height": 48
+                          },
+                          {
+                            "type": "TEXT",
+                            "characters": "点击或拖拽视频至此",
+                            "fontSize": 16,
+                            "fontWeight": 600,
+                            "fills": [{"type": "SOLID", "color": {"r": 0.48, "g": 0.38, "b": 1, "a": 1}}]
+                          },
+                          {
+                            "type": "TEXT",
+                            "characters": "支持多文件上传，自动排序",
+                            "fontSize": 12,
+                            "fills": [{"type": "SOLID", "color": {"r": 0.6, "g": 0.6, "b": 0.6, "a": 1}}]
+                          },
+                          {
+                            "id": "7:5",
+                            "name": "Btn: Select File",
+                            "type": "FRAME",
+                            "paddingLeft": 24,
+                            "paddingRight": 24,
+                            "paddingTop": 10,
+                            "paddingBottom": 10,
+                            "cornerRadius": 6,
+                            "fills": [{"type": "SOLID", "color": {"r": 0.48, "g": 0.38, "b": 1, "a": 1}}],
+                            "children": [
+                                {"type": "TEXT", "characters": "选择文件", "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}]}
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "8:1",
+                        "name": "Right: File List Panel",
+                        "type": "FRAME",
+                        "layoutMode": "VERTICAL",
+                        "layoutGrow": 2,
+                        "itemSpacing": 12,
+                        "children": [
+                          {
+                            "id": "8:2",
+                            "name": "List Header",
+                            "type": "FRAME",
+                            "layoutMode": "HORIZONTAL",
+                            "primaryAxisAlignItems": "SPACE_BETWEEN",
+                            "children": [
+                                {
+                                    "type": "TEXT", 
+                                    "characters": "已上传视频 (10)", 
+                                    "fontWeight": 600,
+                                    "fontSize": 16
+                                },
+                                {
+                                    "id": "8:3",
+                                    "name": "Btn: Merge",
+                                    "type": "FRAME",
+                                    "paddingLeft": 16,
+                                    "paddingRight": 16,
+                                    "paddingTop": 8,
+                                    "paddingBottom": 8,
+                                    "cornerRadius": 6,
+                                    "fills": [{"type": "SOLID", "color": {"r": 0.55, "g": 0.2, "b": 0.9, "a": 1}}],
+                                    "children": [
+                                        {"type": "TEXT", "characters": "合并视频", "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}], "fontSize": 12}
+                                    ]
+                                }
+                            ]
+                          },
+                          {
+                            "id": "8:4",
+                            "name": "Scrollable List Container",
+                            "type": "FRAME",
+                            "layoutMode": "VERTICAL",
+                            "itemSpacing": 8,
+                            "children": [
+                                {
+                                    "name": "List Item 1",
+                                    "type": "FRAME",
+                                    "layoutMode": "HORIZONTAL",
+                                    "primaryAxisAlignItems": "SPACE_BETWEEN",
+                                    "paddingLeft": 12,
+                                    "paddingRight": 12,
+                                    "paddingTop": 12,
+                                    "paddingBottom": 12,
+                                    "cornerRadius": 6,
+                                    "fills": [{"type": "SOLID", "color": {"r": 0.98, "g": 0.98, "b": 0.98, "a": 1}}],
+                                    "children": [
+                                        {
+                                            "type": "FRAME",
+                                            "layoutMode": "HORIZONTAL",
+                                            "itemSpacing": 12,
+                                            "children": [
+                                                {"type": "TEXT", "characters": "::", "name": "DragHandle", "fills": [{"type": "SOLID", "color": {"r": 0.8, "g": 0.8, "b": 0.8, "a": 1}}]},
+                                                {"type": "TEXT", "characters": "1.mp4", "fills": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.2, "b": 0.2, "a": 1}}]},
+                                                {"type": "TEXT", "characters": "#1", "fills": [{"type": "SOLID", "color": {"r": 0.6, "g": 0.6, "b": 0.6, "a": 1}}]}
+                                            ]
+                                        },
+                                        {
+                                            "type": "FRAME",
+                                            "name": "Delete Btn",
+                                            "children": [{"type": "TEXT", "characters": "🗑", "fontSize": 14}]
+                                        }
+                                    ]
+                                },
+                                {
+                                    "name": "List Item 2 (Example)",
+                                    "type": "FRAME",
+                                    "layoutMode": "HORIZONTAL",
+                                    "paddingLeft": 12,
+                                    "paddingRight": 12,
+                                    "paddingTop": 12,
+                                    "paddingBottom": 12,
+                                    "cornerRadius": 6,
+                                    "fills": [{"type": "SOLID", "color": {"r": 0.98, "g": 0.98, "b": 0.98, "a": 1}}],
+                                    "children": [{"type": "TEXT", "characters": "2.mp4..."}]
+                                }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "10:1",
+                "name": "Footer Actions",
+                "type": "FRAME",
+                "layoutMode": "HORIZONTAL",
+                "itemSpacing": 16,
+                "primaryAxisAlignItems": "MIN",
+                "children": [
+                   {
+                    "id": "10:2",
+                    "name": "Btn: Generate Script",
+                    "type": "FRAME",
+                    "layoutMode": "HORIZONTAL",
+                    "paddingLeft": 24,
+                    "paddingRight": 24,
+                    "paddingTop": 12,
+                    "paddingBottom": 12,
+                    "cornerRadius": 8,
+                    "fills": [{"type": "SOLID", "color": {"r": 0.8, "g": 0.7, "b": 1.0, "a": 1}}],
+                    "children": [
+                        {"type": "TEXT", "characters": "✨ 生成解说脚本", "fills": [{"type": "SOLID", "color": {"r": 0.3, "g": 0.1, "b": 0.6, "a": 1}}], "fontWeight": 600}
+                    ]
+                  },
+                  {
+                    "id": "10:3",
+                    "name": "Btn: Generate Video",
+                    "type": "FRAME",
+                    "layoutMode": "HORIZONTAL",
+                    "paddingLeft": 24,
+                    "paddingRight": 24,
+                    "paddingTop": 12,
+                    "paddingBottom": 12,
+                    "cornerRadius": 8,
+                    "fills": [{"type": "SOLID", "color": {"r": 0.48, "g": 0.38, "b": 1, "a": 1}}],
+                    "effects": [{"type": "DROP_SHADOW", "color": {"r": 0.48, "g": 0.38, "b": 1, "a": 0.3}, "offset": {"x": 0, "y": 4}, "radius": 8}],
+                    "children": [
+                        {"type": "TEXT", "characters": "📹 生成视频", "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}], "fontWeight": 600}
+                    ]
+                  },
+                  {
+                    "id": "10:4",
+                    "name": "Btn: Download",
+                    "type": "FRAME",
+                    "layoutMode": "HORIZONTAL",
+                    "paddingLeft": 24,
+                    "paddingRight": 24,
+                    "paddingTop": 12,
+                    "paddingBottom": 12,
+                    "cornerRadius": 8,
+                    "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+                    "strokes": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.8, "b": 0.5, "a": 1}}],
+                    "children": [
+                        {"type": "TEXT", "characters": "📥 下载视频", "fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.8, "b": 0.5, "a": 1}}], "fontWeight": 600}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

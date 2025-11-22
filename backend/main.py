@@ -29,6 +29,7 @@ from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
+from modules.ws_manager import manager
 
 # 配置日志
 logging.basicConfig(
@@ -48,7 +49,17 @@ logger.info(f"Python 解释器: {sys.executable}")
 # 配置CORS - 允许Tauri前端访问
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:1420", "tauri://localhost", "http://127.0.0.1:1420"],
+    allow_origins=[
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "http://localhost:1421",
+        "http://127.0.0.1:1421",
+        # 允许本地Vite开发服务器访问，便于前端开发调试
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # Tauri 协议
+        "tauri://localhost",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,41 +79,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 service_data_dir = project_root / "backend" / "serviceData"
 app.mount("/backend/serviceData", StaticFiles(directory=str(service_data_dir)), name="serviceData")
 
-# WebSocket连接管理器
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket连接已建立，当前连接数: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket连接已断开，当前连接数: {len(self.active_connections)}")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        try:
-            await websocket.send_text(message)
-        except Exception as e:
-            logger.error(f"发送个人消息失败: {e}")
-
-    async def broadcast(self, message: str):
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"广播消息失败: {e}")
-                disconnected.append(connection)
-        
-        # 清理断开的连接
-        for conn in disconnected:
-            self.disconnect(conn)
-
-manager = ConnectionManager()
+# WebSocket连接管理器在 modules/ws_manager.py 中定义并提供单例 manager
 
 # 数据模型
 class VideoProcessRequest(BaseModel):
