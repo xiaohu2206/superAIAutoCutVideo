@@ -1,0 +1,63 @@
+name: Build Windows App (Tauri + PyInstaller)
+
+on:
+  workflow_dispatch:
+    inputs:
+      fullBackend:
+        description: Use full backend dependencies (requirements.txt)
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Windows packaging dependencies (NSIS & WiX)
+        shell: powershell
+        run: |
+          choco install -y nsis
+          choco install -y wixtoolset
+
+      - name: Install Tauri CLI
+        run: npm i -g @tauri-apps/cli
+
+      - name: Build via PowerShell script
+        shell: powershell
+        run: |
+          $full = "${{ github.event.inputs.fullBackend }}"
+          if ($full -eq "true") {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -FullBackend
+          } else {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: |
+            src-tauri\target\release\bundle\nsis\*.exe
+            src-tauri\target\release\bundle\msi\*.msi
+            src-tauri\target\release\super-auto-cut-video.exe
+            src-tauri\target\release\resources\superAutoCutVideoBackend.exe
+            src-tauri\target\release\**\*.zip
+            frontend\dist\
