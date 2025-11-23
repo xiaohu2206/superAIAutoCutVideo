@@ -147,9 +147,9 @@ echo 后端可执行文件: backend\dist\superAutoCutVideoBackend.exe
 echo.
 
 :: 显示文件大小
-if exist "src-tauri\target\release\SuperAutoCutVideo.exe" (
+if exist "src-tauri\target\release\SuperAIAutoCutVideo.exe" (
     echo 应用大小:
-    dir "src-tauri\target\release\SuperAutoCutVideo.exe" | findstr "SuperAutoCutVideo.exe"
+    dir "src-tauri\target\release\SuperAIAutoCutVideo.exe" | findstr "SuperAIAutoCutVideo.exe"
 )
 
 echo.

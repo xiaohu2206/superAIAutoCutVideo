@@ -2,7 +2,7 @@
 name = "super-auto-cut-video"
 version = "1.0.0"
 description = "AI智能视频剪辑桌面应用"
-authors = ["SuperAutoCutVideo Team"]
+authors = ["SuperAIAutoCutVideo Team"]
 license = "MIT"
 repository = "https://github.com/your-username/super-auto-cut-video"
 edition = "2021"

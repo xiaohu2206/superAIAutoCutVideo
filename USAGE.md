@@ -1,4 +1,4 @@
-# SuperAutoCutVideo 使用说明
+# SuperAIAutoCutVideo 使用说明
 
 轻量、跨平台的一站式智能视频处理桌面应用。支持多视频上传与合并、AI脚本与TTS配音、实时进度反馈，以及两遍响度标准化等能力。
 

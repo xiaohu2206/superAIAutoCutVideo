@@ -1,6 +1,6 @@
-<img src="frontend/src/assets/logo.png" alt="SuperAutoCutVideo Logo" width="120" />
+<img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
 
-# SuperAutoCutVideo · AI智能视频剪辑
+# SuperAIAutoCutVideo · AI智能视频剪辑
 
 轻量、跨平台的一站式智能视频处理桌面应用，开箱即用，适合内容创作者和团队快速产出高质量视频。
 

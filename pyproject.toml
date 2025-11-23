@@ -11,10 +11,10 @@ description = "AI智能视频剪辑应用 - 基于深度学习的自动视频编
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "SuperAutoCutVideo Team", email = "team@superautocutvideo.com"}
+    {name = "SuperAIAutoCutVideo Team", email = "team@superautocutvideo.com"}
 ]
 maintainers = [
-    {name = "SuperAutoCutVideo Team", email = "team@superautocutvideo.com"}
+    {name = "SuperAIAutoCutVideo Team", email = "team@superautocutvideo.com"}
 ]
 keywords = [
     "video-editing",

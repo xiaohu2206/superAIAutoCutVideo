@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SuperAutoCutVideo",
+  "productName": "SuperAIAutoCutVideo",
   "version": "1.0.0",
   "identifier": "com.superautocutvideo.app",
   "build": {
@@ -30,15 +30,12 @@
     },
     "resources": [
       "resources/*"
-    ],
-    "externalBin": [
-      "resources/superAutoCutVideoBackend.exe"
     ]
   },
   "app": {
     "windows": [
       {
-        "title": "SuperAutoCutVideo",
+        "title": "SuperAIAutoCutVideo",
         "width": 1280,
         "height": 800,
         "resizable": true,
