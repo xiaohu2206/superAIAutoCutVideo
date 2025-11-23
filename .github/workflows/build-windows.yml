@@ -128,7 +128,6 @@ jobs:
             Get-ChildItem "src-tauri\target\release" -File | Select-Object Name, Length
           }
         }
-        }
 
     - name: Upload MSI
       uses: actions/upload-artifact@v4
