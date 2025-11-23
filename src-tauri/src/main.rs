@@ -217,8 +217,8 @@ async fn start_backend(
             c.arg(backend_script);
             #[cfg(target_os = "windows")]
             { c.creation_flags(CREATE_NO_WINDOW); }
-            c.current_dir(backend_dir)
-             
+            c.current_dir(backend_dir);
+
             c
         } else {
             return Err("未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string());
