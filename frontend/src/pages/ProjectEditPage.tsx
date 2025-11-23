@@ -4,16 +4,12 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle,
-  Download,
   FileVideo,
-  GripVertical,
   Loader,
   Save,
-  Sparkles,
   ChevronDown,
   Upload,
-  Video,
-  DeleteIcon
+  
 } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
@@ -274,7 +270,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         (message as any).scope === "generate_script" &&
         (message as any).project_id === project?.id
       ) {
-        const progress = typeof message.progress === "number" ? message.progress : scriptGenProgress;
         if (typeof message.progress === "number") {
           setScriptGenProgress(Math.max(0, Math.min(100, message.progress)));
         }

@@ -59,6 +59,13 @@ rm -f src-tauri/resources/superAutoCutVideoBackend
 # 构建前端
 echo "[2/4] 构建前端..."
 cd frontend
+if [ ! -d "node_modules" ]; then
+    echo "安装前端依赖..."
+    npm ci || {
+        echo "npm ci 失败，尝试 npm install...";
+        npm install || { echo "错误: 前端依赖安装失败"; exit 1; };
+    }
+fi
 npm run build
 if [ $? -ne 0 ]; then
     echo "错误: 前端构建失败"
@@ -69,7 +76,15 @@ cd ..
 # 打包后端
 echo "[3/4] 打包后端..."
 cd backend
-$PYTHON_CMD -m PyInstaller --onefile --name superAutoCutVideoBackend --distpath dist main.py
+$PYTHON_CMD -m pip install --upgrade pip >/dev/null 2>&1 || true
+if [ -f "requirements.runtime.txt" ]; then
+    echo "安装后端运行时依赖 requirements.runtime.txt..."
+    $PYTHON_CMD -m pip install -r requirements.runtime.txt || { echo "错误: 后端依赖安装失败"; exit 1; }
+elif [ -f "requirements.txt" ]; then
+    echo "安装后端依赖 requirements.txt..."
+    $PYTHON_CMD -m pip install -r requirements.txt || { echo "错误: 后端依赖安装失败"; exit 1; }
+fi
+$PYTHON_CMD -m PyInstaller --onefile --noconsole --name superAutoCutVideoBackend --distpath dist main.py
 if [ $? -ne 0 ]; then
     echo "错误: 后端打包失败"
     exit 1

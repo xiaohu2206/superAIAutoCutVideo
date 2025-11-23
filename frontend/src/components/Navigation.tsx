@@ -1,8 +1,7 @@
 import {
   Github,
   Home,
-  Settings,
-  Video
+  Settings
 } from 'lucide-react'
 import React from 'react'
 // @ts-ignore

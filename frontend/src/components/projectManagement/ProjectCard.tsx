@@ -4,7 +4,6 @@ import React from "react";
 import {
   Folder,
   Calendar,
-  Video,
   FileText,
   Trash2,
   Clock,

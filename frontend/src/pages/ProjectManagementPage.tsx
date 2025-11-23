@@ -1,7 +1,7 @@
 // 项目管理页面（一级页面）
 
 import React, { useEffect, useState } from "react";
-import { Plus, RefreshCw, Folder } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import ProjectList from "../components/projectManagement/ProjectList";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";

@@ -1,38 +1,17 @@
 {
-  "productName": "AI智能视频剪辑",
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SuperAutoCutVideo",
   "version": "1.0.0",
   "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeDevCommand": "npm --prefix ./frontend run dev",
-    "beforeBuildCommand": "npm --prefix ./frontend run build",
+    "beforeDevCommand": "cd frontend && npm run dev",
+    "beforeBuildCommand": "cd frontend && npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../frontend/dist"
   },
-  "app": {
-    "withGlobalTauri": false,
-    "security": {
-      "csp": null
-    },
-    "windows": [
-      {
-        "fullscreen": false,
-        "resizable": true,
-        "title": "AI智能视频剪辑",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "center": true,
-        "decorations": true,
-        "alwaysOnTop": false,
-        "skipTaskbar": false,
-        "theme": "Light"
-      }
-    ]
-  },
   "bundle": {
     "active": true,
-    "targets": "app",
+    "targets": ["msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,32 +19,40 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/superAutoCutVideoBackend.exe"
-    ],
-    "externalBin": [],
-    "copyright": "",
-    "category": "Video",
-    "shortDescription": "AI智能视频剪辑桌面应用",
-    "longDescription": "基于AI技术的智能视频剪辑工具，支持自动场景检测、智能剪切和实时预览",
-    "linux": {
-      "deb": {
-        "depends": []
-      }
-    },
-    "macOS": {
-      "frameworks": [],
-      "minimumSystemVersion": "10.13",
-      "exceptionDomain": "",
-      "signingIdentity": null,
-      "providerShortName": null,
-      "entitlements": null
-    },
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
-    }
+      "timestampUrl": "",
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["en-US", "zh-CN"],
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perUser"
+      }
+    },
+    "resources": [
+      "resources/*"
+    ],
+    "externalBin": [
+      "resources/superAutoCutVideoBackend"
+    ]
   },
-  "plugins": {}
+  "app": {
+    "windows": [
+      {
+        "title": "SuperAutoCutVideo",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
+    }
+  }
 }
