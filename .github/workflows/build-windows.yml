@@ -132,6 +132,20 @@ jobs:
         Write-Host "=== Hex dump (first 16 bytes) ==="
         Format-Hex "src-tauri\tauri.conf.json" | Select-Object -First 3
 
+    - name: Provide NSIS en-US language file
+      run: |
+        Write-Host "=== Preparing NSIS en-US language file ==="
+        $destDir = "src-tauri\nsis"
+        if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+        $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+        $englishNlf = Join-Path $nsisDir "Contrib\Language files\English.nlf"
+        if (!(Test-Path $englishNlf)) {
+          throw "English.nlf not found in installed NSIS at $englishNlf"
+        }
+        $out = Join-Path $destDir "en-US.nlf"
+        Copy-Item $englishNlf $out -Force
+        Write-Host "NSIS language file ready: $out"
+
     - name: Build Tauri app
       working-directory: src-tauri
       run: cargo tauri build --config tauri.conf.json

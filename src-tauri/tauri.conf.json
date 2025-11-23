@@ -25,7 +25,8 @@
       },
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "languages": ["en-US"]
+        "languages": ["English"],
+        "custom_language_files": ["nsis/en-US.nlf"]
       }
     },
     "resources": [
