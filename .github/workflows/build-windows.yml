@@ -117,8 +117,17 @@ jobs:
       if: always()
       run: |
         Write-Host "=== Build Artifacts ==="
-        Get-ChildItem "src-tauri\target\release\bundle" -Recurse -Include *.msi,*.exe | ForEach-Object {
-          Write-Host "$($_.FullName) - $([math]::Round($_.Length/1MB,2)) MB"
+        if (Test-Path "src-tauri\target\release\bundle") {
+          Get-ChildItem "src-tauri\target\release\bundle" -Recurse -Include *.msi,*.exe | ForEach-Object {
+            Write-Host "$($_.FullName) - $([math]::Round($_.Length/1MB,2)) MB"
+          }
+        } else {
+          Write-Host "Bundle directory not found. Build may have failed."
+          if (Test-Path "src-tauri\target\release") {
+            Write-Host "Release directory contents:"
+            Get-ChildItem "src-tauri\target\release" -File | Select-Object Name, Length
+          }
+        }
         }
 
     - name: Upload MSI
