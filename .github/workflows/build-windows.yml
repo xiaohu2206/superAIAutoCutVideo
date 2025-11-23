@@ -30,9 +30,9 @@ jobs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Install Tauri CLI
+    - name: Install Tauri CLI (v2)
       run: |
-        cargo install tauri-cli --locked
+        cargo install tauri-cli --version ">=2.0.0,<3.0.0" --locked
         cargo tauri --version
 
     - name: Cache cargo registry
@@ -55,6 +55,11 @@ jobs:
 
     - name: Install FFmpeg
       run: choco install ffmpeg -y --no-progress
+
+    - name: Install Windows bundlers (NSIS & WiX)
+      run: |
+        choco install nsis -y --no-progress
+        choco install wixtoolset -y --no-progress
 
     - name: Install frontend dependencies
       working-directory: frontend
@@ -109,8 +114,23 @@ jobs:
         Write-Host "`nFFmpeg:"
         ffmpeg -version | Select-Object -First 1
 
+    - name: Verify Tauri config file
+      run: |
+        Write-Host "=== Verify tauri.conf.json ==="
+        if (Test-Path "src-tauri\tauri.conf.json") {
+          $item = Get-Item "src-tauri\tauri.conf.json"
+          Write-Host "Path: $($item.FullName)"
+          Write-Host "Size: $($item.Length) bytes"
+          if ($item.Length -eq 0) { throw "tauri.conf.json is empty" }
+          Get-Content "src-tauri\tauri.conf.json" -Head 20 | ForEach-Object { Write-Host $_ }
+        } else {
+          throw "src-tauri\\tauri.conf.json not found"
+        }
+
     - name: Build Tauri app
       working-directory: src-tauri
+      env:
+        TAURI_CONFIG: tauri.conf.json
       run: cargo tauri build
 
     - name: List artifacts

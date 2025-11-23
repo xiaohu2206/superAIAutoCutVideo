@@ -1,41 +1,53 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AI智能视频剪辑",
+  "productName": "SuperAutoCutVideo",
   "version": "1.0.0",
-  "identifier": "com.superautocutvideo.desktop",
+  "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix frontend",
-    "beforeBuildCommand": "npm run build --prefix frontend",
-    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd frontend && npm run dev",
+    "beforeBuildCommand": "cd frontend && npm run build",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "../frontend/dist"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "languages": ["en-US"]
+      }
+    },
+    "resources": [
+      "resources/*"
+    ],
+    "externalBin": [
+      "resources/superAutoCutVideoBackend.exe"
+    ]
   },
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "AI智能视频剪辑",
-        "width": 1200,
+        "title": "SuperAutoCutVideo",
+        "width": 1280,
         "height": 800,
         "resizable": true,
         "fullscreen": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
     }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/64x64.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "resources": ["./resources"]
   },
   "plugins": {}
 }
