@@ -127,11 +127,14 @@ jobs:
           throw "src-tauri\\tauri.conf.json not found"
         }
 
+    - name: Show Tauri config header bytes
+      run: |
+        Write-Host "=== Hex dump (first 16 bytes) ==="
+        Format-Hex "src-tauri\tauri.conf.json" | Select-Object -First 3
+
     - name: Build Tauri app
       working-directory: src-tauri
-      env:
-        TAURI_CONFIG: tauri.conf.json
-      run: cargo tauri build
+      run: cargo tauri build --config tauri.conf.json
 
     - name: List artifacts
       if: always()
