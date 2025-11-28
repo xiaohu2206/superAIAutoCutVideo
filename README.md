@@ -28,6 +28,8 @@ cd frontend && npm install
 
 # 安装后端依赖
 cd ../backend && pip install -r requirements.txt
+source .venv/bin/activate 
+python main.py
 
 # 回到项目根目录，一键启动桌面应用
 cd .. && cargo tauri dev

@@ -249,20 +249,20 @@ async def ensure_models_ready_for_script(project_id: Optional[str] = None) -> No
     #                 except Exception:
     #                     pass
     # except Exception as e:
-        logging.warning(f"视频分析模型连通性测试异常（不阻断）：{e}")
-        if project_id:
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "progress",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "video_model_error",
-                    "message": "视频分析模型验证异常（不影响脚本生成）",
-                    "progress": 24,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
+        # logging.warning(f"视频分析模型连通性测试异常（不阻断）：{e}")
+        # if project_id:
+        #     try:
+        #         await manager.broadcast(json.dumps({
+        #             "type": "progress",
+        #             "scope": "generate_script",
+        #             "project_id": project_id,
+        #             "phase": "video_model_error",
+        #             "message": "视频分析模型验证异常（不影响脚本生成）",
+        #             "progress": 24,
+        #             "timestamp": now_ts(),
+        #         }))
+        #     except Exception:
+        #         pass
 
 
 class CreateProjectRequest(BaseModel):
