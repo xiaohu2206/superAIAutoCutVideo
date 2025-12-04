@@ -232,9 +232,9 @@ class TtsTestRequest(BaseModel):
 
 
 @router.post("/configs/{config_id}/test", summary="测试TTS引擎连通性")
-async def test_tts_connection(config_id: str):
+async def test_tts_connection(config_id: str, proxy_url: Optional[str] = Query(None, description="可选代理URL，覆盖EDGE_TTS_PROXY")):
     try:
-        result = await tts_engine_config_manager.test_connection(config_id)
+        result = await tts_engine_config_manager.test_connection(config_id, proxy_url)
         return {"success": result.get('success', False), "data": result}
     except Exception as e:
         logger.error(f"测试TTS连接失败: {e}")

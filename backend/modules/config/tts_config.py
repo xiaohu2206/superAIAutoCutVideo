@@ -5,6 +5,7 @@ TTS引擎配置管理模块
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from pydantic import BaseModel, Field, validator
@@ -382,7 +383,7 @@ class TtsEngineConfigManager:
         self._voices_cache[provider] = voices
         return voices
 
-    async def test_connection(self, config_id: str) -> Dict[str, Any]:
+    async def test_connection(self, config_id: str, proxy_url: Optional[str] = None) -> Dict[str, Any]:
         """测试指定配置的连通性：根据 provider 分支校验"""
         config = self.get_config(config_id)
         if not config:
@@ -395,12 +396,28 @@ class TtsEngineConfigManager:
                 backend_dir = Path(__file__).parent.parent.parent
                 out_path = backend_dir / "serviceData" / "tts" / "previews" / "edge_test_preview.mp3"
                 voice_id = config.active_voice_id or "zh-CN-XiaoxiaoNeural"
+                prev_proxy = None
+                try:
+                    if isinstance(proxy_url, str) and proxy_url.strip():
+                        prev_proxy = os.getenv("EDGE_TTS_PROXY")
+                        os.environ["EDGE_TTS_PROXY"] = proxy_url.strip()
+                except Exception:
+                    prev_proxy = None
                 res = await edge_tts_service.synthesize(
                     text="你好，Edge TTS 连通性测试。",
                     voice_id=voice_id,
                     speed_ratio=config.speed_ratio,
                     out_path=out_path,
                 )
+                # 恢复环境变量
+                try:
+                    if isinstance(proxy_url, str) and proxy_url.strip():
+                        if prev_proxy is None:
+                            os.environ.pop("EDGE_TTS_PROXY", None)
+                        else:
+                            os.environ["EDGE_TTS_PROXY"] = prev_proxy
+                except Exception:
+                    pass
                 if res.get("success"):
                     return {
                         "success": True,
@@ -415,16 +432,28 @@ class TtsEngineConfigManager:
                         "success": False,
                         "config_id": config_id,
                         "provider": config.provider,
-                        "message": res.get("error") or "合成失败",
-                        "error": res.get("error")
+                        "message": res.get("message") or res.get("error") or "合成失败",
+                        "error": res.get("error") or res.get("message"),
+                        "requires_proxy": bool(res.get("requires_proxy", False)),
+                        "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址"
                     }
             except Exception as e:
+                # 恢复环境变量
+                try:
+                    if isinstance(proxy_url, str) and proxy_url.strip():
+                        if prev_proxy is None:
+                            os.environ.pop("EDGE_TTS_PROXY", None)
+                        else:
+                            os.environ["EDGE_TTS_PROXY"] = prev_proxy
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "config_id": config_id,
                     "provider": config.provider,
                     "message": "Edge TTS 测试失败",
-                    "error": str(e)
+                    "error": str(e),
+                    "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址"
                 }
 
         # 默认走腾讯云 TTS 鉴权校验

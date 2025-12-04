@@ -1,10 +1,10 @@
 import {
-  Github,
-  Home,
-  Settings
+    Github,
+    Home,
+    Settings
 } from 'lucide-react'
 import React from 'react'
-// @ts-ignore
+// @ts-expect-error asset import via Vite alias
 import Logo from '@/assets/logo.png'
 
 interface NavigationProps {

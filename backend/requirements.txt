@@ -20,4 +20,5 @@ pyinstaller>=6.0.0
 psutil>=5.9.0
 tencentcloud-sdk-python>=3.0.1220
 requests
-edge-tts>=6.1.0
+aiohttp>=3.8.0
+edge-tts>=7.2.0

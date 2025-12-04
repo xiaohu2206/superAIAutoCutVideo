@@ -22,17 +22,55 @@
 
 前置要求：`Node.js ≥ 18`、`Python ≥ 3.11`、`Rust`、`FFmpeg`
 
+### Windows（PowerShell）
+
+```powershell
+# 安装前端依赖（优先使用 cnpm）
+cd frontend
+cnpm install
+
+# 创建并使用后端虚拟环境（无需激活）
+cd ..
+py -3 -m venv backend\.venv
+backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+backend\.venv\Scripts\python.exe backend\main.py
+
+# 启动桌面应用
+cargo tauri dev
+```
+
+#### Edge TTS 使用说明（代理与持久化）
+
+- Edge TTS 免凭据，但在中国大陆直连通常会返回 403 或 TLS 连接错误；需配置 HTTP 代理。
+- 推荐使用持久化配置：在 `backend/config/tts_config.json` 的 `edge_tts_default.extra_params` 写入 `ProxyUrl`（示例：`http://127.0.0.1:7890`）。
+- 后端代理解析优先级：`EDGE_TTS_PROXY` → `HTTPS_PROXY`/`HTTP_PROXY` → `extra_params.ProxyUrl`。
+- 每次测试可直接调用接口，无需手动设置环境变量：
+  - 无代理（示例，仅在可直连时可用）：
+    ```powershell
+    Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/api/tts/configs/edge_tts_default/test" -ContentType 'application/json'
+    ```
+  - 指定临时代理：
+    ```powershell
+    Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/api/tts/configs/edge_tts_default/test?proxy_url=http://127.0.0.1:7890" -ContentType 'application/json'
+    ```
+- 若使用虚拟环境 `Activate.ps1`，需在激活后的会话中重新设置会话级环境变量；或继续按上面方式直接调用虚拟环境内的 `python.exe`，避免环境变量丢失。
+- 前端会自动发现后端端口（扫描范围 8000–8019），无需手动修改端口。
+
+### macOS
+
 ```bash
 # 安装前端依赖
-cd frontend && npm install
+cd frontend
+cnpm install
 
-# 安装后端依赖
-cd ../backend && pip install -r requirements.txt
-source .venv/bin/activate 
-python main.py
+# 创建并使用后端虚拟环境（可不激活）
+cd ..
+python3 -m venv backend/.venv
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
+backend/.venv/bin/python backend/main.py
 
-# 回到项目根目录，一键启动桌面应用
-cd .. && cargo tauri dev
+# 启动桌面应用
+cargo tauri dev
 ```
 
 ## 打包

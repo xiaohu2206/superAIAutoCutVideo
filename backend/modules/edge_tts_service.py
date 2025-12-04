@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -66,6 +67,27 @@ def _speed_ratio_to_rate(speed_ratio: Optional[float]) -> str:
         return f"{pct:+d}%"
     except Exception:
         return "+0%"
+
+
+def _resolve_proxy_url() -> Optional[str]:
+    try:
+        env = (os.getenv("EDGE_TTS_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or "").strip()
+        if env:
+            return env
+        try:
+            from modules.config.tts_config import tts_engine_config_manager
+            cfg = tts_engine_config_manager.get_active_config()
+            if cfg and (getattr(cfg, "provider", "") or "").lower() == "edge_tts":
+                ep = getattr(cfg, "extra_params", None) or {}
+                for key in ("ProxyUrl", "proxy_url", "proxy", "http_proxy", "https_proxy", "EDGE_TTS_PROXY"):
+                    val = ep.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+        except Exception:
+            pass
+        return None
+    except Exception:
+        return None
 
 
 class EdgeTtsService:
@@ -138,13 +160,17 @@ class EdgeTtsService:
 
         rate = _speed_ratio_to_rate(speed_ratio)
         try:
-            communicate = edge_tts.Communicate(text=text, voice=voice_id, rate=rate)
+            proxy = _resolve_proxy_url()
+            communicate = edge_tts.Communicate(text=text, voice=voice_id, rate=rate, proxy=proxy)
             await _ensure_parent_dir(out_path)
             await communicate.save(str(out_path))
             dur = await _ffprobe_duration(str(out_path))
             return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            msg = str(e)
+            if ("403" in msg) and ("Invalid response status" in msg or "speech.platform.bing.com" in msg or "TrustedClientToken" in msg):
+                return {"success": False, "error": "edge_tts_403", "message": msg, "requires_proxy": True}
+            return {"success": False, "error": msg}
 
 
 edge_tts_service = EdgeTtsService()

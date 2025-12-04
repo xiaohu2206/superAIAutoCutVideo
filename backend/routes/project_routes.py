@@ -170,9 +170,36 @@ async def ensure_models_ready_for_script(project_id: Optional[str] = None) -> No
             except Exception:
                 pass
         raise HTTPException(status_code=400, detail="未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据")
+
+    # 根据 provider 区分校验策略：
+    # - 腾讯云 TTS：仍然严格校验，失败则阻断流程（避免后续配音时报错）
+    # - Edge TTS：连通性依赖外网 / 代理，失败时仅记录告警，不阻断脚本生成
+    tts_cfg = tts_engine_config_manager.get_config(active_tts_id)
+    provider = (getattr(tts_cfg, "provider", None) or "tencent_tts").lower()
+
     tts_result = await tts_engine_config_manager.test_connection(active_tts_id)
     if not tts_result.get("success", False):
         msg = tts_result.get("error") or tts_result.get("message") or "TTS配置不可用"
+
+        # Edge TTS：不阻断脚本生成，只提示告警
+        if provider == "edge_tts":
+            logging.warning(f"Edge TTS 配置连通性检查失败（忽略，不阻断脚本生成）：{msg}")
+            if project_id:
+                try:
+                    await manager.broadcast(json.dumps({
+                        "type": "warning",
+                        "scope": "generate_script",
+                        "project_id": project_id,
+                        "phase": "tts_unavailable_edge",
+                        "message": f"Edge TTS 配置连通性检查失败，将跳过强制校验：{msg}",
+                        "timestamp": now_ts(),
+                    }))
+                except Exception:
+                    pass
+            # 直接返回，不再抛错
+            return
+
+        # 其他 TTS（例如腾讯云）：保持原有严格行为
         if project_id:
             try:
                 await manager.broadcast(json.dumps({
@@ -186,6 +213,7 @@ async def ensure_models_ready_for_script(project_id: Optional[str] = None) -> No
             except Exception:
                 pass
         raise HTTPException(status_code=400, detail=f"TTS配置不可用：{msg}")
+
     if project_id:
         try:
             await manager.broadcast(json.dumps({

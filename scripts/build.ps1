@@ -13,8 +13,16 @@ Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
 Step "Check toolchain"
-foreach ($cmd in @('node','npm','python','pip','cargo')) {
+foreach ($cmd in @('node','python','pip','cargo')) {
   if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Command not found: $cmd" }
+}
+$npmCmd = "npm"
+if (Get-Command cnpm -ErrorAction SilentlyContinue) {
+    $npmCmd = "cnpm"
+    Step "Using cnpm as package manager"
+} else {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Fail "Command not found: npm" }
+    Step "Using npm as package manager"
 }
 try { pip show pyinstaller | Out-Null } catch { }
 if (-not $?) { Step "Install PyInstaller" ; pip install pyinstaller | Out-Null }
@@ -37,8 +45,14 @@ catch { Info "Skip removing resource backend (locked): src-tauri\\resources\\sup
 Step "Build frontend"
 Push-Location frontend
 try {
-  if (-not (Test-Path node_modules)) { Step "Install frontend deps (npm ci)" ; npm ci }
-  npm run build
+  if (-not (Test-Path node_modules)) { 
+      if ($npmCmd -eq "cnpm") {
+          Step "Install frontend deps (cnpm install)" ; cnpm install
+      } else {
+          Step "Install frontend deps (npm ci)" ; npm ci
+      }
+  }
+  & $npmCmd run build
 }
 catch { Pop-Location ; Fail "Frontend build failed: $($_.Exception.Message)" }
 Pop-Location
@@ -66,7 +80,7 @@ try {
   }
   else { Fail "No backend requirements file found" }
 
-  pyinstaller --onefile --noconsole --name superAutoCutVideoBackend --distpath dist main.py
+  pyinstaller --clean --distpath dist backend.spec
   if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
 }
 catch { Pop-Location ; Fail "Backend packaging failed: $($_.Exception.Message)" }

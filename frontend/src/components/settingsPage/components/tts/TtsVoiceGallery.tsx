@@ -63,7 +63,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
     }
     try {
       // 仅保留中文试听文本（Edge TTS 固定使用中文）
-      const getDefaultPreviewText = (_v: TtsVoice, _prov?: string): string => {
+      const getDefaultPreviewText = (): string => {
         return "您好，欢迎使用智能配音。";
       };
 
@@ -71,7 +71,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
         const res = await ttsService.previewVoice(voice.id, {
           config_id: configId,
           provider,
-          text: getDefaultPreviewText(voice, provider),
+          text: getDefaultPreviewText(),
         });
         const url = res?.data?.sample_wav_url || res?.data?.audio_url || voice.sample_wav_url;
         playUrl(url, voice.id);

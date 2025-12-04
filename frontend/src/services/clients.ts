@@ -528,7 +528,7 @@ export const utils = {
   async discoverBackendPort(
     host: string = DEFAULT_HOST,
     startPort: number = DEFAULT_PORT,
-    maxAttempts: number = 3 // 减少到3次尝试
+    maxAttempts: number = 20
   ): Promise<{ port: number; host: string } | null> {
     for (let i = 0; i < maxAttempts; i++) {
       const port = startPort + i;

@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Optional
+from typing import Optional, List
 
 import requests
 
@@ -37,12 +37,12 @@ class BcutASR(BaseASR):
         super().__init__(audio_path, use_cache=use_cache)
         self.session = requests.Session()
         self.task_id: Optional[str] = None
-        self.__etags: list[str] = []
+        self.__etags: List[str] = []
 
         self.__in_boss_key: Optional[str] = None
         self.__resource_id: Optional[str] = None
         self.__upload_id: Optional[str] = None
-        self.__upload_urls: list[str] = []
+        self.__upload_urls: List[str] = []
         self.__per_size: Optional[int] = None
         self.__clips: Optional[int] = None
 
@@ -171,5 +171,5 @@ class BcutASR(BaseASR):
         logging.info(f"转换成功")
         return json.loads(task_resp["result"])
 
-    def _make_segments(self, resp_data: dict) -> list[ASRDataSeg]:
+    def _make_segments(self, resp_data: dict) -> List[ASRDataSeg]:
         return [ASRDataSeg(u.get('text') or u.get('transcript') or '', u['start_time'], u['end_time']) for u in resp_data['utterances']]

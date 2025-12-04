@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List
+from typing import List, Tuple
 from pathlib import Path
 
 
@@ -19,7 +19,7 @@ class ASRDataSeg:
         """Convert to LRC timestamp format"""
         return f"[{self._ms_to_lrc_time(self.start_time)}]"
     
-    def to_ass_ts(self) -> tuple[str, str]:
+    def to_ass_ts(self) -> Tuple[str, str]:
         """Convert to ASS timestamp format"""
         return self._ms_to_ass_ts(self.start_time), self._ms_to_ass_ts(self.end_time)
 

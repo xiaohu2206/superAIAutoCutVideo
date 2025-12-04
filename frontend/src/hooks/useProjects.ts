@@ -13,20 +13,18 @@ import type {
 
 // 统一提取错误信息，优先使用后端提供的 detail/message
 const getErrorMessage = (err: unknown, fallback: string): string => {
-  try {
-    if (err && typeof err === "object") {
-      const anyErr = err as any;
-      if (typeof anyErr.message === "string" && anyErr.message) {
-        return anyErr.message;
-      }
-      if (typeof anyErr.detail === "string" && anyErr.detail) {
-        return anyErr.detail;
-      }
+  if (err && typeof err === "object") {
+    const anyErr = err as any;
+    if (typeof anyErr.message === "string" && anyErr.message) {
+      return anyErr.message;
     }
-    if (typeof err === "string" && err) {
-      return err;
+    if (typeof anyErr.detail === "string" && anyErr.detail) {
+      return anyErr.detail;
     }
-  } catch {}
+  }
+  if (typeof err === "string" && err) {
+    return err;
+  }
   return fallback;
 };
 
