@@ -4,14 +4,14 @@
   "version": "1.0.0",
   "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeDevCommand": "cd frontend && npm run dev",
-    "beforeBuildCommand": "cd frontend && npm run build",
+    "beforeDevCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; cnpm run dev\"",
+    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; cnpm run build\"",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../frontend/dist"
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -46,7 +46,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
     }
   },
   "plugins": {}

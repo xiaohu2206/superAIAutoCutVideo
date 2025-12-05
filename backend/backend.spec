@@ -4,7 +4,9 @@ import sys
 from PyInstaller.utils.hooks import collect_all
 
 # 收集所有 cv2 和相关依赖
-datas = []
+datas = [
+    ('serviceData', 'serviceData'),
+]
 binaries = []
 hiddenimports = [
     'uvicorn.logging',

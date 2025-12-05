@@ -107,6 +107,30 @@ const App: React.FC = () => {
         if (status?.port) {
           configureBackend(status.port);
         }
+        // 若 Tauri 管理的后端未运行（例如你手动单独启动了后端），尝试自动发现外部后端端口
+        if (!status?.running) {
+          const discoveredOk = await autoConfigureBackend();
+          if (discoveredOk) {
+            // 读取服务端口信息，更新状态
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 1000);
+              const serverInfo = await fetch(
+                `${apiClient.getBaseUrl()}/api/server/info`,
+                {
+                  method: "GET",
+                  headers: { "Content-Type": "application/json" },
+                  signal: controller.signal,
+                }
+              ).then((res) => res.json());
+              clearTimeout(timeoutId);
+              const port = serverInfo?.data?.port ?? 8000;
+              status = { running: true, port };
+            } catch {
+              status = { running: true, port: 8000 };
+            }
+          }
+        }
       } else {
         // 在浏览器环境中，尝试自动发现后端端口
         console.log("浏览器环境，尝试自动发现后端端口...");

@@ -23,6 +23,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+# 解决 PyInstaller 打包后 uvicorn 日志报错 "AttributeError: 'NoneType' object has no attribute 'isatty'"
+# 当 console=False 时，sys.stdout 和 sys.stderr 为 None
+class NullWriter:
+    def write(self, text):
+        pass
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+
+if getattr(sys, 'frozen', False):
+    if sys.stdout is None:
+        sys.stdout = NullWriter()
+    if sys.stderr is None:
+        sys.stderr = NullWriter()
+
+print("Backend initializing...")  # Debug marker
+
 # 导入AI路由
 from routes import health_router
 from routes.video_model_routes import router as video_model_router
@@ -72,11 +90,56 @@ app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
 
-project_root = Path(__file__).resolve().parent.parent
-uploads_dir = project_root / "uploads"
+def get_app_paths():
+    """
+    获取应用路径配置，兼容开发环境和打包环境（PyInstaller）
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包环境 (PyInstaller)
+        # sys._MEIPASS 是解压后的临时目录，包含代码和 bundled 资源
+        base_path = Path(sys._MEIPASS)
+        
+        # sys.executable 是可执行文件所在目录
+        # 我们希望 uploads 和 config 等持久化数据位于可执行文件同级目录，或者用户数据目录
+        # 这里为了便携性，暂定为可执行文件同级目录
+        exe_dir = Path(sys.executable).parent
+        
+        # serviceData 如果是只读配置或临时缓存，可以使用 bundled 中的路径
+        # 如果需要持久化修改，应该在启动时复制到 exe_dir
+        # 目前 edge_voices_cache.json 会写入，所以使用临时目录没问题（重启丢失缓存）
+        # 或者也可以指向 exe_dir / "serviceData" 并要求用户手动复制（或者代码自动复制）
+        # 为了简单起见，先使用 bundled 路径（意味着缓存不持久化）
+        # 修正：如果 main.py 尝试 mount 一个不存在的目录会报错，必须确保目录存在
+        service_data_dir = base_path / "backend" / "serviceData"
+        if not service_data_dir.exists():
+             # 尝试备用路径（spec文件中可能配置为直接在根目录）
+             service_data_dir = base_path / "serviceData"
+        
+        uploads_dir = exe_dir / "uploads"
+        
+    else:
+        # 开发环境
+        base_path = Path(__file__).resolve().parent # backend/
+        project_root = base_path.parent # superAIAutoCutVideo/
+        
+        service_data_dir = base_path / "serviceData"
+        uploads_dir = project_root / "uploads"
+        
+    return service_data_dir, uploads_dir
+
+service_data_dir, uploads_dir = get_app_paths()
+
+# 确保目录存在
+if not service_data_dir.exists():
+    # 如果 bundled 中没有 serviceData（例如首次打包遗漏），尝试创建以免 crash
+    # 但如果是只读 mount，内容为空可能导致功能缺失
+    logger.warning(f"ServiceData directory not found at {service_data_dir}, creating empty directory")
+    service_data_dir.mkdir(parents=True, exist_ok=True)
+
 uploads_dir.mkdir(parents=True, exist_ok=True)
+
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
-service_data_dir = project_root / "backend" / "serviceData"
+# 注意：挂载路径 url 保持不变
 app.mount("/backend/serviceData", StaticFiles(directory=str(service_data_dir)), name="serviceData")
 
 # WebSocket连接管理器在 modules/ws_manager.py 中定义并提供单例 manager

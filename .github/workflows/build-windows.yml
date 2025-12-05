@@ -65,10 +65,6 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Build frontend
-      working-directory: frontend
-      run: npm run build
-
     - name: Install Python dependencies
       working-directory: backend
       run: |
@@ -131,6 +127,15 @@ jobs:
       run: |
         Write-Host "=== Hex dump (first 16 bytes) ==="
         Format-Hex "src-tauri\tauri.conf.json" | Select-Object -First 3
+
+    - name: Patch Tauri config for CI
+      run: |
+        Write-Host "=== Patching tauri.conf.json for GitHub Actions ==="
+        $path = "src-tauri\tauri.conf.json"
+        $content = Get-Content $path -Raw
+        $newContent = $content -replace 'cnpm', 'npm'
+        Set-Content $path $newContent
+        Write-Host "Replaced 'cnpm' with 'npm' in tauri.conf.json"
 
     - name: Provide NSIS en-US language file
       run: |

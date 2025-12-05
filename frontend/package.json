@@ -8,6 +8,7 @@
     "start": "vite --port 1420 --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
+    "tauri": "tauri",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "type-check": "tsc --noEmit"
@@ -21,6 +22,7 @@
     "tailwind-merge": "^2.0.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.9.5",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
     "@typescript-eslint/eslint-plugin": "^6.10.0",
