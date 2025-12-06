@@ -127,6 +127,8 @@ export interface UseProjectDetailReturn {
   updateProject: (data: UpdateProjectRequest) => Promise<void>;
   uploadVideo: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
+  uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
+  deleteSubtitle: () => Promise<void>;
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
   reorderVideos: (orderedPaths: string[]) => Promise<void>;
@@ -229,6 +231,39 @@ export const useProjectDetail = (
     },
     [uploadVideo]
   );
+
+  const uploadSubtitle = useCallback(
+    async (file: File, onProgress?: (percent: number) => void) => {
+      if (!project) return;
+      setError(null);
+      setLoading(true);
+      try {
+        const response = await projectService.uploadSubtitle(project.id, file, onProgress);
+        setProject((prev) => (prev ? { ...prev, subtitle_path: response.file_path } : null));
+      } catch (err) {
+        setError(getErrorMessage(err, "上传字幕失败"));
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [project]
+  );
+
+  const deleteSubtitle = useCallback(async () => {
+    if (!project) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await projectService.deleteSubtitle(project.id);
+      setProject((prev) => (prev ? { ...prev, subtitle_path: undefined } : null));
+    } catch (err) {
+      setError(getErrorMessage(err, "删除字幕失败"));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [project]);
 
   /**
    * 删除视频
@@ -481,6 +516,8 @@ export const useProjectDetail = (
     updateProject,
     uploadVideo,
     uploadVideos,
+    uploadSubtitle,
+    deleteSubtitle,
     deleteVideo,
     deleteVideoItem,
     reorderVideos,
@@ -494,4 +531,3 @@ export const useProjectDetail = (
     merging,
   };
 };
-

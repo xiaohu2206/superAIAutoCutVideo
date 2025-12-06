@@ -88,6 +88,13 @@ export class ProjectService {
     return response?.data?.removed ?? true;
   }
 
+  async deleteSubtitle(projectId: string): Promise<boolean> {
+    const response = await apiClient.post<{ data?: { removed?: boolean } }>(
+      `/api/projects/${projectId}/delete/subtitle`
+    );
+    return response?.data?.removed ?? true;
+  }
+
   
 
   /**
@@ -152,6 +159,64 @@ export class ProjectService {
 
       xhr.send(formData);
     });
+  }
+
+  async uploadSubtitle(
+    projectId: string,
+    file: File,
+    onProgress?: (percent: number) => void
+  ): Promise<FileUploadResponse> {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    return new Promise<FileUploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open(
+        "POST",
+        `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/subtitle`
+      )
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = Math.round((event.loaded / event.total) * 100)
+          onProgress(percent)
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText)
+            resolve(result.data as FileUploadResponse)
+          } catch (e) {
+            reject(new Error("解析响应失败"))
+          }
+        } else {
+          let msg = `上传字幕失败: ${xhr.statusText || xhr.status}`
+          try {
+            if (xhr.responseText) {
+              const errJson = JSON.parse(xhr.responseText)
+              if (typeof errJson === "string") {
+                msg = errJson
+              } else if (errJson?.detail) {
+                msg = errJson.detail
+              } else if (errJson?.message) {
+                msg = errJson.message
+              }
+            }
+          } catch (e) {
+            console.error(e)
+          }
+          reject(new Error(msg))
+        }
+      }
+
+      xhr.onerror = () => {
+        reject(new Error("网络错误，上传字幕失败"))
+      }
+
+      xhr.send(formData)
+    })
   }
 
   /**
@@ -276,4 +341,3 @@ export class ProjectService {
 
 // 导出单例实例
 export const projectService = new ProjectService();
-

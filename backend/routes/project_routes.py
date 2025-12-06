@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import asyncio
 import logging
+import re
 import cv2
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -346,33 +347,84 @@ def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
     segments: List[Dict[str, Any]] = []
     try:
         content = srt_path.read_text(encoding="utf-8", errors="ignore")
-        blocks = [b.strip() for b in content.strip().split("\n\n") if b.strip()]
-        for idx, block in enumerate(blocks, start=1):
-            lines = block.splitlines()
-            if len(lines) < 2:
-                continue
-            # line 0 could be index, line 1 timing
-            timing_line = lines[1] if "-->" in lines[1] else lines[0]
-            if "-->" not in timing_line:
-                continue
-            start_str, end_str = [t.strip() for t in timing_line.split("-->")]
-            start_t = _parse_ts(start_str)
-            end_t = _parse_ts(end_str)
-            text_lines = lines[2:] if timing_line == lines[1] else lines[1:]
-            text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
-            if not text:
-                text = f"字幕段{idx}"
-            segments.append({
-                "id": str(idx),
-                "start_time": float(start_t),
-                "end_time": float(end_t),
-                "text": text,
-                "subtitle": text,
-            })
+        norm = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+        lines = [ln.strip() for ln in norm.splitlines() if ln.strip()]
+        # 优先检测压缩后的行格式：[HH:MM:SS,mmm-HH:MM:SS,mmm] text
+        bracket_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2},\d{3})-(\d{2}:\d{2}:\d{2},\d{3})\]\s*(.+)$")
+        bracket_matches = [bracket_pattern.match(ln) for ln in lines]
+        if any(bracket_matches):
+            idx = 1
+            for m in bracket_matches:
+                if not m:
+                    continue
+                start_str, end_str, text = m.groups()
+                start_t = _parse_ts(start_str)
+                end_t = _parse_ts(end_str)
+                segments.append({
+                    "id": str(idx),
+                    "start_time": float(start_t),
+                    "end_time": float(end_t),
+                    "text": text,
+                    "subtitle": text,
+                })
+                idx += 1
+        else:
+            # 兼容标准SRT解析
+            blocks = [b.strip() for b in norm.split("\n\n") if b.strip()]
+            for idx, block in enumerate(blocks, start=1):
+                ls = [l for l in block.splitlines() if l.strip()]
+                if len(ls) < 2:
+                    continue
+                timing_line = ls[1] if "-->" in ls[1] else ls[0]
+                if "-->" not in timing_line:
+                    continue
+                start_str, end_str = [t.strip() for t in timing_line.split("-->")]
+                start_t = _parse_ts(start_str)
+                end_t = _parse_ts(end_str)
+                text_lines = ls[2:] if timing_line == ls[1] else ls[1:]
+                text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
+                if not text:
+                    text = f"字幕段{idx}"
+                segments.append({
+                    "id": str(idx),
+                    "start_time": float(start_t),
+                    "end_time": float(end_t),
+                    "text": text,
+                    "subtitle": text,
+                })
     except Exception:
         # 解析失败返回空
         pass
     return segments
+
+def compress_srt(content: str) -> str:
+    text = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    out_lines: List[str] = []
+    for b in blocks:
+        lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        timing_i = None
+        for i, ln in enumerate(lines[:3]):
+            if "-->" in ln:
+                timing_i = i
+                break
+        if timing_i is None:
+            continue
+        parts = lines[timing_i].split("-->")
+        if len(parts) < 2:
+            continue
+        start = parts[0].strip()
+        end = parts[1].strip()
+        text_lines = lines[timing_i + 1:]
+        t = " ".join(text_lines)
+        t = re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"<[^>]+>", "", t)
+        if not t:
+            continue
+        out_lines.append(f"[{start}-{end}] {t}")
+    return ("\n".join(out_lines) + ("\n" if out_lines else ""))
 
 
 def read_video_duration(video_path: Path) -> float:
@@ -661,6 +713,7 @@ async def generate_script(req: GenerateScriptRequest):
                 pass
             raise HTTPException(status_code=500, detail="语音识别失败")
         srt_text = utterances_to_srt(utterances)
+        srt_text = compress_srt(srt_text)
         srt_out = uploads_dir() / "subtitles" / f"{req.project_id}_subtitle_{ts}.srt"
         srt_out.write_text(srt_text, encoding="utf-8")
         web_path = to_web_path(srt_out)
@@ -916,13 +969,17 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
 
     size = 0
     try:
-        with out_path.open("wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                f.write(chunk)
+        buf = bytearray()
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            buf.extend(chunk)
+        content = buf.decode("utf-8", errors="ignore")
+        compressed = compress_srt(content)
+        with out_path.open("w", encoding="utf-8") as f:
+            f.write(compressed)
+        size = len(compressed.encode("utf-8"))
     finally:
         await file.close()
 
@@ -943,8 +1000,51 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     }
 
 
-    
+@router.post("/{project_id}/upload/subtitle")
+async def upload_subtitle(project_id: str, file: UploadFile = File(...)):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in {".srt"}:
+        raise HTTPException(status_code=400, detail="仅支持上传SRT文件")
+
+    up_dir = uploads_dir() / "subtitles"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    unique = uuid.uuid4().hex[:8]
+    out_name = f"{project_id}_subtitle_{ts}_{unique}{suffix}"
+    out_path = up_dir / out_name
+
+    size = 0
+    try:
+        buf = bytearray()
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            buf.extend(chunk)
+        content = buf.decode("utf-8", errors="ignore")
+        compressed = compress_srt(content)
+        with out_path.open("w", encoding="utf-8") as f:
+            f.write(compressed)
+        size = len(compressed.encode("utf-8"))
+    finally:
+        await file.close()
+
+    web_path = to_web_path(out_path)
+    projects_store.update_project(project_id, {"subtitle_path": web_path})
+
+    return {
+        "message": "字幕上传成功",
+        "data": {
+            "file_path": web_path,
+            "file_name": file.filename,
+            "file_size": size,
+            "upload_time": now_ts(),
+        },
+        "timestamp": now_ts(),
+    }
 
 # ========================= 文件删除 =========================
 
