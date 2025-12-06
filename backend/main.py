@@ -67,17 +67,7 @@ logger.info(f"Python 解释器: {sys.executable}")
 # 配置CORS - 允许Tauri前端访问
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",
-        "http://127.0.0.1:1420",
-        "http://localhost:1421",
-        "http://127.0.0.1:1421",
-        # 允许本地Vite开发服务器访问，便于前端开发调试
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        # Tauri 协议
-        "tauri://localhost",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

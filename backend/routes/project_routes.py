@@ -529,6 +529,32 @@ async def generate_script(req: GenerateScriptRequest):
     # 若没有字幕，进行ASR识别
     if not sub_abs:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "progress",
+                "scope": "generate_script",
+                "project_id": req.project_id,
+                "phase": "validating_asr",
+                "message": "正在验证ASR服务是否可用",
+                "progress": 25,
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        asr_check = await _run_in_thread(BcutASR.test_connection)
+        if not asr_check.get("success", False):
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "scope": "generate_script",
+                    "project_id": req.project_id,
+                    "phase": "asr_unavailable",
+                    "message": asr_check.get("error") or asr_check.get("message") or "ASR服务不可用",
+                    "timestamp": now_ts(),
+                }))
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
         audio_abs: Optional[Path] = None
         # 复用已提取音频
         if getattr(p, "audio_path", None):
@@ -1309,3 +1335,6 @@ async def get_merged_video(project_id: str):
         filename=filename,
         media_type="video/mp4"
     )
+async def _run_in_thread(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))

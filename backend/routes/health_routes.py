@@ -13,6 +13,11 @@ from typing import Dict, List, Optional, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+import json
+from modules.config.content_model_config import content_model_config_manager
+from modules.config.tts_config import tts_engine_config_manager
+from modules.ws_manager import manager
+from services.asr_bcut import BcutASR
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,11 @@ _start_time = time.time()
 def get_uptime() -> float:
     """获取运行时间"""
     return time.time() - _start_time
+
+
+async def _run_in_thread(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
 async def check_ai_service_health() -> ServiceStatus:
@@ -399,3 +409,126 @@ async def test_all_ai_connections():
     except Exception as e:
         logger.error(f"测试所有AI连接失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/test-integrations", summary="测试关键集成组件")
+async def test_integrations():
+    """
+    测试关键集成组件状态（文案生成模型 + TTS）
+    """
+    results = {
+        "content_model": {"status": "unknown", "message": "未测试"},
+        "tts": {"status": "unknown", "message": "未测试"},
+        "asr": {"status": "unknown", "message": "未测试"},
+        "overall_status": "healthy"
+    }
+
+    # 1. 测试文案生成模型
+    try:
+        active_content_id = content_model_config_manager.get_active_config_id()
+        if not active_content_id:
+             results["content_model"] = {
+                 "status": "error", 
+                 "message": "未激活任何文案生成模型配置"
+             }
+        else:
+            content_result = await content_model_config_manager.test_connection(active_content_id)
+            if content_result.get("success", False):
+                 results["content_model"] = {
+                     "status": "ok", 
+                     "message": "连接正常",
+                     "details": content_result
+                 }
+            else:
+                 results["content_model"] = {
+                     "status": "error", 
+                     "message": content_result.get("error") or content_result.get("message") or "连接失败",
+                     "details": content_result
+                 }
+    except Exception as e:
+        results["content_model"] = {
+            "status": "error", 
+            "message": f"测试异常: {str(e)}"
+        }
+
+    # 2. 测试 TTS
+    try:
+        active_tts_id = tts_engine_config_manager.get_active_config_id()
+        if not active_tts_id:
+             results["tts"] = {
+                 "status": "error", 
+                 "message": "未激活任何TTS配置"
+             }
+        else:
+            tts_result = await tts_engine_config_manager.test_connection(active_tts_id)
+            if tts_result.get("success", False):
+                 results["tts"] = {
+                     "status": "ok", 
+                     "message": "连接正常",
+                     "details": tts_result
+                 }
+            else:
+                 results["tts"] = {
+                     "status": "error", 
+                     "message": tts_result.get("error") or tts_result.get("message") or "连接失败",
+                     "details": tts_result
+                 }
+    except Exception as e:
+        results["tts"] = {
+            "status": "error", 
+            "message": f"测试异常: {str(e)}"
+        }
+
+    # 3. 测试 ASR
+    try:
+        asr_result = await _run_in_thread(BcutASR.test_connection)
+        if asr_result.get("success", False):
+            results["asr"] = {
+                "status": "ok",
+                "message": "连接正常",
+                "details": asr_result
+            }
+        else:
+            results["asr"] = {
+                "status": "error",
+                "message": asr_result.get("error") or asr_result.get("message") or "连接失败",
+                "details": asr_result
+            }
+    except Exception as e:
+        results["asr"] = {
+            "status": "error",
+            "message": f"测试异常: {str(e)}"
+        }
+
+    # 汇总
+    if (
+        results["content_model"].get("status") != "ok" or
+        results["tts"].get("status") != "ok" or
+        results["asr"].get("status") != "ok"
+    ):
+        results["overall_status"] = "unhealthy"
+        try:
+             await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "system_check",
+                "message": "系统组件自检发现问题",
+                "timestamp": datetime.now().isoformat()
+            }))
+        except:
+            pass
+    else:
+        try:
+             await manager.broadcast(json.dumps({
+                "type": "success",
+                "scope": "system_check",
+                "message": "系统组件自检全部通过",
+                "timestamp": datetime.now().isoformat()
+            }))
+        except:
+            pass
+
+    return {
+        "success": True,
+        "data": results,
+        "timestamp": datetime.now().isoformat()
+    }

@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { defineConfig } from 'vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     port: 1420,
     host: '0.0.0.0',
-    strictPort: true,
+    strictPort: Boolean(process.env.TAURI_DEV),
   },
 
   // 构建配置

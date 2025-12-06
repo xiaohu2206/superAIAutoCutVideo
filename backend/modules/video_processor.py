@@ -10,7 +10,8 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+import json
 
 import cv2
 import numpy as np
@@ -67,144 +68,562 @@ class VideoProcessor:
             return False
 
     async def concat_videos(self, inputs: List[str], output_path: str, on_progress=None) -> bool:
-        """稳健拼接多个视频片段，解决拼接处卡顿问题。
-        原因分析：此前使用 concat demuxer + `-c copy` 要求片段参数完全一致且必须从关键帧开始，
-        如果某段不是关键帧起始或存在时间戳不连续，播放器可能在拼接处卡顿（等待下一个关键帧）。
-
-        修复策略：改为使用 filter_complex 的 concat 过滤器并重编码输出，统一时间戳，避免GOP跨段依赖。
-        - 对每段视频/音频先 reset PTS（setpts/asetpts）
-        - 统一分辨率为偶数尺寸，统一帧率，提升通用播放器兼容性
-        - 对于没有音频轨的片段，自动填充与视频等长的静音音频，避免拼接失败
-        - 通过 concat 滤镜合并，再使用 libx264 + aac 重编码输出
-        - 输出包含 `-movflags +faststart` 以优化播放体验
+        """
         """
         try:
             if not inputs:
                 logger.error("拼接视频失败: 输入列表为空")
                 return False
 
-            # 构造输入参数
-            cmd: List[str] = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel", "error",
-            ]
-            for p in inputs:
-                cmd.extend(["-i", str(p)])
-
             n = len(inputs)
-            # 预先探测每段时长与是否有音频
+
             durations: List[float] = []
             has_audio: List[bool] = []
+            vinfo_list: List[Dict[str, Any]] = []
+            ainfo_list: List[Optional[Dict[str, Any]]] = []
+            format_names: List[str] = []
+            keyframe_starts: List[bool] = []
             for p in inputs:
-                # 优先使用视频流时长，其次用容器总时长，兜底为 0
                 d = await self._ffprobe_video_duration(p)
                 if d is None:
                     d = await self._ffprobe_duration(p, "format")
                 d = d or 0.0
                 durations.append(max(d, 0.0))
-                # 探测是否存在音频流
                 a_dur = await self._ffprobe_duration(p, "audio")
                 has_audio.append(a_dur is not None and a_dur > 0.0)
+                vi, ai = await self._probe_stream_info(p)
+                vinfo_list.append(vi or {})
+                ainfo_list.append(ai)
+                fmt = await self._ffprobe_format_name(p)
+                format_names.append(fmt or "")
+                kf = await self._first_frame_is_keyframe(p)
+                keyframe_starts.append(bool(kf))
 
-            # 为每个输入构建 reset 与统一参数语句
+            def _fr_to_float(s: Optional[str]) -> Optional[float]:
+                if not s:
+                    return None
+                try:
+                    if "/" in s:
+                        a, b = s.split("/")
+                        return float(a) / float(b) if float(b) != 0 else None
+                    return float(s)
+                except Exception:
+                    return None
+
+            copy_possible = True
+            if not vinfo_list:
+                copy_possible = False
+            else:
+                base_v = vinfo_list[0]
+                base_a = ainfo_list[0]
+                base_fr = _fr_to_float(base_v.get("r_frame_rate"))
+                for i in range(1, n):
+                    vi = vinfo_list[i]
+                    ai = ainfo_list[i]
+                    if not vi:
+                        copy_possible = False
+                        break
+                    fr = _fr_to_float(vi.get("r_frame_rate"))
+                    if not (
+                        vi.get("codec_name") == base_v.get("codec_name") and
+                        vi.get("pix_fmt") == base_v.get("pix_fmt") and
+                        vi.get("width") == base_v.get("width") and
+                        vi.get("height") == base_v.get("height") and
+                        ((fr is None and base_fr is None) or (fr is not None and base_fr is not None and abs(fr - base_fr) < 0.001))
+                    ):
+                        copy_possible = False
+                        break
+                    if (base_a is None) != (ai is None):
+                        copy_possible = False
+                        break
+                    if base_a and ai:
+                        if not (
+                            ai.get("codec_name") == base_a.get("codec_name") and
+                            ai.get("sample_rate") == base_a.get("sample_rate") and
+                            ai.get("channels") == base_a.get("channels")
+                        ):
+                            copy_possible = False
+                            break
+            can_concat_demuxer = False
+            list_path = Path(output_path).with_suffix(".concat.txt")
+            if copy_possible:
+                try:
+                    lines = []
+                    for p in inputs:
+                        q = Path(p).as_posix()
+                        lines.append(f"file '{q}'")
+                    list_path.write_text("\n".join(lines), encoding="utf-8")
+                    can_concat_demuxer = True
+                except Exception:
+                    can_concat_demuxer = False
+
+            vcodec0 = (vinfo_list[0] or {}).get("codec_name") if vinfo_list else None
+            acodec0 = (ainfo_list[0] or {}).get("codec_name") if ainfo_list else None
+            is_mp4_like = any(((format_names[i] or "").lower().find("mp4") != -1 or (format_names[i] or "").lower().find("mov") != -1) for i in range(n))
+            is_h264_hevc = vcodec0 in {"h264", "hevc"}
+            audio_all_same_codec = all(((ainfo_list[i] or {}).get("codec_name") == acodec0) for i in range(n)) if ainfo_list else True
+            can_concat_ts = copy_possible and is_mp4_like and is_h264_hevc and (acodec0 in {None, "aac"}) and audio_all_same_codec
+
+            if can_concat_ts:
+                try:
+                    bsfilter_v = "h264_mp4toannexb" if vcodec0 == "h264" else "hevc_mp4toannexb"
+                    tmp_dir = Path(output_path).parent
+                    ts_files: List[Path] = []
+                    procs = []
+                    for idx, p in enumerate(inputs):
+                        ts_path = tmp_dir / f".concat_{idx}.ts"
+                        ts_files.append(ts_path)
+                        cmd_ts = [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-i", str(p),
+                            "-c", "copy",
+                            "-bsf:v", bsfilter_v,
+                            "-f", "mpegts",
+                            "-y", str(ts_path)
+                        ]
+                        procs.append(asyncio.create_subprocess_exec(*cmd_ts, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE))
+                    created = await asyncio.gather(*procs, return_exceptions=True)
+                    waits = []
+                    for pr in created:
+                        if hasattr(pr, "communicate"):
+                            waits.append(pr.communicate())
+                    if waits:
+                        outs = await asyncio.gather(*waits, return_exceptions=True)
+                        for pr in created:
+                            if hasattr(pr, "returncode") and pr.returncode != 0:
+                                can_concat_ts = False
+                                break
+                    if not can_concat_ts:
+                        for f in ts_files:
+                            try:
+                                if f.exists():
+                                    f.unlink()
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            if on_progress:
+                                await on_progress(5.0)
+                        except Exception:
+                            pass
+                        concat_uri = "concat:" + "|".join(str(f) for f in ts_files)
+                        cmd = [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-i", concat_uri,
+                            "-c", "copy",
+                        ]
+                        if acodec0 == "aac":
+                            cmd.extend(["-bsf:a", "aac_adtstoasc"])
+                        cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        process = await asyncio.create_subprocess_exec(
+                            *cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
+                        )
+                        total_duration = sum(durations)
+                        if on_progress:
+                            try:
+                                last_bucket = -1
+                                seen_end = False
+                                while True:
+                                    line = await process.stdout.readline()
+                                    if not line:
+                                        break
+                                    s = line.decode(errors="ignore").strip()
+                                    if s.startswith("out_time_ms="):
+                                        try:
+                                            ms = float(s.split("=", 1)[1])
+                                            if total_duration > 0:
+                                                pct = (ms / (total_duration * 1000.0)) * 100.0
+                                                if pct < 0:
+                                                    pct = 0.0
+                                                if pct > 100:
+                                                    pct = 100.0
+                                                if not seen_end and pct >= 100.0:
+                                                    pct = 99.0
+                                                await on_progress(pct)
+                                                bucket = int(pct // 5)
+                                                if bucket > last_bucket:
+                                                    logger.info(f"拼接进度: {pct:.1f}%")
+                                                    last_bucket = bucket
+                                        except Exception:
+                                            pass
+                                    elif s.startswith("progress=") and s.endswith("end"):
+                                        seen_end = True
+                                        logger.info("拼接进度: 99.0% (等待完成)")
+                            except Exception:
+                                pass
+                        stdout, stderr = await process.communicate()
+                        for f in ts_files:
+                            try:
+                                if f.exists():
+                                    f.unlink()
+                            except Exception:
+                                pass
+                        if process.returncode == 0:
+                            if on_progress:
+                                try:
+                                    await on_progress(100.0)
+                                except Exception:
+                                    pass
+                            logger.info(f"视频拼接成功: {output_path}")
+                            return True
+                        else:
+                            err = stderr.decode(errors="ignore")
+                            logger.error(f"视频拼接失败: {err}")
+                            return False
+                except Exception:
+                    can_concat_ts = False
+
+            if can_concat_demuxer and not can_concat_ts:
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(list_path),
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    "-progress", "pipe:1",
+                    "-y", output_path,
+                ]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                total_duration = sum(durations)
+                if on_progress:
+                    try:
+                        last_bucket = -1
+                        seen_end = False
+                        while True:
+                            line = await process.stdout.readline()
+                            if not line:
+                                break
+                            s = line.decode(errors="ignore").strip()
+                            if s.startswith("out_time_ms="):
+                                try:
+                                    ms = float(s.split("=", 1)[1])
+                                    if total_duration > 0:
+                                        pct = (ms / (total_duration * 1000.0)) * 100.0
+                                        if pct < 0:
+                                            pct = 0.0
+                                        if pct > 100:
+                                            pct = 100.0
+                                        if not seen_end and pct >= 100.0:
+                                            pct = 99.0
+                                        await on_progress(pct)
+                                        bucket = int(pct // 5)
+                                        if bucket > last_bucket:
+                                            logger.info(f"拼接进度: {pct:.1f}%")
+                                            last_bucket = bucket
+                                except Exception:
+                                    pass
+                            elif s.startswith("progress=") and s.endswith("end"):
+                                seen_end = True
+                                logger.info("拼接进度: 99.0% (等待完成)")
+                    except Exception:
+                        pass
+                stdout, stderr = await process.communicate()
+                try:
+                    if list_path.exists():
+                        list_path.unlink()
+                except Exception:
+                    pass
+                if process.returncode == 0:
+                    if on_progress:
+                        try:
+                            await on_progress(100.0)
+                        except Exception:
+                            pass
+                    logger.info(f"视频拼接成功: {output_path}")
+                    return True
+                else:
+                    err = stderr.decode(errors="ignore")
+                    logger.error(f"视频拼接失败: {err}")
+                    return False
+
+            cmd: List[str] = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+            ]
+            for p in inputs:
+                cmd.extend(["-i", str(p)])
+
             vf_parts = []
             for i in range(n):
-                # 统一分辨率为偶数、统一帧率（避免兼容问题）
-                # 注意：格式统一到 yuv420p 以提升播放器兼容性
-                vf_parts.append(
-                    f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
-                )
+                base_fr_val = _fr_to_float(vinfo_list[0].get("r_frame_rate")) if vinfo_list and vinfo_list[0] else None
+                if base_fr_val is not None:
+                    vf_parts.append(
+                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={base_fr_val},format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+                    )
+                else:
+                    vf_parts.append(
+                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+                    )
                 if has_audio[i]:
-                    # 统一采样率，重置时间戳
                     vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
                 else:
-                    # 无音频：生成与视频等长的静音音轨
                     dur = durations[i]
-                    # 使用 anullsrc 生成静音，并按时长裁剪
                     vf_parts.append(
                         f"anullsrc=r=48000:cl=stereo,atrim=0:{dur},asetpts=PTS-STARTPTS[a{i}]"
                     )
 
-            # 拼接 concat 段
             concat_inputs = "".join([f"[v{i}][a{i}]" for i in range(n)])
             filter_complex = ";".join(vf_parts) + f";{concat_inputs}concat=n={n}:v=1:a=1[v][a]"
 
-            cmd.extend([
-                "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "[a]",
-                # 视频编码参数（质量与速度折中）
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                "-pix_fmt", "yuv420p",
-                # 音频编码参数
-                "-c:a", "aac", "-b:a", "192k",
-                # 提升网络播放体验
-                "-movflags", "+faststart",
-                "-progress", "pipe:1",
-                "-y", output_path
-            ])
+            encoder_sets = await self._get_encoder_priority_list()
+            last_err = None
+            for vcodec_args in encoder_sets:
+                cmd_try = list(cmd)
+                cmd_try.extend([
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]", "-map", "[a]",
+                    *vcodec_args,
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k"
+                ])
+                cmd_try.extend([
+                    "-movflags", "+faststart",
+                    "-max_muxing_queue_size", "1024",
+                    "-progress", "pipe:1",
+                    "-y", output_path
+                ])
 
-            logger.info(f"开始稳健拼接（重编码），共 {n} 段 -> {output_path}")
+                process = await asyncio.create_subprocess_exec(
+                    *cmd_try,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+                total_duration = sum(durations)
+                if on_progress:
+                    try:
+                        last_bucket = -1
+                        seen_end = False
+                        while True:
+                            line = await process.stdout.readline()
+                            if not line:
+                                break
+                            s = line.decode(errors="ignore").strip()
+                            if s.startswith("out_time_ms="):
+                                try:
+                                    ms = float(s.split("=", 1)[1])
+                                    if total_duration > 0:
+                                        pct = (ms / (total_duration * 1000.0)) * 100.0
+                                        if pct < 0:
+                                            pct = 0.0
+                                        if pct > 100:
+                                            pct = 100.0
+                                        if not seen_end and pct >= 100.0:
+                                            pct = 99.0
+                                        await on_progress(pct)
+                                        bucket = int(pct // 5)
+                                        if bucket > last_bucket:
+                                            logger.info(f"拼接进度: {pct:.1f}%")
+                                            last_bucket = bucket
+                                except Exception:
+                                    pass
+                            elif s.startswith("progress=") and s.endswith("end"):
+                                seen_end = True
+                                logger.info("拼接进度: 99.0% (等待完成)")
+                    except Exception:
+                        pass
 
-            total_duration = 0.0
-            for d in durations:
-                total_duration += d
-
-            if on_progress:
-                try:
-                    last_bucket = -1  # 控制日志输出频率（每 5% 一次）
-                    seen_end = False  # 在真正结束前不把进度提升到 100
-                    while True:
-                        line = await process.stdout.readline()
-                        if not line:
-                            break
-                        s = line.decode(errors="ignore").strip()
-                        if s.startswith("out_time_ms="):
-                            try:
-                                ms = float(s.split("=", 1)[1])
-                                if total_duration > 0:
-                                    pct = (ms / (total_duration * 1000.0)) * 100.0
-                                    if pct < 0:
-                                        pct = 0.0
-                                    if pct > 100:
-                                        pct = 100.0
-                                    # 在未收到 progress=end 之前不显示 100%，避免“瞬间100%”误导
-                                    if not seen_end and pct >= 100.0:
-                                        pct = 99.0
-                                    # 发送回调
-                                    await on_progress(pct)
-                                    # 限流打印日志（每 5% 打印一次）
-                                    bucket = int(pct // 5)
-                                    if bucket > last_bucket:
-                                        logger.info(f"拼接进度: {pct:.1f}%")
-                                        last_bucket = bucket
-                            except Exception:
-                                pass
-                        elif s.startswith("progress=") and s.endswith("end"):
-                            seen_end = True
+                stdout, stderr = await process.communicate()
+                if process.returncode == 0:
+                    if on_progress:
+                        try:
                             await on_progress(100.0)
-                            logger.info("拼接进度: 100.0% (完成)")
-                except Exception:
-                    pass
+                        except Exception:
+                            pass
+                    logger.info(f"视频拼接成功: {output_path}")
+                    return True
+                else:
+                    err = stderr.decode(errors="ignore")
+                    last_err = err
+                    logger.error(f"视频拼接失败: {err}")
+                    try:
+                        if Path(output_path).exists():
+                            Path(output_path).unlink()
+                    except Exception:
+                        pass
 
-            stdout, stderr = await process.communicate()
-
-            if process.returncode == 0:
-                logger.info(f"视频拼接成功: {output_path}")
-                return True
-            else:
-                err = stderr.decode(errors="ignore")
-                logger.error(f"视频拼接失败: {err}")
-                return False
+            if last_err:
+                logger.error(f"视频拼接失败: {last_err}")
+            return False
 
         except Exception as e:
             logger.error(f"拼接视频时出错: {e}")
+            return False
+
+    async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-print_format", "json",
+                "-show_streams",
+                path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None, None
+            data = json.loads(out.decode(errors="ignore") or "{}")
+            streams = data.get("streams") or []
+            v = None
+            a = None
+            for s in streams:
+                if s.get("codec_type") == "video" and v is None:
+                    v = {
+                        "codec_name": s.get("codec_name"),
+                        "pix_fmt": s.get("pix_fmt"),
+                        "width": s.get("width"),
+                        "height": s.get("height"),
+                        "r_frame_rate": s.get("r_frame_rate"),
+                    }
+                elif s.get("codec_type") == "audio" and a is None:
+                    sr = s.get("sample_rate")
+                    try:
+                        sr_int = int(sr) if sr is not None else None
+                    except Exception:
+                        sr_int = None
+                    a = {
+                        "codec_name": s.get("codec_name"),
+                        "sample_rate": sr_int,
+                        "channels": s.get("channels"),
+                    }
+            return v, a
+        except Exception:
+            return None, None
+
+    async def _pick_fast_encoder(self) -> Tuple[str, List[str]]:
+        await self._detect_cuda()
+        encoders = await self._detect_encoders()
+        if "h264_nvenc" in encoders:
+            logger.info("编码器选择: h264_nvenc (GPU)")
+            return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p1"]
+        if "h264_qsv" in encoders:
+            logger.info("编码器选择: h264_qsv (GPU)")
+            return "h264_qsv", ["-c:v", "h264_qsv"]
+        if "h264_amf" in encoders:
+            logger.info("编码器选择: h264_amf (GPU)")
+            return "h264_amf", ["-c:v", "h264_amf"]
+        logger.info("编码器选择: libx264 (CPU)")
+        return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "23"]
+
+    async def _get_encoder_priority_list(self) -> List[List[str]]:
+        await self._detect_cuda()
+        names = await self._detect_encoders()
+        seq: List[List[str]] = []
+        if "h264_nvenc" in names:
+            seq.append(["-c:v", "h264_nvenc", "-preset", "p1"])
+        if "h264_qsv" in names:
+            seq.append(["-c:v", "h264_qsv"])
+        if "h264_amf" in names:
+            seq.append(["-c:v", "h264_amf"])
+        seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "23"])
+        return seq
+
+    async def _detect_encoders(self) -> List[str]:
+        if getattr(self, "_encoders_cache", None) is not None:
+            return getattr(self, "_encoders_cache")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-hide_banner", "-encoders",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            text = out.decode(errors="ignore")
+            names = []
+            for name in ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"]:
+                if name in text:
+                    names.append(name)
+            setattr(self, "_encoders_cache", names)
+            return names
+        except Exception:
+            setattr(self, "_encoders_cache", ["libx264"])
+            return ["libx264"]
+
+    async def _ffmpeg_supports_cuda_hwaccel(self) -> bool:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-hide_banner", "-hwaccels",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode == 0:
+                text = out.decode(errors="ignore").lower()
+                return ("cuda" in text) or ("nvdec" in text) or ("cuvid" in text)
+            return False
+        except Exception:
+            return False
+
+    async def _detect_cuda(self) -> bool:
+        if getattr(self, "_cuda_checked", False):
+            return bool(getattr(self, "_cuda_available", False))
+        has_hwaccel = await self._ffmpeg_supports_cuda_hwaccel()
+        encs = await self._detect_encoders()
+        use = has_hwaccel or ("h264_nvenc" in encs)
+        setattr(self, "_cuda_checked", True)
+        setattr(self, "_cuda_available", use)
+        if use:
+            if not getattr(self, "_cuda_log_done", False):
+                logger.info("检测到CUDA/NVENC，已启用GPU加速")
+                setattr(self, "_cuda_log_done", True)
+        else:
+            if not getattr(self, "_cuda_log_done", False):
+                logger.info("未检测到CUDA/NVENC，使用CPU编码")
+                setattr(self, "_cuda_log_done", True)
+        return use
+
+    async def _ffprobe_format_name(self, path: str) -> Optional[str]:
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=format_name",
+                "-of", "default=nk=1:nw=1",
+                path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode == 0:
+                s = out.decode(errors="ignore").strip()
+                return s or None
+            return None
+        except Exception:
+            return None
+
+    async def _first_frame_is_keyframe(self, path: str) -> bool:
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-skip_frame", "nokey",
+                "-show_entries", "frame=pkt_pts_time",
+                "-of", "csv=p=0",
+                "-read_intervals", "%+0.2",
+                path,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return False
+            text = out.decode(errors="ignore").strip()
+            if not text:
+                return False
+            try:
+                first_kf_time = float(text.splitlines()[0].strip())
+                return abs(first_kf_time) < 0.001
+            except Exception:
+                return False
+        except Exception:
             return False
 
     async def _ffprobe_video_duration(self, path: str) -> Optional[float]:
@@ -290,6 +709,7 @@ class VideoProcessor:
             if adur <= 0.0:
                 logger.error("无法获取音频时长")
                 return False
+            _, vcodec_args_pick = await self._pick_fast_encoder()
             if adur >= vdur:
                 pad = max(adur - vdur, 0.0)
                 pad_str = f"{pad:.3f}"
@@ -297,14 +717,14 @@ class VideoProcessor:
                 filter_complex = f
                 map_args = ["-map", "[v]", "-map", "[a]"]
                 extra = []
-                vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                vcodec_args = vcodec_args_pick + ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
             else:
                 adur_str = f"{adur:.3f}"
                 f = f"[0:v]trim=start=0:end={adur_str},setpts=PTS-STARTPTS[v];[1:a]asetpts=PTS-STARTPTS[a]"
                 filter_complex = f
                 map_args = ["-map", "[v]", "-map", "[a]"]
                 extra = []
-                vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                vcodec_args = vcodec_args_pick + ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
 
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error",

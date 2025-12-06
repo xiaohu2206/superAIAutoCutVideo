@@ -48,6 +48,17 @@ class BcutASR(BaseASR):
 
         self.__download_url: Optional[str] = None
 
+    @staticmethod
+    def test_connection(timeout: int = 6) -> dict:
+        try:
+            resp = requests.get(API_BASE_URL, timeout=timeout)
+            ok = int(resp.status_code) < 500
+            if ok:
+                return {"success": True, "status_code": int(resp.status_code)}
+            return {"success": False, "status_code": int(resp.status_code)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def upload(self) -> None:
         """申请上传"""
         if not self.file_binary:

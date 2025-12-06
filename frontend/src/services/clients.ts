@@ -256,6 +256,11 @@ export class ApiClient {
     return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/test`);
   }
 
+  // 测试所有集成组件（一键自检）
+  async testIntegrations(): Promise<any> {
+    return this.post("/api/health/test-integrations");
+  }
+
   // 音色试听（优先使用凭据生成，其次回退 sample_wav_url）
   async previewTtsVoice(voiceId: string, req?: { text?: string; provider?: string; config_id?: string }): Promise<any> {
     return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {});
