@@ -795,7 +795,7 @@ async def generate_script(req: GenerateScriptRequest):
                 }))
             except Exception:
                 pass
-            plot_analysis = await ScriptGenerationService.generate_plot_analysis(subtitle_text)
+            plot_analysis = await ScriptGenerationService.generate_plot_analysis_pipeline(subtitle_text)
             ts_pa = datetime.now().strftime("%Y%m%d_%H%M%S")
             pa_out = uploads_dir() / "analyses" / f"{req.project_id}_analysis_{ts_pa}.txt"
             try:

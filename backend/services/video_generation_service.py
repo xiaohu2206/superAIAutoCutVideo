@@ -6,7 +6,6 @@
 根据项目中的脚本（script.segments）对原视频进行剪辑并拼接，输出生成视频文件。
 """
 
-import asyncio
 import logging
 from datetime import datetime
 import shutil

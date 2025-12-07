@@ -90,7 +90,7 @@ lint:
 	@echo "前端代码检查..."
 	cd frontend && npm run lint
 	@echo "后端代码检查..."
-	cd backend && flake8 .
+	cd backend && flake8 . --exclude .venv,__pycache__ --max-line-length 160
 	cd backend && mypy .
 	@echo "代码检查完成!"
 
