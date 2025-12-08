@@ -67,7 +67,7 @@ class ScriptGenerationService:
     @staticmethod
     def _chunk_text(
         text: str,
-        chunk_chars_max: int = 7000,
+        chunk_chars_max: int = 15000,
         overlap_ratio: float = 0.12,
         min_last_ratio: float = 0.4,
     ) -> List[str]:
@@ -251,9 +251,9 @@ class ScriptGenerationService:
     @staticmethod
     async def generate_plot_analysis_pipeline(
         subtitle_content: str,
-        chunk_chars_max: int = 7000,
+        chunk_chars_max: int = 15000,
         overlap_ratio: float = 0.12,
-        max_points_per_chunk: int = 12,
+        max_points_per_chunk: int = 20,
     ) -> str:
         chunks = ScriptGenerationService._chunk_text(
             subtitle_content,
@@ -282,8 +282,360 @@ class ScriptGenerationService:
         return ScriptGenerationService._compose_plot_analysis_text(merged)
 
     @staticmethod
+    def _parse_srt_subtitles(subtitle_content: str) -> List[Dict[str, Any]]:
+        """解析SRT字幕内容为结构化列表"""
+        subs = []
+        # 简单正则匹配 SRT 块
+        # 格式:
+        # 1
+        # 00:00:01,000 --> 00:00:04,000
+        # 字幕文本
+        pattern = re.compile(r"(\d+)\s+(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\s+(.+?)(?=\n\s*\d+\s+\d{2}:\d{2}:\d{2}|\Z)", re.DOTALL)
+        
+        # 归一化换行
+        content = subtitle_content.strip().replace("\r\n", "\n") + "\n"
+        
+        matches = pattern.findall(content)
+        for m in matches:
+            idx, start_str, end_str, text = m
+            try:
+                start_s = ScriptGenerationService._parse_timestamp_str(start_str)
+                end_s = ScriptGenerationService._parse_timestamp_str(end_str)
+                subs.append({
+                    "index": int(idx),
+                    "start": start_s,
+                    "end": end_s,
+                    "text": text.strip()
+                })
+            except Exception:
+                continue
+        return subs
+
+    @staticmethod
+    def _parse_timestamp_str(ts: str) -> float:
+        """解析单个时间戳 00:00:00,000 为秒数"""
+        try:
+            h, m, s = ts.replace(',', '.').split(':')
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _filter_plot_analysis_by_time(plot_analysis: str, start_s: float, end_s: float) -> str:
+        """从剧情分析文本中筛选出当前时间窗口相关的爆点"""
+        if not plot_analysis:
+            return ""
+        
+        # 假设 plot_analysis 是由 _compose_plot_analysis_text 生成的格式
+        # 爆点X：Title
+        # 时间：HH:MM:SS,mmm-HH:MM:SS,mmm
+        lines = plot_analysis.split('\n')
+        relevant_lines = []
+        current_block = []
+        in_block = False
+        block_time_range = None
+        
+        for line in lines:
+            if line.startswith("爆点"):
+                if current_block and block_time_range:
+                    # 检查上一块是否相关
+                    bs, be = block_time_range
+                    # 简单的重叠判断
+                    if not (be < start_s or bs > end_s):
+                        relevant_lines.extend(current_block)
+                
+                current_block = [line]
+                in_block = True
+                block_time_range = None
+            elif line.startswith("时间：") and in_block:
+                current_block.append(line)
+                try:
+                    ts_str = line.replace("时间：", "").strip()
+                    block_time_range = _parse_timestamp_pair(ts_str)
+                except:
+                    pass
+            elif in_block:
+                current_block.append(line)
+        
+        # 处理最后一块
+        if current_block and block_time_range:
+            bs, be = block_time_range
+            if not (be < start_s or bs > end_s):
+                relevant_lines.extend(current_block)
+                
+        if not relevant_lines:
+            # 如果没有匹配到，为了上下文，返回前300个字符或摘要
+            return plot_analysis[:500] + "..."
+            
+        return "\n".join(relevant_lines)
+
+    @staticmethod
+    async def _generate_script_chunk(
+        chunk_idx: int,
+        start_time: float,
+        end_time: float,
+        subtitles: List[Dict[str, Any]],
+        plot_analysis_snippet: str,
+        drama_name: str
+    ) -> List[Dict[str, Any]]:
+        """生成单个分块的脚本"""
+        
+        # 1. 准备字幕文本 (带时间标记，方便模型引用)
+        subs_text_lines = []
+        for s in subtitles:
+            # 简单格式: [00:00-00:05] 台词
+            s_fmt = f"{int(s['start'] // 60):02d}:{int(s['start'] % 60):02d}"
+            e_fmt = f"{int(s['end'] // 60):02d}:{int(s['end'] % 60):02d}"
+            subs_text_lines.append(f"[{s_fmt}-{e_fmt}] {s['text']}")
+        
+        # 限制字幕 tokens (简单的字符截断，防止溢出)
+        subs_text = "\n".join(subs_text_lines)
+        if len(subs_text) > 6000: # 约 3-4k tokens
+            subs_text = subs_text[:6000] + "\n...(字幕过长截断)..."
+
+        system_prompt = (
+            "你是一位短剧解说文案创作专家。你的任务是根据提供的字幕片段和剧情爆点，创作一段精彩的解说文案。\n"
+            "要求：\n"
+            "1. **输出格式**：严格的JSON格式，包含 `segments` 列表，每个元素含 `start_time`(秒), `end_time`(秒), `text`(解说词), `subtitle`(对应画面字幕/画面描述，可选)。\n"
+            "2. **内容风格**：紧凑、悬念迭起、情绪饱满。避免流水账，要提炼剧情冲突。\n"
+            "3. **时间控制**：生成的解说词时间戳必须严格落在输入的时间窗口内 ({:.1f} - {:.1f} 秒)。\n"
+            "4. **真实性**：解说必须基于字幕事实，不可捏造剧情。\n"
+            "5. **分段**：每段解说词长度适中（10-20秒），便于观众消化。\n"
+        ).format(start_time, end_time)
+
+        user_content = (
+            f"剧名：{drama_name}\n"
+            f"当前时间窗口：{start_time:.1f}秒 - {end_time:.1f}秒\n\n"
+            f"剧情爆点参考：\n{plot_analysis_snippet}\n\n"
+            f"字幕片段：\n{subs_text}\n\n"
+            "请生成该片段的解说脚本 JSON："
+        )
+
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=user_content)
+        ]
+
+        try:
+            resp = await ai_service.send_chat(messages)
+            data, _ = sanitize_json_text_to_dict(resp.content)
+            segments = data.get("segments", [])
+            if not isinstance(segments, list):
+                return []
+            
+            # 校验和修正
+            valid_segments = []
+            for seg in segments:
+                # 强制类型转换
+                try:
+                    s_t = float(seg.get("start_time", 0))
+                    e_t = float(seg.get("end_time", 0))
+                    # 简单过滤掉完全不在窗口内的（容忍一点误差）
+                    if e_t < start_time - 5 or s_t > end_time + 5:
+                        continue
+                    
+                    seg["start_time"] = s_t
+                    seg["end_time"] = e_t
+                    seg["text"] = str(seg.get("text", "")).strip()
+                    # 标记来源 chunk，方便调试
+                    seg["_chunk_idx"] = chunk_idx
+                    valid_segments.append(seg)
+                except:
+                    continue
+            return valid_segments
+        except Exception as e:
+            logger.error(f"Chunk {chunk_idx} generation failed: {e}")
+            return []
+
+    @staticmethod
+    def _merge_segments(all_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """合并并去重所有分段"""
+        # 1. 按开始时间排序
+        sorted_segs = sorted(all_segments, key=lambda x: x["start_time"])
+        
+        merged = []
+        if not sorted_segs:
+            return []
+            
+        # 2. 简单的重叠去重逻辑
+        # 如果当前段与上一段重叠严重，或者时间包含，则择优保留
+        # 这里简化处理：如果重叠 > 50%，保留文本较长的那个（假设信息量大），或者保留后来的（假设覆盖逻辑）
+        
+        current = sorted_segs[0]
+        for next_seg in sorted_segs[1:]:
+            # 计算重叠
+            overlap_start = max(current["start_time"], next_seg["start_time"])
+            overlap_end = min(current["end_time"], next_seg["end_time"])
+            overlap_len = max(0, overlap_end - overlap_start)
+            
+            curr_len = current["end_time"] - current["start_time"]
+            next_len = next_seg["end_time"] - next_seg["start_time"]
+            
+            # 如果重叠超过较短段落的 40%
+            if overlap_len > 0 and (overlap_len > 0.4 * min(curr_len, next_len) + 0.1): 
+                # 冲突，需合并
+                # 策略：保留更靠中心的 chunk 的结果？或者文本更长的？
+                # 简单策略：保留文本更长的
+                if len(next_seg["text"]) > len(current["text"]):
+                    current = next_seg
+                else:
+                    pass # Keep current
+            else:
+                # 无显著冲突，加入 current，切换到 next
+                merged.append(current)
+                current = next_seg
+        
+        merged.append(current)
+        
+        # 3. 重新编号 ID
+        for i, seg in enumerate(merged):
+            seg["id"] = str(i + 1)
+            
+        return merged
+
+    @staticmethod
+    async def _refine_full_script(
+        segments: List[Dict[str, Any]],
+        drama_name: str,
+        plot_analysis: str
+    ) -> List[Dict[str, Any]]:
+        """全局优化脚本：统一风格，优化过渡"""
+        
+        if not segments:
+            return []
+            
+        # 构造精简的 segments 文本供模型读取
+        # 仅包含时间与文本，节省 token
+        draft_text = []
+        for seg in segments:
+            draft_text.append(f"ID:{seg['id']} | {seg['start_time']:.1f}-{seg['end_time']:.1f} | {seg['text']}")
+            
+        draft_str = "\n".join(draft_text)
+        
+        # 如果草稿太长，可能也需要切分优化，但这里假设 Map-Reduce 后的纯文本已经足够小 (通常解说词比字幕少得多)
+        # 假设 100个段落 * 50字 = 5000字，勉强可接受。
+        
+        system_prompt = (
+            "你是一位短剧解说主编。请对以下解说文案草稿进行全局润色。\n"
+            "目标：\n"
+            "1. **统一风格**：确保全篇口吻一致，情绪连贯。\n"
+            "2. **优化过渡**：段落间衔接自然，消除生硬的拼接感。\n"
+            "3. **增强钩子**：确保关键节点的悬念足够吸引人。\n"
+            "4. **结构保持**：严格输出 JSON，**必须保留原 ID 和时间戳**，仅修改 `text` 和 `subtitle`。\n"
+            "5. **去重**：如果发现内容重复，请精简。\n"
+        )
+        
+        user_content = (
+            f"剧名：{drama_name}\n"
+            f"剧情背景：\n{plot_analysis[:1000]}...\n\n" # 提供部分背景
+            f"文案草稿：\n{draft_str}\n\n"
+            "请输出优化后的 JSON (字段: id, start_time, end_time, text, subtitle):"
+        )
+        
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=user_content)
+        ]
+        
+        try:
+            resp = await ai_service.send_chat(messages)
+            data, _ = sanitize_json_text_to_dict(resp.content)
+            
+            # 解析返回的 segments，并更新原 segments
+            # 因为模型可能会漏掉某些段落或改乱 ID，我们需要做一个健壮的映射
+            new_segments_map = {str(s.get("id")): s for s in data.get("segments", []) if s.get("id")}
+            
+            final_segments = []
+            for seg in segments:
+                sid = str(seg["id"])
+                if sid in new_segments_map:
+                    new_seg = new_segments_map[sid]
+                    # 更新文本
+                    seg["text"] = new_seg.get("text", seg["text"])
+                    if "subtitle" in new_seg:
+                        seg["subtitle"] = new_seg["subtitle"]
+                final_segments.append(seg)
+                
+            return final_segments
+        except Exception as e:
+            logger.warning(f"Refine script failed, returning draft: {e}")
+            return segments
+
+    @staticmethod
     async def generate_script_json(drama_name: str, plot_analysis: str, subtitle_content: str) -> Dict[str, Any]:
-        """调用提示词模块生成格式化脚本文案（返回已校验的原始JSON字典）"""
+        """
+        生成解说脚本（Map-Reduce-Refine 模式）
+        1. 解析字幕
+        2. 滑动窗口分块 (Map)
+        3. 并发生成各块脚本
+        4. 合并去重 (Reduce)
+        5. 全局润色 (Refine)
+        """
+        # 1. 解析字幕
+        subtitles = ScriptGenerationService._parse_srt_subtitles(subtitle_content)
+        if not subtitles:
+            # Fallback to simple generation if parsing fails
+            logger.warning("Subtitle parsing failed, fallback to simple generation")
+            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content)
+            
+        total_duration = subtitles[-1]["end"] if subtitles else 0
+        if total_duration == 0:
+             return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content)
+
+        # 2. 分块配置
+        WINDOW_SIZE = 300  # 5分钟
+        OVERLAP = 60       # 1分钟重叠
+        
+        chunks = []
+        curr_time = 0
+        idx = 0
+        while curr_time < total_duration:
+            end_time = curr_time + WINDOW_SIZE
+            # 获取该时间段内的字幕
+            chunk_subs = [s for s in subtitles if s["start"] >= curr_time and s["start"] < end_time]
+            
+            if chunk_subs:
+                chunks.append({
+                    "idx": idx,
+                    "start": curr_time,
+                    "end": end_time,
+                    "subs": chunk_subs
+                })
+                idx += 1
+            
+            if curr_time + WINDOW_SIZE >= total_duration:
+                break
+            curr_time += (WINDOW_SIZE - OVERLAP)
+
+        # 3. 并发生成 (限制并发数为 5)
+        sem = asyncio.Semaphore(5)
+        
+        async def generate_one(chunk):
+            async with sem:
+                # 筛选相关的剧情爆点
+                local_plot = ScriptGenerationService._filter_plot_analysis_by_time(plot_analysis, chunk["start"], chunk["end"])
+                return await ScriptGenerationService._generate_script_chunk(
+                    chunk["idx"], chunk["start"], chunk["end"], chunk["subs"], local_plot, drama_name
+                )
+        
+        tasks = [generate_one(c) for c in chunks]
+        results = await asyncio.gather(*tasks)
+        
+        all_segments = []
+        for res in results:
+            all_segments.extend(res)
+            
+        # 4. 合并去重
+        merged_segments = ScriptGenerationService._merge_segments(all_segments)
+        
+        # 5. 全局润色
+        final_segments = await ScriptGenerationService._refine_full_script(merged_segments, drama_name, plot_analysis)
+        
+        return {"segments": final_segments}
+
+    @staticmethod
+    async def _generate_script_json_simple(drama_name: str, plot_analysis: str, subtitle_content: str) -> Dict[str, Any]:
+        """(旧版逻辑) 直接调用提示词模块生成"""
         key = "short_drama_narration:script_generation"
         variables = {
             "drama_name": drama_name,
@@ -308,6 +660,7 @@ class ScriptGenerationService:
         data, raw_json = sanitize_json_text_to_dict(raw_text)
         data = validate_script_items(data)
         return data
+
 
     @staticmethod
     def to_video_script(data: Dict[str, Any], total_duration: float) -> Dict[str, Any]:
