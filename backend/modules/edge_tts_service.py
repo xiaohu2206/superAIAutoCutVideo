@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -71,9 +72,7 @@ def _speed_ratio_to_rate(speed_ratio: Optional[float]) -> str:
 
 def _resolve_proxy_url() -> Optional[str]:
     try:
-        env = (os.getenv("EDGE_TTS_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or "").strip()
-        if env:
-            return env
+        # 优先使用配置中的代理，以便在运行时覆盖环境变量
         try:
             from modules.config.tts_config import tts_engine_config_manager
             cfg = tts_engine_config_manager.get_active_config()
@@ -85,9 +84,39 @@ def _resolve_proxy_url() -> Optional[str]:
                         return val.strip()
         except Exception:
             pass
+
+        # 其次读取环境变量
+        env = (os.getenv("EDGE_TTS_PROXY") or "").strip()
+        if env:
+            if env.lower() in ("none", "disable", "disabled"):
+                return None
+            return env
+        sys_https = (os.getenv("HTTPS_PROXY") or "").strip()
+        if sys_https:
+            return sys_https
+        sys_http = (os.getenv("HTTP_PROXY") or "").strip()
+        if sys_http:
+            return sys_http
         return None
     except Exception:
         return None
+
+
+def _normalize_proxy_url(url: Optional[str]) -> Optional[str]:
+    try:
+        if not url:
+            return None
+        u = url.strip()
+        if not u:
+            return None
+        lu = u.lower()
+        if lu in ("none", "disable", "disabled", "null"):
+            return None
+        if "://" in u:
+            return u
+        return f"http://{u}"
+    except Exception:
+        return url
 
 
 class EdgeTtsService:
@@ -97,7 +126,6 @@ class EdgeTtsService:
         返回统一的字典结构，供配置层映射到 TtsVoice。
         """
         try:
-            # 读取缓存
             if VOICES_CACHE_PATH.exists():
                 try:
                     data = json.loads(VOICES_CACHE_PATH.read_text("utf-8"))
@@ -106,13 +134,12 @@ class EdgeTtsService:
                 except Exception:
                     pass
 
-            import edge_tts  # noqa: F401
+            import edge_tts
         except Exception as e:
             logger.error(f"edge-tts 模块不可用: {e}")
             return []
 
         try:
-            import edge_tts
             voices_raw = await edge_tts.list_voices()
             voices: List[Dict[str, Any]] = []
             for v in voices_raw:
@@ -148,7 +175,7 @@ class EdgeTtsService:
             logger.error(f"获取 Edge TTS 音色失败: {e}")
             return []
 
-    async def synthesize(self, text: str, voice_id: str, speed_ratio: Optional[float], out_path: Path) -> Dict[str, Any]:
+    async def synthesize(self, text: str, voice_id: str, speed_ratio: Optional[float], out_path: Path, proxy_override: Optional[str] = None) -> Dict[str, Any]:
         """
         使用 Edge TTS 合成语音到指定文件。
         返回包含路径与时长信息的结果。
@@ -158,19 +185,152 @@ class EdgeTtsService:
         except Exception as e:
             return {"success": False, "error": f"edge_tts_import_failed: {e}"}
 
-        rate = _speed_ratio_to_rate(speed_ratio)
+        cfg_voice: Optional[str] = None
+        cfg_speed: Optional[float] = None
         try:
-            proxy = _resolve_proxy_url()
-            communicate = edge_tts.Communicate(text=text, voice=voice_id, rate=rate, proxy=proxy)
-            await _ensure_parent_dir(out_path)
-            await communicate.save(str(out_path))
-            dur = await _ffprobe_duration(str(out_path))
-            return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
+            from modules.config.tts_config import tts_engine_config_manager
+            cfg = tts_engine_config_manager.get_active_config()
+            if cfg and (getattr(cfg, "provider", "") or "").lower() == "edge_tts":
+                cfg_voice = getattr(cfg, "active_voice_id", None)
+                cfg_speed = getattr(cfg, "speed_ratio", None)
+        except Exception:
+            pass
+
+        vid = voice_id if isinstance(voice_id, str) and voice_id.strip() else (cfg_voice or "zh-CN-XiaoxiaoNeural")
+        sr = speed_ratio if speed_ratio is not None else cfg_speed
+        rate = _speed_ratio_to_rate(sr)
+        pitch = _ratio_to_pitch(sr)
+        try:
+            candidates: List[Optional[str]] = []
+            if proxy_override is not None:
+                ov = _normalize_proxy_url(proxy_override)
+                candidates.append(ov)
+                candidates.append(None)
+            else:
+                candidates.append(None)
+                candidates.append(_normalize_proxy_url(_resolve_proxy_url()))
+
+            errs: List[Dict[str, Any]] = []
+            for proxy in candidates:
+                prev_env: Dict[str, Optional[str]] = {}
+                need_disable_env = proxy is None
+                try:
+                    try:
+                        logger.info(f"edge_tts proxy attempt: {proxy}")
+                    except Exception:
+                        pass
+                    if need_disable_env:
+                        for k in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "EDGE_TTS_PROXY"):
+                            prev_env[k] = os.environ.get(k)
+                            os.environ.pop(k, None)
+                        prev_env["NO_PROXY"] = os.environ.get("NO_PROXY")
+                        os.environ["NO_PROXY"] = "*"
+                    await _ensure_parent_dir(out_path)
+                    try:
+                        communicate = edge_tts.Communicate(text=text, voice=vid, rate=rate, pitch=pitch, proxy=proxy)
+                        await communicate.save(str(out_path))
+                    except Exception:
+                        audio_data = bytes()
+                        cm2 = edge_tts.Communicate(text=text, voice=vid, rate=rate, pitch=pitch, proxy=proxy)
+                        async for chunk in cm2.stream():
+                            if chunk.get("type") == "audio":
+                                audio_data += chunk.get("data", b"")
+                        if not audio_data:
+                            raise
+                        with open(str(out_path), "wb") as f:
+                            f.write(audio_data)
+                    dur = await _ffprobe_duration(str(out_path))
+                    return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
+                except Exception as e:
+                    msg = str(e)
+                    requires_proxy = False
+                    if ("403" in msg) and ("Invalid response status" in msg or "speech.platform.bing.com" in msg or "TrustedClientToken" in msg):
+                        requires_proxy = True
+                    if ("Cannot connect to host" in msg) or ("Connect call failed" in msg) or ("proxy" in msg.lower()):
+                        requires_proxy = True
+                    errs.append({"message": msg, "requires_proxy": requires_proxy})
+                finally:
+                    if need_disable_env:
+                        for k in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "EDGE_TTS_PROXY"):
+                            v = prev_env.get(k, None)
+                            if v is None:
+                                os.environ.pop(k, None)
+                            else:
+                                os.environ[k] = v
+                        vnp = prev_env.get("NO_PROXY", None)
+                        if vnp is None:
+                            os.environ.pop("NO_PROXY", None)
+                        else:
+                            os.environ["NO_PROXY"] = vnp
+
+            if errs:
+                last = errs[-1]
+                if (platform.system().lower() == "darwin"):
+                    mac_voice = _map_edge_to_mac_voice(voice_id)
+                    ok = await _mac_say_to_mp3(text, mac_voice, out_path)
+                    if ok:
+                        dur = await _ffprobe_duration(str(out_path))
+                        return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
+                return {"success": False, "error": last["message"], "message": last["message"], "requires_proxy": bool(last.get("requires_proxy", False))}
+            return {"success": False, "error": "edge_tts_unknown_error"}
         except Exception as e:
-            msg = str(e)
-            if ("403" in msg) and ("Invalid response status" in msg or "speech.platform.bing.com" in msg or "TrustedClientToken" in msg):
-                return {"success": False, "error": "edge_tts_403", "message": msg, "requires_proxy": True}
-            return {"success": False, "error": msg}
+            return {"success": False, "error": f"edge_tts_outer_exception: {e}"}
 
 
 edge_tts_service = EdgeTtsService()
+
+
+def _ratio_to_pitch(speed_ratio: Optional[float]) -> str:
+    try:
+        return "+0Hz"
+    except Exception:
+        return "+0Hz"
+
+
+async def _mac_say_to_mp3(text: str, voice: Optional[str], mp3_path: Path) -> bool:
+    try:
+        await _ensure_parent_dir(mp3_path)
+        tmp_aiff = mp3_path.with_suffix(".aiff")
+        args = ["say"]
+        if isinstance(voice, str) and voice.strip():
+            args += ["-v", voice.strip()]
+        args += ["-o", str(tmp_aiff), text]
+        p1 = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, _ = await p1.communicate()
+        if p1.returncode != 0:
+            try:
+                if tmp_aiff.exists():
+                    tmp_aiff.unlink()
+            except Exception:
+                pass
+            return False
+        p2 = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(tmp_aiff),
+            str(mp3_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, _ = await p2.communicate()
+        try:
+            if tmp_aiff.exists():
+                tmp_aiff.unlink()
+        except Exception:
+            pass
+        return p2.returncode == 0
+    except Exception:
+        return False
+
+
+def _map_edge_to_mac_voice(voice_id: str) -> Optional[str]:
+    try:
+        v = (voice_id or "").lower()
+        if v.startswith("zh-"):
+            return "Ting-Ting"
+        if v.startswith("en-"):
+            return "Samantha"
+        return None
+    except Exception:
+        return None

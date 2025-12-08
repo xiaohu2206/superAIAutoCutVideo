@@ -390,34 +390,18 @@ class TtsEngineConfigManager:
             return {"success": False, "config_id": config_id, "error": f"配置 '{config_id}' 不存在"}
 
         if config.provider == 'edge_tts':
-            # Edge TTS 无需凭据，执行一次简短合成以验证服务可用
             try:
                 from modules.edge_tts_service import edge_tts_service
                 backend_dir = Path(__file__).parent.parent.parent
                 out_path = backend_dir / "serviceData" / "tts" / "previews" / "edge_test_preview.mp3"
                 voice_id = config.active_voice_id or "zh-CN-XiaoxiaoNeural"
-                prev_proxy = None
-                try:
-                    if isinstance(proxy_url, str) and proxy_url.strip():
-                        prev_proxy = os.getenv("EDGE_TTS_PROXY")
-                        os.environ["EDGE_TTS_PROXY"] = proxy_url.strip()
-                except Exception:
-                    prev_proxy = None
                 res = await edge_tts_service.synthesize(
                     text="你好，Edge TTS 连通性测试。",
                     voice_id=voice_id,
                     speed_ratio=config.speed_ratio,
                     out_path=out_path,
+                    proxy_override=(proxy_url if isinstance(proxy_url, str) else None),
                 )
-                # 恢复环境变量
-                try:
-                    if isinstance(proxy_url, str) and proxy_url.strip():
-                        if prev_proxy is None:
-                            os.environ.pop("EDGE_TTS_PROXY", None)
-                        else:
-                            os.environ["EDGE_TTS_PROXY"] = prev_proxy
-                except Exception:
-                    pass
                 if res.get("success"):
                     return {
                         "success": True,
@@ -435,25 +419,16 @@ class TtsEngineConfigManager:
                         "message": res.get("message") or res.get("error") or "合成失败",
                         "error": res.get("error") or res.get("message"),
                         "requires_proxy": bool(res.get("requires_proxy", False)),
-                        "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址"
+                        "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址，例如 http://127.0.0.1:7897 或 socks5://127.0.0.1:7897"
                     }
             except Exception as e:
-                # 恢复环境变量
-                try:
-                    if isinstance(proxy_url, str) and proxy_url.strip():
-                        if prev_proxy is None:
-                            os.environ.pop("EDGE_TTS_PROXY", None)
-                        else:
-                            os.environ["EDGE_TTS_PROXY"] = prev_proxy
-                except Exception:
-                    pass
                 return {
                     "success": False,
                     "config_id": config_id,
                     "provider": config.provider,
                     "message": "Edge TTS 测试失败",
                     "error": str(e),
-                    "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址"
+                    "hint": "请设置 EDGE_TTS_PROXY 或在配置 extra_params.ProxyUrl 指定代理地址，例如 http://127.0.0.1:7897 或 socks5://127.0.0.1:7897"
                 }
 
         # 默认走腾讯云 TTS 鉴权校验
