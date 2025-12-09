@@ -158,62 +158,51 @@ class VideoGenerationService:
 
         clip_paths: List[str] = []
         for idx, seg in enumerate(segments, start=1):
-            try:
-                start = float(seg.get("start_time", 0.0))
-                end = float(seg.get("end_time", 0.0))
-                if end <= start:
-                    # 跳过无效片段
-                    logger.warning(f"跳过无效片段: idx={idx} start={start} end={end}")
-                    continue
-                duration = max(0.0, end - start)
-                clip_name = f"clip_{idx:04d}.mp4"
-                clip_abs = tmp_dir / clip_name
+            start = float(seg.get("start_time", 0.0))
+            end = float(seg.get("end_time", 0.0))
+            if end <= start:
+                raise ValueError(f"无效片段: idx={idx} start={start} end={end}")
+            duration = max(0.0, end - start)
+            clip_name = f"clip_{idx:04d}.mp4"
+            clip_abs = tmp_dir / clip_name
 
-                ok = await video_processor.cut_video_segment(
-                    str(input_abs), str(clip_abs), start, duration
-                )
-                if ok:
-                    text = str(seg.get("text", "") or "").strip()
-                    if text.startswith("播放原片"):
-                        clip_paths.append(str(clip_abs))
+            ok = await video_processor.cut_video_segment(
+                str(input_abs), str(clip_abs), start, duration
+            )
+            if not ok:
+                raise RuntimeError(f"剪切片段失败: {idx}")
+
+            text = str(seg.get("text", "") or "").strip()
+            if text.startswith("播放原片"):
+                clip_paths.append(str(clip_abs))
+            else:
+                seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                sy = await tts_service.synthesize(text, str(seg_audio), None)
+                if not sy.get("success"):
+                    raise RuntimeError(f"TTS合成失败: {idx} - {sy.get('error')}")
+                adur = float(sy.get("duration") or 0.0) if isinstance(sy.get("duration"), (int, float)) else 0.0
+                if adur <= 0.0:
+                    adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                if adur > 0.0 and input_dur > 0.0 and adur > duration:
+                    ext = adur - duration
+                    fwd = max(0.0, input_dur - end)
+                    if fwd >= ext:
+                        new_start = start
+                        new_dur = duration + ext
                     else:
-                        try:
-                            seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
-                            sy = await tts_service.synthesize(text, str(seg_audio), None)
-                            if sy.get("success"):
-                                adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
-                                if adur > 0.0 and input_dur > 0.0 and adur > duration:
-                                    ext = adur - duration
-                                    fwd = max(0.0, input_dur - end)
-                                    if fwd >= ext:
-                                        new_start = start
-                                        new_dur = duration + ext
-                                    else:
-                                        shortage = ext - fwd
-                                        new_start = max(0.0, start - shortage)
-                                        new_dur = input_dur - new_start
-                                    ok2 = await video_processor.cut_video_segment(
-                                        str(input_abs), str(clip_abs), new_start, new_dur
-                                    )
-                                    if not ok2:
-                                        logger.warning(f"片段延长失败，使用原片段: {idx}")
-                                clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
-                                rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
-                                if rep_ok:
-                                    clip_paths.append(str(clip_nar_abs))
-                                else:
-                                    logger.warning(f"片段配音替换失败，保留原片段: {idx}")
-                                    clip_paths.append(str(clip_abs))
-                            else:
-                                logger.warning(f"TTS合成失败，保留原片段: {idx} - {sy.get('error')}")
-                                clip_paths.append(str(clip_abs))
-                        except Exception as e:
-                            logger.warning(f"生成配音或替换失败（保留原片段） idx={idx}: {e}")
-                            clip_paths.append(str(clip_abs))
-                else:
-                    logger.warning(f"剪切片段失败，已跳过: {idx}")
-            except Exception as e:
-                logger.warning(f"处理片段出错（跳过） idx={idx}: {e}")
+                        shortage = ext - fwd
+                        new_start = max(0.0, start - shortage)
+                        new_dur = input_dur - new_start
+                    ok2 = await video_processor.cut_video_segment(
+                        str(input_abs), str(clip_abs), new_start, new_dur
+                    )
+                    if not ok2:
+                        raise RuntimeError(f"片段延长失败: {idx}")
+                clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
+                rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
+                if not rep_ok:
+                    raise RuntimeError(f"片段配音替换失败: {idx}")
+                clip_paths.append(str(clip_nar_abs))
 
             # 广播：片段进度（15% -> 70% 区间）
             try:
@@ -295,7 +284,9 @@ class VideoGenerationService:
             pass
 
         ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(str(output_abs), str(norm_abs))
-        final_abs = norm_abs if ok_norm else output_abs
+        if not ok_norm:
+            raise RuntimeError("响度标准化失败")
+        final_abs = norm_abs
         web_output = _to_web_path(final_abs)
         projects_store.update_project(project_id, {"output_video_path": web_output, "status": "completed"})
 
@@ -305,8 +296,8 @@ class VideoGenerationService:
                     "type": "progress",
                     "scope": "generate_video",
                     "project_id": project_id,
-                    "phase": "normalize_done" if ok_norm else "normalize_skipped",
-                    "message": "响度标准化完成" if ok_norm else "跳过响度标准化，保留原拼接视频",
+                    "phase": "normalize_done",
+                    "message": "响度标准化完成",
                     "progress": 95,
                     "timestamp": datetime.now().isoformat(),
                 })

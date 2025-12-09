@@ -500,7 +500,7 @@ class VideoProcessor:
     async def _pick_fast_encoder(self) -> Tuple[str, List[str]]:
         await self._detect_cuda()
         encoders = await self._detect_encoders()
-        if "h264_nvenc" in encoders:
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in encoders):
             logger.info("编码器选择: h264_nvenc (GPU)")
             return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p1"]
         if "h264_qsv" in encoders:
@@ -565,8 +565,7 @@ class VideoProcessor:
         if getattr(self, "_cuda_checked", False):
             return bool(getattr(self, "_cuda_available", False))
         has_hwaccel = await self._ffmpeg_supports_cuda_hwaccel()
-        encs = await self._detect_encoders()
-        use = has_hwaccel or ("h264_nvenc" in encs)
+        use = has_hwaccel
         setattr(self, "_cuda_checked", True)
         setattr(self, "_cuda_available", use)
         if use:
@@ -673,13 +672,34 @@ class VideoProcessor:
     async def _ffprobe_duration(self, path: str, stream_type: str = "format") -> Optional[float]:
         try:
             if stream_type == "audio":
-                cmd = [
+                cmd_a = [
                     "ffprobe", "-v", "error",
                     "-select_streams", "a:0",
                     "-show_entries", "stream=duration",
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
+                proc_a = await asyncio.create_subprocess_exec(*cmd_a, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                out_a, _ = await proc_a.communicate()
+                if proc_a.returncode == 0:
+                    try:
+                        return float(out_a.decode().strip())
+                    except Exception:
+                        pass
+                cmd_f = [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ]
+                proc_f = await asyncio.create_subprocess_exec(*cmd_f, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                out_f, _ = await proc_f.communicate()
+                if proc_f.returncode == 0:
+                    try:
+                        return float(out_f.decode().strip())
+                    except Exception:
+                        return None
+                return None
             else:
                 cmd = [
                     "ffprobe", "-v", "error",
@@ -687,14 +707,14 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            out, _ = await proc.communicate()
-            if proc.returncode == 0:
-                try:
-                    return float(out.decode().strip())
-                except Exception:
-                    return None
-            return None
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                out, _ = await proc.communicate()
+                if proc.returncode == 0:
+                    try:
+                        return float(out.decode().strip())
+                    except Exception:
+                        return None
+                return None
         except Exception:
             return None
 
@@ -748,6 +768,30 @@ class VideoProcessor:
                 return True
             else:
                 err = stderr.decode(errors="ignore")
+                if ("Cannot load nvcuda.dll" in err) or ("Error while opening encoder" in err) or ("Could not open encoder" in err):
+                    vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                    cmd_fb = [
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-i", video_path,
+                        "-i", narr_used,
+                        "-filter_complex", filter_complex,
+                        *map_args,
+                        *vcodec_args_fb,
+                        "-c:a", "aac", "-b:a", "192k",
+                        *extra,
+                        "-y", output_path,
+                    ]
+                    p2 = await asyncio.create_subprocess_exec(
+                        *cmd_fb,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    _, e2 = await p2.communicate()
+                    if p2.returncode == 0:
+                        return True
+                    else:
+                        logger.error(f"片段音频替换失败: {err}\n{e2.decode(errors='ignore')}")
+                        return False
                 logger.error(f"片段音频替换失败: {err}")
                 return False
 

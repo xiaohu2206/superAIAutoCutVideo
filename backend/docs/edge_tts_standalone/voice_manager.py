@@ -31,7 +31,7 @@ def mktimestamp(time_seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
 
 
-def get_all_azure_voices(filter_locals=None) -> list[str]:
+def get_all_azure_voices(filter_locals=None) -> List[str]:
     if filter_locals is None:
         filter_locals = ["zh-CN", "en-US", "zh-HK", "zh-TW", "vi-VN"]
     voices_str = """
@@ -1075,7 +1075,7 @@ def generate_audio(
         try:
             logger.info(f"第 {i+1} 次使用 edge_tts 生成音频")
 
-            async def _do() -> tuple[SubMaker, bytes]:
+            async def _do() -> Tuple[SubMaker, bytes]:
                 communicate = edge_tts.Communicate(text, voice_name, rate=rate_str, pitch=pitch_str, proxy=proxy)
                 sub_maker = edge_tts.SubMaker()
                 audio_data = bytes()  # 用于存储音频数据
