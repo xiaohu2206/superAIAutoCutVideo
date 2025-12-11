@@ -2,21 +2,26 @@
 
 # SuperAIAutoCutVideo · AI智能视频剪辑
 
-轻量、跨平台的一站式智能视频处理桌面应用，开箱即用，适合内容创作者和团队快速产出高质量视频。
+轻量、跨平台的一站式智能视频处理桌面应用，开箱即用，适合内容创作者和团队快速产出高质量视频。（免费、免费、免费）
 
 ## 亮点特性
 
 - 多项目管理：支持创建、切换与独立配置
-- 短剧解说工作流：多集上传 → 自动合并 → 生成解说脚本 → 生成解说视频
-- AI 辅助脚本与配音，自动混流与响度标准化
-- 支持多视频上传、合并与基础剪辑
-- 实时进度反馈与双向通信（HTTP + WebSocket）
-- 现代技术栈：React + TypeScript + Tauri + Python FastAPI + FFmpeg
+- 短剧解说工作流：多集上传 → 自动合并 → 生成解说脚本（暂时只支持字幕分析） → 生成解说视频
+- 自动提取视频字幕
+- 支持自定义提示词（高级配置）
+- 支持上传字幕文件（高级配置）
+- 支持腾讯tts、edge tts  
 
-## 更新计划
 
+
+## 更新计划（持续更新优化中....
+- 加入更多的大模型集合平台
+- 添加 OCR 识别字幕
+- 添加whisper提取字幕
 - 添加影视解说功能
 - 添加视觉分析视频功能
+- 打包成 Windows 和 macOS 版本
 
 ## 快速开始
 
@@ -36,7 +41,6 @@ backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 backend\.venv\Scripts\python.exe backend\main.py
 
 # 启动桌面应用
-cargo tauri dev
 ```
 
 #### Edge TTS 使用说明（代理与持久化）
@@ -76,7 +80,6 @@ cargo tauri dev
 ## 打包
 
 ```bash
-cargo tauri build
 ```
 
 ## 文档与支持
@@ -84,6 +87,17 @@ cargo tauri build
 - 后端 API 文档：`docs/backend_api_documentation.md`
 - 前端说明：`docs/FRONTEND_README.md`
 - 使用指南：`USAGE.md`
+
+## 联系方式
+
+<img src="docs/image/douyin.png" alt="抖音码" width="160" />
+
+- 抖音号：`xiaohu_111`
+- 微信号：`interest_dog`
+
+## 说明
+
+如果大家有不懂的或者想优化添加的功能请联系我，比如需要我录制教程视频都可以。现在版本还不稳定，没有做版本管理，还在断断续续更新中，不懂代码的用起来可能还有难度。
 
 ## 许可证
 
