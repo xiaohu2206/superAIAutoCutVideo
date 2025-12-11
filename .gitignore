@@ -167,7 +167,6 @@ config/production.json
 *.flv
 *.webm
 *.mp3
-*.wav
 *.aac
 
 # 大文件

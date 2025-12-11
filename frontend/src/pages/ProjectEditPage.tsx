@@ -330,7 +330,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id, scriptGenProgress]);
+  }, [project?.id]);
 
   /**
    * 处理保存脚本
@@ -422,7 +422,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id, videoGenProgress]);
+  }, [project?.id]);
 
   /**
    * 处理下载输出视频

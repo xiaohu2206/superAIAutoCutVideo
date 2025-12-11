@@ -196,7 +196,25 @@ async def _ensure_models_ready_for_script(project_id: Optional[str] = None) -> N
                 pass
         raise HTTPException(status_code=400, detail="未找到激活的文案生成模型配置，请在“模型配置”中启用一个配置")
 
-    content_result = await content_model_config_manager.test_connection(active_content_id)
+    try:
+        content_result = await asyncio.wait_for(
+            content_model_config_manager.test_connection(active_content_id),
+            timeout=15,
+        )
+    except asyncio.TimeoutError:
+        if project_id:
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "scope": "generate_script",
+                    "project_id": project_id,
+                    "phase": "content_model_unavailable",
+                    "message": "文案生成模型配置连通性测试超时",
+                    "timestamp": _now_ts(),
+                }))
+            except Exception:
+                pass
+        raise HTTPException(status_code=504, detail="文案生成模型配置连通性测试超时")
     if not content_result.get("success", False):
         msg = content_result.get("error") or content_result.get("message") or "文案生成模型不可用"
         if project_id:
@@ -227,84 +245,84 @@ async def _ensure_models_ready_for_script(project_id: Optional[str] = None) -> N
         except Exception:
             pass
 
-    if project_id:
-        try:
-            await manager.broadcast(json.dumps({
-                "type": "progress",
-                "scope": "generate_script",
-                "project_id": project_id,
-                "phase": "validating_tts",
-                "message": "正在验证TTS功能是否可用",
-                "progress": 15,
-                "timestamp": _now_ts(),
-            }))
-        except Exception:
-            pass
+    # if project_id:
+    #     try:
+    #         await manager.broadcast(json.dumps({
+    #             "type": "progress",
+    #             "scope": "generate_script",
+    #             "project_id": project_id,
+    #             "phase": "validating_tts",
+    #             "message": "正在验证TTS功能是否可用",
+    #             "progress": 15,
+    #             "timestamp": _now_ts(),
+    #         }))
+    #     except Exception:
+    #         pass
 
-    active_tts_id = tts_engine_config_manager.get_active_config_id()
-    if not active_tts_id:
-        if project_id:
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "tts_missing",
-                    "message": "未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据",
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-        raise HTTPException(status_code=400, detail="未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据")
+    # active_tts_id = tts_engine_config_manager.get_active_config_id()
+    # if not active_tts_id:
+    #     if project_id:
+    #         try:
+    #             await manager.broadcast(json.dumps({
+    #                 "type": "error",
+    #                 "scope": "generate_script",
+    #                 "project_id": project_id,
+    #                 "phase": "tts_missing",
+    #                 "message": "未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据",
+    #                 "timestamp": _now_ts(),
+    #             }))
+    #         except Exception:
+    #             pass
+    #     raise HTTPException(status_code=400, detail="未找到激活的TTS配置，请在“TTS配置”中启用并完善凭据")
 
-    tts_cfg = tts_engine_config_manager.get_config(active_tts_id)
-    provider = (getattr(tts_cfg, "provider", None) or "tencent_tts").lower()
+    # tts_cfg = tts_engine_config_manager.get_config(active_tts_id)
+    # provider = (getattr(tts_cfg, "provider", None) or "tencent_tts").lower()
 
-    tts_result = await tts_engine_config_manager.test_connection(active_tts_id)
-    if not tts_result.get("success", False):
-        msg = tts_result.get("error") or tts_result.get("message") or "TTS配置不可用"
-        if provider == "edge_tts":
-            logging.warning(f"Edge TTS 配置连通性检查失败（忽略，不阻断脚本生成）：{msg}")
-            if project_id:
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "warning",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "tts_unavailable_edge",
-                        "message": f"Edge TTS 配置连通性检查失败，将跳过强制校验：{msg}",
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-            return
-        if project_id:
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "tts_unavailable",
-                    "message": f"TTS配置不可用：{msg}",
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-        raise HTTPException(status_code=400, detail=f"TTS配置不可用：{msg}")
+    # tts_result = await tts_engine_config_manager.test_connection(active_tts_id)
+    # if not tts_result.get("success", False):
+    #     msg = tts_result.get("error") or tts_result.get("message") or "TTS配置不可用"
+    #     if provider == "edge_tts":
+    #         logging.warning(f"Edge TTS 配置连通性检查失败（忽略，不阻断脚本生成）：{msg}")
+    #         if project_id:
+    #             try:
+    #                 await manager.broadcast(json.dumps({
+    #                     "type": "warning",
+    #                     "scope": "generate_script",
+    #                     "project_id": project_id,
+    #                     "phase": "tts_unavailable_edge",
+    #                     "message": f"Edge TTS 配置连通性检查失败，将跳过强制校验：{msg}",
+    #                     "timestamp": _now_ts(),
+    #                 }))
+    #             except Exception:
+    #                 pass
+    #         return
+    #     if project_id:
+    #         try:
+    #             await manager.broadcast(json.dumps({
+    #                 "type": "error",
+    #                 "scope": "generate_script",
+    #                 "project_id": project_id,
+    #                 "phase": "tts_unavailable",
+    #                 "message": f"TTS配置不可用：{msg}",
+    #                 "timestamp": _now_ts(),
+    #             }))
+    #         except Exception:
+    #             pass
+    #     raise HTTPException(status_code=400, detail=f"TTS配置不可用：{msg}")
 
-    if project_id:
-        try:
-            await manager.broadcast(json.dumps({
-                "type": "progress",
-                "scope": "generate_script",
-                "project_id": project_id,
-                "phase": "tts_ready",
-                "message": "TTS功能连通性正常",
-                "progress": 20,
-                "timestamp": _now_ts(),
-            }))
-        except Exception:
-            pass
+    # if project_id:
+    #     try:
+    #         await manager.broadcast(json.dumps({
+    #             "type": "progress",
+    #             "scope": "generate_script",
+    #             "project_id": project_id,
+    #             "phase": "tts_ready",
+    #             "message": "TTS功能连通性正常",
+    #             "progress": 20,
+    #             "timestamp": _now_ts(),
+    #         }))
+    #     except Exception:
+    #         pass
 
 
 class GenerateScriptService:
