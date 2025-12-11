@@ -16,6 +16,7 @@ import type { WebSocketMessage } from "../services/clients";
 import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
 import ProjectOperations from "../components/projectEdit/ProjectOperations";
 import ScriptEditor from "../components/projectEdit/ScriptEditor";
+import AdvancedConfigSection from "../components/projectEdit/AdvancedConfigSection";
 
 interface ProjectEditPageProps {
   projectId: string;
@@ -547,39 +548,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         </div>
 
         {showAdvancedConfig && (
-          <div className="border-t border-gray-200 pt-4 space-y-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">上传字幕SRT</label>
-              <div className="flex items-center space-x-3">
-                <input
-                  type="file"
-                  accept=".srt"
-                  onChange={handleSubtitleFileChange}
-                  disabled={uploadingSubtitle}
-                  className="block w-full max-w-xs text-sm text-gray-700"
-                />
-                {uploadingSubtitle && (
-                  <div className="w-40 h-2 bg-gray-200 rounded">
-                    <div
-                      className="h-2 bg-blue-600 rounded transition-all"
-                      style={{ width: `${Math.round(subtitleUploadProgress)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-              {project.subtitle_path ? (
-                <div className="mt-2 flex items-center text-xs text-gray-600">
-                  <span className="mr-3">已上传字幕：{project.subtitle_path.split("/").pop()}</span>
-                  <button
-                    onClick={handleDeleteSubtitle}
-                    className="px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
-                  >
-                    删除字幕
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <AdvancedConfigSection
+            projectId={projectId}
+            uploadingSubtitle={uploadingSubtitle}
+            subtitleUploadProgress={subtitleUploadProgress}
+            subtitlePath={project.subtitle_path}
+            onSubtitleFileChange={handleSubtitleFileChange}
+            onDeleteSubtitle={handleDeleteSubtitle}
+          />
         )}
 
         {/* 视频源管理：上传 / 排序 / 合并（Figma 布局）*/}

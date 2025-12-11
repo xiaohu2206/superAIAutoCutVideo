@@ -128,6 +128,19 @@ export class ApiClient {
     });
   }
 
+  // PUT请求
+  async put<T>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: "PUT",
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  // DELETE请求
+  async delete<T>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint, { method: "DELETE" });
+  }
+
   // 测试连接
   async testConnection(): Promise<boolean> {
     try {

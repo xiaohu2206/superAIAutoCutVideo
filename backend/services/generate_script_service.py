@@ -662,6 +662,7 @@ class GenerateScriptService:
                 drama_name=drama_name,
                 plot_analysis=plot_analysis,
                 subtitle_content=subtitle_text,
+                project_id=project_id,
             )
             try:
                 await manager.broadcast(json.dumps({
@@ -731,4 +732,3 @@ class GenerateScriptService:
 
 
 generate_script_service = GenerateScriptService()
-

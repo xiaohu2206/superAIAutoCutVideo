@@ -21,6 +21,7 @@ from modules.ai import ChatMessage
 from modules.prompts.prompt_manager import prompt_manager
 from services.ai_service import ai_service
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
+from modules.projects_store import projects_store
 
 logger = logging.getLogger(__name__)
 
@@ -400,13 +401,33 @@ class ScriptGenerationService:
         return "\n".join(relevant_lines)
 
     @staticmethod
+    def _resolve_prompt_key(project_id: Optional[str], default_key: str) -> str:
+        if not project_id:
+            return default_key
+        p = projects_store.get_project(project_id)
+        if not p:
+            return default_key
+        sel_map = getattr(p, "prompt_selection", {}) or {}
+        sel = sel_map.get(default_key)
+        if not isinstance(sel, dict):
+            return default_key
+        t = str(sel.get("type") or "official").lower()
+        kid = str(sel.get("key_or_id") or "")
+        if t == "user" and kid:
+            return kid.split(":", 1)[-1]
+        if t == "official" and kid:
+            return kid
+        return default_key
+
+    @staticmethod
     async def _generate_script_chunk(
         chunk_idx: int,
         start_time: float,
         end_time: float,
         subtitles: List[Dict[str, Any]],
         plot_analysis_snippet: str,
-        drama_name: str
+        drama_name: str,
+        project_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         subs_text_lines = []
         for s in subtitles:
@@ -415,7 +436,8 @@ class ScriptGenerationService:
         subs_text = "\n".join(subs_text_lines)
         if len(subs_text) > 6000:
             subs_text = subs_text[:6000]
-        key = "short_drama_narration:script_generation"
+        default_key = "short_drama_narration:script_generation"
+        key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
         variables = {
             "drama_name": drama_name,
             "plot_analysis": plot_analysis_snippet or "",
@@ -429,7 +451,8 @@ class ScriptGenerationService:
                 register_prompts()
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
             except Exception as e:
-                raise RuntimeError(f"无法获取提示词 {key}: {e}")
+                key = default_key
+                messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
         try:
             resp = await ai_service.send_chat(messages)
@@ -536,7 +559,7 @@ class ScriptGenerationService:
             return items
 
     @staticmethod
-    async def generate_script_json(drama_name: str, plot_analysis: str, subtitle_content: str) -> Dict[str, Any]:
+    async def generate_script_json(drama_name: str, plot_analysis: str, subtitle_content: str, project_id: Optional[str] = None) -> Dict[str, Any]:
         """
         生成解说脚本（Map-Reduce-Refine 模式）
         1. 解析字幕
@@ -550,10 +573,10 @@ class ScriptGenerationService:
         if not subtitles:
             # Fallback to simple generation if parsing fails
             logger.warning("Subtitle parsing failed, fallback to simple generation")
-            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content)
+            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
         total_duration = subtitles[-1]["end"] if subtitles else 0
         if total_duration == 0:
-            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content)
+            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
 
         # 2. 分块配置
         WINDOW_SIZE = 2500  # 5分钟
@@ -585,7 +608,7 @@ class ScriptGenerationService:
                 # 筛选相关的剧情爆点
                 local_plot = ScriptGenerationService._filter_plot_analysis_by_time(plot_analysis, chunk["start"], chunk["end"])
                 return await ScriptGenerationService._generate_script_chunk(
-                    chunk["idx"], chunk["start"], chunk["end"], chunk["subs"], local_plot, drama_name
+                    chunk["idx"], chunk["start"], chunk["end"], chunk["subs"], local_plot, drama_name, project_id
                 )
         tasks = [generate_one(c) for c in chunks]
         results = await asyncio.gather(*tasks)
@@ -599,9 +622,10 @@ class ScriptGenerationService:
         return data
 
     @staticmethod
-    async def _generate_script_json_simple(drama_name: str, plot_analysis: str, subtitle_content: str) -> Dict[str, Any]:
+    async def _generate_script_json_simple(drama_name: str, plot_analysis: str, subtitle_content: str, project_id: Optional[str] = None) -> Dict[str, Any]:
         """(旧版逻辑) 直接调用提示词模块生成"""
-        key = "short_drama_narration:script_generation"
+        default_key = "short_drama_narration:script_generation"
+        key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
         variables = {
             "drama_name": drama_name,
             "plot_analysis": plot_analysis,
@@ -616,7 +640,8 @@ class ScriptGenerationService:
                 register_prompts()
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
             except Exception as e:
-                raise RuntimeError(f"无法获取提示词 {key}: {e}")
+                key = default_key
+                messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
         resp = await ai_service.send_chat(messages)
         raw_text = resp.content

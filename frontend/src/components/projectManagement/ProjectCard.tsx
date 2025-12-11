@@ -1,16 +1,16 @@
 // 项目卡片组件
 
-import React from "react";
 import {
-  Folder,
   Calendar,
-  FileText,
-  Trash2,
-  Clock,
   CheckCircle,
-  XCircle,
+  Clock,
   Edit,
+  FileText,
+  Folder,
+  Trash2,
+  XCircle,
 } from "lucide-react";
+import React from "react";
 import type { Project } from "../../types/project";
 import { ProjectStatus } from "../../types/project";
 
@@ -81,7 +81,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   return (
     <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 overflow-hidden">
       {/* 卡片内容 */}
-      <div className="p-6">
+      <div className="p-6 min-h-[224px]">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center space-x-3">
             <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-lg">

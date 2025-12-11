@@ -66,18 +66,18 @@ class BasePrompt:
         """
         渲染模板
 
-        使用 `${var}` 形式的占位符；当缺少变量时抛出 ValueError。
+        使用 `${var}` 形式的占位符；支持 `{{var}}` 双语法并在渲染前归一化。
+        当缺少变量时抛出 ValueError。
         """
         template_str = self.get_template()
+        normalized = re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", r"${\1}", template_str)
 
-        # 找出模板中所有占位符
-        placeholders = set(re.findall(r"\$\{([a-zA-Z0-9_]+)\}", template_str))
+        placeholders = set(re.findall(r"\$\{([a-zA-Z0-9_]+)\}", normalized))
         missing = [p for p in placeholders if p not in variables]
         if missing:
             raise ValueError(f"缺少必要的模板变量: {', '.join(missing)}")
 
-        # 执行替换
-        return Template(template_str).substitute(**variables)
+        return Template(normalized).substitute(**variables)
 
 
 class TextPrompt(BasePrompt):

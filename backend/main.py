@@ -47,6 +47,7 @@ from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
+from routes.prompts_routes import router as prompts_router
 from modules.ws_manager import manager
 
 # 配置日志
@@ -79,6 +80,7 @@ app.include_router(video_model_router)
 app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
+app.include_router(prompts_router)
 
 def get_app_paths():
     """

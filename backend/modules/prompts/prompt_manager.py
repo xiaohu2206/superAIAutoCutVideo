@@ -19,6 +19,7 @@ import pkgutil
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, List, Optional, Tuple
+import re
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -45,13 +46,15 @@ class PromptTemplate(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     enabled: bool = True
+    origin: Optional[str] = None
 
     def render(self, variables: Dict[str, Any]) -> str:
-        """渲染模板，使用 `${var}` 占位符"""
-        missing = [v for v in self.variables if v not in variables]
+        t = re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", r"${\1}", self.template)
+        placeholders = set(re.findall(r"\$\{([a-zA-Z0-9_]+)\}", t))
+        missing = [v for v in placeholders if v not in variables]
         if missing:
             raise ValueError(f"缺少必要的模板变量: {', '.join(missing)}")
-        return Template(self.template).substitute(**variables)
+        return Template(t).substitute(**variables)
 
 
 class VideoAnalysisPrompts:
@@ -78,8 +81,12 @@ class PromptManager:
             config_file = backend_dir / "config" / "prompts.json"
         self._config_file = Path(config_file)
 
-        # 加载模板 + 自动发现模块
+        # 加载模板 + 自动发现模块 + 加载用户模板
         self._load_templates_from_config()
+        try:
+            self._load_user_templates()
+        except Exception as e:
+            logger.warning(f"加载用户模板失败: {e}")
         self._auto_discover_and_register()
 
     # ------------------------
@@ -147,7 +154,32 @@ class PromptManager:
         # 先尝试模板
         tpl = self.get_template(key_or_id)
         if tpl:
-            user_text = tpl.render(variables)
+            def _normalize(s: str) -> str:
+                return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", r"${\1}", s or "")
+
+            def _preamble(cat: Optional[str]) -> str:
+                c = str(cat or "")
+                if c == "short_drama_narration":
+                    return (
+                        "\n### 原始字幕（含精确时间戳）\n"
+                        "<subtitles>\n"
+                        "${subtitle_content}\n"
+                        "</subtitles>\n\n"
+                        "### 剧情概述\n"
+                        "<plot>\n"
+                        "${plot_analysis}\n"
+                        "</plot>\n\n"
+                        "现在请基于以上要求，为短剧《${drama_name}》创作解说脚本：\n"
+                    )
+                return ""
+
+            composed = (tpl.template or "") + _preamble(tpl.category) 
+            t = _normalize(composed)
+            placeholders = set(re.findall(r"\$\{([a-zA-Z0-9_]+)\}", t))
+            missing = [v for v in placeholders if v not in variables]
+            if missing:
+                raise ValueError(f"缺少必要的模板变量: {', '.join(missing)}")
+            user_text = Template(t).substitute(**variables)
             return {"system": tpl.system_prompt, "user": user_text}
 
         # 再尝试模块化提示词
@@ -169,6 +201,96 @@ class PromptManager:
         messages.append({"role": "user", "content": rendered["user"]})
         return messages
 
+    def list_summary(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        def add_tpl(tid: str, tpl: PromptTemplate):
+            items.append({
+                "id_or_key": tid,
+                "name": tpl.name,
+                "origin": (tpl.origin or "official"),
+                "category": tpl.category,
+                "tags": tpl.tags or [],
+            })
+        def add_prompt(key: str, p: BasePrompt):
+            items.append({
+                "id_or_key": key,
+                "name": p.metadata.name,
+                "origin": "official",
+                "category": p.metadata.category,
+                "tags": p.metadata.tags or [],
+            })
+        if category:
+            for tid, tpl in self._templates.items():
+                if tpl.category == category:
+                    add_tpl(tid, tpl)
+            for key, p in self._prompts.items():
+                try:
+                    cat = key.split(":", 1)[0]
+                except Exception:
+                    cat = p.metadata.category
+                if cat == category:
+                    add_prompt(key, p)
+        else:
+            for tid, tpl in self._templates.items():
+                add_tpl(tid, tpl)
+            for key, p in self._prompts.items():
+                add_prompt(key, p)
+        return items
+
+    def describe_item(self, key_or_id: str) -> Dict[str, Any]:
+        tpl = self.get_template(key_or_id)
+        if tpl:
+            return {
+                "id_or_key": key_or_id,
+                "name": tpl.name,
+                "category": tpl.category,
+                "origin": tpl.origin or "user",
+                "template": tpl.template,
+                "variables": tpl.variables,
+                "system_prompt": tpl.system_prompt,
+                "tags": tpl.tags or [],
+                "version": tpl.version,
+            }
+        prompt = self.get_prompt(key_or_id)
+        if not prompt:
+            # 支持简化 id 前缀 user:xxx
+            if key_or_id.startswith("user:"):
+                kid = key_or_id.split(":", 1)[1]
+                tpl2 = self.get_template(kid)
+                if tpl2:
+                    return {
+                        "id_or_key": kid,
+                        "name": tpl2.name,
+                        "category": tpl2.category,
+                        "origin": tpl2.origin or "user",
+                        "template": tpl2.template,
+                        "variables": tpl2.variables,
+                        "system_prompt": tpl2.system_prompt,
+                        "tags": tpl2.tags or [],
+                        "version": tpl2.version,
+                    }
+            raise KeyError(f"未找到提示词或模板: {key_or_id}")
+        return {
+            "id_or_key": f"{prompt.metadata.category}:{prompt.metadata.name}",
+            "name": prompt.metadata.name,
+            "category": prompt.metadata.category,
+            "origin": "official",
+            "template": prompt.get_template(),
+            "variables": prompt.metadata.parameters or [],
+            "system_prompt": prompt.get_system_prompt(),
+            "tags": prompt.metadata.tags or [],
+            "version": prompt.metadata.version,
+        }
+
+    @staticmethod
+    def validate_template_placeholders(template_str: str, required_vars: List[str]) -> Dict[str, Any]:
+        norm = re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", r"${\1}", template_str or "")
+        placeholders = sorted(set(re.findall(r"\$\{([a-zA-Z0-9_]+)\}", norm)))
+        req = sorted(set([str(v) for v in (required_vars or [])]))
+        missing = [v for v in req if v not in placeholders]
+        extra = [v for v in placeholders if v not in req] if req else []
+        return {"placeholders": placeholders, "missing": missing, "extra": extra}
+
     # ------------------------
     # 内部：加载配置与自动发现
     # ------------------------
@@ -188,6 +310,25 @@ class PromptManager:
             logger.info(f"提示词配置加载完成，共 {len(self._templates)} 个模板")
         except Exception as e:
             logger.error(f"读取提示词配置失败: {self._config_file}, error={e}")
+
+    def _load_user_templates(self) -> None:
+        backend_dir = Path(__file__).parent.parent.parent
+        store_path = backend_dir / "data" / "user_prompts.json"
+        if not store_path.exists():
+            return
+        try:
+            data = json.loads(store_path.read_text(encoding="utf-8"))
+            templates = data.get("templates", {})
+            for tid, t in templates.items():
+                try:
+                    t["origin"] = "user"
+                    tpl = PromptTemplate(**t)
+                    self.add_template(tpl)
+                except Exception as e:
+                    logger.warning(f"用户模板加载失败: {tid}, error={e}")
+            logger.info(f"用户模板加载完成，共 {len(templates)} 个模板")
+        except Exception as e:
+            logger.error(f"读取用户模板失败: {store_path}, error={e}")
 
     def _auto_discover_and_register(self) -> None:
         """

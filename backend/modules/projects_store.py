@@ -38,6 +38,7 @@ class Project(BaseModel):
     plot_analysis_path: Optional[str] = None
     output_video_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
+    prompt_selection: Dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: str
 
@@ -172,6 +173,18 @@ class ProjectsStore:
 
     def save_script(self, project_id: str, script: Dict[str, Any]) -> Optional[Project]:
         return self.update_project(project_id, {"script": script})
+
+    def update_prompt_selection(self, project_id: str, feature_key: str, selection: Dict[str, Any]) -> Optional[Project]:
+        with self._lock:
+            p = self._projects.get(project_id)
+            if not p:
+                return None
+            sel = dict(p.prompt_selection or {})
+            sel[str(feature_key)] = selection
+            p.prompt_selection = sel
+            p.updated_at = datetime.now().isoformat()
+            self._persist()
+            return p
 
     def clear_video_path(self, project_id: str) -> Optional[Project]:
         with self._lock:
