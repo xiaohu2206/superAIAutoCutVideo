@@ -17,6 +17,7 @@ export const getDefaultBaseUrl = (provider: string): string => {
     qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
+    openrouter: "https://openrouter.ai/api/v1/chat/completions",
   };
   return defaults[provider] || "";
 };
@@ -29,6 +30,7 @@ export const getDefaultModelName = (provider: string): string => {
     qwen: "qwen-vl-plus",
     doubao: "doubao-vision-pro",
     deepseek: "deepseek-vl-chat",
+    openrouter: "openai/gpt-4o-mini",
   };
   return defaults[provider] || "";
 };
@@ -41,6 +43,7 @@ export const getDefaultDescription = (provider: string): string => {
     qwen: "通义千问视频生成模型",
     doubao: "豆包视频生成模型",
     deepseek: "DeepSeek视频生成模型",
+    openrouter: "OpenRouter视频生成模型",
   };
   return defaults[provider] || "";
 };
@@ -64,6 +67,7 @@ export const getContentDefaultBaseUrl = (provider: string): string => {
     qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
+    openrouter: "https://openrouter.ai/api/v1/chat/completions",
   };
   return defaults[provider] || "";
 };
@@ -76,6 +80,7 @@ export const getContentDefaultModelName = (provider: string): string => {
     qwen: "qwen3-max",
     doubao: "doubao-seed-1-6-251015",
     deepseek: "deepseek-chat",
+    openrouter: "openai/gpt-4o-mini",
   };
   return defaults[provider] || "";
 };
@@ -88,6 +93,7 @@ export const getContentDefaultDescription = (provider: string): string => {
     qwen: "通义千问文案生成模型",
     doubao: "豆包文案生成模型",
     deepseek: "DeepSeek文案生成模型",
+    openrouter: "OpenRouter文案生成模型（支持结构化输出）",
   };
   return defaults[provider] || "";
 };

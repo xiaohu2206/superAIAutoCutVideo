@@ -172,7 +172,7 @@ class ScriptGenerationService:
             ChatMessage(role="system", content=sys_prompt),
             ChatMessage(role="user", content=user_prompt),
         ]
-        resp = await ai_service.send_chat(messages)
+        resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
         data, _raw = sanitize_json_text_to_dict(resp.content)
         items = data.get("plot_points") or []
         if not isinstance(items, list):
@@ -455,7 +455,7 @@ class ScriptGenerationService:
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
         try:
-            resp = await ai_service.send_chat(messages)
+            resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             items = data.get("items") or []
@@ -540,7 +540,7 @@ class ScriptGenerationService:
             ChatMessage(role="user", content=user_content)
         ]
         try:
-            resp = await ai_service.send_chat(messages)
+            resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             new_items_map = {int(it.get("_id")): it for it in data.get("items", []) if it.get("_id") is not None}
@@ -643,7 +643,7 @@ class ScriptGenerationService:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
-        resp = await ai_service.send_chat(messages)
+        resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
         raw_text = resp.content
 
         # 清洗与校验

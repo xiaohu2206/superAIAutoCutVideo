@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { TauriCommands } from "../../../services/tauriService";
 import { contentModelService } from "../../../services/contentModelService";
+import { TauriCommands } from "../../../services/tauriService";
 import type { ContentModelConfig, TestResult } from "../types";
 import {
   getContentConfigIdByProvider,
@@ -27,11 +27,9 @@ export const useContentModelConfig = () => {
       extra_params: {},
       description: "",
     });
-  const [testingContentConnection, setTestingContentConnection] =
-    useState(false);
-  const [contentTestResult, setContentTestResult] = useState<TestResult | null>(
-    null
-  );
+  const [testingContentConnection, setTestingContentConnection] = useState(false);
+  const [contentTestResult, setContentTestResult] = useState<TestResult | null>(null);
+  const [contentTestStructured, setContentTestStructured] = useState<string | null>(null);
   const [showContentPassword, setShowContentPassword] = useState(false);
 
   useEffect(() => {
@@ -132,17 +130,39 @@ export const useContentModelConfig = () => {
     try {
       setTestingContentConnection(true);
       setContentTestResult(null);
+      setContentTestStructured(null);
 
       const configId = getContentConfigIdByProvider(contentSelectedProvider);
       const response = await contentModelService.testConnection(configId);
 
       if (response.success) {
+        const structured =
+          response.data?.structured_output ??
+          null;
+        const raw =
+          response.data?.raw_content ??
+          response.data?.response_preview ??
+          null;
         setContentTestResult({ success: true, message: "连接测试成功！" });
+        if (structured) {
+          try {
+            setContentTestStructured(JSON.stringify(structured, null, 2));
+          } catch {
+            setContentTestStructured(String(structured));
+          }
+        } else if (raw) {
+          setContentTestStructured(String(raw));
+        } else {
+          setContentTestStructured(null);
+        }
       } else {
         setContentTestResult({
           success: false,
           message: response.data?.error || "连接测试失败",
         });
+        setContentTestStructured(
+          response.data?.raw_content || response.data?.response_preview || null
+        );
       }
     } catch (error) {
       console.error("测试文案生成模型连接失败:", error);
@@ -150,6 +170,7 @@ export const useContentModelConfig = () => {
         success: false,
         message: "连接测试失败：" + (error as Error).message,
       });
+      setContentTestStructured(null);
     } finally {
       setTestingContentConnection(false);
     }
@@ -161,6 +182,7 @@ export const useContentModelConfig = () => {
     setCurrentContentConfig,
     testingContentConnection,
     contentTestResult,
+    contentTestStructured,
     showContentPassword,
     setShowContentPassword,
     handleContentProviderChange,

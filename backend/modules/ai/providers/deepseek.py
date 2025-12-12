@@ -51,7 +51,6 @@ class DeepSeekProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "top_p": 0.95,
             "frequency_penalty": 0,

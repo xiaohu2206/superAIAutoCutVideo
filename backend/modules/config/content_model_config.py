@@ -20,7 +20,7 @@ class ContentModelConfig(BaseModel):
     api_key: str = Field(..., description="API密钥")
     base_url: str = Field(..., description="API基础地址")
     model_name: str = Field(..., description="模型名称")
-    max_tokens: Optional[int] = Field(10000, description="最大token数")
+    max_tokens: Optional[int] = Field(None, description="最大token数")
     temperature: Optional[float] = Field(0.7, description="温度参数", ge=0.0, le=2.0)
     timeout: Optional[int] = Field(600, description="超时时间（秒）", ge=1, le=10000)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外参数")
@@ -29,7 +29,7 @@ class ContentModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude']
+        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -147,6 +147,17 @@ class ContentModelConfigManager:
                     description='DeepSeek文案生成模型',
                     enabled=False
                 )
+            },
+            {
+                'id': 'openrouter_content_generation',
+                'config': ContentModelConfig(
+                    provider='openrouter',
+                    api_key='your_openrouter_api_key_here',
+                    base_url='https://openrouter.ai/api/v1/chat/completions',
+                    model_name='openai/gpt-4o-mini',
+                    description='OpenRouter文案生成模型（支持结构化输出）',
+                    enabled=False
+                )
             }
         ]
         
@@ -158,7 +169,7 @@ class ContentModelConfigManager:
 
     def update_config(self, config_id: str, config: ContentModelConfig) -> bool:
         """
-        更新配置，确保同时只有一个配置被启用
+        更新配置（不存在则创建），确保同时只有一个配置被启用
         
         Args:
             config_id: 配置ID
@@ -168,26 +179,35 @@ class ContentModelConfigManager:
             bool: 是否更新成功
         """
         try:
+            # 轻度清洗字段（去除反引号与多余空格）
+            try:
+                cleaned_base_url = (config.base_url or "").strip().strip("`")
+                cleaned_model_name = (config.model_name or "").strip().strip("`")
+                config = config.copy(update={"base_url": cleaned_base_url, "model_name": cleaned_model_name})
+            except Exception:
+                pass
+            
+            # 若配置不存在则创建
             if config_id not in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 不存在")
+                logger.info(f"创建新的文案生成模型配置: {config_id}")
+                self.configs[config_id] = config
+            else:
+                self.configs[config_id] = config
             
             # 如果当前配置被设置为启用，则禁用其他所有配置
             if config.enabled:
                 for other_id, other_config in self.configs.items():
                     if other_id != config_id and other_config.enabled:
-                        # 创建新的配置对象，将enabled设置为False
                         updated_config = other_config.copy(update={'enabled': False})
                         self.configs[other_id] = updated_config
                         logger.info(f"自动禁用配置: {other_id}")
             
-            self.configs[config_id] = config
             self.save_configs()
-            
-            logger.info(f"更新文案生成模型配置成功: {config_id}")
+            logger.info(f"保存/更新文案生成模型配置成功: {config_id}")
             return True
             
         except Exception as e:
-            logger.error(f"更新文案生成模型配置失败: {e}")
+            logger.error(f"保存/更新文案生成模型配置失败: {e}")
             return False
 
     def get_config(self, config_id: str) -> Optional[ContentModelConfig]:

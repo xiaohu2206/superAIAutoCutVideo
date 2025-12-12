@@ -21,7 +21,7 @@ class AIModelConfig(BaseModel):
     api_key: str  # API密钥
     base_url: str  # API基础地址
     model_name: str  # 模型名称
-    max_tokens: Optional[int] = 100000  # 最大token数
+    max_tokens: Optional[int] = None  # 最大token数
     temperature: Optional[float] = 0.7  # 温度参数
     timeout: Optional[int] = 600  # 超时时间（秒）
     extra_params: Optional[Dict[str, Any]] = {}  # 额外参数
@@ -71,7 +71,7 @@ class AIProviderBase(ABC):
         """发送请求到AI服务"""
         pass
     
-    async def chat_completion(self, messages: List[ChatMessage]) -> ChatResponse:
+    async def chat_completion(self, messages: List[ChatMessage], extra_params: Optional[Dict[str, Any]] = None) -> ChatResponse:
         """
         聊天完成接口
         
@@ -84,6 +84,12 @@ class AIProviderBase(ABC):
         try:
             # 格式化消息
             payload = self._format_messages(messages)
+            # 合并额外参数（用于控制结构化输出等）
+            if extra_params:
+                try:
+                    payload.update(extra_params)
+                except Exception:
+                    pass
             
             # 发送请求
             response_data = await self._make_request(payload)
@@ -95,7 +101,7 @@ class AIProviderBase(ABC):
             logger.error(f"AI聊天完成请求失败: {e}")
             raise
     
-    async def stream_chat_completion(self, messages: List[ChatMessage]) -> AsyncGenerator[str, None]:
+    async def stream_chat_completion(self, messages: List[ChatMessage], extra_params: Optional[Dict[str, Any]] = None) -> AsyncGenerator[str, None]:
         """
         流式聊天完成接口
         
@@ -109,9 +115,21 @@ class AIProviderBase(ABC):
             # 格式化消息（流式）
             payload = self._format_messages(messages)
             payload["stream"] = True
+            if extra_params:
+                try:
+                    payload.update(extra_params)
+                except Exception:
+                    pass
             
             # 发送流式请求
-            async with self.client.stream("POST", self.config.base_url, json=payload) as response:
+            headers = self._get_headers()
+            try:
+                eh = payload.get("extra_headers")
+                if isinstance(eh, dict):
+                    headers.update({k: str(v) for k, v in eh.items()})
+            except Exception:
+                pass
+            async with self.client.stream("POST", self.config.base_url, json=payload, headers=headers) as response:
                 response.raise_for_status()
                 
                 async for line in response.aiter_lines():
@@ -145,18 +163,37 @@ class AIProviderBase(ABC):
             Dict: 测试结果
         """
         try:
+            # 使用结构化输出进行连通性测试，尽量返回合法JSON
             test_messages = [
-                ChatMessage(role="user", content="Hello, this is a connection test.")
+                ChatMessage(role="system", content="你是结构化输出测试助手。请严格以json输出。"),
+                ChatMessage(
+                    role="user",
+                    content="请以json输出，返回一个对象，包含字段：ok(bool)、provider(string)、model(string)、timestamp(ISO8601)。仅输出JSON。"
+                )
             ]
-            
-            response = await self.chat_completion(test_messages)
+            response = await self.chat_completion(
+                test_messages,
+                extra_params={
+                    "response_format": {"type": "json_object"},
+                    "thinking": {"type": "disabled"}
+                }
+            )
+            structured_output: Optional[Dict[str, Any]] = None
+            raw_content = response.content or ""
+            try:
+                import json as _json
+                structured_output = _json.loads(raw_content)
+            except Exception:
+                structured_output = None
             
             return {
                 "success": True,
                 "message": "连接测试成功",
                 "provider": self.config.provider,
                 "model": self.config.model_name,
-                "response_preview": response.content[:100] + "..." if len(response.content) > 100 else response.content
+                "response_preview": raw_content[:100] + "..." if len(raw_content) > 100 else raw_content,
+                "structured_output": structured_output,
+                "raw_content": raw_content
             }
             
         except Exception as e:

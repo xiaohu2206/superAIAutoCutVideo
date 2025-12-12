@@ -51,7 +51,6 @@ class DoubaoProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_completion_tokens": 65535,
         }
         
         # 添加额外参数

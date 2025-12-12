@@ -51,13 +51,34 @@ class QwenProvider(AIProviderBase):
         payload = {
             "model": self.config.model_name,
             "messages": formatted_messages,
-            "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
         }
         
-        # 添加额外参数（顶层OpenAI兼容参数）
         if self.config.extra_params:
             payload.update(self.config.extra_params)
+        thinking_param = payload.pop("thinking", None)
+        if thinking_param is not None:
+            enable_val: Optional[bool] = None
+            type_val = None
+            if isinstance(thinking_param, dict):
+                type_val = thinking_param.get("type")
+            else:
+                type_val = thinking_param
+            if isinstance(type_val, str):
+                t = type_val.strip().lower()
+                if t in ("enabled", "enable", "on", "true"):
+                    enable_val = True
+                elif t in ("disabled", "disable", "off", "false"):
+                    enable_val = False
+            elif isinstance(type_val, bool):
+                enable_val = type_val
+            if enable_val is not None:
+                extra_body = payload.get("extra_body")
+                if not isinstance(extra_body, dict):
+                    extra_body = {}
+                extra_body["enable_thinking"] = enable_val
+                payload["extra_body"] = extra_body
+                payload["enable_thinking"] = enable_val
         
         return payload
     
@@ -88,15 +109,53 @@ class QwenProvider(AIProviderBase):
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """发送请求到Qwen API"""
         try:
+            is_stream = bool(payload.get("stream"))
+            thinking_param = payload.pop("thinking", None)
+            if thinking_param is not None:
+                enable_val: Optional[bool] = None
+                type_val = None
+                if isinstance(thinking_param, dict):
+                    type_val = thinking_param.get("type")
+                else:
+                    type_val = thinking_param
+                if isinstance(type_val, str):
+                    t = type_val.strip().lower()
+                    if t in ("enabled", "enable", "on", "true"):
+                        enable_val = True
+                    elif t in ("disabled", "disable", "off", "false"):
+                        enable_val = False
+                elif isinstance(type_val, bool):
+                    enable_val = type_val
+                if enable_val is not None:
+                    extra_body = payload.get("extra_body")
+                    if not isinstance(extra_body, dict):
+                        extra_body = {}
+                    extra_body["enable_thinking"] = enable_val
+                    payload["extra_body"] = extra_body
+                    payload["enable_thinking"] = enable_val
+            if not is_stream:
+                extra_body = payload.get("extra_body")
+                if not isinstance(extra_body, dict):
+                    extra_body = {}
+                extra_body["enable_thinking"] = False
+                payload["extra_body"] = extra_body
+                payload["enable_thinking"] = False
+            
+            
+            
             constant_headers = self._get_headers()
             response = await self.client.post(
                 self.config.base_url,
                 json=payload,
                 headers=constant_headers
             )
-            response.raise_for_status()
-            
             response_data = response.json()
+            if response.status_code >= 400:
+                err = response_data.get("error") if isinstance(response_data, dict) else None
+                if isinstance(err, dict):
+                    raise Exception(f"Qwen API错误: {err.get('message') or response.text}")
+                else:
+                    raise Exception(f"Qwen API请求失败: {response.text}")
             
             # 检查API错误
             if "error" in response_data:

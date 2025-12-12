@@ -8,18 +8,21 @@ AI模型提供商模块
 from .qwen import QwenProvider
 from .doubao import DoubaoProvider
 from .deepseek import DeepSeekProvider
+from .openrouter import OpenRouterProvider
 
 __all__ = [
     "QwenProvider",
     "DoubaoProvider", 
-    "DeepSeekProvider"
+    "DeepSeekProvider",
+    "OpenRouterProvider",
 ]
 
 # 提供商注册表
 PROVIDER_REGISTRY = {
     "qwen": QwenProvider,
     "doubao": DoubaoProvider,
-    "deepseek": DeepSeekProvider
+    "deepseek": DeepSeekProvider,
+    "openrouter": OpenRouterProvider,
 }
 
 def get_provider_class(provider_name: str):

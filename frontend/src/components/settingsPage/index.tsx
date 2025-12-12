@@ -24,7 +24,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   backendStatus = { running: false, port: 8000 },
   connections = { api: false, websocket: false },
 }) => {
-  const [activeSection, setActiveSection] = useState("videoModel");
+  const [activeSection, setActiveSection] = useState(sections[0].id);
 
 
   const {
@@ -46,6 +46,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     setCurrentContentConfig,
     testingContentConnection,
     contentTestResult,
+    contentTestStructured,
     showContentPassword,
     setShowContentPassword,
     handleContentProviderChange,
@@ -79,6 +80,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             setCurrentContentConfig={setCurrentContentConfig}
             testingContentConnection={testingContentConnection}
             contentTestResult={contentTestResult}
+            contentTestStructured={contentTestStructured}
             showContentPassword={showContentPassword}
             setShowContentPassword={setShowContentPassword}
             handleContentProviderChange={handleContentProviderChange}

@@ -10,6 +10,7 @@ interface ContentModelSettingsProps {
   >;
   testingContentConnection: boolean;
   contentTestResult: TestResult | null;
+  contentTestStructured: string | null;
   showContentPassword: boolean;
   setShowContentPassword: React.Dispatch<React.SetStateAction<boolean>>;
   handleContentProviderChange: (provider: string) => void;
@@ -26,6 +27,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
   setCurrentContentConfig,
   testingContentConnection,
   contentTestResult,
+  contentTestStructured,
   showContentPassword,
   setShowContentPassword,
   handleContentProviderChange,
@@ -47,6 +49,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           <option value="qwen">通义千问 (Qwen)</option>
           <option value="doubao">豆包 (Doubao)</option>
           <option value="deepseek">DeepSeek</option>
+          <option value="openrouter">OpenRouter</option>
         </select>
         <p className="text-xs text-gray-500 mt-1">
           选择用于文案生成的AI模型提供商
@@ -157,6 +160,17 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
               <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
             )}
             <span className="text-sm">{contentTestResult.message}</span>
+          </div>
+        )}
+
+        {contentTestStructured && (
+          <div className="mt-3 p-3 rounded-lg bg-gray-50 text-gray-800 border border-gray-200">
+            <p className="text-xs font-medium text-gray-600 mb-2">
+              结构化输出预览
+            </p>
+            <pre className="text-xs overflow-auto max-h-48 whitespace-pre-wrap break-words">
+              {contentTestStructured}
+            </pre>
           </div>
         )}
       </div>

@@ -10,6 +10,7 @@ from .providers import (
     QwenProvider,
     DoubaoProvider,
     DeepSeekProvider,
+    OpenRouterProvider,
     PROVIDER_REGISTRY,
     get_provider_class,
     get_available_providers
@@ -23,6 +24,7 @@ __all__ = [
     "QwenProvider",
     "DoubaoProvider",
     "DeepSeekProvider",
+    "OpenRouterProvider",
     "PROVIDER_REGISTRY",
     "get_provider_class",
     "get_available_providers"

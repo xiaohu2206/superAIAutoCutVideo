@@ -29,7 +29,7 @@ class VideoModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude']
+        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
