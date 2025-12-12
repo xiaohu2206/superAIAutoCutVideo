@@ -294,7 +294,7 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
                 />
                 <textarea
-                  placeholder="输入模板内容,可以参考官方模板"
+                  placeholder={`模版需要要求大模型输出包含这些字段，不然无法合并：_id, timestamp, picture, narration, OST`}
                   value={newTemplate}
                   onChange={(e) => setNewTemplate(e.target.value)}
                   className="w-full h-[60vh] border border-gray-300 rounded px-3 py-2 text-sm"

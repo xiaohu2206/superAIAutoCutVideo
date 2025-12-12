@@ -525,9 +525,11 @@ class ScriptGenerationService:
         draft_lines = [f"ID:{it['_id'] or i+1} | {it['timestamp']} | {it['narration']}" for i, it in enumerate(items)]
         draft_str = "\n".join(draft_lines)
         system_prompt = (
-            "你是一位短剧解说主编。请在保持每条 '_id' 与 'timestamp' 不变的前提下优化文案。"
-            "严格输出一个 JSON 对象，包含 'items' 列表，元素字段必须为 '_id', 'timestamp', 'picture', 'narration', 'OST'。"
-            "只允许修改 'narration' 与 'picture'，不要新增或删除条目，不要输出任何非JSON字符。"
+            "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
+            "必须严格保留每条 '_id' 与 'timestamp' 不变，不增删、不重排条目。"
+            "仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义，不做大幅改写。"
+            "一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
+            "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
         )
         user_content = (
             f"剧名：{drama_name}\n"
@@ -581,6 +583,8 @@ class ScriptGenerationService:
         # 2. 分块配置
         WINDOW_SIZE = 2500  # 5分钟
         OVERLAP = 60       # 1分钟重叠
+        if total_duration < WINDOW_SIZE * 1.8:
+            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
         chunks = []
         curr_time = 0
         idx = 0

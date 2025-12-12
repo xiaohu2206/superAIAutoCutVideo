@@ -563,17 +563,14 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
 
     size = 0
     try:
-        buf = bytearray()
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            buf.extend(chunk)
-        content = buf.decode("utf-8", errors="ignore")
-        compressed = compress_srt(content)
-        with out_path.open("w", encoding="utf-8") as f:
-            f.write(compressed)
-        size = len(compressed.encode("utf-8"))
+        # 以二进制模式保存视频文件
+        with open(out_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                size += len(chunk)
+                buffer.write(chunk)
     finally:
         await file.close()
 
@@ -999,10 +996,17 @@ async def download_output_video(project_id: str):
         raise HTTPException(status_code=404, detail="输出视频文件不存在")
 
     filename = abs_path.name
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Disposition": f"inline; filename=\"{filename}\"",
+    }
     return FileResponse(
         path=str(abs_path),
         filename=filename,
-        media_type="video/mp4"
+        media_type="video/mp4",
+        headers=headers,
     )
 
 # ========================= 合并视频播放 =========================
@@ -1024,10 +1028,17 @@ async def get_merged_video(project_id: str):
 
     filename = abs_path.name
     # 合并输出目前固定为 mp4
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Disposition": f"inline; filename=\"{filename}\"",
+    }
     return FileResponse(
         path=str(abs_path),
         filename=filename,
-        media_type="video/mp4"
+        media_type="video/mp4",
+        headers=headers,
     )
 async def _run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()

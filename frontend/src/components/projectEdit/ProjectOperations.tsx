@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   Loader,
   AlertCircle,
@@ -40,6 +40,20 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   showOutputPreview,
   setShowOutputPreview,
 }) => {
+  const [outputVideoCacheBust, setOutputVideoCacheBust] = useState<number>(0);
+
+  useEffect(() => {
+    if (showOutputPreview && project.output_video_path) {
+      setOutputVideoCacheBust(Date.now());
+    }
+  }, [showOutputPreview, project.output_video_path]);
+
+  useEffect(() => {
+    if (!isGeneratingVideo && project.output_video_path) {
+      setOutputVideoCacheBust(Date.now());
+    }
+  }, [isGeneratingVideo, project.output_video_path]);
+
   return (
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
       <button
@@ -108,7 +122,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             <div className="p-3">
               <video
                 key={project.merged_video_path}
-                src={projectService.getMergedVideoUrl(project.id)}
+                src={projectService.getMergedVideoUrl(project.id, outputVideoCacheBust)}
                 controls
                 className="w-full rounded-lg bg-black max-h-[70vh]"
                 preload="metadata"
@@ -200,8 +214,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             </div>
             <div className="p-3">
               <video
-                key={project.output_video_path}
-                src={projectService.getOutputVideoDownloadUrl(project.id)}
+                key={`${project.output_video_path}-${outputVideoCacheBust}`}
+                src={projectService.getOutputVideoDownloadUrl(project.id, outputVideoCacheBust)}
                 controls
                 className="w-full rounded-lg bg-black max-h-[70vh]"
                 preload="metadata"

@@ -295,15 +295,21 @@ export class ProjectService {
   /**
    * 获取输出视频下载链接（后端直接返回文件）
    */
-  getOutputVideoDownloadUrl(projectId: string): string {
-    return `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video`;
+  getOutputVideoDownloadUrl(projectId: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video`;
+    return cacheBust !== undefined && cacheBust !== null
+      ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
+      : base;
   }
 
   /**
    * 获取已合并视频播放链接（后端直接返回文件）
    */
-  getMergedVideoUrl(projectId: string): string {
-    return `${apiClient.getBaseUrl()}/api/projects/${projectId}/merged-video`;
+  getMergedVideoUrl(projectId: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/merged-video`;
+    return cacheBust !== undefined && cacheBust !== null
+      ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
+      : base;
   }
 
   /**
