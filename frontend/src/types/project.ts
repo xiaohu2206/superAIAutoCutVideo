@@ -5,7 +5,10 @@
  */
 export enum NarrationType {
   SHORT_DRAMA = "短剧解说",
+  MOVIE = "电影解说",
 }
+
+export type ScriptLengthOption = "短篇" | "中偏" | "长偏";
 
 /**
  * 项目状态枚举
@@ -51,6 +54,7 @@ export interface Project {
   name: string; // 项目名称
   description?: string; // 项目描述
   narration_type: NarrationType; // 解说类型
+  script_length?: ScriptLengthOption; // 电影脚本长度（仅电影解说生效）
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -81,6 +85,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   narration_type?: NarrationType;
+  script_length?: ScriptLengthOption;
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];
@@ -109,4 +114,3 @@ export interface FileUploadResponse {
   file_size: number;
   upload_time: string;
 }
-

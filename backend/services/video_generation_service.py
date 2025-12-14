@@ -198,6 +198,14 @@ class VideoGenerationService:
                     )
                     if not ok2:
                         raise RuntimeError(f"片段延长失败: {idx}")
+                elif adur > 0.0 and (adur + 0.05) < duration:
+                    new_start = start
+                    new_dur = adur
+                    ok2s = await video_processor.cut_video_segment(
+                        str(input_abs), str(clip_abs), new_start, new_dur
+                    )
+                    if not ok2s:
+                        raise RuntimeError(f"片段缩短失败: {idx}")
                 clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
                 rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
                 if not rep_ok:

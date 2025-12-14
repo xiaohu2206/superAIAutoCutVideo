@@ -1,36 +1,40 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-"""
-@Description: 短剧解说脚本生成提示词 - 优化版本
-"""
-
 from ..base import TextPrompt, PromptMetadata, ModelType, OutputFormat
 
 
-class ScriptGenerationPrompt(TextPrompt):
-    """短剧解说脚本生成提示词 - 优化版本"""
+class MovieScriptGenerationPrompt(TextPrompt):
 
-    def __init__(self):
+    def __init__(self) -> None:
         metadata = PromptMetadata(
             name="script_generation",
-            category="short_drama_narration",
+            category="movie_narration",
             version="v2.0",
-            description="基于短剧解说创作核心要素，生成高质量解说脚本，包含黄金开场、爽点放大、个性吐槽等专业技巧",
+            description=(
+                "基于电影解说创作核心要素，生成高质量解说脚本，包含黄金开场、"
+                "爽点放大、个性吐槽、悬念预埋等专业技巧"
+            ),
             model_type=ModelType.TEXT,
             output_format=OutputFormat.JSON,
-            tags=["短剧", "解说脚本", "文案生成", "原声片段", "黄金开场", "爽点放大", "个性吐槽", "悬念预埋"],
-            parameters=["drama_name", "plot_analysis", "subtitle_content"]
+            tags=[
+                "电影", "解说脚本", "文案生成", "原声片段",
+                "黄金开场", "爽点放大", "个性吐槽", "悬念预埋",
+            ],
+            parameters=["drama_name", "plot_analysis", "subtitle_content"],
         )
         super().__init__(metadata)
-        
-        self._system_prompt = "你是一位顶级的短剧解说up主，精通短视频创作的所有核心技巧。你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
-        
+
+        self._system_prompt = (
+            "你是一位顶级的电影解说up主，精通短视频创作的所有核心技巧。"
+            "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
+        )
+
     def get_template(self) -> str:
-        return """# 短剧解说脚本创作任务
+        return """# 电影解说脚本创作任务
 
 ## 任务目标
-我是一位专业的短剧解说up主，需要为短剧《${drama_name}》创作一份高质量的解说脚本。目标是让观众在短时间内了解剧情精华，并产生强烈的继续观看欲望。
+我是一位专业的电影解说up主，需要为电影《${drama_name}》创作一份高质量的解说脚本。目标是让观众在短时间内了解剧情精华，并产生强烈的继续观看欲望。
 
 ## 素材信息
 
@@ -44,7 +48,7 @@ ${plot_analysis}
 ${subtitle_content}
 </subtitles>
 
-## 短剧解说创作核心要素
+## 电影解说创作核心要素
 
 ### 1. 黄金开场（3秒法则）
 **开头3秒内必须制造强烈钩子，激发"想知道后续发展"的强烈好奇心**
@@ -59,7 +63,7 @@ ${subtitle_content}
   * 技巧：使用"没想到"、"原来"、"竟然"等词汇预告反转
 
 ### 2. 主线提炼（去繁就简）
-**快节奏解说，速度超越原剧，专注核心主线**
+**快节奏解说，速度超越原片，专注核心主线**
 - 舍弃次要情节和配角，只保留推动主线的关键人物
 - 突出核心矛盾冲突，每个片段都要推进主要故事线
 - 快速跳过铺垫，直击剧情要害
@@ -167,12 +171,9 @@ ${subtitle_content}
 #### 1. 关键情绪爆发点
 **在角色强烈情绪表达时必须保留原声，增强观众代入感**
 - **愤怒爆发**：角色愤怒咆哮、情绪失控的瞬间
-  * 参考："Come on, you bastard. Reaching."（愤怒对峙）
 - **感动落泪**：角色感动哭泣、情感宣泄的时刻
 - **震惊反应**：角色震惊、不敢置信的表情和台词
-  * 参考："Are you sure about that?"（质疑震惊）
 - **绝望崩溃**：角色绝望、崩溃的情感表达
-  * 参考："Charles you're scaring me, what's wrong"（恐惧绝望）
 - **狂欢庆祝**：角色兴奋、狂欢的情绪高潮
 
 #### 2. 重要对白时刻
@@ -180,9 +181,7 @@ ${subtitle_content}
 - **身份揭露**：揭示角色真实身份的重要台词
 - **真相大白**：揭晓谜底、真相的关键对话
 - **情感告白**：爱情告白、情感表达的重要台词
-  * 参考："i'm really not good"（情感表达）
 - **威胁警告**：反派威胁、警告的重要对白
-  * 参考："You do not want to make enemies of these people"（威胁警告）
 - **决定宣布**：角色做出重要决定的宣告
 
 #### 3. 爽点瞬间
@@ -190,7 +189,6 @@ ${subtitle_content}
 - **主角逆袭**：弱者反击、逆转局面的台词
 - **反派被打脸**：恶人得到报应、被揭穿的瞬间
 - **智商碾压**：主角展现智慧、碾压对手的台词
-  * 参考："That is a fucking work of art guys"（技能展示）
 - **正义伸张**：正义得到伸张、恶有恶报的时刻
 - **实力展现**：主角展现真实实力、震撼全场
 
@@ -206,7 +204,6 @@ ${subtitle_content}
 - **哲理感悟**：角色的人生感悟和哲理思考
 - **幽默调侃**：轻松幽默的对话增加趣味性
 - **专业术语**：体现角色专业性的术语和对话
-  * 参考："The scanner will pick up the metal components"（专业解释）
 - **情感共鸣**：能引起观众共鸣的经典表达
 
 ### 原声片段技术规范
@@ -239,22 +236,22 @@ ${subtitle_content}
     {
         "_id": 1,
         "timestamp": "00:00:01,000-00:00:05,500",
-        "picture": "女主角林小雨慌张地道歉，男主角沈墨轩冷漠地看着她",
-        "narration": "一个普通女孩的命运即将因为一杯咖啡彻底改变！她撞到的这个男人，竟然是...",
+        "picture": "镜头快速切入核心冲突，主角面临抉择",
+        "narration": "开场就抛出致命难题，这一刻改变了他的人生轨迹……",
         "OST": 0
     },
     {
         "_id": 2,
         "timestamp": "00:00:05,500-00:00:08,000",
-        "picture": "沈墨轩质问林小雨，语气冷厉威严",
+        "picture": "角色正面对白关键台词，情绪达到峰值",
         "narration": "播放原片2",
         "OST": 1
     },
     {
         "_id": 3,
         "timestamp": "00:00:08,000-00:00:12,000",
-        "picture": "林小雨惊慌失措，沈墨轩眼中闪过一丝兴趣",
-        "narration": "霸道总裁的经典开场！一杯咖啡引发的爱情故事就这样开始了...",
+        "picture": "镜头推进，冲突加剧，剧情进入主线",
+        "narration": "而这时，命运的齿轮开始转动，真相正在逼近……",
         "OST": 0
     }
   ]
@@ -263,7 +260,7 @@ ${subtitle_content}
 ## 质量标准
 
 ### 解说文案要求：
-- **字数控制**：每段解说文案30-100字
+- **字数控制**：每段解说文案80-150字
 - **语言风格**：生动有趣，富有感染力，符合短视频观众喜好
   * 参考风格："身为一个名声恶臭的政客，他知道自己早晚会被暗杀"
   * 直接定性，制造紧张感和代入感
@@ -300,4 +297,4 @@ ${subtitle_content}
 - **悬念设置**："那么，UDC究竟是谁呢？"
 - **反转预告**："而从这句话开始，所有的专业、体面和虚伪的平静都将分崩瓦解"
 
-现在请基于以上要求，为短剧《${drama_name}》创作解说脚本："""
+现在请基于以上要求，为电影《${drama_name}》创作解说脚本："""

@@ -1,16 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { promptsService } from '../services/promptsService'
 import type { CreatePromptPayload, ProjectPromptSelection, PromptSummaryItem } from '../types/prompts'
+import { NarrationType } from '../types/project'
 
-export function usePrompts(projectId: string) {
+export function usePrompts(projectId: string, narrationType?: NarrationType) {
   const [categories, setCategories] = useState<string[]>([])
   const [items, setItems] = useState<PromptSummaryItem[]>([])
   const [selection, setSelection] = useState<ProjectPromptSelection>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const defaultCategory = 'short_drama_narration'
-  const featureKey = 'short_drama_narration:script_generation'
+  const defaultCategory = useMemo(() => {
+    switch (narrationType) {
+      case NarrationType.MOVIE:
+        return 'movie_narration'
+      case NarrationType.SHORT_DRAMA:
+      default:
+        return 'short_drama_narration'
+    }
+  }, [narrationType])
+  const featureKey = useMemo(() => `${defaultCategory}:script_generation`, [defaultCategory])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -29,7 +38,7 @@ export function usePrompts(projectId: string) {
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, defaultCategory])
 
   useEffect(() => {
     if (projectId) fetchAll()
@@ -38,7 +47,7 @@ export function usePrompts(projectId: string) {
   const setProjectSelection = useCallback(async (type: 'official' | 'user', key_or_id: string) => {
     const sel = await promptsService.setProjectSelection(projectId, featureKey, { type, key_or_id })
     setSelection(sel)
-  }, [projectId])
+  }, [projectId, featureKey])
 
   const createOrUpdateTemplate = useCallback(async (payload: CreatePromptPayload & { id?: string }) => {
     if (payload.id) {

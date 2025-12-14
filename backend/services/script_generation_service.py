@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 import asyncio
+import json
 
 from modules.ai import ChatMessage
 from modules.prompts.prompt_manager import prompt_manager
@@ -401,6 +402,29 @@ class ScriptGenerationService:
         return "\n".join(relevant_lines)
 
     @staticmethod
+    def _clean_plot_analysis_for_prompt(text: str) -> str:
+        if not text:
+            return ""
+        lines = [ln for ln in str(text).splitlines() if not re.match(r"^\s*(时间：|时间:|关键词：|关键词:)", ln)]
+        out = "\n".join(lines)
+        out = re.sub(r"\n{3,}", "\n\n", out).strip()
+        return out
+
+    @staticmethod
+    def _default_prompt_key_for_project(project_id: Optional[str]) -> str:
+        """根据项目的解说类型选择默认官方模板键"""
+        category = "short_drama_narration"
+        if project_id:
+            p = projects_store.get_project(project_id)
+            if p:
+                t = str(getattr(p, "narration_type", "") or "")
+                if t == "电影解说":
+                    category = "movie_narration"
+                else:
+                    category = "short_drama_narration"
+        return f"{category}:script_generation"
+
+    @staticmethod
     def _resolve_prompt_key(project_id: Optional[str], default_key: str) -> str:
         if not project_id:
             return default_key
@@ -436,7 +460,7 @@ class ScriptGenerationService:
         subs_text = "\n".join(subs_text_lines)
         if len(subs_text) > 6000:
             subs_text = subs_text[:6000]
-        default_key = "short_drama_narration:script_generation"
+        default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
         key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
         variables = {
             "drama_name": drama_name,
@@ -447,10 +471,14 @@ class ScriptGenerationService:
             messages_dicts = prompt_manager.build_chat_messages(key, variables)
         except KeyError:
             try:
-                from modules.prompts.short_drama_narration import register_prompts
+                cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
+                if cat == "movie_narration":
+                    from modules.prompts.movie_narration import register_prompts
+                else:
+                    from modules.prompts.short_drama_narration import register_prompts
                 register_prompts()
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
-            except Exception as e:
+            except Exception:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
@@ -517,24 +545,39 @@ class ScriptGenerationService:
     async def _refine_full_script(
         segments: List[Dict[str, Any]],
         drama_name: str,
-        plot_analysis: str
+        plot_analysis: str,
+        length_mode: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         items = segments
         if not items:
             return []
-        draft_lines = [f"ID:{it['_id'] or i+1} | {it['timestamp']} | {it['narration']}" for i, it in enumerate(items)]
-        draft_str = "\n".join(draft_lines)
+        draft_str = json.dumps(items, ensure_ascii=False)
+        n = len(items)
+        mode = (str(length_mode or "长偏") or "长偏").strip()
+        if mode == "短篇":
+            target = max(1, round(n / 3))
+            retain_desc = f"必须仅保留 {target} 条最关键条目，其余全部删除（必须遵守）。返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
+        elif mode == "中偏":
+            target = max(1, round(n * 2 / 3))
+            retain_desc = f"必须仅保留 {target} 条关键条目，其余全部删除（必须遵守）。返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
+        else:
+            target = n
+            retain_desc = ""
+
         system_prompt = (
             "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
-            "必须严格保留每条 '_id' 与 'timestamp' 不变，不增删、不重排条目。"
-            "仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义，不做大幅改写。"
-            "一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
+            + retain_desc +
+            "**原声与解说比例**：7:3（原声70%，解说30%）"
+            "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+            "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
+            "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
             "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
         )
         user_content = (
+            f"{retain_desc}\n\n"
             f"剧名：{drama_name}\n"
-            f"剧情背景：\n{plot_analysis[:1000]}...\n\n"
             f"草稿：\n{draft_str}\n\n"
+            # f"剧情背景：\n{ScriptGenerationService._clean_plot_analysis_for_prompt(plot_analysis)}\n\n"
             "请按要求返回 JSON。"
         )
         messages = [
@@ -545,16 +588,64 @@ class ScriptGenerationService:
             resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
-            new_items_map = {int(it.get("_id")): it for it in data.get("items", []) if it.get("_id") is not None}
+            llm_items = data.get("items", [])
+            llm_ids_ordered: List[int] = []
+            for it in llm_items:
+                try:
+                    if it.get("_id") is None:
+                        continue
+                    llm_ids_ordered.append(int(it.get("_id")))
+                except Exception:
+                    continue
+            new_items_map = {int(it.get("_id")): it for it in llm_items if it.get("_id") is not None}
+
+            def _update_item(orig: Dict[str, Any], new_it: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                _id_val = int(orig.get("_id") or 0)
+                if new_it:
+                    orig["narration"] = str(new_it.get("narration", orig.get("narration", "")))
+                    orig["picture"] = new_it.get("picture")
+                    try:
+                        ost_val = 1 if new_it.get("OST") == 1 else 0
+                        orig["OST"] = ost_val
+                    except Exception:
+                        pass
+                orig["_id"] = _id_val
+                return orig
+
+            if mode == "长偏" or target >= n:
+                final_items: List[Dict[str, Any]] = []
+                for i, it in enumerate(items, start=1):
+                    _id = int(it.get("_id") or i)
+                    it["_id"] = _id
+                    final_items.append(_update_item(it, new_items_map.get(_id)))
+                return final_items
+
+            keep_ids: List[int] = []
+            if llm_ids_ordered:
+                for _id in llm_ids_ordered:
+                    if _id not in keep_ids:
+                        keep_ids.append(_id)
+                if len(keep_ids) > target:
+                    keep_ids = keep_ids[:target]
+            else:
+                ids_all = [int(it.get("_id") or idx) for idx, it in enumerate(items, start=1)]
+                keep_ids = ids_all[:target]
+
+            id_set = set([int(it.get("_id") or idx) for idx, it in enumerate(items, start=1)])
+            keep_ids = [i for i in keep_ids if i in id_set]
+            if len(keep_ids) < target:
+                for i in sorted(id_set):
+                    if i not in keep_ids:
+                        keep_ids.append(i)
+                    if len(keep_ids) >= target:
+                        break
+
             final_items: List[Dict[str, Any]] = []
             for i, it in enumerate(items, start=1):
                 _id = int(it.get("_id") or i)
-                if _id in new_items_map:
-                    new_it = new_items_map[_id]
-                    it["narration"] = str(new_it.get("narration", it.get("narration", "")))
-                    it["picture"] = new_it.get("picture")
-                it["_id"] = _id
-                final_items.append(it)
+                if _id in keep_ids:
+                    it["_id"] = _id
+                    final_items.append(_update_item(it, new_items_map.get(_id)))
             return final_items
         except Exception as e:
             logger.warning(f"Refine script failed, returning draft: {e}")
@@ -575,16 +666,60 @@ class ScriptGenerationService:
         if not subtitles:
             # Fallback to simple generation if parsing fails
             logger.warning("Subtitle parsing failed, fallback to simple generation")
-            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            # 统一走 refine 控制比例
+            sel_mode = None
+            try:
+                if project_id:
+                    p = projects_store.get_project(project_id)
+                    if p and getattr(p, "script_length", None):
+                        sel_mode = p.script_length
+            except Exception:
+                sel_mode = None
+            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
+            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
+            data = {"items": final_items}
+            data = validate_script_items(data)
+            return data
         total_duration = subtitles[-1]["end"] if subtitles else 0
         if total_duration == 0:
-            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            sel_mode = None
+            try:
+                if project_id:
+                    p = projects_store.get_project(project_id)
+                    if p and getattr(p, "script_length", None):
+                        sel_mode = p.script_length
+            except Exception:
+                sel_mode = None
+            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
+            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
+            data = {"items": final_items}
+            data = validate_script_items(data)
+            return data
 
         # 2. 分块配置
-        WINDOW_SIZE = 2500  # 5分钟
+        WINDOW_SIZE = 2000 
         OVERLAP = 60       # 1分钟重叠
         if total_duration < WINDOW_SIZE * 1.8:
-            return await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
+            # 若小于30分钟，强制短篇
+            force_short = total_duration > 0 and total_duration < 1800
+            sel_mode = None
+            try:
+                if project_id:
+                    p = projects_store.get_project(project_id)
+                    if p and getattr(p, "script_length", None):
+                        sel_mode = p.script_length
+            except Exception:
+                sel_mode = None
+            if force_short:
+                sel_mode = "短篇"
+            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
+            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
+            data = {"items": final_items}
+            data = validate_script_items(data)
+            return data
         chunks = []
         curr_time = 0
         idx = 0
@@ -620,7 +755,18 @@ class ScriptGenerationService:
         for res in results:
             all_items.extend(res)
         merged_items = ScriptGenerationService._merge_items(all_items)
-        final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis)
+        force_short = total_duration > 0 and total_duration < 1800
+        sel_mode = None
+        try:
+            if project_id:
+                p = projects_store.get_project(project_id)
+                if p and getattr(p, "script_length", None):
+                    sel_mode = p.script_length
+        except Exception:
+            sel_mode = None
+        if force_short:
+            sel_mode = "短篇"
+        final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
         data = {"items": final_items}
         data = validate_script_items(data)
         return data
@@ -628,7 +774,7 @@ class ScriptGenerationService:
     @staticmethod
     async def _generate_script_json_simple(drama_name: str, plot_analysis: str, subtitle_content: str, project_id: Optional[str] = None) -> Dict[str, Any]:
         """(旧版逻辑) 直接调用提示词模块生成"""
-        default_key = "short_drama_narration:script_generation"
+        default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
         key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
         variables = {
             "drama_name": drama_name,
@@ -638,12 +784,15 @@ class ScriptGenerationService:
         try:
             messages_dicts = prompt_manager.build_chat_messages(key, variables)
         except KeyError:
-            # 回退：显式注册短剧解说提示词模块，防止自动发现因环境路径导致未执行
             try:
-                from modules.prompts.short_drama_narration import register_prompts
+                cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
+                if cat == "movie_narration":
+                    from modules.prompts.movie_narration import register_prompts
+                else:
+                    from modules.prompts.short_drama_narration import register_prompts
                 register_prompts()
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
-            except Exception as e:
+            except Exception:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]

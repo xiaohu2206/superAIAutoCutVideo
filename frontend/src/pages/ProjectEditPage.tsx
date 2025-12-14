@@ -5,12 +5,11 @@ import {
   ArrowLeft,
   CheckCircle,
   Loader,
-  ChevronDown,
 } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
 import type { VideoScript } from "../types/project";
-import { NarrationType } from "../types/project";
+ 
 import { wsClient } from "../services/clients";
 import type { WebSocketMessage } from "../services/clients";
 import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
@@ -34,7 +33,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     project,
     loading,
     error,
-    updateProject,
     uploadVideos,
     uploadSubtitle,
     deleteSubtitle,
@@ -157,6 +155,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [uploadingSubtitle, setUploadingSubtitle] = useState(false);
   const [subtitleUploadProgress, setSubtitleUploadProgress] = useState<number>(0);
+  const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
 
   /**
    * 处理视频文件选择
@@ -221,6 +220,37 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
   };
 
+  const handleSubtitleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(true);
+  };
+
+  const handleSubtitleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(false);
+  };
+
+  const handleSubtitleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSubtitle(false);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    setSuccessMessage(null);
+    setUploadingSubtitle(true);
+    setSubtitleUploadProgress(0);
+    try {
+      await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
+      setSuccessMessage("字幕文件上传成功！");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUploadingSubtitle(false);
+      setTimeout(() => setSubtitleUploadProgress(0), 800);
+    }
+  };
+
   const handleSubtitleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -242,15 +272,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
   };
 
-  const handleDeleteSubtitle = async () => {
-    try {
-      await deleteSubtitle();
-      setSuccessMessage("字幕删除成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error("删除字幕失败:", err);
-    }
-  };
+  
 
   
   
@@ -438,16 +460,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   /**
    * 处理解说类型变更
    */
-  const handleNarrationTypeChange = async (
-    e: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    const newType = e.target.value as NarrationType;
-    try {
-      await updateProject({ narration_type: newType });
-    } catch (err) {
-      console.error("更新解说类型失败:", err);
-    }
-  };
+  
 
   // 同步项目脚本到编辑器
   React.useEffect(() => {
@@ -522,12 +535,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             onClick={() => setShowAdvancedConfig((v) => !v)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
+            <span className="text-xs text-gray-500">（支持上传-字幕、提示词）</span>
             高级配置
           </button>
         </div>
 
         {/* 解说类型（Figma 风格选择框）*/}
-        <div>
+        {/* <div>
           <label
             htmlFor="narration-type"
             className="block text-sm font-medium text-gray-700 mb-2"
@@ -535,17 +549,18 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             解说类型
           </label>
           <div className="relative w-full md:w-1/2">
-            <select
-              id="narration-type"
-              value={project.narration_type}
-              onChange={handleNarrationTypeChange}
-              className="appearance-none w-full pr-10 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all bg-white"
-            >
-              <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
-            </select>
+          <select
+            id="narration-type"
+            value={project.narration_type}
+            onChange={handleNarrationTypeChange}
+            className="appearance-none w-full pr-10 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all bg-white"
+          >
+            <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
+            <option value={NarrationType.MOVIE}>电影解说</option>
+          </select>
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           </div>
-        </div>
+        </div> */}
 
         {showAdvancedConfig && (
           <AdvancedConfigSection
@@ -553,8 +568,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             uploadingSubtitle={uploadingSubtitle}
             subtitleUploadProgress={subtitleUploadProgress}
             subtitlePath={project.subtitle_path}
+            narrationType={project.narration_type}
             onSubtitleFileChange={handleSubtitleFileChange}
-            onDeleteSubtitle={handleDeleteSubtitle}
+            onDeleteSubtitle={deleteSubtitle}
+            isDraggingSubtitle={isDraggingSubtitle}
+            onSubtitleDragOver={handleSubtitleDragOver}
+            onSubtitleDragLeave={handleSubtitleDragLeave}
+            onSubtitleDrop={handleSubtitleDrop}
           />
         )}
 

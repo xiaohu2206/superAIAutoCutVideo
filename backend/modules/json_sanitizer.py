@@ -50,11 +50,52 @@ def sanitize_json_text_to_dict(text: str) -> Tuple[Dict[str, Any], str]:
     cleaned = _extract_braced_json(cleaned)
     cleaned = _remove_trailing_commas(cleaned)
 
-    # 兼容常见的中文全角引号误用（谨慎处理）
-    cleaned = cleaned.replace("“", '"').replace("”", '"')
-
-    # 尝试解析
-    data = json.loads(cleaned)
+    try:
+        data = json.loads(cleaned)
+    except Exception:
+        def _normalize_json_quotes_stateful(s: str) -> str:
+            out = []
+            in_string = False
+            start_quote = ''
+            escape = False
+            for ch in s:
+                if not in_string:
+                    if ch in ('"', '“', '”', "'", '`'):
+                        start_quote = ch
+                        in_string = True
+                        escape = False
+                        out.append('"')
+                    else:
+                        out.append(ch)
+                else:
+                    if escape:
+                        out.append(ch)
+                        escape = False
+                    else:
+                        if ch == '\\':
+                            out.append(ch)
+                            escape = True
+                        else:
+                            if start_quote == '“':
+                                is_close = (ch == '”')
+                            elif start_quote == '”':
+                                is_close = (ch == '“')
+                            else:
+                                is_close = (ch == start_quote)
+                            if is_close:
+                                in_string = False
+                                start_quote = ''
+                                out.append('"')
+                            else:
+                                if start_quote in ("'", '`') and ch == '"':
+                                    out.append('\\"')
+                                else:
+                                    out.append(ch)
+            return ''.join(out)
+        cleaned2 = _normalize_json_quotes_stateful(cleaned)
+        cleaned2 = _remove_trailing_commas(cleaned2)
+        data = json.loads(cleaned2)
+        cleaned = cleaned2
     if not isinstance(data, dict):
         # 如果是列表，包一层
         data = {"items": data}

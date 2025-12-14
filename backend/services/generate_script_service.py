@@ -197,10 +197,7 @@ async def _ensure_models_ready_for_script(project_id: Optional[str] = None) -> N
         raise HTTPException(status_code=400, detail="未找到激活的文案生成模型配置，请在“模型配置”中启用一个配置")
 
     try:
-        content_result = await asyncio.wait_for(
-            content_model_config_manager.test_connection(active_content_id),
-            timeout=15,
-        )
+        content_result = await content_model_config_manager.test_connection(active_content_id)
     except asyncio.TimeoutError:
         if project_id:
             try:
@@ -356,7 +353,7 @@ class GenerateScriptService:
         except Exception:
             pass
 
-        await _ensure_models_ready_for_script(project_id)
+        # await _ensure_models_ready_for_script(project_id)
 
         root = _backend_root_dir()
         video_abs = _resolve_path(video_path)

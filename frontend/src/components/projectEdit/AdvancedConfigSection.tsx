@@ -2,6 +2,9 @@ import { Check, Copy, X } from "lucide-react";
 import React, { useState } from "react";
 import { usePrompts } from "../../hooks/usePrompts";
 import type { CreatePromptPayload } from "../../types/prompts";
+import { SubtitleUploader } from "./SubtitleUploader";
+import { NarrationType, type ScriptLengthOption } from "../../types/project";
+import { projectService } from "../../services/projectService";
 
 interface AdvancedConfigSectionProps {
   projectId: string;
@@ -10,6 +13,11 @@ interface AdvancedConfigSectionProps {
   subtitlePath?: string;
   onSubtitleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDeleteSubtitle: () => void;
+  narrationType?: NarrationType;
+  isDraggingSubtitle: boolean;
+  onSubtitleDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
+  onSubtitleDragLeave: (e: React.DragEvent<HTMLDivElement>) => void;
+  onSubtitleDrop: (e: React.DragEvent<HTMLDivElement>) => void;
 }
 
 const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
@@ -19,6 +27,11 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
   subtitlePath,
   onSubtitleFileChange,
   onDeleteSubtitle,
+  narrationType,
+  isDraggingSubtitle,
+  onSubtitleDragOver,
+  onSubtitleDragLeave,
+  onSubtitleDrop,
 }) => {
   const {
     items,
@@ -31,7 +44,7 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
     loading,
     error,
     defaultCategory,
-  } = usePrompts(projectId);
+  } = usePrompts(projectId, narrationType || NarrationType.SHORT_DRAMA);
 
   const [newName, setNewName] = useState("");
   const [newTemplate, setNewTemplate] = useState("");
@@ -43,9 +56,32 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [templateModalMode, setTemplateModalMode] = useState<"create" | "edit">("create");
   const [copied, setCopied] = useState(false);
+  const [scriptLength, setScriptLength] = useState<ScriptLengthOption>("长偏");
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const p = await projectService.getProject(projectId);
+        if (p && p.script_length) {
+          setScriptLength(p.script_length);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [projectId]);
+
+  const handleScriptLengthChange = async (len: ScriptLengthOption) => {
+    setScriptLength(len);
+    try {
+      await projectService.updateProject(projectId, { script_length: len });
+    } catch (e) {
+      // ignore network error
+    }
+  };
 
   const currentSel = selection?.[featureKey];
-  const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || "short_drama_narration:script_generation";
+  const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
+  const otherOfficialItems = (items || []).filter((it) => it.origin === "official" && it.id_or_key !== featureKey);
 
   const handleSelect = async (origin: "official" | "user", id_or_key: string) => {
     await setProjectSelection(origin, id_or_key);
@@ -139,57 +175,104 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
 
   return (
     <div className="border-t border-gray-200 pt-4 space-y-3">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">上传字幕SRT</label>
-        <div className="flex items-center space-x-3">
-          <input
-            type="file"
-            accept=".srt"
-            onChange={onSubtitleFileChange}
-            disabled={uploadingSubtitle}
-            className="block w-full max-w-xs text-sm text-gray-700"
-          />
-          {uploadingSubtitle && (
-            <div className="w-40 h-2 bg-gray-200 rounded">
-              <div
-                className="h-2 bg-blue-600 rounded transition-all"
-                style={{ width: `${Math.round(subtitleUploadProgress)}%` }}
-              />
-            </div>
-          )}
-        </div>
-        {subtitlePath ? (
-          <div className="mt-2 flex items-center text-xs text-gray-600">
-            <span className="mr-3">已上传字幕：{subtitlePath.split("/").pop()}</span>
-            <button
-              onClick={onDeleteSubtitle}
-              className="px-2 py-1 bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
-            >
-              删除字幕
-            </button>
+      <SubtitleUploader
+        uploading={uploadingSubtitle}
+        progress={subtitleUploadProgress}
+        path={subtitlePath}
+        onFileChange={onSubtitleFileChange}
+        onDelete={onDeleteSubtitle}
+        isDragging={isDraggingSubtitle}
+        onDragOver={onSubtitleDragOver}
+        onDragLeave={onSubtitleDragLeave}
+        onDrop={onSubtitleDrop}
+      />
+
+      {narrationType === NarrationType.MOVIE ? (
+        <div className="border-t border-gray-200 pt-4">
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium text-gray-700 mb-2">电影脚本长度</label>
+            <span className="text-xs text-gray-500">若视频时长小于30分钟仅建议短篇</span>
           </div>
-        ) : null}
-      </div>
+          <div className="space-y-2">
+            <div
+              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
+              onClick={() => handleScriptLengthChange("短篇")}
+            >
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="script-length"
+                  checked={scriptLength === "短篇"}
+                  onChange={() => handleScriptLengthChange("短篇")}
+                />
+                <span className="text-sm">短篇（保留约 1/3 片段）</span>
+              </label>
+            </div>
+            <div
+              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
+              onClick={() => handleScriptLengthChange("中偏")}
+            >
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="script-length"
+                  checked={scriptLength === "中偏"}
+                  onChange={() => handleScriptLengthChange("中偏")}
+                />
+                <span className="text-sm">中偏（保留约 2/3 片段）</span>
+              </label>
+            </div>
+            <div
+              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
+              onClick={() => handleScriptLengthChange("长偏")}
+            >
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="script-length"
+                  checked={scriptLength === "长偏"}
+                  onChange={() => handleScriptLengthChange("长偏")}
+                />
+                <span className="text-sm">长偏（保留全部片段）</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="border-t border-gray-200 pt-4">
         <div className="flex items-center justify-between">
-          <label className="block text-sm font-medium text-gray-700 mb-2">提示词选择（短剧解说）</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{`提示词选择（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
           {loading ? <span className="text-xs text-gray-500">加载中</span> : null}
         </div>
         {error ? <div className="text-xs text-red-600 mb-2">{error}</div> : null}
         <div className="space-y-2">
-          <div className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer" onClick={() => handleSelect("official", "short_drama_narration:script_generation")}>
+          <div className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer" onClick={() => handleSelect("official", featureKey)}>
             <label className="flex items-center space-x-2">
               <input
                 type="radio"
                 name="prompt-select"
-                checked={selectedIdOrKey === "short_drama_narration:script_generation"}
-                onChange={() => handleSelect("official", "short_drama_narration:script_generation")}
+                checked={selectedIdOrKey === featureKey}
+                onChange={() => handleSelect("official", featureKey)}
               />
               <span className="text-sm">官方默认模板</span>
             </label>
-            <button onClick={(e) => { e.stopPropagation(); handleRowPreview("short_drama_narration:script_generation"); }} className="text-xs text-blue-600">预览</button>
+            <button onClick={(e) => { e.stopPropagation(); handleRowPreview(featureKey); }} className="text-xs text-blue-600">预览</button>
           </div>
+          {otherOfficialItems.map((it) => (
+            <div key={it.id_or_key} className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer" onClick={() => handleSelect("official", it.id_or_key)}>
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="prompt-select"
+                  checked={selectedIdOrKey === it.id_or_key}
+                  onChange={() => handleSelect("official", it.id_or_key)}
+                />
+                <span className="text-sm">{it.name}</span>
+              </label>
+              <button onClick={(e) => { e.stopPropagation(); handleRowPreview(it.id_or_key); }} className="text-xs text-blue-600">预览</button>
+            </div>
+          ))}
           {items.filter((it) => it.origin === "user").map((it) => (
             <div key={it.id_or_key} className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer" onClick={() => handleSelect("user", it.id_or_key)}>
               <label className="flex items-center space-x-2">

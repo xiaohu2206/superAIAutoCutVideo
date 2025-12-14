@@ -40,6 +40,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           选择模型提供商
+          <span className="text-xs text-gray-500">（OpenRouter的openai/gpt-5效果更佳）</span>
         </label>
         <select
           value={contentSelectedProvider}

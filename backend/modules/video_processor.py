@@ -502,7 +502,7 @@ class VideoProcessor:
         encoders = await self._detect_encoders()
         if getattr(self, "_cuda_available", False) and ("h264_nvenc" in encoders):
             logger.info("编码器选择: h264_nvenc (GPU)")
-            return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p1"]
+            return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p3"]
         if "h264_qsv" in encoders:
             logger.info("编码器选择: h264_qsv (GPU)")
             return "h264_qsv", ["-c:v", "h264_qsv"]
@@ -510,19 +510,19 @@ class VideoProcessor:
             logger.info("编码器选择: h264_amf (GPU)")
             return "h264_amf", ["-c:v", "h264_amf"]
         logger.info("编码器选择: libx264 (CPU)")
-        return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "23"]
+        return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
 
     async def _get_encoder_priority_list(self) -> List[List[str]]:
         await self._detect_cuda()
         names = await self._detect_encoders()
         seq: List[List[str]] = []
         if "h264_nvenc" in names:
-            seq.append(["-c:v", "h264_nvenc", "-preset", "p1"])
+            seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
         if "h264_qsv" in names:
             seq.append(["-c:v", "h264_qsv"])
         if "h264_amf" in names:
             seq.append(["-c:v", "h264_amf"])
-        seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "23"])
+        seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
         return seq
 
     async def _detect_encoders(self) -> List[str]:
@@ -729,7 +729,32 @@ class VideoProcessor:
             if adur <= 0.0:
                 logger.error("无法获取音频时长")
                 return False
-            _, vcodec_args_pick = await self._pick_fast_encoder()
+            enc_name, vcodec_args_pick = await self._pick_fast_encoder()
+            tol = 0.05
+            if abs(adur - vdur) <= tol:
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-i", video_path,
+                    "-i", narr_used,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
+                    "-movflags", "+faststart",
+                    "-y", output_path,
+                ]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                if process.returncode == 0:
+                    return True
+                else:
+                    err = stderr.decode(errors="ignore")
+                    logger.error(f"配音替换失败(拷贝路径): {err}")
+                    return False
             if adur >= vdur:
                 pad = max(adur - vdur, 0.0)
                 pad_str = f"{pad:.3f}"
@@ -737,14 +762,18 @@ class VideoProcessor:
                 filter_complex = f
                 map_args = ["-map", "[v]", "-map", "[a]"]
                 extra = []
-                vcodec_args = vcodec_args_pick + ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
             else:
                 adur_str = f"{adur:.3f}"
                 f = f"[0:v]trim=start=0:end={adur_str},setpts=PTS-STARTPTS[v];[1:a]asetpts=PTS-STARTPTS[a]"
                 filter_complex = f
                 map_args = ["-map", "[v]", "-map", "[a]"]
                 extra = []
-                vcodec_args = vcodec_args_pick + ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+            vcodec_args = list(vcodec_args_pick)
+            if enc_name == "h264_nvenc":
+                vcodec_args.extend(["-rc:v", "vbr_hq", "-cq:v", "19"])
+            elif enc_name == "libx264":
+                vcodec_args.extend(["-crf", "18"])
+            vcodec_args.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
 
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -769,7 +798,7 @@ class VideoProcessor:
             else:
                 err = stderr.decode(errors="ignore")
                 if ("Cannot load nvcuda.dll" in err) or ("Error while opening encoder" in err) or ("Could not open encoder" in err):
-                    vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                    vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                     cmd_fb = [
                         "ffmpeg", "-hide_banner", "-loglevel", "error",
                         "-i", video_path,

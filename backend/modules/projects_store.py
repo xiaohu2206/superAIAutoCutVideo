@@ -25,6 +25,7 @@ class Project(BaseModel):
     name: str
     description: Optional[str] = None
     narration_type: str = Field(default="短剧解说")
+    script_length: Optional[str] = None
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -111,6 +112,7 @@ class ProjectsStore:
             name=name,
             description=description,
             narration_type=narration_type or "短剧解说",
+            script_length=None,
             status="draft",
             video_path=None,
             video_paths=[],
@@ -139,6 +141,7 @@ class ProjectsStore:
                 "name",
                 "description",
                 "narration_type",
+                "script_length",
                 "status",
                 "video_path",
                 "video_paths",

@@ -129,7 +129,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="请输入项目名称"
+                placeholder="作为提示词，影视名称"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                 disabled={loading}
                 required
@@ -173,6 +173,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 disabled={loading}
               >
                 <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
+                <option value={NarrationType.MOVIE}>电影解说</option>
               </select>
             </div>
 
