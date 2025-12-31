@@ -92,8 +92,9 @@ cargo tauri dev
 ## 联系方式
 
 <img src="docs/image/douyin.png" alt="抖音码" width="160" />
-
 - 抖音号：`xiaohu_111`
+
+<img src="docs/image/weixinqun.jpg" alt="微信码" width="160" />
 - 微信号：`interest_dog`
 
 ## 说明
