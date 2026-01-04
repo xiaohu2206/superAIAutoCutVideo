@@ -145,6 +145,10 @@ async fn start_backend(
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
+    let is_dev_mode = cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let force_packaged_backend = std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
+    let prefer_python_backend = is_dev_mode && !force_packaged_backend;
+
     // 尝试定位打包的后端可执行文件
     let primary_path = if cfg!(target_os = "windows") {
         resource_dir.join("superAutoCutVideoBackend.exe")
@@ -163,7 +167,7 @@ async fn start_backend(
         primary_path
     } else if let Some(fp) = &fallback_path { fp.clone() } else { primary_path };
 
-    let mut cmd = if backend_executable.exists() {
+    let mut cmd = if !prefer_python_backend && backend_executable.exists() {
         // 使用打包的可执行文件
         println!("使用打包的后端可执行文件: {:?}", backend_executable);
         let mut c = Command::new(backend_executable);
@@ -173,14 +177,30 @@ async fn start_backend(
     } else {
         // 未发现打包的后端
         // 生产环境严格要求存在打包后端；开发环境允许回退到 Python
-        if cfg!(debug_assertions) {
-            let backend_script = resource_dir
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("backend")
-                .join("main.py");
+        if is_dev_mode {
+            let mut backend_script: Option<PathBuf> = None;
+            let mut search_roots: Vec<PathBuf> = vec![resource_dir.clone()];
+            if let Ok(exe) = std::env::current_exe() {
+                search_roots.push(exe);
+            }
+            if let Ok(cwd) = std::env::current_dir() {
+                search_roots.push(cwd);
+            }
+
+            for root in search_roots {
+                for anc in root.ancestors().take(8) {
+                    let cand = anc.join("backend").join("main.py");
+                    if cand.exists() {
+                        backend_script = Some(cand);
+                        break;
+                    }
+                }
+                if backend_script.is_some() {
+                    break;
+                }
+            }
+
+            let backend_script = backend_script.ok_or_else(|| "后端脚本不存在: backend/main.py".to_string())?;
 
             if !backend_script.exists() {
                 return Err(format!("后端脚本不存在: {:?}", backend_script));
@@ -239,6 +259,11 @@ async fn start_backend(
         Ok(mut child) => {
             // 捕获日志到临时文件
             let log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&log_path);
             if let Some(stdout) = child.stdout.take() {
                 let path_clone = log_path.clone();
                 thread::spawn(move || {

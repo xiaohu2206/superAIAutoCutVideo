@@ -1,5 +1,4 @@
 // API客户端 - 处理与FastAPI后端的通信
-import { invoke } from "@tauri-apps/api/core";
 
 // API基础配置（默认端口，运行时可通过 configureBackend 动态覆盖）
 const DEFAULT_HOST = "127.0.0.1";
@@ -278,6 +277,20 @@ export class ApiClient {
   async previewTtsVoice(voiceId: string, req?: { text?: string; provider?: string; config_id?: string }): Promise<any> {
     return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {});
   }
+
+  // ===== 剪映草稿路径相关 API =====
+  async getJianyingDraftPath(): Promise<any> {
+    return this.get(`/api/jianying/draft-path`);
+  }
+  async updateJianyingDraftPath(path: string): Promise<any> {
+    return this.request(`/api/jianying/draft-path`, {
+      method: "PATCH",
+      body: JSON.stringify({ path }),
+    });
+  }
+  async detectJianyingDraftPath(): Promise<any> {
+    return this.post(`/api/jianying/detect-draft-path`);
+  }
 }
 
 // WebSocket客户端类
@@ -432,19 +445,42 @@ export class WebSocketClient {
 
 // Tauri命令包装器
 export class TauriCommands {
+  private static canUseTauri(): boolean {
+    const w = typeof window !== "undefined" ? (window as any) : undefined;
+    return !!(w && w.__TAURI__ && w.__TAURI__.core && typeof w.__TAURI__.core.invoke === "function");
+  }
+  private static async coreInvoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
+    if (TauriCommands.canUseTauri()) {
+      const w: any = window;
+      return w.__TAURI__.core.invoke(cmd, args || {});
+    }
+    throw new Error("Tauri runtime unavailable");
+  }
   // 启动后端
   static async startBackend(): Promise<BackendStatus> {
-    return invoke<BackendStatus>("start_backend");
+    try {
+      return await TauriCommands.coreInvoke<BackendStatus>("start_backend");
+    } catch {
+      return { running: false, port: DEFAULT_PORT };
+    }
   }
 
   // 停止后端
   static async stopBackend(): Promise<boolean> {
-    return invoke<boolean>("stop_backend");
+    try {
+      return await TauriCommands.coreInvoke<boolean>("stop_backend");
+    } catch {
+      return false;
+    }
   }
 
   // 获取后端状态
   static async getBackendStatus(): Promise<BackendStatus> {
-    return invoke<BackendStatus>("get_backend_status");
+    try {
+      return await TauriCommands.coreInvoke<BackendStatus>("get_backend_status");
+    } catch {
+      return { running: false, port: DEFAULT_PORT };
+    }
   }
 
   // 选择视频文件
@@ -452,7 +488,13 @@ export class TauriCommands {
     path?: string;
     cancelled: boolean;
   }> {
-    return invoke("select_video_file");
+    try {
+      return await TauriCommands.coreInvoke("select_video_file");
+    } catch {
+      const p = typeof window !== "undefined" ? window.prompt("请输入视频文件路径") : null;
+      if (p && p.trim()) return { path: p.trim(), cancelled: false };
+      return { cancelled: true };
+    }
   }
 
   // 选择输出目录
@@ -460,22 +502,42 @@ export class TauriCommands {
     path?: string;
     cancelled: boolean;
   }> {
-    return invoke("select_output_directory");
+    try {
+      return await TauriCommands.coreInvoke("select_output_directory");
+    } catch {
+      const p = typeof window !== "undefined" ? window.prompt("请输入目录路径") : null;
+      if (p && p.trim()) return { path: p.trim(), cancelled: false };
+      return { cancelled: true };
+    }
   }
 
   // 获取应用信息
   static async getAppInfo(): Promise<Record<string, string>> {
-    return invoke("get_app_info");
+    try {
+      return await TauriCommands.coreInvoke("get_app_info");
+    } catch {
+      return {};
+    }
   }
 
   // 显示通知
   static async showNotification(title: string, body: string): Promise<void> {
-    return invoke("show_notification", { title, body });
+    try {
+      await TauriCommands.coreInvoke("show_notification", { title, body });
+    } catch {
+      return;
+    }
   }
 
   // 打开外部链接
   static async openExternalLink(url: string): Promise<void> {
-    return invoke("open_external_link", { url });
+    try {
+      await TauriCommands.coreInvoke("open_external_link", { url });
+    } catch {
+      if (typeof window !== "undefined") {
+        window.open(url, "_blank");
+      }
+    }
   }
 }
 

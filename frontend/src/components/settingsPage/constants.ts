@@ -1,4 +1,4 @@
-import { Activity, FileText, Info, Mic } from "lucide-react";
+import { Activity, FileText, Info, Mic, FolderOpen } from "lucide-react";
 import type { AppSettings, SettingsSection } from "./types";
 
 /**
@@ -24,6 +24,7 @@ export const defaultSettings: AppSettings = {
 export const sections: SettingsSection[] = [
   // { id: "videoModel", label: "视频生成模型", icon: Cpu },
   { id: "contentModel", label: "文案生成模型", icon: FileText },
+  { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
   { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "monitor", label: "健康监测", icon: Activity },
   { id: "about", label: "关于", icon: Info },

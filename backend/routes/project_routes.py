@@ -34,6 +34,7 @@ from modules.video_processor import video_processor
 from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
+from services.jianying_draft_service import jianying_draft_service, JianyingDraftService
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
 from modules.config.content_model_config import content_model_config_manager
@@ -101,6 +102,8 @@ class MergeTaskStatus(BaseModel):
     file_path: Optional[str] = None
 
 MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
+
+DRAFT_TASKS: Dict[str, MergeTaskStatus] = {}
 
 
 class UpdateVideoOrderRequest(BaseModel):
@@ -815,6 +818,102 @@ async def get_merged_video(project_id: str):
         path=str(abs_path),
         filename=filename,
         media_type="video/mp4",
+        headers=headers,
+    )
+
+
+# ========================= 剪映草稿生成与下载 =========================
+
+@router.post("/{project_id}/generate-jianying-draft")
+async def generate_jianying_draft(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.video_path:
+        raise HTTPException(status_code=400, detail="请先上传原始视频文件")
+
+    task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    DRAFT_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
+
+    async def _run():
+        try:
+            DRAFT_TASKS[task_id].status = "processing"
+            DRAFT_TASKS[task_id].message = "生成中"
+            DRAFT_TASKS[task_id].progress = 1.0
+            r = await jianying_draft_service.generate_draft_zip(project_id=project_id, task_id=task_id)
+            DRAFT_TASKS[task_id].file_path = r.zip_web
+            DRAFT_TASKS[task_id].status = "completed"
+            DRAFT_TASKS[task_id].message = "生成完成"
+            DRAFT_TASKS[task_id].progress = 100.0
+        except Exception as e:
+            DRAFT_TASKS[task_id].status = "failed"
+            DRAFT_TASKS[task_id].message = str(e) or "生成失败"
+            DRAFT_TASKS[task_id].progress = 0.0
+
+    asyncio.create_task(_run())
+
+    return {
+        "message": "开始生成剪映草稿",
+        "data": {
+            "task_id": task_id,
+            "scope": JianyingDraftService.SCOPE,
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/jianying-draft/status/{task_id}")
+async def get_jianying_draft_status(project_id: str, task_id: str):
+    _ = project_id
+    t = DRAFT_TASKS.get(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "message": "获取剪映草稿生成进度",
+        "data": t.model_dump(),
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/jianying-draft")
+async def download_jianying_draft(project_id: str, f: Optional[str] = None):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    root = project_root_dir()
+    drafts_dir = root / "uploads" / "jianying_drafts" / "outputs" / project_id
+    drafts_dir.mkdir(parents=True, exist_ok=True)
+
+    target: Optional[Path] = None
+    if f:
+        name = Path(str(f)).name
+        candidate = drafts_dir / name
+        if candidate.exists() and candidate.is_file():
+            target = candidate
+    else:
+        candidates = sorted(
+            [x for x in drafts_dir.glob("*.zip") if x.is_file()],
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            target = candidates[0]
+
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="尚未生成剪映草稿")
+
+    filename = target.name
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Disposition": f"attachment; filename=\"{filename}\"",
+    }
+    return FileResponse(
+        path=str(target),
+        filename=filename,
+        media_type="application/zip",
         headers=headers,
     )
 async def _run_in_thread(func, *args, **kwargs):

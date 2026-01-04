@@ -293,6 +293,27 @@ export class ProjectService {
   }
 
   /**
+   * 生成剪映草稿（后台任务 + WebSocket 进度）
+   */
+  async startGenerateJianyingDraft(projectId: string): Promise<{ task_id: string; scope?: string } | null> {
+    const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string }>>(
+      `/api/projects/${projectId}/generate-jianying-draft`
+    );
+    return response.data ?? null;
+  }
+
+  /**
+   * 获取剪映草稿下载链接（后端直接返回 zip 文件）
+   */
+  getJianyingDraftDownloadUrl(projectId: string, fileName?: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/jianying-draft`;
+    const qs: string[] = [];
+    if (fileName) qs.push(`f=${encodeURIComponent(fileName)}`);
+    if (cacheBust !== undefined && cacheBust !== null) qs.push(`v=${encodeURIComponent(String(cacheBust))}`);
+    return qs.length ? `${base}?${qs.join("&")}` : base;
+  }
+
+  /**
    * 获取输出视频下载链接（后端直接返回文件）
    */
   getOutputVideoDownloadUrl(projectId: string, cacheBust?: string | number): string {

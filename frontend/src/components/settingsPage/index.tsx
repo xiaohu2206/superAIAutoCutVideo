@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 import React, { useState } from "react";
 import { WebSocketMessage } from "../../services/clients";
 import AboutSection from "./components/AboutSection";
+import { JianyingDraftPathSection } from "./components/JianyingDraftPathSection";
 import { ContentModelSettings } from "./components/models/content/ContentModelSettings";
 import { VideoModelSettings } from "./components/models/video/VideoModelSettings";
 import MonitorSection from "./components/MonitorSection";
@@ -88,6 +89,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             testContentModelConnection={testContentModelConnection}
           />
         );
+      case "jianyingDraftPath":
+        return <JianyingDraftPathSection />;
       case "tts":
         return <TtsSettings />;
       case "monitor":

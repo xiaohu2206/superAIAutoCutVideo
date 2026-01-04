@@ -18,6 +18,12 @@ interface ProjectOperationsProps {
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; type?: string }[];
   handleDownloadVideo: () => void;
+  isGeneratingDraft: boolean;
+  handleGenerateDraft: () => void;
+  draftGenProgress: number;
+  draftGenLogs: { timestamp: string; message: string; type?: string }[];
+  handleDownloadDraft: () => void;
+  draftFileName?: string | null;
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
   showOutputPreview: boolean;
@@ -35,6 +41,12 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   videoGenProgress,
   videoGenLogs,
   handleDownloadVideo,
+  isGeneratingDraft,
+  handleGenerateDraft,
+  draftGenProgress,
+  draftGenLogs,
+  handleDownloadDraft,
+  draftFileName,
   showMergedPreview,
   setShowMergedPreview,
   showOutputPreview,
@@ -89,6 +101,35 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           {videoGenLogs.length > 0 && (
             <div className="mt-2 space-y-1">
               {videoGenLogs.slice(-1).map((log, idx) => (
+                <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
+                  {log.type === "error" ? (
+                    <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
+                  ) : (
+                    <Loader className="h-3 w-3 mr-1 text-blue-600" />
+                  )}
+                  <span className="break-all">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(isGeneratingDraft || (draftGenProgress > 0 && draftGenProgress < 100)) && (
+        <div className="w-full mt-3">
+          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+            <span>剪映草稿生成进度</span>
+            <span>{Math.round(draftGenProgress)}%</span>
+          </div>
+          <div className="w-full h-2 bg-gray-200 rounded">
+            <div
+              className="h-2 bg-blue-600 rounded transition-all"
+              style={{ width: `${Math.round(draftGenProgress)}%` }}
+            />
+          </div>
+          {draftGenLogs.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {draftGenLogs.slice(-1).map((log, idx) => (
                 <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
                   {log.type === "error" ? (
                     <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
@@ -184,6 +225,39 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       >
         下载视频
       </button>
+      <button
+        onClick={handleGenerateDraft}
+        disabled={!project.video_path || isGeneratingDraft}
+        className="flex mt-2 items-center px-6 py-3 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isGeneratingDraft ? (
+          <>
+            <Loader className="h-5 w-5 mr-2 animate-spin" />
+            生成剪映草稿中...
+          </>
+        ) : (
+          <>生成剪映草稿</>
+        )}
+      </button>
+      <button
+        onClick={handleDownloadDraft}
+        disabled={!draftFileName}
+        className="flex mt-2 items-center px-6 py-3 bg-white text-green-600 border border-green-500 rounded-lg font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        下载剪映草稿
+      </button>
+      {draftFileName && (
+        <div className="mt-2 text-xs text-gray-600">
+          已生成：
+          <button
+            onClick={handleDownloadDraft}
+            className="ml-1 break-all text-blue-600 hover:underline"
+            title="点击下载剪映草稿"
+          >
+            {draftFileName}
+          </button>
+        </div>
+      )}
       {project.output_video_path && (
         <div className="mt-2 text-xs text-gray-600">
           已生成：

@@ -48,7 +48,9 @@ from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
 from routes.prompts_routes import router as prompts_router
+from routes.jianying_config_routes import router as jianying_router
 from modules.ws_manager import manager
+from modules.config.jianying_config import jianying_config_manager
 
 # 配置日志
 logging.basicConfig(
@@ -81,6 +83,7 @@ app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
 app.include_router(prompts_router)
+app.include_router(jianying_router)
 
 def get_app_paths():
     """
@@ -361,6 +364,11 @@ async def startup_event():
     logger.info("AI智能视频剪辑后端服务启动")
     # 启动心跳任务
     asyncio.create_task(send_periodic_heartbeat())
+    try:
+        # 默认查找并设置剪映草稿路径（若尚未设置）
+        jianying_config_manager.ensure_default_draft_path()
+    except Exception as e:
+        logger.warning(f"默认查找剪映草稿路径失败: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

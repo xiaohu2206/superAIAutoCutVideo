@@ -167,7 +167,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --strict-markers --strict-config"
+addopts = "-ra -q --strict-markers --strict-config --ignore=backend/docs"
 testpaths = [
     "backend/tests",
 ]

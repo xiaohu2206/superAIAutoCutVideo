@@ -10,12 +10,13 @@ import React, { useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
 import type { VideoScript } from "../types/project";
  
-import { wsClient } from "../services/clients";
-import type { WebSocketMessage } from "../services/clients";
-import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
+import AdvancedConfigSection from "../components/projectEdit/AdvancedConfigSection";
 import ProjectOperations from "../components/projectEdit/ProjectOperations";
 import ScriptEditor from "../components/projectEdit/ScriptEditor";
-import AdvancedConfigSection from "../components/projectEdit/AdvancedConfigSection";
+import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
+import type { WebSocketMessage } from "../services/clients";
+import { wsClient } from "../services/clients";
+import { projectService } from "../services/projectService";
 
 interface ProjectEditPageProps {
   projectId: string;
@@ -62,6 +63,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [videoGenLogs, setVideoGenLogs] = useState<
     { timestamp: string; message: string; phase?: string; type?: string }[]
   >([]);
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [draftGenProgress, setDraftGenProgress] = useState<number>(0);
+  const [draftGenLogs, setDraftGenLogs] = useState<
+    { timestamp: string; message: string; phase?: string; type?: string }[]
+  >([]);
+  const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
+  const [draftFileName, setDraftFileName] = useState<string | null>(null);
   // 合并视频预览弹层
   const [showMergedPreview, setShowMergedPreview] = useState(false);
   // 输出视频预览弹层
@@ -411,6 +419,35 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     }
   };
 
+  const handleGenerateDraft = async () => {
+    if (!project?.video_path) {
+      alert("请先上传原始视频文件");
+      return;
+    }
+    setIsGeneratingDraft(true);
+    setDraftGenProgress(0);
+    setDraftGenLogs([]);
+    setDraftTaskId(null);
+    setDraftFileName(null);
+    setSuccessMessage(null);
+    try {
+      const res = await projectService.startGenerateJianyingDraft(project.id);
+      const taskId = res?.task_id;
+      if (taskId) {
+        setDraftTaskId(taskId);
+      }
+    } catch (err) {
+      console.error("生成剪映草稿失败:", err);
+      setIsGeneratingDraft(false);
+    }
+  };
+
+  const handleDownloadDraft = () => {
+    if (!project) return;
+    const url = projectService.getJianyingDraftDownloadUrl(project.id, draftFileName || undefined, Date.now());
+    window.open(url, "_blank");
+  };
+
   // 订阅 WebSocket 消息，获取生成视频的实时进度
   React.useEffect(() => {
     const handler = (message: WebSocketMessage) => {
@@ -445,6 +482,50 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       wsClient.off("*", handler);
     };
   }, [project?.id]);
+
+  React.useEffect(() => {
+    const handler = (message: WebSocketMessage) => {
+      if (
+        message &&
+        (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+        (message as any).scope === "generate_jianying_draft" &&
+        (message as any).project_id === project?.id
+      ) {
+        const msgTaskId = (message as any).task_id as string | undefined;
+        if (draftTaskId && msgTaskId && msgTaskId !== draftTaskId) {
+          return;
+        }
+        if (typeof message.progress === "number") {
+          setDraftGenProgress(Math.max(0, Math.min(100, message.progress)));
+        }
+        const msgText = message.message || "";
+        setDraftGenLogs((prev) => [
+          ...prev,
+          {
+            timestamp: message.timestamp,
+            message: msgText,
+            phase: (message as any).phase,
+            type: message.type,
+          },
+        ]);
+        if (message.type === "completed") {
+          const url = (message as any).download_url as string | undefined;
+          const nameFromUrl = url ? new URL(url, window.location.origin).searchParams.get("f") : null;
+          setDraftFileName(nameFromUrl || draftFileName);
+          setIsGeneratingDraft(false);
+          setSuccessMessage("剪映草稿生成成功！");
+          setTimeout(() => setSuccessMessage(null), 3000);
+        }
+        if (message.type === "error") {
+          setIsGeneratingDraft(false);
+        }
+      }
+    };
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id, draftTaskId, draftFileName]);
 
   /**
    * 处理下载输出视频
@@ -612,6 +693,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           videoGenProgress={videoGenProgress}
           videoGenLogs={videoGenLogs}
           handleDownloadVideo={handleDownloadVideo}
+          isGeneratingDraft={isGeneratingDraft}
+          handleGenerateDraft={handleGenerateDraft}
+          draftGenProgress={draftGenProgress}
+          draftGenLogs={draftGenLogs}
+          handleDownloadDraft={handleDownloadDraft}
+          draftFileName={draftFileName}
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
           showOutputPreview={showOutputPreview}
