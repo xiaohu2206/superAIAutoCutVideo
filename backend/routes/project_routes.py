@@ -849,6 +849,19 @@ async def generate_jianying_draft(project_id: str):
             DRAFT_TASKS[task_id].status = "failed"
             DRAFT_TASKS[task_id].message = str(e) or "生成失败"
             DRAFT_TASKS[task_id].progress = 0.0
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "scope": JianyingDraftService.SCOPE,
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "failed",
+                    "message": f"剪映草稿生成失败: {str(e)}",
+                    "progress": DRAFT_TASKS[task_id].progress,
+                    "timestamp": now_ts(),
+                }))
+            except Exception:
+                pass
 
     asyncio.create_task(_run())
 

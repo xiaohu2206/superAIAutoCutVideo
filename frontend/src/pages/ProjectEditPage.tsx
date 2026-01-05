@@ -53,6 +53,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [draftErrorMessage, setDraftErrorMessage] = useState<string | null>(null);
   // 生成脚本进度 & 日志
   const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
   const [scriptGenLogs, setScriptGenLogs] = useState<
@@ -430,6 +431,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     setDraftTaskId(null);
     setDraftFileName(null);
     setSuccessMessage(null);
+    setDraftErrorMessage(null);
     try {
       const res = await projectService.startGenerateJianyingDraft(project.id);
       const taskId = res?.task_id;
@@ -513,11 +515,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           const nameFromUrl = url ? new URL(url, window.location.origin).searchParams.get("f") : null;
           setDraftFileName(nameFromUrl || draftFileName);
           setIsGeneratingDraft(false);
+          setDraftErrorMessage(null);
           setSuccessMessage("剪映草稿生成成功！");
           setTimeout(() => setSuccessMessage(null), 3000);
         }
         if (message.type === "error") {
           setIsGeneratingDraft(false);
+          setDraftErrorMessage(msgText);
         }
       }
     };
@@ -605,6 +609,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
           <AlertCircle className="h-5 w-5 mr-2" />
           {error}
+        </div>
+      )}
+      {draftErrorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          {draftErrorMessage}
         </div>
       )}
 
