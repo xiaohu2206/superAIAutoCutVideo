@@ -840,8 +840,8 @@ async def generate_jianying_draft(project_id: str):
             DRAFT_TASKS[task_id].status = "processing"
             DRAFT_TASKS[task_id].message = "生成中"
             DRAFT_TASKS[task_id].progress = 1.0
-            r = await jianying_draft_service.generate_draft_zip(project_id=project_id, task_id=task_id)
-            DRAFT_TASKS[task_id].file_path = r.zip_web
+            r = await jianying_draft_service.generate_draft_folder(project_id=project_id, task_id=task_id)
+            DRAFT_TASKS[task_id].file_path = r.dir_web
             DRAFT_TASKS[task_id].status = "completed"
             DRAFT_TASKS[task_id].message = "生成完成"
             DRAFT_TASKS[task_id].progress = 100.0

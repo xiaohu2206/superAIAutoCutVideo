@@ -71,7 +71,6 @@ class JianyingConfigManager:
         localappdata = Path(os.getenv("LOCALAPPDATA") or "").expanduser()
         home = Path.home()
         documents = home / "Documents"
-        # JianyingPro / CapCut 常见项目目录
         for base, brand in [
             (appdata, "JianyingPro"),
             (localappdata, "JianyingPro"),
@@ -79,30 +78,26 @@ class JianyingConfigManager:
             (localappdata, "CapCut"),
         ]:
             if str(base):
-                items.append(base / brand / "User Data" / "Projects")
-                items.append(base / brand / "userdata" / "projects")
-        # Documents 中的常见目录
-        items.append(documents / "JianyingPro" / "Projects")
-        items.append(documents / "CapCut" / "Projects")
-        items.append(documents / "CapCut Projects")
-        # 其他常见目录
-        items.append(home / "Videos" / "CapCut")
-        items.append(home / "Videos" / "JianyingPro")
+                items.append(base / brand / "User Data" / "Projects" / "com.lveditor.draft")
+                items.append(base / brand / "userdata" / "projects" / "com.lveditor.draft")
+        items.append(documents / "JianyingPro" / "Projects" / "com.lveditor.draft")
+        items.append(documents / "CapCut" / "Projects" / "com.lveditor.draft")
+        items.append(documents / "CapCut Projects" / "com.lveditor.draft")
+        items.append(home / "Videos" / "CapCut" / "com.lveditor.draft")
+        items.append(home / "Videos" / "JianyingPro" / "com.lveditor.draft")
         return items
 
     def _candidate_paths_macos(self) -> List[Path]:
         items: List[Path] = []
         home = Path.home()
         app_support = home / "Library" / "Application Support"
-        # JianyingPro / CapCut
         for brand in ["JianyingPro", "CapCut"]:
-            items.append(app_support / brand / "User Data" / "Projects")
-            items.append(app_support / brand / "userdata" / "projects")
-        # Movies / Documents 可能的目录
-        items.append(home / "Movies" / "CapCut Projects")
-        items.append(home / "Movies" / "CapCut")
-        items.append(home / "Documents" / "CapCut")
-        items.append(home / "Documents" / "JianyingPro")
+            items.append(app_support / brand / "User Data" / "Projects" / "com.lveditor.draft")
+            items.append(app_support / brand / "userdata" / "projects" / "com.lveditor.draft")
+        items.append(home / "Movies" / "CapCut Projects" / "com.lveditor.draft")
+        items.append(home / "Movies" / "CapCut" / "com.lveditor.draft")
+        items.append(home / "Documents" / "CapCut" / "com.lveditor.draft")
+        items.append(home / "Documents" / "JianyingPro" / "com.lveditor.draft")
         return items
 
     def auto_detect_draft_paths(self) -> List[str]:
@@ -152,4 +147,3 @@ class JianyingConfigManager:
 
 # 全局实例
 jianying_config_manager = JianyingConfigManager()
-
