@@ -34,7 +34,7 @@ from modules.video_processor import video_processor
 from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
-from services.jianying_draft_service import jianying_draft_service, JianyingDraftService
+from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
 from modules.config.content_model_config import content_model_config_manager
@@ -840,7 +840,7 @@ async def generate_jianying_draft(project_id: str):
             DRAFT_TASKS[task_id].status = "processing"
             DRAFT_TASKS[task_id].message = "生成中"
             DRAFT_TASKS[task_id].progress = 1.0
-            r = await jianying_draft_service.generate_draft_folder(project_id=project_id, task_id=task_id)
+            r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id)
             DRAFT_TASKS[task_id].file_path = r.dir_web
             DRAFT_TASKS[task_id].status = "completed"
             DRAFT_TASKS[task_id].message = "生成完成"
@@ -852,7 +852,7 @@ async def generate_jianying_draft(project_id: str):
             try:
                 await manager.broadcast(json.dumps({
                     "type": "error",
-                    "scope": JianyingDraftService.SCOPE,
+                    "scope": JianyingDraftManager.SCOPE,
                     "project_id": project_id,
                     "task_id": task_id,
                     "phase": "failed",
@@ -869,7 +869,7 @@ async def generate_jianying_draft(project_id: str):
         "message": "开始生成剪映草稿",
         "data": {
             "task_id": task_id,
-            "scope": JianyingDraftService.SCOPE,
+            "scope": JianyingDraftManager.SCOPE,
         },
         "timestamp": now_ts(),
     }

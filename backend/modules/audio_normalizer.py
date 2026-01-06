@@ -51,6 +51,63 @@ class AudioNormalizer:
         except Exception:
             return None
 
+    async def normalize_audio_loudness(self, input_path: str, output_path: str, sample_rate: int = 44100, channels: int = 2) -> bool:
+        if not os.path.exists(input_path):
+            logger.error(f"音频不存在: {input_path}")
+            return False
+        measured = await self._first_pass(input_path)
+        # 根据输出扩展名选择编码器
+        ext = os.path.splitext(output_path)[1].lower()
+        if ext in {".mp3"}:
+            codec_args = ["-c:a", "libmp3lame", "-q:a", "2"]
+        elif ext in {".wav"}:
+            codec_args = ["-c:a", "pcm_s16le"]
+        else:
+            codec_args = ["-c:a", "aac", "-b:a", "192k"]
+        if measured is None or ("target_offset" not in measured):
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", input_path,
+                "-af", f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7",
+                "-ar", str(sample_rate),
+                "-ac", str(channels),
+                *codec_args,
+                output_path,
+            ]
+        else:
+            logger.info(
+                "两遍 loudnorm 测量: I=%.2f, LRA=%.2f, TP=%.2f, thresh=%.2f, offset=%.2f" % (
+                    measured['input_i'], measured['input_lra'], measured['input_tp'], measured['input_thresh'], measured['target_offset']
+                )
+            )
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", input_path,
+                "-af", (
+                    f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7:"
+                    f"measured_I={measured['input_i']}:"
+                    f"measured_LRA={measured['input_lra']}:"
+                    f"measured_TP={measured['input_tp']}:"
+                    f"measured_thresh={measured['input_thresh']}:"
+                    f"offset={measured['target_offset']}:"
+                    f"linear=true"
+                ),
+                "-ar", str(sample_rate),
+                "-ac", str(channels),
+                *codec_args,
+                output_path,
+            ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info(f"音频标准化处理完成: {input_path} -> {output_path}")
+            return True
+        logger.error(stderr.decode(errors="ignore"))
+        return False
     async def normalize_video_loudness(self, input_path: str, output_path: str, sample_rate: int = 44100, channels: int = 2) -> bool:
         if not os.path.exists(input_path):
             logger.error(f"音频不存在: {input_path}")
