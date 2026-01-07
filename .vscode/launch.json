@@ -1,0 +1,42 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Backend Debug",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/backend",
+            "python": "C:\\Users\\jiangchao1\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend:${env:PYTHONPATH}"
+            },
+            "args": [],
+            "justMyCode": true,
+            "stopOnEntry": false
+        },
+        {
+            "name": "Python: Backend Debug (with uvicorn)",
+            "type": "python",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+                "--reload"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/backend",
+            "python": "C:\\Users\\jiangchao1\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend:${env:PYTHONPATH}"
+            },
+            "justMyCode": true,
+            "stopOnEntry": false
+        }
+    ]
+}

@@ -1,9 +1,5 @@
+import { AlertCircle, Clipboard, FileVideo, FolderOpen, Loader } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import {
-  Loader,
-  AlertCircle,
-  FileVideo,
-} from "lucide-react";
 import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
 
@@ -53,6 +49,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   setShowOutputPreview,
 }) => {
   const [outputVideoCacheBust, setOutputVideoCacheBust] = useState<number>(0);
+  const [copying, setCopying] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     if (showOutputPreview && project.output_video_path) {
@@ -65,6 +63,36 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       setOutputVideoCacheBust(Date.now());
     }
   }, [isGeneratingVideo, project.output_video_path]);
+
+  const handleCopyDraftPath = async () => {
+    const path = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
+    if (!path) return;
+    try {
+      setCopying(true);
+      await navigator.clipboard.writeText(path);
+      alert("草稿路径已复制到剪贴板");
+    } catch (e) {
+      alert("复制失败");
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const handleOpenDraftDir = async () => {
+    const path = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
+    if (!path) {
+      alert("尚未生成剪映草稿");
+      return;
+    }
+    try {
+      setOpening(true);
+      await projectService.openPathInExplorer(project.id, path);
+    } catch (e: any) {
+      alert(e?.message || "打开文件管理器失败");
+    } finally {
+      setOpening(false);
+    }
+  };
 
   return (
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
@@ -241,7 +269,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       </button>
       <button
         onClick={handleDownloadDraft}
-        disabled={!draftFileName}
+        disabled={!draftFileName && !project?.jianying_draft_last_dir && !project?.jianying_draft_last_dir_web}
         className="flex mt-2 items-center px-6 py-3 bg-white text-green-600 border border-green-500 rounded-lg font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         下载剪映草稿
@@ -258,6 +286,28 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           </button>
         </div>
       )}
+      {project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web ? (
+        <div className="mt-2 w-full text-xs text-gray-600 flex items-center flex-wrap">
+          <span>草稿目录：</span>
+          <span className="ml-1 break-all">{(project.jianying_draft_last_dir || project.jianying_draft_last_dir_web || "").toString()}</span>
+          <button
+            onClick={handleCopyDraftPath}
+            className="ml-2 inline-flex items-center px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-700"
+            title="复制草稿路径"
+          >
+            <Clipboard className="h-3 w-3 mr-1" />
+            {copying ? "复制中..." : "复制路径"}
+          </button>
+          <button
+            onClick={handleOpenDraftDir}
+            className="ml-2 inline-flex items-center px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-700"
+            title="打开文件管理器"
+          >
+            <FolderOpen className="h-3 w-3 mr-1" />
+            {opening ? "打开中..." : "打开文件夹"}
+          </button>
+        </div>
+      ) : null}
       {project.output_video_path && (
         <div className="mt-2 text-xs text-gray-600">
           已生成：

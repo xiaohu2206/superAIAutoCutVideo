@@ -46,6 +46,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     mergeVideos,
     mergeProgress,
     merging,
+    refreshProject,
   } = useProjectDetail(projectId);
 
   const [editedScript, setEditedScript] = useState<string>("");
@@ -512,12 +513,25 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         ]);
         if (message.type === "completed") {
           const url = (message as any).download_url as string | undefined;
-          const nameFromUrl = url ? new URL(url, window.location.origin).searchParams.get("f") : null;
+          let nameFromUrl = url ? new URL(url, window.location.origin).searchParams.get("f") : null;
+          if (!nameFromUrl) {
+            const fp = (message as any).file_path as string | undefined;
+            if (fp) {
+              try {
+                const normalized = fp.replace(/\\+/g, "/");
+                const folder = normalized.split("/").filter(Boolean).pop() || "";
+                if (folder) nameFromUrl = `${folder}.zip`;
+              } catch (e) {
+                void e;
+              }
+            }
+          }
           setDraftFileName(nameFromUrl || draftFileName);
           setIsGeneratingDraft(false);
           setDraftErrorMessage(null);
           setSuccessMessage("剪映草稿生成成功！");
           setTimeout(() => setSuccessMessage(null), 3000);
+          void refreshProject();
         }
         if (message.type === "error") {
           setIsGeneratingDraft(false);

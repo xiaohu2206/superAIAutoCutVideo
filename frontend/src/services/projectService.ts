@@ -314,6 +314,33 @@ export class ProjectService {
   }
 
   /**
+   * 在系统文件管理器中打开路径（目录或选中文件）
+   */
+  async openPathInExplorer(projectId: string, path?: string): Promise<void> {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/open-in-explorer`;
+    const url = path ? `${base}?path=${encodeURIComponent(path)}` : base;
+    const res = await fetch(url);
+    if (!res.ok) {
+      let msg = `打开文件管理器失败: ${res.statusText}`;
+      try {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json();
+          if (typeof j === "string") msg = j;
+          else if (j?.detail) msg = j.detail;
+          else if (j?.message) msg = j.message;
+        } else {
+          const t = await res.text();
+          if (t) msg = t;
+        }
+      } catch (e) {
+        void e;
+      }
+      throw new Error(msg);
+    }
+  }
+
+  /**
    * 获取输出视频下载链接（后端直接返回文件）
    */
   getOutputVideoDownloadUrl(projectId: string, cacheBust?: string | number): string {
