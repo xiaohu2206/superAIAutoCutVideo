@@ -10,6 +10,7 @@ export const JianyingDraftPathSection: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [detecting, setDetecting] = useState<boolean>(false);
+  const isTauri = typeof window !== "undefined" && !!((window as any).__TAURI__?.core?.invoke);
 
   const loadCurrent = async () => {
     setLoading(true);
@@ -41,7 +42,7 @@ export const JianyingDraftPathSection: React.FC = () => {
         setPath(selected);
         setExists(true);
       } else {
-        setError("未找到剪映草稿路径，请手动选择");
+        setError("未找到剪映草稿路径，请手动");
       }
     } catch (e: any) {
       setError(e?.message || "自动查找失败");
@@ -82,7 +83,7 @@ export const JianyingDraftPathSection: React.FC = () => {
   return (
     <div className="space-y-4">
       <div className="text-sm text-gray-700">
-        配置剪映草稿存放路径，便于生成的草稿zip自动复制到剪映项目目录中。
+        配置剪映草稿存放路径（生成剪映草稿必须配置正确，不然无法使用，剪映9.0+版本）。
       </div>
 
       {error ? (
@@ -93,7 +94,7 @@ export const JianyingDraftPathSection: React.FC = () => {
       ) : null}
 
       <div className="space-y-2">
-        <label className="block text-sm text-gray-700">草稿路径</label>
+        <label className="block text-sm text-gray-700">草稿路径（一般末尾是com.lveditor.draft）</label>
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -102,14 +103,16 @@ export const JianyingDraftPathSection: React.FC = () => {
             placeholder="请选择或输入剪映草稿目录"
             className="px-3 py-2 border border-gray-300 rounded-md w-full"
           />
-          <button
-            className="inline-flex items-center px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200"
-            onClick={handleBrowse}
-            title="浏览选择目录"
-          >
-            <FolderOpen className="h-4 w-4 mr-1" />
-            浏览
-          </button>
+          {isTauri ? (
+            <button
+              className="inline-flex items-center px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200"
+              onClick={handleBrowse}
+              title="浏览选择目录"
+            >
+              <FolderOpen className="h-4 w-4 mr-1" />
+              浏览
+            </button>
+          ) : null}
         </div>
         <div className="flex items-center text-sm">
           {exists ? (
@@ -155,4 +158,3 @@ export const JianyingDraftPathSection: React.FC = () => {
 };
 
 export default JianyingDraftPathSection;
-

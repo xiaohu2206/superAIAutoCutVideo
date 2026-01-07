@@ -1,7 +1,8 @@
-import { AlertCircle, Clipboard, FileVideo, FolderOpen, Loader } from "lucide-react";
+import { AlertCircle, Check, Clipboard, ChevronDown, Download, FileVideo, FolderOpen, Loader, Play, Scissors } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
+import { Dropdown } from "../ui/Dropdown";
 
 interface ProjectOperationsProps {
   project: Project;
@@ -48,6 +49,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const [copying, setCopying] = useState(false);
   const [opening, setOpening] = useState(false);
 
+  const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
+
   useEffect(() => {
     if (showOutputPreview && project.output_video_path) {
       setOutputVideoCacheBust(Date.now());
@@ -61,11 +64,10 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   }, [isGeneratingVideo, project.output_video_path]);
 
   const handleCopyDraftPath = async () => {
-    const path = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
-    if (!path) return;
+    if (!draftPath) return;
     try {
       setCopying(true);
-      await navigator.clipboard.writeText(path);
+      await navigator.clipboard.writeText(draftPath.toString());
       alert("草稿路径已复制到剪贴板");
     } catch (e) {
       alert("复制失败");
@@ -75,14 +77,13 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   };
 
   const handleOpenDraftDir = async () => {
-    const path = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
-    if (!path) {
+    if (!draftPath) {
       alert("尚未生成剪映草稿");
       return;
     }
     try {
       setOpening(true);
-      await projectService.openPathInExplorer(project.id, path);
+      await projectService.openPathInExplorer(project.id, draftPath.toString());
     } catch (e: any) {
       alert(e?.message || "打开文件管理器失败");
     } finally {
@@ -95,7 +96,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       <button
         onClick={handleGenerateScript}
         disabled={!project.video_path || isGeneratingScript}
-        className="bg-violet-600 mt-2 flex items-center px-6 py-3 bg-violet-300 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        className="bg-violet-600 mt-2 flex items-center px-6 py-2 bg-violet-300 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGeneratingScript ? (
           <>
@@ -108,6 +109,49 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           </>
         )}
       </button>
+
+       {project.script && project.video_path && 
+       <Dropdown
+        trigger={
+          <button className="flex mt-2 items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
+            视频操作
+            <ChevronDown className="ml-2 h-4 w-4" />
+          </button>
+        }
+        items={[
+          {
+            label: (
+              <>
+                {isGeneratingVideo ? <Loader className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                {isGeneratingVideo ? "生成视频中..." : "生成视频"}
+              </>
+            ),
+            onClick: handleGenerateVideo,
+            disabled: !project.script || !project.video_path || isGeneratingVideo,
+          },
+          {
+            label: (
+              <>
+                <Download className="h-4 w-4 mr-2" />
+                下载视频
+              </>
+            ),
+            onClick: handleDownloadVideo,
+            disabled: !project.output_video_path,
+          },
+          {
+            label: (
+              <>
+                {isGeneratingDraft ? <Loader className="h-4 w-4 mr-2 animate-spin" /> : <Scissors className="h-4 w-4 mr-2" />}
+                {isGeneratingDraft ? "生成草稿中..." : "生成剪映草稿"}
+              </>
+            ),
+            onClick: handleGenerateDraft,
+            disabled: !project.script || !project.video_path || isGeneratingDraft,
+          },
+        ]}
+      />
+      }
       {/* 生成视频实时进度显示 */}
       {(isGeneratingVideo || (videoGenProgress > 0 && videoGenProgress < 100)) && (
         <div className="w-full mt-3">
@@ -226,75 +270,64 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           )}
         </div>
       )}
-      <button
-        onClick={handleGenerateVideo}
-        disabled={!project.script || !project.video_path || isGeneratingVideo}
-        className="flex mt-2 items-center px-6 py-3 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isGeneratingVideo ? (
-          <>
-            <Loader className="h-5 w-5 mr-2 animate-spin" />
-            生成视频中...
-          </>
-        ) : (
-          <>
-            生成视频
-          </>
-        )}
-      </button>
-      <button
-        onClick={handleDownloadVideo}
-        disabled={!project.output_video_path}
-        className="flex mt-2 items-center px-6 py-3 bg-white text-green-600 border border-green-500 rounded-lg font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        下载视频
-      </button>
-      <button
-        onClick={handleGenerateDraft}
-        disabled={!project.video_path || isGeneratingDraft}
-        className="flex mt-2 items-center px-6 py-3 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isGeneratingDraft ? (
-          <>
-            <Loader className="h-5 w-5 mr-2 animate-spin" />
-            生成剪映草稿中...
-          </>
-        ) : (
-          <>生成剪映草稿</>
-        )}
-      </button>
-      {project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web ? (
-        <div className="mt-2 w-full text-xs text-gray-600 flex items-center flex-wrap">
-          <span>草稿目录：</span>
-          <span className="ml-1 break-all">{(project.jianying_draft_last_dir || project.jianying_draft_last_dir_web || "").toString()}</span>
-          <button
-            onClick={handleCopyDraftPath}
-            className="ml-2 inline-flex items-center px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-700"
-            title="复制草稿路径"
-          >
-            <Clipboard className="h-3 w-3 mr-1" />
-            {copying ? "复制中..." : "复制路径"}
-          </button>
-          <button
-            onClick={handleOpenDraftDir}
-            className="ml-2 inline-flex items-center px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-700"
-            title="打开文件管理器"
-          >
-            <FolderOpen className="h-3 w-3 mr-1" />
-            {opening ? "打开中..." : "打开文件夹"}
-          </button>
-        </div>
-      ) : null}
-      {project.output_video_path && (
-        <div className="mt-2 text-xs text-gray-600">
-          已生成：
-          <button
-            onClick={() => setShowOutputPreview(true)}
-            className="ml-1 break-all text-blue-600 hover:underline"
-            title="点击预览输出视频"
-          >
-            {project.output_video_path.split("/").pop()}
-          </button>
+     
+      {(draftPath || project.output_video_path) && (
+        <div className="w-full mt-4 bg-gray-50 rounded-lg border border-gray-200 divide-y divide-gray-200 overflow-hidden">
+          {/* 草稿目录 */}
+          {draftPath && (
+            <div className="px-4 py-3 flex items-center justify-between hover:bg-gray-100 transition-colors">
+              <div className="flex items-center min-w-0 mr-4 overflow-hidden">
+                <FolderOpen className="h-4 w-4 text-gray-500 mr-2 flex-shrink-0" />
+                <span className="text-xs font-medium text-gray-500 mr-2 flex-shrink-0">草稿路径:</span>
+                <span className="text-xs text-gray-700 truncate font-mono select-all" title={draftPath.toString()}>
+                  {draftPath.toString()}
+                </span>
+              </div>
+              <div className="flex items-center space-x-1 flex-shrink-0">
+                <button
+                  onClick={handleCopyDraftPath}
+                  className={`p-1.5 rounded-md transition-all ${
+                    copying 
+                      ? "bg-green-100 text-green-600" 
+                      : "text-gray-400 hover:text-gray-700 hover:bg-gray-200"
+                  }`}
+                  title="复制路径"
+                >
+                  {copying ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  onClick={handleOpenDraftDir}
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all"
+                  title="打开文件管理器"
+                >
+                  {opening ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 输出视频 */}
+          {project.output_video_path && (
+            <div className="px-4 py-3 flex items-center justify-between hover:bg-gray-100 transition-colors">
+              <div className="flex items-center min-w-0 overflow-hidden">
+                <FileVideo className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />
+                <span className="text-xs font-medium text-gray-500 mr-2 flex-shrink-0">成品:</span>
+                <button
+                  onClick={() => setShowOutputPreview(true)}
+                  className="text-xs text-blue-600 hover:text-blue-700 hover:underline truncate font-medium text-left"
+                  title="点击预览"
+                >
+                  {project.output_video_path.split("/").pop()}
+                </button>
+              </div>
+              <button
+                onClick={() => setShowOutputPreview(true)}
+                className="ml-2 text-xs px-2 py-1 bg-white border border-gray-200 text-gray-600 rounded hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
+              >
+                预览
+              </button>
+            </div>
+          )}
         </div>
       )}
       {/* 输出视频预览弹窗 */}

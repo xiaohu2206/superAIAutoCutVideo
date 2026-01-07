@@ -32,6 +32,7 @@ import zipfile
 import subprocess
 from starlette.background import BackgroundTask
 import shutil
+import platform
 
 from modules.projects_store import projects_store, Project
 from modules.video_processor import video_processor
@@ -836,6 +837,9 @@ async def generate_jianying_draft(project_id: str):
         raise HTTPException(status_code=404, detail="项目不存在")
     if not p.video_path:
         raise HTTPException(status_code=400, detail="请先上传原始视频文件")
+    cfg_path = jianying_config_manager.get_draft_path()
+    if not cfg_path or not cfg_path.exists():
+        raise HTTPException(status_code=400, detail="未设置剪映草稿路径，无法生成")
 
     task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     DRAFT_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
@@ -910,16 +914,29 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
     target = path or (p.model_dump().get("jianying_draft_last_dir") or "")
     if not target:
         raise HTTPException(status_code=400, detail="未找到草稿目录路径")
-    # 解析绝对路径
-    abs_path = Path(target)
-    if str(target).startswith("/"):
-        abs_path = project_root_dir() / str(target)[1:]
+    abs_path = Path(str(target)).expanduser()
+    if not abs_path.is_absolute():
+        if str(target).startswith("/"):
+            abs_path = project_root_dir() / str(target)[1:]
+        else:
+            abs_path = Path(str(target))
     try:
         if abs_path.exists():
+            sysname = platform.system().lower()
             if abs_path.is_file():
-                subprocess.Popen(["explorer", "/select,", str(abs_path)])
+                if "windows" in sysname:
+                    subprocess.Popen(["explorer", "/select,", str(abs_path)])
+                elif "darwin" in sysname:
+                    subprocess.Popen(["open", "-R", str(abs_path)])
+                else:
+                    subprocess.Popen(["xdg-open", str(abs_path.parent)])
             else:
-                subprocess.Popen(["explorer", str(abs_path)])
+                if "windows" in sysname:
+                    subprocess.Popen(["explorer", str(abs_path)])
+                elif "darwin" in sysname:
+                    subprocess.Popen(["open", str(abs_path)])
+                else:
+                    subprocess.Popen(["xdg-open", str(abs_path)])
             return {"message": "已打开文件管理器", "data": {"path": str(abs_path)}, "timestamp": now_ts()}
         else:
             raise HTTPException(status_code=404, detail="路径不存在")

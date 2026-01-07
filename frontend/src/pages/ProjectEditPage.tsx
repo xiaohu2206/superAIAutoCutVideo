@@ -436,9 +436,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       const taskId = res?.task_id;
       if (taskId) {
         setDraftTaskId(taskId);
+      } else {
+        setIsGeneratingDraft(false);
+        setDraftErrorMessage("生成剪映草稿失败");
       }
     } catch (err) {
       console.error("生成剪映草稿失败:", err);
+      const msg = err instanceof Error ? err.message : "生成剪映草稿失败";
+      setDraftErrorMessage(msg);
       setIsGeneratingDraft(false);
     }
   };
@@ -587,28 +592,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         </div>
       </div>
 
-      {/* 成功提示 */}
-      {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
-          <CheckCircle className="h-5 w-5 mr-2" />
-          {successMessage}
-        </div>
-      )}
-
-      {/* 错误提示 */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {error}
-        </div>
-      )}
-      {draftErrorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {draftErrorMessage}
-        </div>
-      )}
-
       {/* 项目配置区 */}
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <div className="flex items-center justify-between mb-4">
@@ -704,6 +687,29 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           setShowOutputPreview={setShowOutputPreview}
         />
       </div>
+
+
+      {/* 成功提示 */}
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
+          <CheckCircle className="h-5 w-5 mr-2" />
+          {successMessage}
+        </div>
+      )}
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          {error}
+        </div>
+      )}
+      {draftErrorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          {draftErrorMessage}
+        </div>
+      )}
 
       <ScriptEditor
         editedScript={editedScript}
