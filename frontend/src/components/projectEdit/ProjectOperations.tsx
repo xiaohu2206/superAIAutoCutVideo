@@ -18,8 +18,6 @@ interface ProjectOperationsProps {
   handleGenerateDraft: () => void;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; type?: string }[];
-  handleDownloadDraft: () => void;
-  draftFileName?: string | null;
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
   showOutputPreview: boolean;
@@ -41,8 +39,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   handleGenerateDraft,
   draftGenProgress,
   draftGenLogs,
-  handleDownloadDraft,
-  draftFileName,
   showMergedPreview,
   setShowMergedPreview,
   showOutputPreview,
@@ -267,25 +263,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           <>生成剪映草稿</>
         )}
       </button>
-      <button
-        onClick={handleDownloadDraft}
-        disabled={!draftFileName && !project?.jianying_draft_last_dir && !project?.jianying_draft_last_dir_web}
-        className="flex mt-2 items-center px-6 py-3 bg-white text-green-600 border border-green-500 rounded-lg font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        下载剪映草稿
-      </button>
-      {draftFileName && (
-        <div className="mt-2 text-xs text-gray-600">
-          已生成：
-          <button
-            onClick={handleDownloadDraft}
-            className="ml-1 break-all text-blue-600 hover:underline"
-            title="点击下载剪映草稿"
-          >
-            {draftFileName}
-          </button>
-        </div>
-      )}
       {project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web ? (
         <div className="mt-2 w-full text-xs text-gray-600 flex items-center flex-wrap">
           <span>草稿目录：</span>

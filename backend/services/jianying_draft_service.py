@@ -220,7 +220,6 @@ class JianyingDraftService:
                 "phase": "completed",
                 "message": "剪映草稿生成完成",
                 "progress": 100,
-                "download_url": f"/api/projects/{project_id}/jianying-draft?f={zip_abs.name}",
                 "file_path": zip_web,
                 "copied_to": copied_to,
                 "timestamp": _now_ts(),

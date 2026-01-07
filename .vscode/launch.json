@@ -8,7 +8,7 @@
             "program": "${workspaceFolder}/backend/main.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/backend",
-            "python": "C:\\Users\\jiangchao1\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
+            "python": "/Users/jiangchao/Documents/江汐瑶/学习/测试/superAIAutoCutVideo/backend/.venv/bin/python",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend:${env:PYTHONPATH}"
             },
@@ -31,7 +31,7 @@
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/backend",
-            "python": "C:\\Users\\jiangchao1\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
+            "python": "/Users/jiangchao/Documents/江汐瑶/学习/测试/superAIAutoCutVideo/backend/.venv/bin/python",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend:${env:PYTHONPATH}"
             },

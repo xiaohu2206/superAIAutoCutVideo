@@ -71,7 +71,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     { timestamp: string; message: string; phase?: string; type?: string }[]
   >([]);
   const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
-  const [draftFileName, setDraftFileName] = useState<string | null>(null);
   // 合并视频预览弹层
   const [showMergedPreview, setShowMergedPreview] = useState(false);
   // 输出视频预览弹层
@@ -430,7 +429,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     setDraftGenProgress(0);
     setDraftGenLogs([]);
     setDraftTaskId(null);
-    setDraftFileName(null);
     setSuccessMessage(null);
     setDraftErrorMessage(null);
     try {
@@ -443,12 +441,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       console.error("生成剪映草稿失败:", err);
       setIsGeneratingDraft(false);
     }
-  };
-
-  const handleDownloadDraft = () => {
-    if (!project) return;
-    const url = projectService.getJianyingDraftDownloadUrl(project.id, draftFileName || undefined, Date.now());
-    window.open(url, "_blank");
   };
 
   // 订阅 WebSocket 消息，获取生成视频的实时进度
@@ -512,21 +504,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           },
         ]);
         if (message.type === "completed") {
-          const url = (message as any).download_url as string | undefined;
-          let nameFromUrl = url ? new URL(url, window.location.origin).searchParams.get("f") : null;
-          if (!nameFromUrl) {
-            const fp = (message as any).file_path as string | undefined;
-            if (fp) {
-              try {
-                const normalized = fp.replace(/\\+/g, "/");
-                const folder = normalized.split("/").filter(Boolean).pop() || "";
-                if (folder) nameFromUrl = `${folder}.zip`;
-              } catch (e) {
-                void e;
-              }
-            }
-          }
-          setDraftFileName(nameFromUrl || draftFileName);
           setIsGeneratingDraft(false);
           setDraftErrorMessage(null);
           setSuccessMessage("剪映草稿生成成功！");
@@ -543,7 +520,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id, draftTaskId, draftFileName]);
+  }, [project?.id, draftTaskId]);
 
   /**
    * 处理下载输出视频
@@ -721,8 +698,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           handleGenerateDraft={handleGenerateDraft}
           draftGenProgress={draftGenProgress}
           draftGenLogs={draftGenLogs}
-          handleDownloadDraft={handleDownloadDraft}
-          draftFileName={draftFileName}
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
           showOutputPreview={showOutputPreview}

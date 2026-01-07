@@ -303,17 +303,6 @@ export class ProjectService {
   }
 
   /**
-   * 获取剪映草稿下载链接（后端直接返回 zip 文件）
-   */
-  getJianyingDraftDownloadUrl(projectId: string, fileName?: string, cacheBust?: string | number): string {
-    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/jianying-draft`;
-    const qs: string[] = [];
-    if (fileName) qs.push(`f=${encodeURIComponent(fileName)}`);
-    if (cacheBust !== undefined && cacheBust !== null) qs.push(`v=${encodeURIComponent(String(cacheBust))}`);
-    return qs.length ? `${base}?${qs.join("&")}` : base;
-  }
-
-  /**
    * 在系统文件管理器中打开路径（目录或选中文件）
    */
   async openPathInExplorer(projectId: string, path?: string): Promise<void> {

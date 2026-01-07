@@ -39,7 +39,6 @@ from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
-from services.jianying_draft_packager import pack_jianying_draft
 from modules.config.jianying_config import jianying_config_manager
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
@@ -828,7 +827,7 @@ async def get_merged_video(project_id: str):
     )
 
 
-# ========================= 剪映草稿生成与下载 =========================
+# ========================= 剪映草稿生成 =========================
 
 @router.post("/{project_id}/generate-jianying-draft")
 async def generate_jianying_draft(project_id: str):
@@ -902,63 +901,6 @@ async def get_jianying_draft_status(project_id: str, task_id: str):
         "timestamp": now_ts(),
     }
 
-
-@router.get("/{project_id}/jianying-draft")
-async def download_jianying_draft(project_id: str, f: Optional[str] = None):
-    p = projects_store.get_project(project_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    try:
-        target, pack_tmp_dir = pack_jianying_draft(project_id, f)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="尚未生成剪映草稿")
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"打包草稿失败: {str(e)}")
-
-    try:
-        for z in target.parent.glob("*.zip"):
-            try:
-                if z.resolve() != target.resolve():
-                    z.unlink(missing_ok=True)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    filename = target.name
-    headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "Content-Disposition": f"attachment; filename=\"{filename}\"",
-    }
-    def _cleanup_zip(pid: str, zip_str: str, tmpdir: Optional[str] = None):
-        try:
-            Path(zip_str).unlink(missing_ok=True)
-        except Exception:
-            pass
-        try:
-            projects_store.update_project(pid, {"jianying_draft_last_zip": None})
-        except Exception:
-            pass
-        try:
-            if tmpdir:
-                td = Path(tmpdir)
-                if td.exists():
-                    shutil.rmtree(td, ignore_errors=True)
-        except Exception:
-            pass
-    bg = BackgroundTask(_cleanup_zip, project_id, str(target), str(pack_tmp_dir) if pack_tmp_dir else None)
-    return FileResponse(
-        path=str(target),
-        filename=filename,
-        media_type="application/zip",
-        headers=headers,
-        background=bg,
-    )
 
 @router.get("/{project_id}/open-in-explorer")
 async def open_in_explorer(project_id: str, path: Optional[str] = None):

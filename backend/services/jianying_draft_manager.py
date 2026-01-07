@@ -899,7 +899,6 @@ class JianyingDraftManager:
                 "message": "剪映草稿生成完成",
                 "progress": 100,
                 "file_path": dir_web,
-                "download_url": f"/api/projects/{project_id}/jianying-draft?f={dest_dir.name}.zip",
                 "timestamp": _now_ts(),
             })
             return DraftGenerateFolderResult(task_id=task_id, dir_abs=dest_dir, dir_web=dir_web)

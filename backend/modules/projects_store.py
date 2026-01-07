@@ -42,7 +42,6 @@ class Project(BaseModel):
     jianying_draft_last_dir: Optional[str] = None
     jianying_draft_last_dir_web: Optional[str] = None
     jianying_draft_dirs: List[str] = Field(default_factory=list)
-    jianying_draft_last_zip: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
     prompt_selection: Dict[str, Any] = Field(default_factory=dict)
     created_at: str
@@ -88,8 +87,8 @@ class ProjectsStore:
                                 p["jianying_draft_last_dir_web"] = None
                             if "jianying_draft_dirs" not in p:
                                 p["jianying_draft_dirs"] = []
-                            if "jianying_draft_last_zip" not in p:
-                                p["jianying_draft_last_zip"] = None
+                            if "jianying_draft_last_zip" in p:
+                                p.pop("jianying_draft_last_zip", None)
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -169,7 +168,6 @@ class ProjectsStore:
                 "jianying_draft_last_dir",
                 "jianying_draft_last_dir_web",
                 "jianying_draft_dirs",
-                "jianying_draft_last_zip",
                 "script",
             ]:
                 if key in updates and updates[key] is not None:

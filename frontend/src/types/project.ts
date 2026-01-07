@@ -68,7 +68,6 @@ export interface Project {
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径
   jianying_draft_last_dir_web?: string; // 最新草稿目录Web路径
   jianying_draft_dirs?: string[]; // 草稿目录Web路径列表
-  jianying_draft_last_zip?: string; // 最新打包zip绝对路径或Web路径
   script?: VideoScript; // 视频脚本
   created_at: string; // 创建时间
   updated_at: string; // 更新时间
