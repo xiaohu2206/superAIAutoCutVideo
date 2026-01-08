@@ -70,6 +70,10 @@ jobs:
           npm install
         }
 
+    - name: Build frontend
+      working-directory: frontend
+      run: npm run build
+
     - name: Install Python dependencies
       working-directory: backend
       run: |
