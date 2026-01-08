@@ -395,12 +395,20 @@ class TtsEngineConfigManager:
                 backend_dir = Path(__file__).parent.parent.parent
                 out_path = backend_dir / "serviceData" / "tts" / "previews" / "edge_test_preview.mp3"
                 voice_id = config.active_voice_id or "zh-CN-XiaoxiaoNeural"
+                ep = getattr(config, "extra_params", None) or {}
+                cfg_proxy = None
+                try:
+                    v = ep.get("ProxyUrl")
+                    if isinstance(v, str) and v.strip():
+                        cfg_proxy = v.strip()
+                except Exception:
+                    cfg_proxy = None
                 res = await edge_tts_service.synthesize(
                     text="你好，Edge TTS 连通性测试。",
                     voice_id=voice_id,
                     speed_ratio=config.speed_ratio,
                     out_path=out_path,
-                    proxy_override=(proxy_url if isinstance(proxy_url, str) else None),
+                    proxy_override=(proxy_url if isinstance(proxy_url, str) and proxy_url.strip() else cfg_proxy),
                 )
                 if res.get("success"):
                     return {

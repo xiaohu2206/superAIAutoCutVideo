@@ -103,7 +103,7 @@ cd ..
 # 构建 Tauri 应用
 echo "[4/4] 构建 Tauri 应用..."
 cd src-tauri
-cargo tauri build --release
+cargo tauri build
 if [ $? -ne 0 ]; then
     echo "错误: Tauri 应用构建失败"
     exit 1

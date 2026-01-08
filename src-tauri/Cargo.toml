@@ -1,6 +1,6 @@
 [package]
 name = "super-auto-cut-video"
-version = "1.0.0"
+version = "1.5.0"
 description = "AI智能视频剪辑桌面应用"
 authors = ["SuperAIAutoCutVideo Team"]
 license = "MIT"

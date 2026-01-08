@@ -79,9 +79,39 @@ cargo tauri dev
 ```
 
 ## 打包
+- 本地打包（Windows，PowerShell，在项目根目录）：
+  - 一键脚本：
+    ```powershell
+    powershell -ExecutionPolicy Bypass -Command ./scripts/build.bat
+    ```
+  - 手动步骤（用于排障）：
+    ```powershell
+    # 前端
+    cd frontend
+    cnpm install; if ($LASTEXITCODE -ne 0) { npm install }
+    cnpm run build; if ($LASTEXITCODE -ne 0) { npm run build }
+    cd ..
+    # 后端
+    cd backend
+    python -m pip install -r requirements.runtime.txt
+    pyinstaller --onefile --name superAutoCutVideoBackend --distpath dist main.py
+    cd ..
+    # 复制后端到资源目录
+    New-Item -ItemType Directory -Force -Path "src-tauri\resources" | Out-Null
+    Copy-Item "backend\dist\superAutoCutVideoBackend.exe" "src-tauri\resources\" -Force
+    # 构建 Tauri
+    cd src-tauri
+    cargo tauri build
+    ```
+  - 产物位置：
+    - 安装包：`src-tauri\target\release\bundle\nsis\*.exe`
+    - 可执行文件：`src-tauri\target\release\super-auto-cut-video.exe`
+    - 后端：`src-tauri\target\release\resources\superAutoCutVideoBackend.exe`
 
-```bash
-```
+- CI 打包（GitHub Actions）：
+  - 推送到 `master`/`main` 或创建标签 `v*` 会自动触发
+  - 工作流文件：`.github/workflows/build-windows.yml`
+  - 构建成功后，产物以 `windows-nsis` 作为 Artifact 上传；打标签会同时发布到 Release
 
 ## 文档与支持
 

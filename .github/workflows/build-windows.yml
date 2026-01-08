@@ -21,6 +21,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
+        cache: 'npm'
 
     - name: Setup Python
       uses: actions/setup-python@v5
@@ -56,10 +57,8 @@ jobs:
     - name: Install FFmpeg
       run: choco install ffmpeg -y --no-progress
 
-    - name: Install Windows bundlers (NSIS & WiX)
-      run: |
-        choco install nsis -y --no-progress
-        choco install wixtoolset -y --no-progress
+    - name: Install NSIS
+      run: choco install nsis -y --no-progress
 
     - name: Install frontend dependencies
       working-directory: frontend
@@ -159,24 +158,18 @@ jobs:
       if: always()
       run: |
         Write-Host "=== Build Artifacts ==="
-        if (Test-Path "src-tauri\target\release\bundle") {
-          Get-ChildItem "src-tauri\target\release\bundle" -Recurse -Include *.msi,*.exe | ForEach-Object {
+        $bundleDir = "src-tauri\target\release\bundle\nsis"
+        if (Test-Path $bundleDir) {
+          Get-ChildItem $bundleDir -Recurse -Include *.exe | ForEach-Object {
             Write-Host "$($_.FullName) - $([math]::Round($_.Length/1MB,2)) MB"
           }
         } else {
-          Write-Host "Bundle directory not found. Build may have failed."
+          Write-Host "NSIS bundle directory not found. Build may have failed."
           if (Test-Path "src-tauri\target\release") {
             Write-Host "Release directory contents:"
             Get-ChildItem "src-tauri\target\release" -File | Select-Object Name, Length
           }
         }
-
-    - name: Upload MSI
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: windows-msi
-        path: src-tauri/target/release/bundle/msi/*.msi
 
     - name: Upload NSIS
       uses: actions/upload-artifact@v4
@@ -190,7 +183,6 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          src-tauri/target/release/bundle/msi/*.msi
           src-tauri/target/release/bundle/nsis/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

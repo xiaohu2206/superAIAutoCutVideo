@@ -253,7 +253,8 @@ export const TtsSettings: React.FC = () => {
       setTestResult(null);
       setTestDurationMs(null);
       const t0 = performance.now();
-      const res = await ttsService.testConnection(currentConfigId!);
+      const proxy = (currentConfig?.extra_params || {})?.ProxyUrl as string | undefined;
+      const res = await ttsService.testConnection(currentConfigId!, proxy);
       const t1 = performance.now();
       setTestDurationMs(Math.round(t1 - t0));
       if (res?.success || res?.data?.success) {

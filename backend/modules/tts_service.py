@@ -66,12 +66,21 @@ class TencentTtsService:
             vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
             speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
             out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            override = None
+            try:
+                pv = ep.get("ProxyUrl")
+                if isinstance(pv, str) and pv.strip():
+                    override = pv.strip()
+            except Exception:
+                override = None
             try:
                 res = await edge_tts_service.synthesize(
                     text=text,
                     voice_id=vid,
                     speed_ratio=speed_ratio,
                     out_path=out,
+                    proxy_override=override,
                 )
                 return res
             except Exception as e:

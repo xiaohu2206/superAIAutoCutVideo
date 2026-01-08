@@ -264,8 +264,9 @@ export class ApiClient {
   }
 
   // 测试TTS引擎连通性
-  async testTtsConnection(configId: string): Promise<any> {
-    return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/test`);
+  async testTtsConnection(configId: string, proxyUrl?: string): Promise<any> {
+    const q = proxyUrl ? `?proxy_url=${encodeURIComponent(proxyUrl)}` : "";
+    return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/test${q}`);
   }
 
   // 测试所有集成组件（一键自检）

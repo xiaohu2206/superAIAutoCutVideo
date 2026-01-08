@@ -22,6 +22,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: 优先选择 cnpm（如不可用则回退 npm）
+set PKG_MGR=cnpm
+cnpm --version >nul 2>&1
+if errorlevel 1 (
+    set PKG_MGR=npm
+    echo 提示: 未检测到 cnpm，回退使用 npm
+)
+
 :: 检查 Python
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -65,10 +73,10 @@ echo [2/4] 构建前端...
 cd frontend
 if not exist "node_modules" (
     echo 安装前端依赖...
-    npm ci
+    %PKG_MGR% install
     if errorlevel 1 (
-        echo npm ci 失败，尝试 npm install...
-        npm install
+        echo 依赖安装失败，尝试再次安装...
+        %PKG_MGR% install
         if errorlevel 1 (
             echo 错误: 前端依赖安装失败
             pause
@@ -76,7 +84,7 @@ if not exist "node_modules" (
         )
     )
 )
-npm run build
+%PKG_MGR% run build
 if errorlevel 1 (
     echo 错误: 前端构建失败
     pause
@@ -125,7 +133,7 @@ cd ..
 :: 构建 Tauri 应用
 echo [4/4] 构建 Tauri 应用...
 cd src-tauri
-cargo tauri build --release
+cargo tauri build
 if errorlevel 1 (
     echo 错误: Tauri 应用构建失败
     pause

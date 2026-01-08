@@ -413,10 +413,12 @@ async fn select_output_directory(app: AppHandle) -> Result<FileSelection, String
 
 // Tauri命令：获取应用信息
 #[tauri::command]
-async fn get_app_info() -> Result<HashMap<String, String>, String> {
+async fn get_app_info(app_handle: AppHandle) -> Result<HashMap<String, String>, String> {
     let mut info = HashMap::new();
+    let pkg = app_handle.package_info();
+    let version = pkg.version.to_string();
     info.insert("name".to_string(), "AI智能视频剪辑".to_string());
-    info.insert("version".to_string(), "1.0.0".to_string());
+    info.insert("version".to_string(), version);
     info.insert("description".to_string(), "基于AI技术的智能视频剪辑工具".to_string());
     Ok(info)
 }

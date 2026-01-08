@@ -207,8 +207,8 @@ class EdgeTtsService:
                 candidates.append(ov)
                 candidates.append(None)
             else:
-                candidates.append(None)
                 candidates.append(_normalize_proxy_url(_resolve_proxy_url()))
+                candidates.append(None)
 
             errs: List[Dict[str, Any]] = []
             for proxy in candidates:

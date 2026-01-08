@@ -28,12 +28,16 @@ export const TtsCredentialForm: React.FC<Props> = ({
   void activeConfigId;
   const [secretIdInput, setSecretIdInput] = useState<string>("");
   const [secretKeyInput, setSecretKeyInput] = useState<string>("");
+  const [proxyInput, setProxyInput] = useState<string>("");
 
   useEffect(() => {
     // 初始不展示敏感值，仅提示设置状态
     setSecretIdInput("");
     setSecretKeyInput("");
-  }, [configId]);
+    const ep = config?.extra_params || {};
+    const pv = typeof ep?.ProxyUrl === "string" ? ep.ProxyUrl : "";
+    setProxyInput(pv);
+  }, [configId, config]);
 
   const handleBlurSecretId = async () => {
     const trimmed = secretIdInput.trim();
@@ -49,6 +53,11 @@ export const TtsCredentialForm: React.FC<Props> = ({
     setSecretKeyInput("");
   };
 
+  const handleBlurProxy = async () => {
+    const trimmed = proxyInput.trim();
+    await onUpdate({ extra_params: { ProxyUrl: trimmed } });
+  };
+
   return (
     <div>
       <h4 className="text-md font-semibold text-gray-900 mb-2">凭据设置</h4>
@@ -56,6 +65,28 @@ export const TtsCredentialForm: React.FC<Props> = ({
         <p className="text-gray-600 text-sm mb-4">该引擎无需凭据，可直接测试与试听。</p>
       ) : (
         <p className="text-gray-600 text-sm mb-4">为保障安全，凭据仅展示设置状态，不显示明文。</p>
+      )}
+      {config?.provider === "edge_tts" && (
+        <div className="grid grid-cols-1 gap-4 mb-2">
+          <div>
+            <label className="block text-sm text-gray-700 mb-1">代理地址（可选）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={proxyInput}
+                placeholder="http://127.0.0.1:7897 或 socks5://127.0.0.1:7897"
+                onChange={(e) => setProxyInput(e.target.value)}
+                onBlur={handleBlurProxy}
+                className="px-3 py-2 border border-gray-300 rounded-md w-full"
+              />
+              {proxyInput?.trim() ? (
+                <ShieldCheck className="h-5 w-5 text-green-600" />
+              ) : (
+                <ShieldAlert className="h-5 w-5 text-orange-600" />
+              )}
+            </div>
+          </div>
+        </div>
       )}
       {config?.provider !== "edge_tts" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
