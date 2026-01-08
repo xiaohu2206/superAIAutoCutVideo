@@ -63,7 +63,12 @@ jobs:
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm ci
+      run: |
+        npm ci
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "npm ci failed, falling back to npm install"
+          npm install
+        }
 
     - name: Install Python dependencies
       working-directory: backend
