@@ -142,9 +142,19 @@ jobs:
         Write-Host "=== Patching tauri.conf.json for GitHub Actions ==="
         $path = "src-tauri\tauri.conf.json"
         $content = Get-Content $path -Raw
-        $newContent = $content -replace 'cnpm', 'npm'
-        Set-Content $path $newContent
-        Write-Host "Replaced 'cnpm' with 'npm' in tauri.conf.json"
+        $content = $content -replace 'cnpm', 'npm'
+        try {
+          $json = $content | ConvertFrom-Json
+          if ($json.bundle -and $json.bundle.windows -and $json.bundle.windows.nsis) {
+            $json.bundle.windows.nsis.languages = @('English')
+            $json.bundle.windows.nsis.PSObject.Properties.Remove('customLanguageFiles') | Out-Null
+          }
+          $content = $json | ConvertTo-Json -Depth 10
+        } catch {
+          Write-Host "JSON patch failed, keeping text replace only"
+        }
+        Set-Content $path $content
+        Write-Host "Patched tauri.conf.json: cnpm->npm, NSIS languages -> English"
 
     - name: Provide NSIS en-US language file
       run: |
