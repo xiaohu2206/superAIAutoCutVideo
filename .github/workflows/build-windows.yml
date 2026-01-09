@@ -137,85 +137,10 @@ jobs:
         Write-Host "=== Hex dump (first 16 bytes) ==="
         Format-Hex "src-tauri\tauri.conf.json" | Select-Object -First 3
 
-    - name: Patch Tauri config for CI
-      run: |
-        Write-Host "=== Patching tauri.conf.json for GitHub Actions ==="
-        $path = "src-tauri\tauri.conf.json"
-        $content = Get-Content $path -Raw
-        $content = $content -replace 'cnpm', 'npm'
-        try {
-          $json = $content | ConvertFrom-Json
-          if ($json.bundle -and $json.bundle.windows -and $json.bundle.windows.nsis) {
-            $json.bundle.windows.nsis.languages = @('English')
-            $json.bundle.windows.nsis.PSObject.Properties.Remove('customLanguageFiles') | Out-Null
-          }
-          $content = $json | ConvertTo-Json -Depth 10
-        } catch {
-          Write-Host "JSON patch failed, keeping text replace only"
-        }
-        Set-Content $path $content
-        Write-Host "Patched tauri.conf.json: cnpm->npm, NSIS languages -> English"
-
-    - name: Provide NSIS en-US language file
-      run: |
-        Write-Host "=== Preparing NSIS en-US language file for Tauri cache ==="
-        $destDirLocal = Join-Path -Path $env:LOCALAPPDATA -ChildPath "tauri\NSIS\Contrib\Language files"
-        if (!(Test-Path $destDirLocal)) {
-          New-Item -ItemType Directory -Path $destDirLocal -Force | Out-Null
-        }
-        $destDirRepo = Join-Path -Path "src-tauri" -ChildPath "nsis"
-        if (!(Test-Path $destDirRepo)) {
-          New-Item -ItemType Directory -Path $destDirRepo -Force | Out-Null
-        }
-        $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
-        $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
-        $candidates = @()
-        if ($pf86) { $candidates += (Join-Path -Path $pf86 -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
-        if ($pf) { $candidates += (Join-Path -Path $pf -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
-        $englishNlf = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-        if (-not $englishNlf) {
-          throw "English.nlf not found in installed NSIS. Checked: $($candidates -join ', ')"
-        }
-        $outLocal = Join-Path -Path $destDirLocal -ChildPath "en-US.nlf"
-        Copy-Item $englishNlf $outLocal -Force
-        Write-Host "NSIS language file injected: $outLocal"
-        if (!(Test-Path $outLocal)) { throw "Failed to prepare en-US.nlf at $outLocal" }
-        # Also provide repository-local custom language file for Tauri customLanguageFiles
-        $outRepo = Join-Path -Path $destDirRepo -ChildPath "en-US.nlf"
-        Copy-Item $englishNlf $outRepo -Force
-        Write-Host "NSIS custom language file prepared: $outRepo"
-        if (!(Test-Path $outRepo)) { throw "Failed to prepare en-US.nlf at $outRepo" }
-
     - name: Build Tauri app
       working-directory: src-tauri
       run: |
-        $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
-        $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
-        $candidates = @()
-        if ($pf86) { $candidates += (Join-Path -Path $pf86 -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
-        if ($pf) { $candidates += (Join-Path -Path $pf -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
-        $englishNlf = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-        if (-not $englishNlf) {
-          $fallbackRepo = Join-Path -Path (Join-Path -Path (Get-Location) -ChildPath 'nsis') -ChildPath 'en-US.nlf'
-          if (Test-Path $fallbackRepo) { $englishNlf = $fallbackRepo }
-        }
-        $job = Start-Job -ScriptBlock {
-          param($english)
-          $targetDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'tauri\NSIS\Contrib\Language files'
-          for ($i=0; $i -lt 300; $i++) {
-            if (Test-Path $targetDir) {
-              $out = Join-Path -Path $targetDir -ChildPath 'en-US.nlf'
-              if (-not (Test-Path $out)) {
-                if ($english -and (Test-Path $english)) { Copy-Item $english $out -Force }
-              }
-              if (Test-Path $out) { break }
-            }
-            Start-Sleep -Seconds 1
-          }
-        } -ArgumentList $englishNlf
         cargo tauri build --config tauri.conf.json
-        Receive-Job $job -Wait | Out-Null
-        Remove-Job $job -Force
 
     - name: List artifacts
       if: always()

@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeDevCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:TAURI_DEV='1'; Set-Location ../frontend; cnpm run dev\"",
-    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; cnpm run build\"",
+    "beforeDevCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:TAURI_DEV='1'; Set-Location ../frontend; npm run dev\"",
+    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; npm run build\"",
     "devUrl": "http://127.0.0.1:1420/index.html",
     "frontendDist": "../frontend/dist"
   },
