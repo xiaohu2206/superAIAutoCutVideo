@@ -153,6 +153,10 @@ jobs:
         if (!(Test-Path $destDirLocal)) {
           New-Item -ItemType Directory -Path $destDirLocal -Force | Out-Null
         }
+        $destDirRepo = Join-Path -Path "src-tauri" -ChildPath "nsis"
+        if (!(Test-Path $destDirRepo)) {
+          New-Item -ItemType Directory -Path $destDirRepo -Force | Out-Null
+        }
         $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
         $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
         $candidates = @()
@@ -166,6 +170,11 @@ jobs:
         Copy-Item $englishNlf $outLocal -Force
         Write-Host "NSIS language file injected: $outLocal"
         if (!(Test-Path $outLocal)) { throw "Failed to prepare en-US.nlf at $outLocal" }
+        # Also provide repository-local custom language file for Tauri customLanguageFiles
+        $outRepo = Join-Path -Path $destDirRepo -ChildPath "en-US.nlf"
+        Copy-Item $englishNlf $outRepo -Force
+        Write-Host "NSIS custom language file prepared: $outRepo"
+        if (!(Test-Path $outRepo)) { throw "Failed to prepare en-US.nlf at $outRepo" }
 
     - name: Build Tauri app
       working-directory: src-tauri
