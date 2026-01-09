@@ -1,0 +1,16 @@
+!define APPNAME "SuperAIAutoCutVideo"
+!define COMPANY "SuperAIAutoCutVideo"
+!define VERSION "1.0.0"
+!define INSTALLDIR "$PROGRAMFILES64\${APPNAME}"
+OutFile "E:\learn\superAutoCutVideoApp\src-tauri\target\release\bundle\nsis\${APPNAME}_${VERSION}_x64-setup.exe"
+InstallDir "${INSTALLDIR}"
+RequestExecutionLevel admin
+Section "Install"
+  SetOutPath "$INSTDIR"
+  File "E:\learn\superAutoCutVideoApp\src-tauri\target\release\super-auto-cut-video.exe"
+  CreateDirectory "$INSTDIR\resources"
+  SetOutPath "$INSTDIR\resources"
+  File "/oname=superAutoCutVideoBackend.exe" "E:\learn\superAutoCutVideoApp\src-tauri\target\release\resources\superAutoCutVideoBackend.exe"
+  SetOutPath "$SMPROGRAMS"
+  CreateShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\super-auto-cut-video.exe"
+SectionEnd
