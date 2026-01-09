@@ -149,19 +149,20 @@ jobs:
     - name: Provide NSIS en-US language file
       run: |
         Write-Host "=== Preparing NSIS en-US language file for Tauri cache ==="
-        $destDirLocal = Join-Path $env:LOCALAPPDATA "tauri\NSIS\Contrib\Language files"
+        $destDirLocal = Join-Path -Path $env:LOCALAPPDATA -ChildPath "tauri\NSIS\Contrib\Language files"
         if (!(Test-Path $destDirLocal)) {
           New-Item -ItemType Directory -Path $destDirLocal -Force | Out-Null
         }
-        $candidates = @(
-          Join-Path ${env:ProgramFiles(x86)} "NSIS\Contrib\Language files\English.nlf",
-          Join-Path ${env:ProgramFiles} "NSIS\Contrib\Language files\English.nlf"
-        )
-        $englishNlf = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+        $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
+        $candidates = @()
+        if ($pf86) { $candidates += (Join-Path -Path $pf86 -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
+        if ($pf) { $candidates += (Join-Path -Path $pf -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
+        $englishNlf = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
         if (-not $englishNlf) {
           throw "English.nlf not found in installed NSIS. Checked: $($candidates -join ', ')"
         }
-        $outLocal = Join-Path $destDirLocal "en-US.nlf"
+        $outLocal = Join-Path -Path $destDirLocal -ChildPath "en-US.nlf"
         Copy-Item $englishNlf $outLocal -Force
         Write-Host "NSIS language file injected: $outLocal"
         if (!(Test-Path $outLocal)) { throw "Failed to prepare en-US.nlf at $outLocal" }
