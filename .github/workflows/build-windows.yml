@@ -178,7 +178,34 @@ jobs:
 
     - name: Build Tauri app
       working-directory: src-tauri
-      run: cargo tauri build --config tauri.conf.json
+      run: |
+        $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+        $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
+        $candidates = @()
+        if ($pf86) { $candidates += (Join-Path -Path $pf86 -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
+        if ($pf) { $candidates += (Join-Path -Path $pf -ChildPath 'NSIS\Contrib\Language files\English.nlf') }
+        $englishNlf = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+        if (-not $englishNlf) {
+          $fallbackRepo = Join-Path -Path (Join-Path -Path (Get-Location) -ChildPath 'nsis') -ChildPath 'en-US.nlf'
+          if (Test-Path $fallbackRepo) { $englishNlf = $fallbackRepo }
+        }
+        $job = Start-Job -ScriptBlock {
+          param($english)
+          $targetDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'tauri\NSIS\Contrib\Language files'
+          for ($i=0; $i -lt 300; $i++) {
+            if (Test-Path $targetDir) {
+              $out = Join-Path -Path $targetDir -ChildPath 'en-US.nlf'
+              if (-not (Test-Path $out)) {
+                if ($english -and (Test-Path $english)) { Copy-Item $english $out -Force }
+              }
+              if (Test-Path $out) { break }
+            }
+            Start-Sleep -Seconds 1
+          }
+        } -ArgumentList $englishNlf
+        cargo tauri build --config tauri.conf.json
+        Receive-Job $job -Wait | Out-Null
+        Remove-Job $job -Force
 
     - name: List artifacts
       if: always()
