@@ -248,8 +248,12 @@ async fn start_backend(
     // 设置环境变量
     let host = "127.0.0.1";
     let port: u16 = choose_available_port(8000);
+    let orig_path = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let new_path = format!("{}{}{}", resource_dir.to_string_lossy(), sep, orig_path);
     cmd.env("HOST", host)
         .env("PORT", port.to_string())
+        .env("PATH", new_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

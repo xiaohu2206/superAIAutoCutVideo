@@ -1,0 +1,6 @@
+FFmpeg 和 FFprobe 二进制已随本应用分发（Windows 平台）。
+FFmpeg 的许可为 LGPL/GPL（取决于构建选项）。
+请遵循 FFmpeg 许可条款；更多信息参见：
+https://ffmpeg.org/legal.html
+
+本应用仅将 FFmpeg/FFprobe 用于媒体处理与探测功能。
