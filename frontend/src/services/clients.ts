@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 // API客户端 - 处理与FastAPI后端的通信
 
 // API基础配置（默认端口，运行时可通过 configureBackend 动态覆盖）
@@ -279,6 +280,14 @@ export class ApiClient {
     return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {});
   }
 
+  // ===== 存储设置相关 API =====
+  async getStorageSettings(): Promise<any> {
+    return this.get("/api/settings/storage");
+  }
+  async updateStorageSettings(data: { uploads_root: string; migrate?: boolean }): Promise<any> {
+    return this.post("/api/settings/storage", data);
+  }
+
   // ===== 剪映草稿路径相关 API =====
   async getJianyingDraftPath(): Promise<any> {
     return this.get(`/api/jianying/draft-path`);
@@ -446,16 +455,8 @@ export class WebSocketClient {
 
 // Tauri命令包装器
 export class TauriCommands {
-  private static canUseTauri(): boolean {
-    const w = typeof window !== "undefined" ? (window as any) : undefined;
-    return !!(w && w.__TAURI__ && w.__TAURI__.core && typeof w.__TAURI__.core.invoke === "function");
-  }
   private static async coreInvoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
-    if (TauriCommands.canUseTauri()) {
-      const w: any = window;
-      return w.__TAURI__.core.invoke(cmd, args || {});
-    }
-    throw new Error("Tauri runtime unavailable");
+    return invoke<T>(cmd, args || {});
   }
   // 启动后端
   static async startBackend(): Promise<BackendStatus> {

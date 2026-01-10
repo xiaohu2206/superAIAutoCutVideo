@@ -63,8 +63,8 @@ def project_root_dir() -> Path:
 
 
 def uploads_dir() -> Path:
-    root = project_root_dir()
-    up = root / "uploads"
+    env = os.environ.get("SACV_UPLOADS_DIR")
+    up = Path(env) if env else (project_root_dir() / "uploads")
     (up / "videos").mkdir(parents=True, exist_ok=True)
     (up / "subtitles").mkdir(parents=True, exist_ok=True)
     (up / "audios").mkdir(parents=True, exist_ok=True)
@@ -73,10 +73,10 @@ def uploads_dir() -> Path:
 
 
 def to_web_path(p: Path) -> str:
-    # 返回以 /uploads/... 开头的路径
-    root = project_root_dir()
-    rel = p.relative_to(root)
-    return "/" + str(rel).replace("\\", "/")
+    env = os.environ.get("SACV_UPLOADS_DIR")
+    up = Path(env) if env else (project_root_dir() / "uploads")
+    rel = p.relative_to(up)
+    return "/uploads/" + str(rel).replace("\\", "/")
 
 class CreateProjectRequest(BaseModel):
     name: str

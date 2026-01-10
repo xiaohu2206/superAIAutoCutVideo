@@ -31,10 +31,6 @@ const AboutSection: React.FC = () => {
                 <dd className="font-medium">SuperAI智能视频剪辑</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-600">版本:</dt>
-                <dd className="font-medium">1.0.0</dd>
-              </div>
-              <div className="flex justify-between">
                 <dt className="text-gray-600">软件版本:</dt>
                 <dd className="font-medium">{appVersion || "未知"}</dd>
               </div>

@@ -97,6 +97,30 @@ const App: React.FC = () => {
     }
   };
 
+  const refreshConnections = async () => {
+    try {
+      const status = await checkBackendStatus();
+      await testApiConnection();
+      if (status && status.running) {
+        try {
+          if (!wsClient.isConnected) {
+            const wsTimeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("WebSocket连接超时")), 1000)
+            );
+            await Promise.race([wsClient.connect(), wsTimeout]);
+          }
+          setConnectionStatus((prev) => ({ ...prev, websocket: wsClient.isConnected }));
+        } catch {
+          setConnectionStatus((prev) => ({ ...prev, websocket: false }));
+        }
+      } else {
+        setConnectionStatus((prev) => ({ ...prev, websocket: false }));
+      }
+    } catch (e) {
+      setConnectionStatus((prev) => ({ ...prev, websocket: false }));
+    }
+  };
+
   const checkBackendStatus = async (): Promise<BackendStatus | null> => {
     try {
       let status: BackendStatus;
@@ -225,6 +249,7 @@ const App: React.FC = () => {
             messages={messages}
             backendStatus={backendStatus}
             connections={connectionStatus}
+            onMonitorEnter={refreshConnections}
           />
         )}
 

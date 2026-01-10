@@ -101,3 +101,27 @@ export interface TtsTestResult {
   message: string;
 }
 
+export interface DiskInfo {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  percent_used?: number;
+  mount?: string;
+}
+
+export interface StorageSettingsData {
+  uploads_root: string;
+  disk?: DiskInfo;
+}
+
+export interface StorageUpdateResponse {
+  success: boolean;
+  message: string;
+  needs_restart?: boolean;
+  data?: {
+    uploads_root?: string;
+    disk?: DiskInfo;
+    migrated_count?: number;
+    failed_count?: number;
+  };
+}

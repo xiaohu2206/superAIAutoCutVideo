@@ -1,11 +1,12 @@
 import { Settings } from "lucide-react";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { WebSocketMessage } from "../../services/clients";
 import AboutSection from "./components/AboutSection";
 import { JianyingDraftPathSection } from "./components/JianyingDraftPathSection";
 import { ContentModelSettings } from "./components/models/content/ContentModelSettings";
 import { VideoModelSettings } from "./components/models/video/VideoModelSettings";
 import MonitorSection from "./components/MonitorSection";
+import StorageSettingsSection from "./components/StorageSettingsSection";
 import { TtsSettings } from "./components/tts/TtsSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
@@ -18,12 +19,14 @@ interface SettingsPageProps {
   messages?: WebSocketMessage[];
   backendStatus?: { running: boolean; port: number; pid?: number };
   connections?: { api: boolean; websocket: boolean };
+  onMonitorEnter?: () => void;
 }
 
 const SettingsPage: React.FC<SettingsPageProps> = ({
   messages = [],
   backendStatus = { running: false, port: 8000 },
   connections = { api: false, websocket: false },
+  onMonitorEnter,
 }) => {
   const [activeSection, setActiveSection] = useState(sections[0].id);
 
@@ -54,6 +57,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     updateCurrentContentConfig,
     testContentModelConnection,
   } = useContentModelConfig();
+
+  useEffect(() => {
+    if (activeSection === "monitor") {
+      onMonitorEnter?.();
+    }
+  }, [activeSection, onMonitorEnter]);
 
   // 渲染当前激活的设置区域内容
   const renderSectionContent = () => {
@@ -93,6 +102,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         return <JianyingDraftPathSection />;
       case "tts":
         return <TtsSettings />;
+      case "storage":
+        return <StorageSettingsSection />;
       case "monitor":
         return (
           <MonitorSection
@@ -171,4 +182,3 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
 };
 
 export default SettingsPage;
-

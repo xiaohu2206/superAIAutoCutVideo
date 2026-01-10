@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
@@ -20,7 +21,8 @@ def get_ext_from_url(u: str) -> str:
 def main():
     project_root = Path(__file__).resolve().parent.parent.parent
     json_path = project_root / "backend" / "serviceData" / "tencent_tts_data.json"
-    out_dir = project_root / "uploads" / "tts-samples" / "tencent"
+    base_up = Path(os.environ.get("SACV_UPLOADS_DIR") or (project_root / "uploads"))
+    out_dir = base_up / "tts-samples" / "tencent"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(json_path, "r", encoding="utf-8") as f:

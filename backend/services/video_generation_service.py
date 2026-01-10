@@ -9,6 +9,7 @@
 import logging
 from datetime import datetime
 import shutil
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -27,16 +28,17 @@ def _backend_root_dir() -> Path:
 
 
 def _uploads_dir() -> Path:
-    root = _backend_root_dir()
-    up = root / "uploads"
+    env = os.environ.get("SACV_UPLOADS_DIR")
+    up = Path(env) if env else (_backend_root_dir() / "uploads")
     (up / "videos").mkdir(parents=True, exist_ok=True)
     return up
 
 
 def _to_web_path(p: Path) -> str:
-    root = _backend_root_dir()
-    rel = p.relative_to(root)
-    return "/" + str(rel).replace("\\", "/")
+    env = os.environ.get("SACV_UPLOADS_DIR")
+    up = Path(env) if env else (_backend_root_dir() / "uploads")
+    rel = p.relative_to(up)
+    return "/uploads/" + str(rel).replace("\\", "/")
 
 
 class VideoGenerationService:

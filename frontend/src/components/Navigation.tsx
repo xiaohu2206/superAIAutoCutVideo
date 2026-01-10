@@ -6,6 +6,7 @@ import {
 import React from 'react'
 // @ts-expect-error asset import via Vite alias
 import Logo from '@/assets/logo.png'
+import { TauriCommands } from '@/services/clients'
 
 interface NavigationProps {
   activeTab: string
@@ -78,7 +79,7 @@ const Navigation: React.FC<NavigationProps> = ({
           <div className="flex items-center space-x-3">
             {/* GitHub链接 */}
             <button
-              onClick={() => window.open('https://github.com/xiaohu2206/superAIAutoCutVideo', '_blank')}
+              onClick={() => TauriCommands.openExternalLink('https://github.com/xiaohu2206/superAIAutoCutVideo')}
               className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
               title="查看源代码"
             >

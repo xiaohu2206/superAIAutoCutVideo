@@ -3,6 +3,7 @@ import zlib
 import logging
 from pathlib import Path
 from typing import Union, Optional
+import os
 
 
 class BaseASR:
@@ -40,9 +41,9 @@ class BaseASR:
     # 缓存目录使用项目根下的 uploads/asr_cache
     @property
     def _cache_dir(self) -> Path:
-        # backend/services/ -> 项目根目录为上上级
-        project_root = Path(__file__).resolve().parents[2]
-        cache_dir = project_root / "uploads" / "asr_cache"
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        root = Path(env) if env else Path(__file__).resolve().parents[2] / "uploads"
+        cache_dir = root / "asr_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
 

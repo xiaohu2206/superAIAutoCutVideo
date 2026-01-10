@@ -104,6 +104,14 @@ jobs:
     - name: Create resources directory
       run: |
         New-Item -ItemType Directory -Path "src-tauri\resources" -Force
+    - name: Copy FFmpeg binaries to resources
+      run: |
+        $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $ffmpegExe) { throw "ffmpeg.exe not found under Chocolatey lib path" }
+        if (-not $ffprobeExe) { throw "ffprobe.exe not found under Chocolatey lib path" }
+        Copy-Item $ffmpegExe.FullName "src-tauri\resources\ffmpeg.exe" -Force
+        Copy-Item $ffprobeExe.FullName "src-tauri\resources\ffprobe.exe" -Force
 
     - name: Copy backend to resources
       run: |
@@ -116,6 +124,9 @@ jobs:
         Test-Path "frontend\dist" | Out-Host
         Write-Host "`nBackend in resources:"
         Test-Path "src-tauri\resources\superAutoCutVideoBackend.exe" | Out-Host
+        Write-Host "`nFFmpeg in resources:"
+        Test-Path "src-tauri\resources\ffmpeg.exe" | Out-Host
+        Test-Path "src-tauri\resources\ffprobe.exe" | Out-Host
         Write-Host "`nFFmpeg:"
         ffmpeg -version | Select-Object -First 1
 
