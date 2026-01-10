@@ -1,12 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SuperAIAutoCutVideo",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeDevCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:TAURI_DEV='1'; Set-Location ../frontend; npm run dev\"",
     "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; npm run build\"",
-    "devUrl": "http://127.0.0.1:1420/index.html",
+    "devUrl": "http://localhost:1420/",
     "frontendDist": "../frontend/dist"
   },
   "bundle": {
@@ -36,7 +35,7 @@
   "app": {
     "windows": [
       {
-        "title": "SuperAIAutoCutVideo",
+        "title": "",
         "width": 1280,
         "height": 800,
         "resizable": true,

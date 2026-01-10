@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { projectService } from "../services/projectService";
-import { wsClient, type WebSocketMessage } from "../services/clients";
+import { apiClient, wsClient, type WebSocketMessage } from "../services/clients";
 import type {
   CreateProjectRequest,
   GenerateScriptRequest,
@@ -27,6 +27,8 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   }
   return fallback;
 };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * 项目管理Hook返回类型
@@ -55,9 +57,23 @@ export const useProjects = (): UseProjectsReturn => {
   const fetchProjects = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const maxAttempts = 20;
+    let attempts = 0;
     try {
+      while (attempts < maxAttempts) {
+        const ready = await apiClient.testConnection();
+        if (ready) break;
+        attempts += 1;
+        setError(`后端未就绪，正在重试(${attempts}/${maxAttempts})...`);
+        await sleep(Math.min(800 + attempts * 200, 3000));
+      }
+      if (attempts >= maxAttempts) {
+        setError("后端未就绪，请稍后重试");
+        return;
+      }
       const data = await projectService.getProjects();
       setProjects(data);
+      setError(null);
     } catch (err) {
       setError(getErrorMessage(err, "获取项目列表失败"));
       console.error("获取项目列表失败:", err);

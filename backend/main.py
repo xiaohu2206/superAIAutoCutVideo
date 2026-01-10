@@ -49,6 +49,7 @@ from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
+from routes.storage_routes import router as settings_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 
@@ -84,45 +85,64 @@ app.include_router(project_router)
 app.include_router(tts_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
+app.include_router(settings_router)
 
 def get_app_paths():
     """
     获取应用路径配置，兼容开发环境和打包环境（PyInstaller）
     """
     if getattr(sys, 'frozen', False):
-        # 打包环境 (PyInstaller)
-        # sys._MEIPASS 是解压后的临时目录，包含代码和 bundled 资源
         base_path = Path(sys._MEIPASS)
-        
-        # sys.executable 是可执行文件所在目录
-        # 我们希望 uploads 和 config 等持久化数据位于可执行文件同级目录，或者用户数据目录
-        # 这里为了便携性，暂定为可执行文件同级目录
         exe_dir = Path(sys.executable).parent
-        
-        # serviceData 如果是只读配置或临时缓存，可以使用 bundled 中的路径
-        # 如果需要持久化修改，应该在启动时复制到 exe_dir
-        # 目前 edge_voices_cache.json 会写入，所以使用临时目录没问题（重启丢失缓存）
-        # 或者也可以指向 exe_dir / "serviceData" 并要求用户手动复制（或者代码自动复制）
-        # 为了简单起见，先使用 bundled 路径（意味着缓存不持久化）
-        # 修正：如果 main.py 尝试 mount 一个不存在的目录会报错，必须确保目录存在
         service_data_dir = base_path / "backend" / "serviceData"
         if not service_data_dir.exists():
-             # 尝试备用路径（spec文件中可能配置为直接在根目录）
-             service_data_dir = base_path / "serviceData"
-        
-        uploads_dir = exe_dir / "uploads"
-        
+            service_data_dir = base_path / "serviceData"
+        if sys.platform == "win32":
+            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+        elif sys.platform == "darwin":
+            base_data = Path.home() / "Library" / "Application Support"
+        else:
+            base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+        settings_dir = base_data / "SuperAutoCutVideo" / "config"
+        settings_file = settings_dir / "app_settings.json"
+        uploads_dir_default = base_data / "SuperAutoCutVideo" / "uploads"
+        try:
+            if settings_file.exists():
+                data = json.loads(settings_file.read_text(encoding="utf-8"))
+                cand = str(data.get("uploads_root") or "").strip()
+                uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
+            else:
+                uploads_dir = uploads_dir_default
+        except Exception:
+            uploads_dir = uploads_dir_default
     else:
-        # 开发环境
-        base_path = Path(__file__).resolve().parent # backend/
-        project_root = base_path.parent # superAIAutoCutVideo/
-        
+        base_path = Path(__file__).resolve().parent
+        project_root = base_path.parent
         service_data_dir = base_path / "serviceData"
-        uploads_dir = project_root / "uploads"
+        # 在开发环境也读取用户设置文件，保证重启后生效
+        if sys.platform == "win32":
+            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+        elif sys.platform == "darwin":
+            base_data = Path.home() / "Library" / "Application Support"
+        else:
+            base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+        settings_dir = base_data / "SuperAutoCutVideo" / "config"
+        settings_file = settings_dir / "app_settings.json"
+        uploads_dir_default = project_root / "uploads"
+        try:
+            if settings_file.exists():
+                data = json.loads(settings_file.read_text(encoding="utf-8"))
+                cand = str(data.get("uploads_root") or "").strip()
+                uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
+            else:
+                uploads_dir = uploads_dir_default
+        except Exception:
+            uploads_dir = uploads_dir_default
         
     return service_data_dir, uploads_dir
 
 service_data_dir, uploads_dir = get_app_paths()
+os.environ["SACV_UPLOADS_DIR"] = str(uploads_dir)
 
 # 确保目录存在
 if not service_data_dir.exists():
