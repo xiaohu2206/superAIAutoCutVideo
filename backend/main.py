@@ -60,6 +60,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def _inject_ffmpeg_into_path() -> None:
+    try:
+        root = Path(__file__).resolve().parents[1]
+        candidates = [
+            root / "src-tauri" / "resources",
+            root / "src-tauri" / "target" / "debug" / "resources",
+            root / "src-tauri" / "target" / "release" / "resources",
+        ]
+        sep = ";" if os.name == "nt" else ":"
+        orig = os.environ.get("PATH", "")
+        prepend: List[str] = []
+        for d in candidates:
+            try:
+                if d.exists():
+                    if os.name == "nt":
+                        f1 = d / "ffmpeg.exe"
+                        f2 = d / "ffprobe.exe"
+                    else:
+                        f1 = d / "ffmpeg"
+                        f2 = d / "ffprobe"
+                    if f1.exists() and f2.exists():
+                        prepend.append(str(d))
+                else:
+                    pass
+            except Exception:
+                pass
+        if prepend:
+            os.environ["PATH"] = sep.join(prepend + [orig]) if orig else sep.join(prepend)
+    except Exception:
+        pass
 # 创建FastAPI应用
 app = FastAPI(
     title="AI智能视频剪辑后端",
@@ -67,6 +97,7 @@ app = FastAPI(
     version="1.0.0"
 )
 logger.info(f"Python 解释器: {sys.executable}")
+_inject_ffmpeg_into_path()
 
 # 配置CORS - 允许Tauri前端访问
 app.add_middleware(
@@ -139,6 +170,7 @@ def get_app_paths():
         except Exception:
             uploads_dir = uploads_dir_default
         
+    logger.info(f"App paths selected service_data_dir={service_data_dir} uploads_dir={uploads_dir} frozen={getattr(sys, 'frozen', False)}")
     return service_data_dir, uploads_dir
 
 service_data_dir, uploads_dir = get_app_paths()

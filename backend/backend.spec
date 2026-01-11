@@ -22,6 +22,7 @@ hiddenimports = [
     'fastapi',
     'pydantic',
     'starlette',
+    'multipart',
 ]
 
 # 收集 cv2 的所有依赖
@@ -65,7 +66,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # 设为 False 可隐藏控制台窗口
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
