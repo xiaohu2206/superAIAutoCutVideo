@@ -17,6 +17,8 @@ use std::net::TcpListener;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+use zip::ZipArchive;
+use std::io::{Read, Write};
 
 // Windows: 隐藏子进程窗口（CREATE_NO_WINDOW）
 #[cfg(target_os = "windows")]
@@ -51,7 +53,7 @@ struct FileSelection {
 async fn wait_for_backend_ready(host: &str, port: u16, total_wait_secs: u64) -> bool {
     let url = format!("http://{}:{}/api/hello", host, port);
     let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(1200))
+        .timeout(Duration::from_millis(3000))
         .build()
     {
         Ok(c) => c,
@@ -68,6 +70,121 @@ async fn wait_for_backend_ready(host: &str, port: u16, total_wait_secs: u64) -> 
         }
     }
     false
+}
+
+async fn discover_existing_backend_port(host: &str) -> Option<u16> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(600))
+        .build()
+        .ok()?;
+    let ranges: &[(u16, u16)] = &[(8000, 8101), (18000, 18101)];
+    for (start, end) in ranges {
+        for p in *start..*end {
+            let url = format!("http://{}:{}/api/hello", host, p);
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_backend_port_from_log() -> Option<u16> {
+    let log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
+    let content = std::fs::read_to_string(&log_path).ok()?;
+    // 搜索类似：Uvicorn running on http://127.0.0.1:8000
+    let needle = "Uvicorn running on http://127.0.0.1:";
+    // 取最后一次出现，避免旧记录干扰
+    if let Some(pos) = content.rfind(needle) {
+        let start = pos + needle.len();
+        let bytes = content.as_bytes();
+        let mut i = start;
+        let mut num: u16 = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c.is_ascii_digit() {
+                num = num.saturating_mul(10).saturating_add((c - b'0') as u16);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if num > 0 {
+            return Some(num);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
+    let ffmpeg_path = resource_dir.join("ffmpeg.exe");
+    let ffprobe_path = resource_dir.join("ffprobe.exe");
+    if ffmpeg_path.exists() && ffprobe_path.exists() {
+        return Ok(());
+    }
+    let url = std::env::var("FFMPEG_WIN_ZIP_URL")
+        .ok()
+        .unwrap_or_else(|| "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string());
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建下载客户端失败: {}", e))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("下载FFmpeg压缩包失败: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载FFmpeg压缩包返回状态异常: {}", resp.status()));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取FFmpeg压缩包内容失败: {}", e))?;
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor).map_err(|e| format!("解析FFmpeg压缩包失败: {}", e))?;
+
+    let mut found_ffmpeg = false;
+    let mut found_ffprobe = false;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| format!("读取压缩包文件失败: {}", e))?;
+        let name = file.name().to_string();
+        let is_ffmpeg = name.ends_with("/bin/ffmpeg.exe") || name.ends_with("\\bin\\ffmpeg.exe") || name.ends_with("ffmpeg.exe");
+        let is_ffprobe = name.ends_with("/bin/ffprobe.exe") || name.ends_with("\\bin\\ffprobe.exe") || name.ends_with("ffprobe.exe");
+
+        if is_ffmpeg || is_ffprobe {
+            let out_path = if is_ffmpeg { ffmpeg_path.clone() } else { ffprobe_path.clone() };
+            // 确保资源目录存在
+            if let Err(e) = std::fs::create_dir_all(&resource_dir) {
+                return Err(format!("创建资源目录失败: {}", e));
+            }
+            let mut out_file = std::fs::File::create(&out_path)
+                .map_err(|e| format!("创建文件失败 {:?}: {}", out_path, e))?;
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .map_err(|e| format!("读取压缩包条目失败: {}", e))?;
+            out_file
+                .write_all(&buf)
+                .map_err(|e| format!("写入文件失败 {:?}: {}", out_path, e))?;
+            if is_ffmpeg {
+                found_ffmpeg = true;
+            } else {
+                found_ffprobe = true;
+            }
+        }
+        if found_ffmpeg && found_ffprobe {
+            break;
+        }
+    }
+
+    if !found_ffmpeg || !found_ffprobe {
+        return Err("压缩包中未找到 ffmpeg.exe 或 ffprobe.exe".to_string());
+    }
+    Ok(())
 }
 
 fn append_log_line(path: PathBuf, line: &str) {
@@ -136,6 +253,19 @@ async fn start_backend(
         }
     }
 
+    let host = "127.0.0.1";
+    let is_dev_mode = cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    if is_dev_mode {
+        if let Some(p) = discover_existing_backend_port(host).await {
+            *state.backend_port.lock().unwrap() = p;
+            return Ok(BackendStatus {
+                running: true,
+                port: p,
+                pid: None,
+            });
+        }
+    }
+
     // 获取资源目录路径（并准备后备路径：与应用同级 resources 目录）
     let resource_dir = app_handle
         .path()
@@ -145,9 +275,17 @@ async fn start_backend(
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
-    let is_dev_mode = cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     let force_packaged_backend = std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
     let prefer_python_backend = is_dev_mode && !force_packaged_backend;
+
+    #[cfg(target_os = "windows")]
+    {
+        if is_dev_mode {
+            if let Err(e) = ensure_ffmpeg_binaries(&resource_dir).await {
+                eprintln!("开发模式自动准备FFmpeg失败: {}", e);
+            }
+        }
+    }
 
     // 尝试定位打包的后端可执行文件
     let primary_path = if cfg!(target_os = "windows") {
@@ -166,6 +304,16 @@ async fn start_backend(
     let backend_executable = if primary_path.exists() {
         primary_path
     } else if let Some(fp) = &fallback_path { fp.clone() } else { primary_path };
+
+    #[cfg(target_os = "windows")]
+    {
+        if !backend_executable.exists() && !is_dev_mode {
+            let _ = ensure_ffmpeg_binaries(&resource_dir).await.map_err(|e| {
+                eprintln!("自动准备FFmpeg失败: {}", &e);
+                e
+            });
+        }
+    }
 
     let mut cmd = if !prefer_python_backend && backend_executable.exists() {
         // 使用打包的可执行文件
@@ -246,7 +394,6 @@ async fn start_backend(
     };
 
     // 设置环境变量
-    let host = "127.0.0.1";
     let port: u16 = choose_available_port(8000);
     let orig_path = std::env::var("PATH").unwrap_or_default();
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
@@ -294,8 +441,8 @@ async fn start_backend(
             }
             *state.backend_port.lock().unwrap() = port;
 
-            // 等待后端就绪（最多 20 秒，避免首次解压或冷启动偏慢）
-            if wait_for_backend_ready(host, port, 20).await {
+            // 等待后端就绪（最多 60 秒，避免首次解压或冷启动偏慢）
+            if wait_for_backend_ready(host, port, 60).await {
                 let _ = tauri_plugin_notification::NotificationExt::notification(&app_handle)
                     .builder()
                     .title("AI智能视频剪辑")
@@ -308,12 +455,27 @@ async fn start_backend(
                     pid: Some(pid),
                 })
             } else {
-                // 超时未就绪，停止进程
-                if let Some(mut child_ref) = state.backend_process.lock().unwrap().take() {
-                    let _ = child_ref.kill();
-                    let _ = child_ref.wait();
+                // 超时未就绪，尝试从日志解析实际监听端口
+                if let Some(found_port) = parse_backend_port_from_log() {
+                    *state.backend_port.lock().unwrap() = found_port;
+                    Ok(BackendStatus {
+                        running: true,
+                        port: found_port,
+                        pid: Some(pid),
+                    })
+                } else {
+                    if let Some(found_port) = discover_existing_backend_port(host).await {
+                        *state.backend_port.lock().unwrap() = found_port;
+                        Ok(BackendStatus {
+                            running: true,
+                            port: found_port,
+                            pid: Some(pid),
+                        })
+                    } else {
+                        // 未发现已就绪端口，保留已启动的进程，返回错误以提示检查日志，但不杀进程
+                        Err("后端服务启动超时，但进程已保留；请查看临时日志 super_auto_cut_backend.log".to_string())
+                    }
                 }
-                Err("后端服务启动超时，请查看临时日志 super_auto_cut_backend.log".to_string())
             }
         }
         Err(e) => Err(format!("启动后端失败: {}", e)),

@@ -53,10 +53,24 @@ def _to_web_path(p: Path) -> str:
 
 
 def _resolve_path(path_str: str) -> Path:
-    root = _backend_root_dir()
     s = (path_str or "").strip()
-    if s.startswith("/"):
-        return root / s[1:]
+    if not s:
+        return Path("")
+    s_norm = s.replace("\\", "/")
+    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        up = Path(env) if env else (_backend_root_dir() / "uploads")
+        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
+        return up / rel
+    try:
+        p = Path(s)
+        if p.is_absolute():
+            return p
+    except Exception:
+        pass
+    root = _backend_root_dir()
+    if s_norm.startswith("/"):
+        return root / s_norm[1:]
     return Path(s)
 
 
@@ -343,6 +357,10 @@ class GenerateScriptService:
             raise HTTPException(status_code=404, detail="项目不存在")
 
         try:
+            logger.info(f"generate_script start project_id={project_id} video_path={video_path} subtitle_path={subtitle_path} uploads_env={os.environ.get('SACV_UPLOADS_DIR')}")
+        except Exception:
+            pass
+        try:
             await manager.broadcast(json.dumps({
                 "type": "progress",
                 "scope": "generate_script",
@@ -359,6 +377,10 @@ class GenerateScriptService:
 
         root = _backend_root_dir()
         video_abs = _resolve_path(video_path)
+        try:
+            logger.info(f"resolved video path project_id={project_id} input={video_path} resolved={video_abs} exists={video_abs.exists()} backend_root={root}")
+        except Exception:
+            pass
         if not video_abs.exists():
             try:
                 await manager.broadcast(json.dumps({
@@ -371,9 +393,17 @@ class GenerateScriptService:
                 }))
             except Exception:
                 pass
+            try:
+                logger.error(f"video missing project_id={project_id} input={video_path} resolved={video_abs} uploads_env={os.environ.get('SACV_UPLOADS_DIR')}")
+            except Exception:
+                pass
             raise HTTPException(status_code=400, detail="视频文件不存在")
 
         total_duration = _read_video_duration(video_abs)
+        try:
+            logger.info(f"video duration project_id={project_id} path={video_abs} duration={total_duration}")
+        except Exception:
+            pass
 
         segments: List[Dict[str, Any]] = []
         subtitle_text: str = ""
@@ -381,6 +411,10 @@ class GenerateScriptService:
 
         if p.subtitle_path:
             cand = _resolve_path(p.subtitle_path)
+            try:
+                logger.info(f"project subtitle candidate project_id={project_id} cand_input={p.subtitle_path} cand_resolved={cand} exists={cand.exists()}")
+            except Exception:
+                pass
             if cand.exists():
                 sub_abs = cand
                 try:
@@ -398,6 +432,10 @@ class GenerateScriptService:
 
         if not sub_abs and subtitle_path:
             cand = _resolve_path(subtitle_path)
+            try:
+                logger.info(f"request subtitle candidate project_id={project_id} cand_input={subtitle_path} cand_resolved={cand} exists={cand.exists()}")
+            except Exception:
+                pass
             if cand.exists():
                 sub_abs = cand
                 try:
@@ -446,6 +484,10 @@ class GenerateScriptService:
             audio_abs: Optional[Path] = None
             if getattr(p, "audio_path", None):
                 a_cand = _resolve_path(p.audio_path)
+                try:
+                    logger.info(f"audio candidate project_id={project_id} cand_input={p.audio_path} cand_resolved={a_cand} exists={a_cand.exists()}")
+                except Exception:
+                    pass
                 if a_cand.exists():
                     audio_abs = a_cand
                     try:
@@ -463,6 +505,10 @@ class GenerateScriptService:
 
             if not audio_abs:
                 audio_out = _uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3"
+                try:
+                    logger.info(f"extract audio project_id={project_id} input_video={video_abs} output_audio={audio_out}")
+                except Exception:
+                    pass
                 try:
                     await manager.broadcast(json.dumps({
                         "type": "progress",
@@ -503,6 +549,10 @@ class GenerateScriptService:
                     pass
                 web_audio_path = _to_web_path(audio_out)
                 projects_store.update_project(project_id, {"audio_path": web_audio_path})
+                try:
+                    logger.info(f"audio ready project_id={project_id} audio_abs={audio_out} web_path={web_audio_path}")
+                except Exception:
+                    pass
                 audio_abs = audio_out
 
             asr = BcutASR(str(audio_abs))
@@ -558,6 +608,10 @@ class GenerateScriptService:
             sub_abs = srt_out
             logging.info(f"asr识别结果保存到 {srt_out}")
             try:
+                logger.info(f"subtitle saved project_id={project_id} subtitle_abs={srt_out} web_path={web_path}")
+            except Exception:
+                pass
+            try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
                     "scope": "generate_script",
@@ -576,6 +630,10 @@ class GenerateScriptService:
             except Exception:
                 subtitle_text = ""
             segments = _parse_srt(sub_abs)
+            try:
+                logger.info(f"subtitle parsed project_id={project_id} subtitle_abs={sub_abs} segments_count={len(segments)}")
+            except Exception:
+                pass
             try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
@@ -709,6 +767,10 @@ class GenerateScriptService:
                 pass
             p2 = projects_store.save_script(project_id, script)
             projects_store.update_project(project_id, {"status": "completed"})
+            try:
+                logger.info(f"script saved project_id={project_id} segments_count={len(script.get('segments', []))}")
+            except Exception:
+                pass
             try:
                 await manager.broadcast(json.dumps({
                     "type": "completed",

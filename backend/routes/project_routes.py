@@ -50,6 +50,7 @@ from modules.ws_manager import manager
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
+logger = logging.getLogger(__name__)
 
 
 def now_ts() -> str:
@@ -270,6 +271,10 @@ async def create_project(req: CreateProjectRequest):
 @router.post("/generate-script")
 async def generate_script(req: GenerateScriptRequest):
     try:
+        try:
+            logger.info(f"route generate-script project_id={req.project_id} video_path={req.video_path} subtitle_path={req.subtitle_path} narration_type={req.narration_type}")
+        except Exception:
+            pass
         return await generate_script_service.generate_script(
             project_id=req.project_id,
             video_path=req.video_path,

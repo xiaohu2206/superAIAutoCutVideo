@@ -112,7 +112,29 @@ if exist "requirements.runtime.txt" (
         exit /b 1
     )
 )
-pyinstaller --onefile --name superAutoCutVideoBackend --distpath dist main.py
+:: 确保打包包含 OpenCV
+pip show opencv-python >nul 2>&1
+if errorlevel 1 (
+    echo 安装 OpenCV 依赖...
+    pip install opencv-python
+    if errorlevel 1 (
+        echo 错误: OpenCV 安装失败
+        pause
+        exit /b 1
+    )
+)
+:: 确保表单上传支持
+pip show python-multipart >nul 2>&1
+if errorlevel 1 (
+    echo 安装 python-multipart 依赖...
+    pip install python-multipart
+    if errorlevel 1 (
+        echo 错误: python-multipart 安装失败
+        pause
+        exit /b 1
+    )
+)
+pyinstaller backend.spec
 if errorlevel 1 (
     echo 错误: 后端打包失败
     pause
