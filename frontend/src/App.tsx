@@ -250,6 +250,7 @@ const App: React.FC = () => {
             backendStatus={backendStatus}
             connections={connectionStatus}
             onMonitorEnter={refreshConnections}
+            onMonitorRefresh={refreshConnections}
           />
         )}
 

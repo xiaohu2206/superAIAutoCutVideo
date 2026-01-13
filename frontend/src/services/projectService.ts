@@ -333,7 +333,17 @@ export class ProjectService {
    * 获取输出视频下载链接（后端直接返回文件）
    */
   getOutputVideoDownloadUrl(projectId: string, cacheBust?: string | number): string {
-    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video`;
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/output-video/download`;
+    return cacheBust !== undefined && cacheBust !== null
+      ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
+      : base;
+  }
+
+  /**
+   * 将 /uploads/... 等Web路径转换为完整URL，用于video预览
+   */
+  getWebFileUrl(webPath: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}${webPath}`;
     return cacheBust !== undefined && cacheBust !== null
       ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
       : base;
