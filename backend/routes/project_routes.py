@@ -809,6 +809,32 @@ async def download_output_video(project_id: str):
         headers=headers,
     )
 
+@router.get("/{project_id}/output-video/download")
+async def download_output_video_attachment(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.output_video_path:
+        raise HTTPException(status_code=404, detail="尚未生成输出视频")
+
+    path_str = p.output_video_path.strip()
+    abs_path = resolve_abs_path(path_str)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="输出视频文件不存在")
+
+    filename = abs_path.name
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Disposition": f"attachment; filename=\"{filename}\"",
+    }
+    return FileResponse(
+        path=str(abs_path),
+        filename=filename,
+        media_type="video/mp4",
+        headers=headers,
+    )
 # ========================= 合并视频播放 =========================
 
 @router.get("/{project_id}/merged-video")

@@ -20,6 +20,7 @@ interface SettingsPageProps {
   backendStatus?: { running: boolean; port: number; pid?: number };
   connections?: { api: boolean; websocket: boolean };
   onMonitorEnter?: () => void;
+  onMonitorRefresh?: () => Promise<void> | void;
 }
 
 const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -27,6 +28,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   backendStatus = { running: false, port: 8000 },
   connections = { api: false, websocket: false },
   onMonitorEnter,
+  onMonitorRefresh,
 }) => {
   const [activeSection, setActiveSection] = useState(sections[0].id);
 
@@ -62,7 +64,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     if (activeSection === "monitor") {
       onMonitorEnter?.();
     }
-  }, [activeSection, onMonitorEnter]);
+  }, [activeSection]);
 
   // 渲染当前激活的设置区域内容
   const renderSectionContent = () => {
@@ -110,6 +112,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             messages={messages as any}
             backendStatus={backendStatus}
             connections={connections}
+            onRefresh={onMonitorRefresh}
           />
         );
       case "about":

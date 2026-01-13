@@ -231,7 +231,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             <div className="p-3">
               <video
                 key={project.merged_video_path}
-                src={projectService.getMergedVideoUrl(project.id, outputVideoCacheBust)}
+                src={projectService.getWebFileUrl(project.merged_video_path, outputVideoCacheBust)}
                 controls
                 className="w-full rounded-lg bg-black max-h-[70vh]"
                 preload="metadata"
@@ -349,7 +349,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             <div className="p-3">
               <video
                 key={`${project.output_video_path}-${outputVideoCacheBust}`}
-                src={projectService.getOutputVideoDownloadUrl(project.id, outputVideoCacheBust)}
+                src={projectService.getWebFileUrl(project.output_video_path, outputVideoCacheBust)}
                 controls
                 className="w-full rounded-lg bg-black max-h-[70vh]"
                 preload="metadata"

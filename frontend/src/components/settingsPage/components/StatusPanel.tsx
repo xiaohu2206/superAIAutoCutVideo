@@ -1,4 +1,4 @@
-import { Activity, AlertCircle, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Clock, Play, Server, Wifi, X } from 'lucide-react'
+import { Activity, AlertCircle, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Clock, Play, RefreshCw, Server, Wifi, X } from 'lucide-react'
 import React, { useState } from 'react'
 import { WebSocketMessage } from '../../../services/clients'
 import healthService, { IntegrationTestResult } from '../../../services/healthService'
@@ -14,17 +14,22 @@ interface StatusPanelProps {
     api: boolean
     websocket: boolean
   }
+  onRefresh?: () => Promise<void> | void
 }
 
 const StatusPanel: React.FC<StatusPanelProps> = ({
   messages,
   backendStatus,
-  connections
+  connections,
+  onRefresh
 }) => {
   const [isExpanded, setIsExpanded] = useState(false)
   const [selectedMessageType, setSelectedMessageType] = useState<string>('all')
   const [isTesting, setIsTesting] = useState(false)
   const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null)
+  const [snapshotBackendStatus, setSnapshotBackendStatus] = useState(backendStatus)
+  const [snapshotConnections, setSnapshotConnections] = useState(connections)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   const handleRunDiagnostics = async () => {
     if (isTesting) return
@@ -41,6 +46,20 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
       console.error('Test failed', e)
     } finally {
       setIsTesting(false)
+    }
+  }
+
+  const handleRefreshStatus = async () => {
+    if (isRefreshing) return
+    setIsRefreshing(true)
+    try {
+      if (onRefresh) {
+        await Promise.resolve(onRefresh())
+      }
+      setSnapshotBackendStatus(backendStatus)
+      setSnapshotConnections(connections)
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
@@ -147,36 +166,51 @@ const StatusPanel: React.FC<StatusPanelProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
           {/* 后端状态 */}
           <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
-            <Server className={`h-5 w-5 ${backendStatus.running ? 'text-green-500' : 'text-red-500'}`} />
+            <Server className={`h-5 w-5 ${snapshotBackendStatus.running ? 'text-green-500' : 'text-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">后端服务</p>
-              <p className={`text-xs ${backendStatus.running ? 'text-green-600' : 'text-red-600'}`}>
-                {backendStatus.running ? `运行中 :${backendStatus.port}` : '已停止'}
+              <p className={`text-xs ${snapshotBackendStatus.running ? 'text-green-600' : 'text-red-600'}`}>
+                {snapshotBackendStatus.running ? `运行中 :${snapshotBackendStatus.port}` : '已停止'}
               </p>
             </div>
           </div>
 
           {/* API连接状态 */}
           <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
-            <div className={`h-5 w-5 rounded-full ${connections.api ? 'bg-green-500' : 'bg-red-500'}`} />
+            <div className={`h-5 w-5 rounded-full ${snapshotConnections.api ? 'bg-green-500' : 'bg-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">HTTP API</p>
-              <p className={`text-xs ${connections.api ? 'text-green-600' : 'text-red-600'}`}>
-                {connections.api ? '已连接' : '未连接'}
+              <p className={`text-xs ${snapshotConnections.api ? 'text-green-600' : 'text-red-600'}`}>
+                {snapshotConnections.api ? '已连接' : '未连接'}
               </p>
             </div>
           </div>
 
           {/* WebSocket连接状态 */}
           <div className="flex items-center space-x-3 rounded-md px-2 py-2 hover:bg-gray-50 transition-colors">
-            <Wifi className={`h-5 w-5 ${connections.websocket ? 'text-green-500' : 'text-red-500'}`} />
+            <Wifi className={`h-5 w-5 ${snapshotConnections.websocket ? 'text-green-500' : 'text-red-500'}`} />
             <div>
               <p className="text-sm font-medium text-gray-900">WebSocket</p>
-              <p className={`text-xs ${connections.websocket ? 'text-green-600' : 'text-red-600'}`}>
-                {connections.websocket ? '已连接' : '未连接'}
+              <p className={`text-xs ${snapshotConnections.websocket ? 'text-green-600' : 'text-red-600'}`}>
+                {snapshotConnections.websocket ? '已连接' : '未连接'}
               </p>
             </div>
           </div>
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={handleRefreshStatus}
+            disabled={isRefreshing}
+            className={`px-3 py-1 text-xs font-medium rounded-full flex items-center space-x-1 ring-1 transition-colors ${
+              isRefreshing
+                ? 'bg-gray-100 text-gray-400 ring-gray-200 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 ring-gray-200'
+            }`}
+            title="刷新状态概览"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>{isRefreshing ? '刷新中...' : '刷新'}</span>
+          </button>
         </div>
       </div>
 
