@@ -79,6 +79,20 @@ def to_web_path(p: Path) -> str:
     rel = p.relative_to(up)
     return "/uploads/" + str(rel).replace("\\", "/")
 
+def resolve_abs_path(path_str: str) -> Path:
+    s = (path_str or "").strip()
+    if not s:
+        return Path("")
+    s_norm = s.replace("\\", "/")
+    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        base = Path(env) if env else (project_root_dir() / "uploads")
+        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
+        return base / rel
+    if s_norm.startswith("/"):
+        return project_root_dir() / s_norm[1:]
+    return Path(s)
+
 class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
@@ -470,9 +484,8 @@ async def delete_video_file(project_id: str, request: Request, req: Optional[Del
             target_path = (p.video_path or "").strip() if p.video_path else None
 
     if target_path:
-        root = project_root_dir()
         path_str = target_path
-        abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
+        abs_path = resolve_abs_path(path_str)
         try:
             if abs_path.exists() and abs_path.is_file():
                 removed_path = str(abs_path)
@@ -487,8 +500,7 @@ async def delete_video_file(project_id: str, request: Request, req: Optional[Del
         p2 = projects_store.remove_video_path(project_id, target_path)
         # 若传入的是绝对路径或不同规范，尝试按统一web规范再次移除
         try:
-            root = project_root_dir()
-            abs_path2 = root / target_path[1:] if target_path.startswith("/") else Path(target_path)
+            abs_path2 = resolve_abs_path(target_path)
             web_norm = to_web_path(abs_path2)
             if web_norm != target_path:
                 p2 = projects_store.remove_video_path(project_id, web_norm) or p2
@@ -538,11 +550,10 @@ async def merge_videos(project_id: str):
             except Exception:
                 pass
 
-            root = project_root_dir()
             inputs: List[Path] = []
             for path_str in p.video_paths:
                 s = path_str.strip()
-                abs_path = root / s[1:] if s.startswith("/") else Path(s)
+                abs_path = resolve_abs_path(s)
                 if not abs_path.exists():
                     MERGE_TASKS[task_id].status = "failed"
                     MERGE_TASKS[task_id].message = f"源视频不存在: {s}"
@@ -679,9 +690,8 @@ async def delete_subtitle_file(project_id: str):
     removed = False
     removed_path = None
     if p.subtitle_path:
-        root = project_root_dir()
         path_str = p.subtitle_path.strip()
-        abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
+        abs_path = resolve_abs_path(path_str)
         try:
             if abs_path.exists() and abs_path.is_file():
                 removed_path = str(abs_path)
@@ -780,9 +790,8 @@ async def download_output_video(project_id: str):
     if not p.output_video_path:
         raise HTTPException(status_code=404, detail="尚未生成输出视频")
 
-    root = project_root_dir()
     path_str = p.output_video_path.strip()
-    abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
+    abs_path = resolve_abs_path(path_str)
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="输出视频文件不存在")
 
@@ -811,9 +820,8 @@ async def get_merged_video(project_id: str):
     if not p.merged_video_path:
         raise HTTPException(status_code=404, detail="尚未存在合并后的视频")
 
-    root = project_root_dir()
     path_str = p.merged_video_path.strip()
-    abs_path = root / path_str[1:] if path_str.startswith("/") else Path(path_str)
+    abs_path = resolve_abs_path(path_str)
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="合并视频文件不存在")
 

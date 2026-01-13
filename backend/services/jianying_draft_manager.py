@@ -55,8 +55,35 @@ def _resolve_path(path_or_web: str) -> Path:
     path_str = (path_or_web or "").strip()
     if not path_str:
         return Path("")
-    if path_str.startswith("/"):
-        return root / path_str[1:]
+    s_norm = path_str.replace("\\", "/")
+    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
+        candidates: List[Path] = []
+        try:
+            if env:
+                candidates.append(Path(env) / rel)
+        except Exception:
+            pass
+        try:
+            candidates.append((_backend_root_dir() / "uploads") / rel)
+        except Exception:
+            pass
+        for c in candidates:
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return candidates[0] if candidates else Path(rel)
+    if s_norm.startswith("/"):
+        return root / s_norm[1:]
+    try:
+        p = Path(path_str)
+        if p.is_absolute():
+            return p
+    except Exception:
+        pass
     return Path(path_str)
 
 

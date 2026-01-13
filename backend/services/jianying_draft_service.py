@@ -49,8 +49,35 @@ def _resolve_path(path_or_web: str) -> Path:
     path_str = (path_or_web or "").strip()
     if not path_str:
         return Path("")
-    if path_str.startswith("/"):
-        return root / path_str[1:]
+    s_norm = path_str.replace("\\", "/")
+    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
+        candidates: List[Path] = []
+        try:
+            if env:
+                candidates.append(Path(env) / rel)
+        except Exception:
+            pass
+        try:
+            candidates.append((_backend_root_dir() / "uploads") / rel)
+        except Exception:
+            pass
+        for c in candidates:
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return candidates[0] if candidates else Path(rel)
+    if s_norm.startswith("/"):
+        return root / s_norm[1:]
+    try:
+        p = Path(path_str)
+        if p.is_absolute():
+            return p
+    except Exception:
+        pass
     return Path(path_str)
 
 
@@ -143,7 +170,7 @@ class JianyingDraftService:
             tmp_dir.mkdir(parents=True, exist_ok=True)
             out_base.mkdir(parents=True, exist_ok=True)
 
-            zip_abs = out_dir / f"{project_id}_jianying_draft_{ts}.zip"
+            zip_abs = out_base / f"{project_id}_jianying_draft_{ts}.zip"
             folder_name = f"JianyingDraft_{_safe_file_stem(p.name or '', project_id)}_{ts}"
 
             await JianyingDraftService._broadcast({
@@ -213,7 +240,10 @@ class JianyingDraftService:
             except Exception:
                 copied_to = None
 
-            zip_web = _to_web_path(zip_abs)
+            try:
+                zip_web = _to_web_path(zip_abs)
+            except Exception:
+                zip_web = str(zip_abs)
             await JianyingDraftService._broadcast({
                 "type": "completed",
                 "scope": JianyingDraftService.SCOPE,
@@ -291,9 +321,13 @@ class JianyingDraftService:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uploads_root = _uploads_dir()
             tmp_dir = uploads_root / "jianying_drafts" / "tmp" / f"{project_id}_{ts}_{task_id[:8]}"
-            out_dir = uploads_root / "jianying_drafts" / "outputs" / project_id
+            target_dir_cfg = jianying_config_manager.get_draft_path()
+            if target_dir_cfg and target_dir_cfg.exists():
+                out_base = target_dir_cfg
+            else:
+                out_base = uploads_root / "jianying_drafts" / "outputs" / project_id
             tmp_dir.mkdir(parents=True, exist_ok=True)
-            out_dir.mkdir(parents=True, exist_ok=True)
+            out_base.mkdir(parents=True, exist_ok=True)
 
             folder_name = f"JianyingDraft_{_safe_file_stem(p.name or '', project_id)}_{ts}"
 
