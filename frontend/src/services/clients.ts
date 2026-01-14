@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 // API客户端 - 处理与FastAPI后端的通信
+import { message } from "./message";
 
 // API基础配置（默认端口，运行时可通过 configureBackend 动态覆盖）
 const DEFAULT_HOST = "127.0.0.1";
@@ -524,11 +525,12 @@ export class TauriCommands {
 
   // 显示通知
   static async showNotification(title: string, body: string): Promise<void> {
-    try {
-      await TauriCommands.coreInvoke("show_notification", { title, body });
-    } catch {
+    const lowerTitle = String(title || "").toLowerCase();
+    if (lowerTitle.includes("错") || lowerTitle.includes("error") || lowerTitle.includes("fail")) {
+      message.error(body);
       return;
     }
+    message.info(body);
   }
 
   // 打开外部链接

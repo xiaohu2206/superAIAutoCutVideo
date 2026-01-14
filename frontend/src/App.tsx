@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import Navigation from "./components/Navigation";
+import MessageHost from "./components/ui/MessageHost";
 import SettingsPage from "./components/settingsPage";
 import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
@@ -223,6 +224,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <MessageHost />
       {/* 导航栏 */}
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
 

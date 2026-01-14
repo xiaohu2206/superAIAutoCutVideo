@@ -1,5 +1,6 @@
-import { AlertCircle, Check, Clipboard, ChevronDown, Download, FileVideo, FolderOpen, Loader, Play, Scissors } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
 import { Project } from "../../types/project";
 import { Dropdown } from "../ui/Dropdown";
@@ -14,15 +15,12 @@ interface ProjectOperationsProps {
   handleGenerateVideo: () => void;
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; type?: string }[];
-  handleDownloadVideo: () => void;
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; type?: string }[];
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
-  showOutputPreview: boolean;
-  setShowOutputPreview: (show: boolean) => void;
 }
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
@@ -35,15 +33,12 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   handleGenerateVideo,
   videoGenProgress,
   videoGenLogs,
-  handleDownloadVideo,
   isGeneratingDraft,
   handleGenerateDraft,
   draftGenProgress,
   draftGenLogs,
   showMergedPreview,
   setShowMergedPreview,
-  showOutputPreview,
-  setShowOutputPreview,
 }) => {
   const [outputVideoCacheBust, setOutputVideoCacheBust] = useState<number>(0);
   const [copying, setCopying] = useState(false);
@@ -52,25 +47,23 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
 
   useEffect(() => {
-    if (showOutputPreview && project.output_video_path) {
-      setOutputVideoCacheBust(Date.now());
-    }
-  }, [showOutputPreview, project.output_video_path]);
-
-  useEffect(() => {
     if (!isGeneratingVideo && project.output_video_path) {
       setOutputVideoCacheBust(Date.now());
     }
   }, [isGeneratingVideo, project.output_video_path]);
 
   const handleCopyDraftPath = async () => {
-    if (!draftPath) return;
+    if (!draftPath) {
+      message.error("尚未生成剪映草稿");
+      return;
+    }
     try {
       setCopying(true);
       await navigator.clipboard.writeText(draftPath.toString());
-      alert("草稿路径已复制到剪贴板");
+      message.success("草稿路径已复制到剪贴板");
     } catch (e) {
-      alert("复制失败");
+      void e;
+      message.error("复制失败");
     } finally {
       setCopying(false);
     }
@@ -78,14 +71,31 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
 
   const handleOpenDraftDir = async () => {
     if (!draftPath) {
-      alert("尚未生成剪映草稿");
+      message.error("尚未生成剪映草稿");
       return;
     }
     try {
       setOpening(true);
       await projectService.openPathInExplorer(project.id, draftPath.toString());
+      message.success("已打开文件管理器");
     } catch (e: any) {
-      alert(e?.message || "打开文件管理器失败");
+      message.error(e?.message || "打开文件管理器失败");
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const handleOpenOutputVideoInExplorer = async () => {
+    if (!project.output_video_path) {
+      message.error("尚未生成输出视频");
+      return;
+    }
+    try {
+      setOpening(true);
+      await projectService.openPathInExplorer(project.id, project.output_video_path);
+      message.success("已打开文件管理器");
+    } catch (e: any) {
+      message.error(e?.message || "打开文件管理器失败");
     } finally {
       setOpening(false);
     }
@@ -119,6 +129,16 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           </button>
         }
         items={[
+         {
+            label: (
+              <>
+                {isGeneratingDraft ? <Loader className="h-4 w-4 mr-2 animate-spin" /> : <Scissors className="h-4 w-4 mr-2" />}
+                {isGeneratingDraft ? "生成草稿中..." : "生成剪映草稿"}
+              </>
+            ),
+            onClick: handleGenerateDraft,
+            disabled: !project.script || !project.video_path || isGeneratingDraft,
+          },
           {
             label: (
               <>
@@ -128,26 +148,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             ),
             onClick: handleGenerateVideo,
             disabled: !project.script || !project.video_path || isGeneratingVideo,
-          },
-          {
-            label: (
-              <>
-                <Download className="h-4 w-4 mr-2" />
-                下载视频
-              </>
-            ),
-            onClick: handleDownloadVideo,
-            disabled: !project.output_video_path,
-          },
-          {
-            label: (
-              <>
-                {isGeneratingDraft ? <Loader className="h-4 w-4 mr-2 animate-spin" /> : <Scissors className="h-4 w-4 mr-2" />}
-                {isGeneratingDraft ? "生成草稿中..." : "生成剪映草稿"}
-              </>
-            ),
-            onClick: handleGenerateDraft,
-            disabled: !project.script || !project.video_path || isGeneratingDraft,
           },
         ]}
       />
@@ -313,49 +313,21 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
                 <FileVideo className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />
                 <span className="text-xs font-medium text-gray-500 mr-2 flex-shrink-0">成品:</span>
                 <button
-                  onClick={() => setShowOutputPreview(true)}
+                  onClick={handleOpenOutputVideoInExplorer}
                   className="text-xs text-blue-600 hover:text-blue-700 hover:underline truncate font-medium text-left"
-                  title="点击预览"
+                  title="在文件管理器中定位"
                 >
                   {project.output_video_path.split("/").pop()}
                 </button>
               </div>
               <button
-                onClick={() => setShowOutputPreview(true)}
+                onClick={handleOpenOutputVideoInExplorer}
                 className="ml-2 text-xs px-2 py-1 bg-white border border-gray-200 text-gray-600 rounded hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
               >
-                预览
+                <FolderOpen className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
-        </div>
-      )}
-      {/* 输出视频预览弹窗 */}
-      {showOutputPreview && project?.output_video_path && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4">
-            <div className="flex items-center justify-between p-3 border-b">
-              <div className="flex items-center text-sm font-medium text-gray-800">
-                <FileVideo className="h-4 w-4 mr-1" /> 输出视频预览
-              </div>
-              <button
-                onClick={() => setShowOutputPreview(false)}
-                className="text-gray-600 hover:text-gray-900"
-                title="关闭预览"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-3">
-              <video
-                key={`${project.output_video_path}-${outputVideoCacheBust}`}
-                src={projectService.getOutputVideoDownloadUrl(project.id, outputVideoCacheBust)}
-                controls
-                className="w-full rounded-lg bg-black max-h-[70vh]"
-                preload="metadata"
-              />
-            </div>
-          </div>
         </div>
       )}
     </div>

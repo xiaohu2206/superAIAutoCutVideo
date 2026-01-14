@@ -1,11 +1,12 @@
 // 项目管理页面（一级页面）
 
 import React, { useEffect, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle, Plus, RefreshCw } from "lucide-react";
 import ProjectList from "../components/projectManagement/ProjectList";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
 import { useProjects } from "../hooks/useProjects";
+import { notifyError, notifySuccess } from "../services/notification";
 import type { Project, CreateProjectRequest } from "../types/project";
 
 interface ProjectManagementPageProps {
@@ -33,17 +34,40 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
 
   // 初始加载项目列表
   useEffect(() => {
-    fetchProjects();
+    void fetchProjects().catch((e) => {
+      void notifyError("错误", e, "获取项目列表失败");
+    });
   }, [fetchProjects]);
+
+  const showSuccess = (message: string, timeoutMs: number = 2500) => {
+    setSuccessMessage(message);
+    setActionErrorMessage(null);
+    void notifySuccess("成功", message);
+    setTimeout(() => setSuccessMessage(null), timeoutMs);
+  };
+
+  const showError = async (err: unknown, fallback: string, timeoutMs: number = 4000) => {
+    const msg = await notifyError("错误", err as any, fallback);
+    setActionErrorMessage(msg);
+    setTimeout(() => setActionErrorMessage(null), timeoutMs);
+  };
 
   /**
    * 处理创建项目
    */
   const handleCreateProject = async (data: CreateProjectRequest) => {
-    await createProject(data);
+    try {
+      await createProject(data);
+      showSuccess("项目创建成功！");
+    } catch (err) {
+      await showError(err, "创建项目失败");
+      throw err;
+    }
   };
 
   /**
@@ -66,8 +90,14 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
    */
   const handleConfirmDelete = async () => {
     if (selectedProject) {
-      await deleteProject(selectedProject.id);
-      setSelectedProject(null);
+      try {
+        await deleteProject(selectedProject.id);
+        setSelectedProject(null);
+        showSuccess("项目已删除！");
+      } catch (err) {
+        await showError(err, "删除项目失败");
+        throw err;
+      }
     }
   };
 
@@ -76,8 +106,14 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
    */
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refreshProjects();
-    setRefreshing(false);
+    try {
+      await refreshProjects();
+      showSuccess("列表已刷新！");
+    } catch (err) {
+      await showError(err, "刷新项目列表失败");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   return (
@@ -138,8 +174,21 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       </div>
 
       {/* 错误提示 */}
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
+          <CheckCircle className="h-5 w-5 mr-2" />
+          {successMessage}
+        </div>
+      )}
+      {actionErrorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          {actionErrorMessage}
+        </div>
+      )}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 mr-2" />
           {error}
         </div>
       )}

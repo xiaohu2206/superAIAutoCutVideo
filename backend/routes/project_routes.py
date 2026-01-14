@@ -85,10 +85,25 @@ def resolve_abs_path(path_str: str) -> Path:
         return Path("")
     s_norm = s.replace("\\", "/")
     if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        base = Path(env) if env else (project_root_dir() / "uploads")
         rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        return base / rel
+        env = os.environ.get("SACV_UPLOADS_DIR")
+        candidates = []
+        if env:
+            try:
+                candidates.append(Path(env) / rel)
+            except Exception:
+                pass
+        try:
+            candidates.append((project_root_dir() / "uploads") / rel)
+        except Exception:
+            pass
+        for c in candidates:
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return candidates[0] if candidates else Path(rel)
     if s_norm.startswith("/"):
         return project_root_dir() / s_norm[1:]
     return Path(s)
@@ -927,12 +942,13 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
     target = path or (p.model_dump().get("jianying_draft_last_dir") or "")
     if not target:
         raise HTTPException(status_code=400, detail="未找到草稿目录路径")
-    abs_path = Path(str(target)).expanduser()
-    if not abs_path.is_absolute():
-        if str(target).startswith("/"):
-            abs_path = project_root_dir() / str(target)[1:]
-        else:
-            abs_path = Path(str(target))
+    raw_target = str(target).strip()
+    if raw_target.startswith("~"):
+        raw_target = str(Path(raw_target).expanduser())
+
+    abs_path = resolve_abs_path(raw_target)
+    if abs_path and not abs_path.is_absolute():
+        abs_path = (project_root_dir() / abs_path).resolve()
     try:
         if abs_path.exists():
             sysname = platform.system().lower()
@@ -957,6 +973,7 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"打开文件管理器失败: {str(e)}")
+
 async def _run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))

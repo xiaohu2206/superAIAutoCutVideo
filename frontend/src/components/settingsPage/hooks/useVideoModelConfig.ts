@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { TauriCommands } from "../../../services/tauriService";
+import { message } from "../../../services/message";
 import { videoModelService } from "../../../services/videoModelService";
 import type { TestResult, VideoModelConfig } from "../types";
 import {
-  getConfigIdByProvider,
-  getDefaultBaseUrl,
-  getDefaultDescription,
-  getDefaultModelName,
+    getConfigIdByProvider,
+    getDefaultBaseUrl,
+    getDefaultDescription,
+    getDefaultModelName,
 } from "../utils";
 
 /**
@@ -118,7 +118,7 @@ export const useVideoModelConfig = () => {
       }
     } catch (error) {
       console.error("自动保存视频生成模型配置失败:", error);
-      await TauriCommands.showNotification("错误", "保存配置失败");
+      message.error("保存配置失败");
     }
   };
 

@@ -68,15 +68,17 @@ export const useProjects = (): UseProjectsReturn => {
         await sleep(Math.min(800 + attempts * 200, 3000));
       }
       if (attempts >= maxAttempts) {
-        setError("后端未就绪，请稍后重试");
-        return;
+        const msg = "后端未就绪，请稍后重试";
+        setError(msg);
+        throw new Error(msg);
       }
       const data = await projectService.getProjects();
       setProjects(data);
       setError(null);
     } catch (err) {
-      setError(getErrorMessage(err, "获取项目列表失败"));
-      console.error("获取项目列表失败:", err);
+      const msg = getErrorMessage(err, "获取项目列表失败");
+      setError(msg);
+      throw err instanceof Error ? err : new Error(msg);
     } finally {
       setLoading(false);
     }

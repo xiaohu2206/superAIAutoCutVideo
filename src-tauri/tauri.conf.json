@@ -5,7 +5,7 @@
   "identifier": "com.superautocutvideo.app",
   "build": {
     "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location ../frontend; npm run build\"",
-    "devUrl": "http://localhost:1420/",
+    "devUrl": "http://127.0.0.1:1420/",
     "frontendDist": "../frontend/dist"
   },
   "bundle": {
@@ -38,7 +38,8 @@
         "width": 1280,
         "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {

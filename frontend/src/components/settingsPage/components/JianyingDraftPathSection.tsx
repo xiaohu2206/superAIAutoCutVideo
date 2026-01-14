@@ -10,7 +10,7 @@ export const JianyingDraftPathSection: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [detecting, setDetecting] = useState<boolean>(false);
-  const isTauri = typeof window !== "undefined" && !!((window as any).__TAURI__?.core?.invoke);
+  const [browsing, setBrowsing] = useState<boolean>(false);
 
   const loadCurrent = async () => {
     setLoading(true);
@@ -52,6 +52,8 @@ export const JianyingDraftPathSection: React.FC = () => {
   };
 
   const handleBrowse = async () => {
+    setBrowsing(true);
+    setError(null);
     try {
       const res = await TauriCommands.selectOutputDirectory();
       if (!res.cancelled && res.path) {
@@ -60,6 +62,8 @@ export const JianyingDraftPathSection: React.FC = () => {
       }
     } catch (e: any) {
       setError(e?.message || "浏览选择失败");
+    } finally {
+      setBrowsing(false);
     }
   };
 
@@ -103,16 +107,17 @@ export const JianyingDraftPathSection: React.FC = () => {
             placeholder="请选择或输入剪映草稿目录"
             className="px-3 py-2 border border-gray-300 rounded-md w-full"
           />
-          {isTauri ? (
-            <button
-              className="inline-flex items-center px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200"
-              onClick={handleBrowse}
-              title="浏览选择目录"
-            >
-              <FolderOpen className="h-4 w-4 mr-1" />
-              浏览
-            </button>
-          ) : null}
+          <button
+            className={`inline-flex items-center px-3 py-2 rounded-md text-sm ${
+              browsing ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+            }`}
+            onClick={handleBrowse}
+            disabled={browsing}
+            title="浏览选择目录"
+          >
+            {browsing ? <Loader className="h-4 w-4 mr-1 animate-spin" /> : <FolderOpen className="h-4 w-4 mr-1" />}
+            浏览
+          </button>
         </div>
         <div className="flex items-center text-sm">
           {exists ? (

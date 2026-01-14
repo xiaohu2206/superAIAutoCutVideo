@@ -1,5 +1,7 @@
-import React from "react";
 import { Upload } from "lucide-react";
+import React from "react";
+import { message } from "../../services/message";
+import { projectService } from "../../services/projectService";
 import type { Project } from "../../types/project";
 
 interface VideoSourcesManagerProps {
@@ -24,7 +26,6 @@ interface VideoSourcesManagerProps {
   ) => void;
   onItemDrop: (e: React.DragEvent<HTMLDivElement>) => void;
   onDeleteVideoItem: (path: string) => void;
-  onShowMergedPreview: () => void;
 }
 
 const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
@@ -46,8 +47,20 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
   onItemDragOver,
   onItemDrop,
   onDeleteVideoItem,
-  onShowMergedPreview,
 }) => {
+  const handleOpenMergedVideoInExplorer = async () => {
+    if (!project.merged_video_path) {
+      message.error("尚未生成合并后的视频");
+      return;
+    }
+    try {
+      await projectService.openPathInExplorer(project.id, project.merged_video_path);
+      message.success("已打开文件管理器");
+    } catch (e: any) {
+      message.error(e?.message || "打开文件管理器失败");
+    }
+  };
+
   return (
     <>
       <div>
@@ -159,9 +172,9 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
             已合并视频：
             <button
               type="button"
-              onClick={onShowMergedPreview}
+              onClick={handleOpenMergedVideoInExplorer}
               className="ml-1 break-all text-blue-600 hover:underline"
-              title="点击预览合并视频"
+              title="在文件管理器中定位"
             >
               {project.merged_video_path}
             </button>

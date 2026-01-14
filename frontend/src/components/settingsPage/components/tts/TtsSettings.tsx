@@ -1,4 +1,4 @@
-import { TauriCommands } from "@/services/tauriService";
+import { message } from "@/services/message";
 import { ttsService } from "@/services/ttsService";
 import { AlertCircle, CheckCircle, Loader } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -81,7 +81,7 @@ export const TtsSettings: React.FC = () => {
         await loadVoices(initProvider);
       } catch (error) {
         console.error("初始化TTS设置失败:", error);
-        await TauriCommands.showNotification("错误", "初始化TTS设置失败");
+        message.error("初始化TTS设置失败");
       }
     };
     init();
