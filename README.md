@@ -1,6 +1,6 @@
 <img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
 
-# SuperAIAutoCut · AI智能视频剪辑
+# SuperAI·AutoCutVideo · AI智能视频剪辑
 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，目前只支持通过字幕自动剪辑。（免费）
 
 
@@ -28,6 +28,20 @@
 - 添加 OCR 识别字幕
 - 添加whisper提取字幕
 - 添加视觉分析视频功能
+
+## 文档与支持
+- 打包说明：`docs/打包说明.md`
+
+
+## 联系方式
+<img src="docs/image/weixinqun.png" alt="微信码" width="160" />
+- 微信群
+
+<img src="docs/image/douyin.png" alt="抖音码" width="160" />
+- 抖音号：`xiaohu_111`
+
+- 微信号：`interest_dog`
+
 
 
 ## 快速开始
@@ -64,18 +78,6 @@ backend/.venv/bin/python backend/main.py
 
 ```
 
-## 文档与支持
-- 打包说明：`docs/打包说明.md`
-
-## 联系方式
-
-<img src="docs/image/weixinqun.png" alt="微信码" width="160" />
-- 微信群
-
-<img src="docs/image/douyin.png" alt="抖音码" width="160" />
-- 抖音号：`xiaohu_111`
-
-- 微信号：`interest_dog`
 
 ## 说明
 
