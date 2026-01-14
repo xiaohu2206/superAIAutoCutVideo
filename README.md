@@ -1,35 +1,40 @@
 <img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
 
 # SuperAIAutoCut · AI智能视频剪辑
+轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，目前只支持通过字幕自动剪辑。（免费）
 
-轻量、跨平台的一站式智能视频处理桌面应用，开箱即用，适合内容创作者和团队快速产出高质量视频。（免费）
+
+## 软件版本
+- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.1/superAIAutoCutVideo-1.0.1.zip">SuperAI-v1.0.1</a>
+
 
 ## 亮点特性
-- 多项目管理：支持创建、切换与独立配置
-- 短剧解说工作流：多集上传 → 自动合并 → 生成解说脚本（暂时只支持字幕分析） → 生成解说视频
-- 自动提取视频字幕
-- 支持自定义提示词（高级配置）
-- 支持上传字幕文件（高级配置）
-- 支持腾讯tts、edge tts  
-- 2025-12-13：加入大模型集合平台(openRouter)
-- 2025-12-14：加入电影解说
-- 2025-12-14：添加电影解说控制输出篇幅（短篇、中篇、长偏 - 高级配置）
+- 2026-01-14: 打包成 Windows 版本
 - 2026-01-07：支持导出为剪映草稿
+- 2025-12-14：添加电影解说控制输出篇幅（短篇、中篇、长偏 - 高级配置）
+- 2025-12-14：加入电影解说
+- 2025-12-13：加入大模型集合平台(openRouter)
+- 支持腾讯tts、edge tts  
+- 支持上传字幕文件（高级配置）
+- 支持自定义提示词（高级配置）
+- 自动提取视频字幕
+- 短剧解说工作流：多集上传 → 自动合并 → 生成解说脚本（暂时只支持字幕分析） → 生成解说视频
+- 多项目管理：支持创建、切换与独立配置
 
 
 ## 更新计划（持续更新优化中....
-- 打包成 Windows 和 macOS 版本
+- 添加手动剪辑片头片尾
 - 添加影视解说功能
 - 添加 OCR 识别字幕
 - 添加whisper提取字幕
 - 添加视觉分析视频功能
 
-## 快速开始
 
+## 快速开始
 前置要求：`Node.js ≥ 18`、`Python ≥ 3.11`、`Rust`、`FFmpeg`
 
-### Windows（PowerShell）
 
+### Windows（PowerShell）
 ```powershell
 # 安装前端依赖（优先使用 cnpm）
 cd frontend
@@ -44,23 +49,6 @@ backend\.venv\Scripts\python.exe backend\main.py
 # 启动桌面应用
 ```
 
-#### Edge TTS 使用说明（代理与持久化）
-
-- Edge TTS 免凭据，但在中国大陆直连通常会返回 403 或 TLS 连接错误；需配置 HTTP 代理。
-- 推荐使用持久化配置：在 `backend/config/tts_config.json` 的 `edge_tts_default.extra_params` 写入 `ProxyUrl`（示例：`http://127.0.0.1:7890`）。
-- 后端代理解析优先级：`EDGE_TTS_PROXY` → `HTTPS_PROXY`/`HTTP_PROXY` → `extra_params.ProxyUrl`。
-- 每次测试可直接调用接口，无需手动设置环境变量：
-  - 无代理（示例，仅在可直连时可用）：
-    ```powershell
-    Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/api/tts/configs/edge_tts_default/test" -ContentType 'application/json'
-    ```
-  - 指定临时代理：
-    ```powershell
-    Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8000/api/tts/configs/edge_tts_default/test?proxy_url=http://127.0.0.1:7890" -ContentType 'application/json'
-    ```
-- 若使用虚拟环境 `Activate.ps1`，需在激活后的会话中重新设置会话级环境变量；或继续按上面方式直接调用虚拟环境内的 `python.exe`，避免环境变量丢失。
-- 前端会自动发现后端端口（扫描范围 8000–8019），无需手动修改端口。
-
 ### macOS
 
 ```bash
@@ -74,54 +62,14 @@ python3 -m venv backend/.venv
 backend/.venv/bin/python -m pip install -r backend/requirements.txt
 backend/.venv/bin/python backend/main.py
 
-# 启动桌面应用
-cargo tauri dev
 ```
 
-## 打包
-- 本地打包（Windows，PowerShell，在项目根目录）：
-  - 一键脚本：
-    ```powershell
-    powershell -ExecutionPolicy Bypass -Command ./scripts/build.bat
-    ```
-  - 手动步骤（用于排障）：
-    ```powershell
-    # 前端
-    cd frontend
-    cnpm install; if ($LASTEXITCODE -ne 0) { npm install }
-    cnpm run build; if ($LASTEXITCODE -ne 0) { npm run build }
-    cd ..
-    # 后端
-    cd backend
-    python -m pip install -r requirements.runtime.txt
-    pyinstaller --onefile --name superAutoCutVideoBackend --distpath dist main.py
-    cd ..
-    # 复制后端到资源目录
-    New-Item -ItemType Directory -Force -Path "src-tauri\resources" | Out-Null
-    Copy-Item "backend\dist\superAutoCutVideoBackend.exe" "src-tauri\resources\" -Force
-    # 构建 Tauri
-    cd src-tauri
-    cargo tauri build
-    ```
-  - 产物位置：
-    - 安装包：`src-tauri\target\release\bundle\nsis\*.exe`
-    - 可执行文件：`src-tauri\target\release\super-auto-cut-video.exe`
-    - 后端：`src-tauri\target\release\resources\superAutoCutVideoBackend.exe`
-
-- CI 打包（GitHub Actions）：
-  - 推送到 `master`/`main` 或创建标签 `v*` 会自动触发
-  - 工作流文件：`.github/workflows/build-windows.yml`
-  - 构建成功后，产物以 `windows-nsis` 作为 Artifact 上传；打标签会同时发布到 Release
-
 ## 文档与支持
-
-- 后端 API 文档：`docs/backend_api_documentation.md`
-- 前端说明：`docs/FRONTEND_README.md`
-- 使用指南：`USAGE.md`
+- 打包说明：`docs/打包说明.md`
 
 ## 联系方式
 
-<img src="docs/image/weixinqun.jpg" alt="微信码" width="160" />
+<img src="docs/image/weixinqun.png" alt="微信码" width="160" />
 - 微信群
 
 <img src="docs/image/douyin.png" alt="抖音码" width="160" />
