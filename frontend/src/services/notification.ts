@@ -1,4 +1,4 @@
-import { TauriCommands } from "./tauriService";
+import { message as uiMessage } from "./message";
 
 export async function notifyError(title: string, error: any, fallback?: string): Promise<string> {
   let message = fallback || "操作失败";
@@ -13,10 +13,12 @@ export async function notifyError(title: string, error: any, fallback?: string):
       message = error.toString();
     }
   }
-  await TauriCommands.showNotification(title, message);
+  void title;
+  uiMessage.error(message);
   return message;
 }
 
 export async function notifySuccess(title: string, message: string): Promise<void> {
-  await TauriCommands.showNotification(title, message);
+  void title;
+  uiMessage.success(message);
 }

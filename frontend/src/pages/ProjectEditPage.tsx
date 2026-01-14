@@ -1,14 +1,12 @@
 // 项目编辑页面（二级页面）
 
-import {
-  AlertCircle,
-  ArrowLeft,
-  CheckCircle,
-  Loader,
-} from "lucide-react";
-import React, { useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import {
+  ArrowLeft,
+  Loader
+} from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectDetail } from "../hooks/useProjects";
 import type { VideoScript } from "../types/project";
  
@@ -18,6 +16,7 @@ import ScriptEditor from "../components/projectEdit/ScriptEditor";
 import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
 import type { WebSocketMessage } from "../services/clients";
 import { wsClient } from "../services/clients";
+import { message } from "../services/message";
 import { projectService } from "../services/projectService";
 
 interface ProjectEditPageProps {
@@ -44,7 +43,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     generateScript,
     saveScript,
     generateVideo,
-    downloadVideo,
     mergeVideos,
     mergeProgress,
     merging,
@@ -55,8 +53,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [draftErrorMessage, setDraftErrorMessage] = useState<string | null>(null);
   // 生成脚本进度 & 日志
   const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
   const [scriptGenLogs, setScriptGenLogs] = useState<
@@ -75,10 +71,37 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
   // 合并视频预览弹层
   const [showMergedPreview, setShowMergedPreview] = useState(false);
-  // 输出视频预览弹层
-  const [showOutputPreview, setShowOutputPreview] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
+    if (err && typeof err === "object") {
+      const anyErr = err as any;
+      if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
+      if (typeof anyErr.detail === "string" && anyErr.detail) return anyErr.detail;
+    }
+    if (typeof err === "string" && err) return err;
+    return fallback;
+  }, []);
+
+  const showSuccess = useCallback((text: string, durationSec: number = 2) => {
+    message.success(text, durationSec);
+  }, []);
+
+  const showErrorText = useCallback((text: string, durationSec: number = 3) => {
+    message.error(text, durationSec);
+  }, []);
+
+  const showError = useCallback(
+    (err: unknown, fallback: string) => {
+      showErrorText(getErrorMessage(err, fallback));
+    },
+    [getErrorMessage, showErrorText]
+  );
+
+  useEffect(() => {
+    if (error) showErrorText(error);
+  }, [error]);
   
   // 视频顺序（可拖拽排序）
   const [videoOrder, setVideoOrder] = useState<string[]>([]);
@@ -129,12 +152,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         const after = videoOrder.join("|");
         if (before !== after) {
           await reorderVideos(videoOrder);
-          setSuccessMessage("排序已保存！");
-          setTimeout(() => setSuccessMessage(null), 2000);
+          showSuccess("排序已保存！", 2000);
         }
       }
     } catch (err) {
-      console.error("保存排序失败:", err);
+      await showError(err, "保存排序失败");
     }
   };
 
@@ -154,8 +176,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         await reorderVideos(videoOrder);
       }
       await mergeVideos();
+      showSuccess("合并视频完成！");
     } catch (err) {
-      console.error("合并视频失败:", err);
+      showError(err, "合并视频失败");
     }
   };
   
@@ -186,16 +209,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setSuccessMessage(null);
-
     setUploadingVideo(true);
     setVideoUploadProgress(0);
     try {
       await uploadVideos(files, (p) => setVideoUploadProgress(p));
-      setSuccessMessage("视频文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("视频文件上传成功！");
     } catch (err) {
-      console.error("上传视频失败:", err);
+      showError(err, "上传视频失败");
     } finally {
       setUploadingVideo(false);
       setTimeout(() => setVideoUploadProgress(0), 800);
@@ -232,16 +252,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     const files = e.dataTransfer.files;
     if (!files || files.length === 0) return;
 
-    setSuccessMessage(null);
-
     setUploadingVideo(true);
     setVideoUploadProgress(0);
     try {
       await uploadVideos(files, (p) => setVideoUploadProgress(p));
-      setSuccessMessage("视频文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("视频文件上传成功！");
     } catch (err) {
-      console.error("上传视频失败:", err);
+      showError(err, "上传视频失败");
     } finally {
       setUploadingVideo(false);
       setTimeout(() => setVideoUploadProgress(0), 800);
@@ -250,29 +267,33 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   const handleSubtitleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
     setIsDraggingSubtitle(true);
   };
 
   const handleSubtitleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDraggingSubtitle(false);
   };
 
   const handleSubtitleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDraggingSubtitle(false);
     const files = e.dataTransfer.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    setSuccessMessage(null);
     setUploadingSubtitle(true);
     setSubtitleUploadProgress(0);
     try {
       await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
-      setSuccessMessage("字幕文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("字幕文件上传成功！");
     } catch (err) {
-      console.error(err);
+      showError(err, "上传字幕失败");
     } finally {
       setUploadingSubtitle(false);
       setTimeout(() => setSubtitleUploadProgress(0), 800);
@@ -285,15 +306,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    setSuccessMessage(null);
     setUploadingSubtitle(true);
     setSubtitleUploadProgress(0);
     try {
       await uploadSubtitle(file, (p) => setSubtitleUploadProgress(p));
-      setSuccessMessage("字幕文件上传成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("字幕文件上传成功！");
     } catch (err) {
-      console.error(err);
+      showError(err, "上传字幕失败");
     } finally {
       setUploadingSubtitle(false);
       setTimeout(() => setSubtitleUploadProgress(0), 800);
@@ -310,32 +329,31 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         return videoExts.some((ext) => lower.endsWith(ext));
       });
       if (filtered.length === 0) return;
-      setSuccessMessage(null);
       setUploadingVideo(true);
       setVideoUploadProgress(0);
       try {
-        const files: File[] = [];
-        for (const p of filtered) {
-          const url = convertFileSrc(p);
-          const res = await fetch(url);
-          const blob = await res.blob();
-          const name = p.split(/[/\\]/).pop() || "file";
-          const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
-          files.push(file);
-        }
+        const files = await Promise.all(
+          filtered.map(async (p) => {
+            const url = convertFileSrc(p);
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`读取文件失败: ${p}`);
+            const blob = await res.blob();
+            const name = p.split(/[/\\]/).pop() || "file";
+            return new File([blob], name, { type: blob.type || "application/octet-stream" });
+          })
+        );
         if (files.length > 0) {
           await uploadVideos(files, (pr) => setVideoUploadProgress(pr));
-          setSuccessMessage("视频文件上传成功！");
-          setTimeout(() => setSuccessMessage(null), 3000);
+          showSuccess("视频文件上传成功！");
         }
       } catch (err) {
-        console.error("上传视频失败:", err);
+        showError(err, "上传视频失败");
       } finally {
         setUploadingVideo(false);
         setTimeout(() => setVideoUploadProgress(0), 800);
       }
     },
-    [uploadVideos]
+    [showError, showSuccess, uploadVideos]
   );
 
   React.useEffect(() => {
@@ -402,14 +420,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
    */
   const handleGenerateScript = async () => {
     if (!project?.video_path) {
-      alert("请先上传视频文件");
+      showErrorText("请先上传视频文件");
       return;
     }
 
     setIsGenerating(true);
     setScriptGenProgress(0);
     setScriptGenLogs([]);
-    setSuccessMessage(null);
 
     try {
       const script = await generateScript({
@@ -425,10 +442,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         // 兜底：如果返回值为空，使用项目中的脚本
         setEditedScript(JSON.stringify(project.script, null, 2));
       }
-      setSuccessMessage("解说脚本生成成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("解说脚本生成成功！");
     } catch (err) {
-      console.error("生成脚本失败:", err);
+      showError(err, "生成脚本失败");
     } finally {
       setIsGenerating(false);
     }
@@ -457,8 +473,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           },
         ]);
         if (message.type === "completed") {
-          setSuccessMessage("解说脚本生成成功！");
-          setTimeout(() => setSuccessMessage(null), 3000);
+          showSuccess("解说脚本生成成功！");
+        }
+        if (message.type === "error") {
+          showErrorText(msgText || "生成脚本失败");
         }
       }
     };
@@ -467,30 +485,28 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id]);
+  }, [project?.id, showSuccess, showErrorText]);
 
   /**
    * 处理保存脚本
    */
   const handleSaveScript = async () => {
     if (!editedScript.trim()) {
-      alert("脚本内容不能为空");
+      showErrorText("脚本内容不能为空");
       return;
     }
 
     try {
       const scriptData: VideoScript = JSON.parse(editedScript);
       setIsSaving(true);
-      setSuccessMessage(null);
 
       await saveScript(scriptData);
-      setSuccessMessage("脚本保存成功！");
-      setTimeout(() => setSuccessMessage(null), 3000);
+      showSuccess("脚本保存成功！");
     } catch (err) {
       if (err instanceof SyntaxError) {
-        alert("脚本格式错误，请检查 JSON 格式是否正确");
+        showErrorText("脚本格式错误，请检查 JSON 格式是否正确");
       } else {
-        console.error("保存脚本失败:", err);
+        showError(err, "保存脚本失败");
       }
     } finally {
       setIsSaving(false);
@@ -502,25 +518,23 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
    */
   const handleGenerateVideo = async () => {
     if (!project?.script) {
-      alert("请先生成并保存脚本");
+      showErrorText("请先生成并保存脚本");
       return;
     }
     if (!project?.video_path) {
-      alert("请先上传原始视频文件");
+      showErrorText("请先上传原始视频文件");
       return;
     }
     setIsGeneratingVideo(true);
     setVideoGenProgress(0);
     setVideoGenLogs([]);
-    setSuccessMessage(null);
     try {
       const outputPath = await generateVideo();
       if (outputPath) {
-        setSuccessMessage("视频生成成功！");
-        setTimeout(() => setSuccessMessage(null), 3000);
+        showSuccess("视频生成成功！");
       }
     } catch (err) {
-      console.error("生成视频失败:", err);
+      showError(err, "生成视频失败");
     } finally {
       setIsGeneratingVideo(false);
     }
@@ -528,15 +542,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   const handleGenerateDraft = async () => {
     if (!project?.video_path) {
-      alert("请先上传原始视频文件");
+      showErrorText("请先上传原始视频文件");
       return;
     }
     setIsGeneratingDraft(true);
     setDraftGenProgress(0);
     setDraftGenLogs([]);
     setDraftTaskId(null);
-    setSuccessMessage(null);
-    setDraftErrorMessage(null);
     try {
       const res = await projectService.startGenerateJianyingDraft(project.id);
       const taskId = res?.task_id;
@@ -544,12 +556,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         setDraftTaskId(taskId);
       } else {
         setIsGeneratingDraft(false);
-        setDraftErrorMessage("生成剪映草稿失败");
+        showErrorText("生成剪映草稿失败");
       }
     } catch (err) {
-      console.error("生成剪映草稿失败:", err);
-      const msg = err instanceof Error ? err.message : "生成剪映草稿失败";
-      setDraftErrorMessage(msg);
+      showError(err, "生成剪映草稿失败");
       setIsGeneratingDraft(false);
     }
   };
@@ -577,8 +587,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           },
         ]);
         if (message.type === "completed") {
-          setSuccessMessage("视频生成成功！");
-          setTimeout(() => setSuccessMessage(null), 3000);
+          showSuccess("视频生成成功！");
+        }
+        if (message.type === "error") {
+          showErrorText(msgText || "生成视频失败");
         }
       }
     };
@@ -587,7 +599,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id]);
+  }, [project?.id, showSuccess, showErrorText]);
 
   React.useEffect(() => {
     const handler = (message: WebSocketMessage) => {
@@ -616,14 +628,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         ]);
         if (message.type === "completed") {
           setIsGeneratingDraft(false);
-          setDraftErrorMessage(null);
-          setSuccessMessage("剪映草稿生成成功！");
-          setTimeout(() => setSuccessMessage(null), 3000);
+          showSuccess("剪映草稿生成成功！");
           void refreshProject();
         }
         if (message.type === "error") {
           setIsGeneratingDraft(false);
-          setDraftErrorMessage(msgText);
+          showErrorText(msgText || "生成剪映草稿失败");
         }
       }
     };
@@ -631,17 +641,24 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     return () => {
       wsClient.off("*", handler);
     };
-  }, [project?.id, draftTaskId]);
+  }, [project?.id, draftTaskId, refreshProject, showSuccess]);
 
-  /**
-   * 处理下载输出视频
-   */
-  const handleDownloadVideo = () => {
-    if (!project?.output_video_path) {
-      alert("尚未生成输出视频");
-      return;
+  const handleDeleteSubtitle = async () => {
+    try {
+      await deleteSubtitle();
+      showSuccess("字幕已删除！");
+    } catch (err) {
+      showError(err, "删除字幕失败");
     }
-    downloadVideo();
+  };
+
+  const handleDeleteVideoItem = async (path: string) => {
+    try {
+      await deleteVideoItem(path);
+      showSuccess("视频已删除！");
+    } catch (err) {
+      showError(err, "删除视频失败");
+    }
   };
 
   /**
@@ -741,7 +758,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             subtitlePath={project.subtitle_path}
             narrationType={project.narration_type}
             onSubtitleFileChange={handleSubtitleFileChange}
-            onDeleteSubtitle={deleteSubtitle}
+            onDeleteSubtitle={handleDeleteSubtitle}
             isDraggingSubtitle={isDraggingSubtitle}
             onSubtitleDragOver={handleSubtitleDragOver}
             onSubtitleDragLeave={handleSubtitleDragLeave}
@@ -768,8 +785,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           onItemDragStart={handleItemDragStart}
           onItemDragOver={handleItemDragOver}
           onItemDrop={handleItemDrop}
-          onDeleteVideoItem={deleteVideoItem}
-          onShowMergedPreview={() => setShowMergedPreview(true)}
+          onDeleteVideoItem={handleDeleteVideoItem}
         />
 
         <ProjectOperations
@@ -782,40 +798,14 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           handleGenerateVideo={handleGenerateVideo}
           videoGenProgress={videoGenProgress}
           videoGenLogs={videoGenLogs}
-          handleDownloadVideo={handleDownloadVideo}
           isGeneratingDraft={isGeneratingDraft}
           handleGenerateDraft={handleGenerateDraft}
           draftGenProgress={draftGenProgress}
           draftGenLogs={draftGenLogs}
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
-          showOutputPreview={showOutputPreview}
-          setShowOutputPreview={setShowOutputPreview}
         />
       </div>
-
-
-      {/* 成功提示 */}
-      {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
-          <CheckCircle className="h-5 w-5 mr-2" />
-          {successMessage}
-        </div>
-      )}
-
-      {/* 错误提示 */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {error}
-        </div>
-      )}
-      {draftErrorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {draftErrorMessage}
-        </div>
-      )}
 
       <ScriptEditor
         editedScript={editedScript}

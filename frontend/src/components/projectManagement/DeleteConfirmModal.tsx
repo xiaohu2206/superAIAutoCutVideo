@@ -1,7 +1,8 @@
 // 删除确认模态框组件
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
+import { notifyError } from "../../services/notification";
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -20,17 +21,24 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   onConfirm,
 }) => {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) setError(null);
+  }, [isOpen]);
 
   /**
    * 处理确认删除
    */
   const handleConfirm = async () => {
     setLoading(true);
+    setError(null);
     try {
       await onConfirm();
       onClose();
     } catch (err) {
-      console.error("删除项目失败:", err);
+      const msg = await notifyError("错误", err as any, "删除项目失败");
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -68,6 +76,11 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
           {/* 内容 */}
           <div className="p-6">
+            {error && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+                {error}
+              </div>
+            )}
             <p className="text-gray-700 mb-4">
               确定要删除项目{" "}
               <span className="font-semibold">"{projectName}"</span> 吗？

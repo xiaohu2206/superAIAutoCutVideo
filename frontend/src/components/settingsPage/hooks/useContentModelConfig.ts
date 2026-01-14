@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { contentModelService } from "../../../services/contentModelService";
-import { TauriCommands } from "../../../services/tauriService";
+import { message } from "../../../services/message";
 import type { ContentModelConfig, TestResult } from "../types";
 import {
-  getContentConfigIdByProvider,
-  getContentDefaultBaseUrl,
-  getContentDefaultDescription,
-  getContentDefaultModelName,
+    getContentConfigIdByProvider,
+    getContentDefaultBaseUrl,
+    getContentDefaultDescription,
+    getContentDefaultModelName,
 } from "../utils";
 
 /**
@@ -121,7 +121,7 @@ export const useContentModelConfig = () => {
       }
     } catch (error) {
       console.error("自动保存文案生成模型配置失败:", error);
-      await TauriCommands.showNotification("错误", "保存配置失败");
+      message.error("保存配置失败");
     }
   };
 
