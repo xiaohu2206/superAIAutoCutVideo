@@ -1,5 +1,7 @@
 // 项目编辑页面（二级页面）
 
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
   Loader
@@ -122,6 +124,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     overIndex: number
   ) => {
     e.preventDefault();
+    try {
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "move";
+      }
+    } catch { void 0; }
     e.stopPropagation();
     if (dragIndex === null || dragIndex === overIndex) return;
     setVideoOrder((prev) => {
@@ -188,6 +195,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [uploadingSubtitle, setUploadingSubtitle] = useState(false);
   const [subtitleUploadProgress, setSubtitleUploadProgress] = useState<number>(0);
   const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
+  const uploadingVideoRef = React.useRef(false);
+  React.useEffect(() => {
+    uploadingVideoRef.current = uploadingVideo;
+  }, [uploadingVideo]);
 
   /**
    * 处理视频文件选择
@@ -220,9 +231,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const handleVideoDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = "copy";
-    }
+    try {
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+      }
+    } catch { void 0; }
     setIsDraggingVideo(true);
   };
 
@@ -305,6 +318,92 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       setTimeout(() => setSubtitleUploadProgress(0), 800);
     }
   };
+
+  const handleTauriPathsUpload = React.useCallback(
+    async (paths: string[]) => {
+      if (!paths || paths.length === 0) return;
+      if (uploadingVideoRef.current) return;
+      const videoExts = [".mp4", ".mov", ".mkv", ".avi", ".flv", ".wmv", ".webm", ".m4v"];
+      const filtered = paths.filter((p) => {
+        const lower = p.toLowerCase();
+        return videoExts.some((ext) => lower.endsWith(ext));
+      });
+      if (filtered.length === 0) return;
+      setUploadingVideo(true);
+      setVideoUploadProgress(0);
+      try {
+        const files = await Promise.all(
+          filtered.map(async (p) => {
+            const url = convertFileSrc(p);
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`读取文件失败: ${p}`);
+            const blob = await res.blob();
+            const name = p.split(/[/\\]/).pop() || "file";
+            return new File([blob], name, { type: blob.type || "application/octet-stream" });
+          })
+        );
+        if (files.length > 0) {
+          await uploadVideos(files, (pr) => setVideoUploadProgress(pr));
+          showSuccess("视频文件上传成功！");
+        }
+      } catch (err) {
+        showError(err, "上传视频失败");
+      } finally {
+        setUploadingVideo(false);
+        setTimeout(() => setVideoUploadProgress(0), 800);
+      }
+    },
+    [showError, showSuccess, uploadVideos]
+  );
+
+  React.useEffect(() => {
+    const onGlobalDragOver = (ev: DragEvent) => {
+      ev.preventDefault();
+      try {
+        if (ev.dataTransfer) {
+          ev.dataTransfer.dropEffect = "copy";
+        }
+      } catch { void 0; }
+    };
+    const onGlobalDrop = (ev: DragEvent) => {
+      ev.preventDefault();
+    };
+    window.addEventListener("dragover", onGlobalDragOver);
+    window.addEventListener("drop", onGlobalDrop);
+
+    let unlistenDrop: (() => void) | undefined;
+    let unlistenHover: (() => void) | undefined;
+    let unlistenCancel: (() => void) | undefined;
+    const setup = async () => {
+      try {
+        unlistenHover = await listen<string[]>("tauri://file-drop-hovered", () => {
+          setIsDraggingVideo(true);
+        });
+        unlistenCancel = await listen<string[]>("tauri://file-drop-cancelled", () => {
+          setIsDraggingVideo(false);
+        });
+        unlistenDrop = await listen<string[]>("tauri://file-drop", async (event) => {
+          setIsDraggingVideo(false);
+          const paths = Array.isArray(event.payload) ? (event.payload as string[]) : [];
+          await handleTauriPathsUpload(paths);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    setup();
+    return () => {
+      window.removeEventListener("dragover", onGlobalDragOver);
+      window.removeEventListener("drop", onGlobalDrop);
+      try {
+        unlistenDrop?.();
+        unlistenHover?.();
+        unlistenCancel?.();
+      } catch (e) {
+        console.error(e);
+      }
+    };
+  }, [handleTauriPathsUpload]);
 
   
 

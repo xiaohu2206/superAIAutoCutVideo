@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { projectService } from "../services/projectService";
-import { apiClient, wsClient, type WebSocketMessage } from "../services/clients";
+import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
 import type {
   CreateProjectRequest,
   GenerateScriptRequest,
@@ -420,7 +420,7 @@ export const useProjectDetail = (
       return;
     }
     const url = projectService.getOutputVideoDownloadUrl(project.id);
-    window.open(url, "_blank");
+    TauriCommands.openExternalLink(url);
   }, [project]);
 
 

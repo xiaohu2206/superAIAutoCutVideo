@@ -107,8 +107,8 @@ class TtsEngineConfigManager:
                         secret_key=None,
                         region=None,
                         description='Edge TTS 默认配置（无需凭据）',
-                        enabled=False,
-                        active_voice_id=None,
+                        enabled=True,
+                        active_voice_id="zh-CN-YunxiNeural",
                         speed_ratio=1.0,
                         extra_params={}
                     )
@@ -165,8 +165,8 @@ class TtsEngineConfigManager:
                     secret_key=None,
                     region=None,
                     description='Edge TTS 默认配置（无需凭据）',
-                    enabled=False,
-                    active_voice_id=None,
+                    enabled=True,
+                    active_voice_id="zh-CN-YunxiNeural",
                     speed_ratio=1.0,
                     extra_params={}
                 )
