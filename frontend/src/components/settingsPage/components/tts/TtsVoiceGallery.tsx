@@ -1,6 +1,6 @@
 import { apiClient } from "@/services/clients";
 import { ttsService } from "@/services/ttsService";
-import { Headphones, PlayCircle, Volume2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Play, Pause, Check, Loader } from "lucide-react";
 import React from "react";
 import type { TtsTestResult, TtsVoice } from "../../types";
 import { LabeledGroup } from "./LabeledGroup";
@@ -17,9 +17,128 @@ interface Props {
   onSetActive: (voiceId: string) => Promise<void> | void;
 }
 
+const VoiceRow = React.memo(({ 
+  voice, 
+  isActive, 
+  isPlaying, 
+  isLoading,
+  isDisabled,
+  progress,
+  onPreview, 
+  onSelect, 
+  hasCredentials 
+}: {
+  voice: TtsVoice;
+  isActive: boolean;
+  isPlaying: boolean;
+  isLoading: boolean;
+  isDisabled: boolean;
+  progress?: number;
+  onPreview: (v: TtsVoice) => void;
+  onSelect: (id: string) => void;
+  hasCredentials: boolean;
+}) => {
+  return (
+    <div className={`
+      group flex items-center gap-3 px-4 h-[48px] border-b border-gray-100 last:border-0 transition-all cursor-default relative
+      ${isActive ? "bg-blue-50/60" : "hover:bg-gray-50"}
+    `}>
+      {/* Play Button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onPreview(voice);
+        }}
+        className={`
+          flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full transition-all
+          ${isPlaying 
+            ? "bg-blue-100 text-blue-600" 
+            : "bg-gray-100 text-gray-500 group-hover:bg-blue-600 group-hover:text-white group-hover:shadow-sm"}
+        `}
+        disabled={isDisabled}
+        title="点击试听"
+      >
+        {isLoading ? (
+          <Loader className="w-3.5 h-3.5 animate-spin" />
+        ) : isPlaying ? (
+          <Pause className="w-3.5 h-3.5 fill-current" />
+        ) : (
+          <Play className="w-3.5 h-3.5 ml-0.5 fill-current" />
+        )}
+      </button>
+
+      {/* Main Info */}
+      <div className="flex-1 min-w-0 flex items-center gap-3">
+        <span className={`text-sm font-medium truncate min-w-[80px] ${isActive ? "text-blue-700" : "text-gray-900"}`}>
+          {voice.name}
+        </span>
+        
+        {/* Tags */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {voice.gender && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">
+              {getGenderLabel(voice.gender)}
+            </span>
+          )}
+          {voice.voice_type_tag && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 hidden sm:inline-block">
+              {voice.voice_type_tag}
+            </span>
+          )}
+          {voice.voice_human_style && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100 hidden md:inline-block">
+              {voice.voice_human_style}
+            </span>
+          )}
+        </div>
+
+        {/* Description - truncate heavily */}
+        {voice.description && (
+          <span className="hidden lg:block text-xs text-gray-400 truncate max-w-[300px] ml-auto mr-4">
+            {voice.description}
+          </span>
+        )}
+      </div>
+
+      {/* Action */}
+      <div className="flex-shrink-0 ml-auto pl-2">
+        {isActive ? (
+           <div className="flex items-center gap-1.5 text-blue-600 bg-blue-100/50 px-2.5 py-1 rounded-full border border-blue-200/50">
+              <Check className="w-3.5 h-3.5" />
+              <span className="text-xs font-medium">使用中</span>
+           </div>
+        ) : (
+            <button
+                onClick={() => onSelect(voice.id)}
+                disabled={!hasCredentials}
+                className={`
+                    text-xs px-3 py-1.5 rounded-md border transition-all font-medium
+                    ${hasCredentials 
+                        ? "bg-white border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 hover:shadow-sm" 
+                        : "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed"}
+                `}
+            >
+                选择
+            </button>
+        )}
+      </div>
+      {isPlaying && typeof progress === "number" && (
+        <div className="absolute left-0 right-0 bottom-0 h-[2px] bg-blue-100">
+          <div
+            className="h-full bg-blue-500 transition-all"
+            style={{ width: `${Math.max(0, Math.min(100, (progress || 0) * 100))}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, configId, provider, hasCredentials, testResult, testDurationMs, onSetActive }) => {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
-  const playingVoiceIdRef = React.useRef<string | null>(null);
+  const [playingVoiceId, setPlayingVoiceId] = React.useState<string | null>(null);
+  const [previewLoadingVoiceId, setPreviewLoadingVoiceId] = React.useState<string | null>(null);
+  const [playProgress, setPlayProgress] = React.useState<number>(0);
   void testResult;
   void testDurationMs;
 
@@ -29,7 +148,8 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
       a.pause();
       a.currentTime = 0;
       audioRef.current = null;
-      playingVoiceIdRef.current = null;
+      setPlayingVoiceId(null);
+      setPlayProgress(0);
     }
   };
 
@@ -47,31 +167,59 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
     stopCurrent();
     const audio = new Audio(resolveUrl(url));
     audioRef.current = audio;
-    playingVoiceIdRef.current = voiceId;
+    setPlayingVoiceId(voiceId);
+    setPlayProgress(0);
+    audio.ontimeupdate = () => {
+      const d = audio.duration || 0;
+      const c = audio.currentTime || 0;
+      setPlayProgress(d > 0 ? c / d : 0);
+    };
     audio.onended = () => {
       audioRef.current = null;
-      playingVoiceIdRef.current = null;
+      setPlayingVoiceId(null);
+      setPlayProgress(0);
     };
     audio.play();
   };
 
   const handlePreview = async (voice: TtsVoice) => {
-    const current = audioRef.current;
-    if (playingVoiceIdRef.current === voice.id && current && !current.paused) {
+    if (playingVoiceId === voice.id) {
       stopCurrent();
       return;
     }
+    const busyVoiceId = previewLoadingVoiceId || playingVoiceId;
+    if (busyVoiceId && busyVoiceId !== voice.id) {
+      return;
+    }
     try {
-      // 仅保留中文试听文本（Edge TTS 固定使用中文）
-      const getDefaultPreviewText = (): string => {
-        return "您好，欢迎使用智能配音。";
+      const getDefaultPreviewText = (v: TtsVoice): string => {
+        const lang = (v.language || "").toLowerCase();
+        const code = (lang.split("-")[0] || "");
+        if (code === "zh") return "您好，欢迎使用智能配音。";
+        if (code === "en") return "Hello, welcome to smart voiceover.";
+        if (code === "ja") return "こんにちは、スマート音声合成へようこそ。";
+        if (code === "ko") return "안녕하세요, 스마트 보이스오버에 오신 것을 환영합니다.";
+        if (code === "es") return "Hola, bienvenido al doblaje inteligente.";
+        if (code === "fr") return "Bonjour, bienvenue sur la voix off intelligente.";
+        if (code === "de") return "Hallo, willkommen bei der intelligenten Sprachsynthese.";
+        if (code === "ru") return "Здравствуйте, добро пожаловать в интеллектуальное озвучивание.";
+        if (code === "it") return "Ciao, benvenuto nel doppiaggio intelligente.";
+        if (code === "pt") return "Olá, bem-vindo à locução inteligente.";
+        if (code === "hi") return "नमस्ते, स्मार्ट वॉयसओवर में आपका स्वागत है.";
+        if (code === "ar") return "مرحبًا، مرحبًا بك في التعليق الصوتي الذكي.";
+        if (code === "tr") return "Merhaba, akıllı seslendirmeye hoş geldiniz.";
+        if (code === "vi") return "Xin chào, chào mừng đến với thuyết minh thông minh.";
+        if (code === "th") return "สวัสดี ยินดีต้อนรับสู่เสียงพากย์อัจฉริยะ";
+        if (code === "id") return "Halo, selamat datang di sulih suara pintar.";
+        return "Hello, welcome to smart voiceover.";
       };
 
       if (hasCredentials && configId) {
+        setPreviewLoadingVoiceId(voice.id);
         const res = await ttsService.previewVoice(voice.id, {
           config_id: configId,
           provider,
-          text: getDefaultPreviewText(),
+          text: getDefaultPreviewText(voice),
         });
         const url = res?.data?.sample_wav_url || res?.data?.audio_url || voice.sample_wav_url;
         playUrl(url, voice.id);
@@ -85,6 +233,9 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
         playUrl(voice.sample_wav_url, voice.id);
       }
     }
+    finally {
+      setPreviewLoadingVoiceId((prev) => (prev === voice.id ? null : prev));
+    }
   };
 
   React.useEffect(() => {
@@ -93,19 +244,14 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
   
   // 仅展示中文音色（Edge TTS）
   const voicesForDisplay = React.useMemo(() => {
-    if (provider === "edge_tts") {
-      return voices.filter(v => {
-        const lang = (v.language || v.id || "").toLowerCase();
-        return lang.startsWith("zh");
-      });
-    }
     return voices;
   }, [voices, provider]);
 
   const grouped = React.useMemo(() => {
     const buckets: Record<string, TtsVoice[]> = {};
     voicesForDisplay.forEach(v => {
-      const key = v.voice_quality || "未标注";
+      const lang = (v.language || "").toLowerCase();
+      const key = lang.startsWith("zh") ? "中文" : lang.startsWith("en") ? "英文" : (v.language || "未标注语言");
       if (!buckets[key]) buckets[key] = [];
       buckets[key].push(v);
     });
@@ -113,105 +259,78 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
   }, [voicesForDisplay]);
 
   const groupNames = React.useMemo(() => {
-    return Object.keys(grouped).sort((a, b) => {
-      const na = parseInt(a, 10);
-      const nb = parseInt(b, 10);
-      if (!isNaN(na) && !isNaN(nb)) return nb - na;
+    const names = Object.keys(grouped);
+    const priority = (x: string) => (x === "中文" ? 0 : x === "英文" ? 1 : 2);
+    return names.sort((a, b) => {
+      const pa = priority(a);
+      const pb = priority(b);
+      if (pa !== pb) return pa - pb;
       return a.localeCompare(b);
     });
   }, [grouped]);
 
-  
+  const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({});
+  const toggleGroup = (name: string) => {
+    setOpenGroups(prev => {
+      const current = prev[name] ?? (name === "中文" || name === "英文");
+      return { ...prev, [name]: !current };
+    });
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {groupNames.map(groupName => (
-        <div key={groupName}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
-            <div className="flex items-center gap-3 flex-wrap min-w-0">
-              <h5 className="text-sm font-semibold text-gray-800">模型类型: {groupName}</h5>
-              <div className="min-w-0 max-w-full overflow-x-auto">
-                <LabeledGroup
-                  label="标签"
-                  items={Array.from(
-                    new Set((grouped[groupName] || []).map(v => v.voice_type_tag).filter(Boolean))
-                  ).map(tag => String(tag))}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-3 flex-shrink-0">
-              <span className="text-[10px] text-gray-500">共 {grouped[groupName].length} 个音色</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {grouped[groupName].map((v) => {
-              const isActive = v.id === activeVoiceId;
-              return (
-                <div key={v.id} className={`border rounded-md p-3 h-full flex flex-col overflow-hidden transition-shadow hover:shadow-sm ${isActive ? "border-blue-500" : "border-gray-200"}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Volume2 className="h-4 w-4 text-gray-700" />
-                      <span className="font-medium text-gray-900 text-sm truncate max-w-[160px]">{v.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {v.gender && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                          {getGenderLabel(v.gender)}
-                        </span>
-                      )}
-                      {isActive && (
-                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">当前已选</span>
-                      )}
-                    </div>
-                  </div>
-                  {v.description && (
-                    <p className="text-xs text-gray-600 mb-3 line-clamp-2 min-h-[32px] break-words">{v.description}</p>
-                  )}
-                  <div className="flex flex-wrap gap-1 mb-3 max-h-16 overflow-y-auto pr-1">
-                    {v.voice_type_tag && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 truncate max-w-[140px]">
-                        {v.voice_type_tag}
-                      </span>
-                    )}
-                    {Array.isArray(v.tags) && v.tags.length > 0 && v.tags.slice(1).map(tag => (
-                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 truncate max-w-[140px]">
-                        {tag}
-                      </span>
-                    ))}
-                    {v.voice_human_style && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-gray-50 text-gray-600 border border-gray-200 truncate max-w-[140px]">
-                        {v.voice_human_style}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-auto flex items-center gap-2 pt-2 border-t border-gray-100">
-                    <button
-                      className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700"
-                      onClick={() => handlePreview(v)}
-                      title="试听"
-                    >
-                      <PlayCircle className="h-4 w-4 mr-1" /> 试听
-                    </button>
-                    <button
-                      className="inline-flex items-center px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded-md text-white"
-                      onClick={() => onSetActive(v.id)}
-                      title="设为当前"
-                      disabled={!hasCredentials}
-                    >
-                      <Headphones className="h-4 w-4 mr-1" /> 设为当前
-                    </button>
-                    {!hasCredentials && (
-                      <span className="text-xs text-orange-600">请先填写凭据</span>
-                    )}
-                  </div>
+        <div key={groupName} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div
+            className="px-4 py-3 bg-gray-50/50 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => toggleGroup(groupName)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-wrap min-w-0">
+                <h5 className="text-sm font-semibold text-gray-800">语言: {groupName}</h5>
+                <div className="min-w-0 max-w-full overflow-x-auto">
+                  <LabeledGroup
+                    label="标签"
+                    items={Array.from(
+                      new Set((grouped[groupName] || []).map(v => v.voice_type_tag).filter(Boolean))
+                    ).map(tag => String(tag))}
+                  />
                 </div>
-              );
-            })}
+                <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                   {grouped[groupName].length}
+                </span>
+              </div>
+              {(openGroups[groupName] ?? (groupName === "中文" || groupName === "英文")) ? (
+                <ChevronUp className="h-4 w-4 text-gray-400" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              )}
+            </div>
           </div>
+          {(openGroups[groupName] ?? (groupName === "中文" || groupName === "英文")) && (
+            <div className="divide-y divide-gray-100">
+              {grouped[groupName].map((v) => (
+                <VoiceRow 
+                  key={v.id} 
+                  voice={v} 
+                  isActive={v.id === activeVoiceId} 
+                  isPlaying={playingVoiceId === v.id}
+                  isLoading={previewLoadingVoiceId === v.id}
+                  isDisabled={Boolean((previewLoadingVoiceId || playingVoiceId) && (v.id !== (previewLoadingVoiceId || playingVoiceId)))}
+                  progress={playingVoiceId === v.id ? playProgress : 0}
+                  onPreview={handlePreview}
+                  onSelect={onSetActive}
+                  hasCredentials={hasCredentials}
+                />
+              ))}
+            </div>
+          )}
         </div>
       ))}
       {voicesForDisplay.length === 0 && (
-        <div className="text-gray-500 text-sm">暂无音色，请选择引擎或检查网络。</div>
+        <div className="text-gray-500 text-sm text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+          暂无音色，请选择引擎或检查网络。
+        </div>
       )}
     </div>
   );

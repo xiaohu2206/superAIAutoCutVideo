@@ -238,13 +238,7 @@ class TtsEngineConfigManager:
         """获取指定提供商的音色列表"""
         provider = provider.lower()
         if provider in self._voices_cache:
-            cached = self._voices_cache[provider]
-            # 仅保留 Edge TTS 的中文音色
-            if provider == 'edge_tts':
-                filtered = [v for v in cached if isinstance(v.language, str) and v.language.lower().startswith('zh') or (isinstance(v.id, str) and v.id.lower().startswith('zh-'))]
-                self._voices_cache[provider] = filtered
-                return filtered
-            return cached
+            return self._voices_cache[provider]
 
         voices: List[TtsVoice] = []
         try:
@@ -358,8 +352,6 @@ class TtsEngineConfigManager:
                         },
                     ]
 
-                # 仅保留中文（zh-*）音色
-                raw_list = [it for it in raw_list if (str(it.get('language') or '')).lower().startswith('zh') or (str(it.get('id') or '')).lower().startswith('zh-')]
                 for item in raw_list:
                     voices.append(TtsVoice(
                         id=str(item.get('id') or ''),

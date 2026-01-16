@@ -277,7 +277,27 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     }
 
                 # 文本使用请求或默认（前端写死即可，这里保持回退）
-                text = req.text or "您好，欢迎使用智能配音。"
+                lang = (match.language if match else None) or ""
+                prefix = (lang.lower().split("-")[0] if isinstance(lang, str) else "")
+                default_map = {
+                    "zh": "您好，欢迎使用智能配音。",
+                    "en": "Hello, welcome to smart voiceover.",
+                    "ja": "こんにちは、スマート音声合成へようこそ。",
+                    "ko": "안녕하세요, 스마트 보이스오버에 오신 것을 환영합니다.",
+                    "es": "Hola, bienvenido al doblaje inteligente.",
+                    "fr": "Bonjour, bienvenue sur la voix off intelligente.",
+                    "de": "Hallo, willkommen bei der intelligenten Sprachsynthese.",
+                    "ru": "Здравствуйте, добро пожаловать в интеллектуальное озвучивание.",
+                    "it": "Ciao, benvenuto nel doppiaggio intelligente.",
+                    "pt": "Olá, bem-vindo à locução inteligente.",
+                    "hi": "नमस्ते, स्मार्ट वॉयसओवर में आपका स्वागत है.",
+                    "ar": "مرحبًا، مرحبًا بك في التعليق الصوتي الذكي.",
+                    "tr": "Merhaba, akıllı seslendirmeye hoş geldiniz.",
+                    "vi": "Xin chào, chào mừng đến với thuyết minh thông minh.",
+                    "th": "สวัสดี ยินดีต้อนรับสู่เสียงพากย์อัจฉริยะ",
+                    "id": "Halo, selamat datang di sulih suara pintar.",
+                }
+                text = req.text or default_map.get(prefix, "Hello, welcome to smart voiceover.")
                 cfg = tts_engine_config_manager.get_active_config()
                 speed_ratio = (cfg.speed_ratio if cfg else 1.0)
                 res = await edge_tts_service.synthesize(text=text, voice_id=vid, speed_ratio=speed_ratio, out_path=cache_path)

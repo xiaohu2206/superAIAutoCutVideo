@@ -173,6 +173,8 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
     setIsTemplateModalOpen(true);
   };
 
+  console.log("otherOfficialItems", otherOfficialItems)
+
   return (
     <div className="border-t border-gray-200 pt-4 space-y-3">
       <SubtitleUploader

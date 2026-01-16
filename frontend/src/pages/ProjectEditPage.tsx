@@ -50,6 +50,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   } = useProjectDetail(projectId);
 
   const [editedScript, setEditedScript] = useState<string>("");
+  const [hasInitializedScript, setHasInitializedScript] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
@@ -73,6 +74,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [showMergedPreview, setShowMergedPreview] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  const setEditedScriptSafe = (script: string) => {
+    setEditedScript(script);
+    setHasInitializedScript(true);
+  };
 
   const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
     if (err && typeof err === "object") {
@@ -438,9 +444,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
       if (script) {
         setEditedScript(JSON.stringify(script, null, 2));
+        setHasInitializedScript(true);
       } else if (project.script) {
         // 兜底：如果返回值为空，使用项目中的脚本
         setEditedScript(JSON.stringify(project.script, null, 2));
+        setHasInitializedScript(true);
       }
       showSuccess("解说脚本生成成功！");
     } catch (err) {
@@ -668,10 +676,11 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   // 同步项目脚本到编辑器
   React.useEffect(() => {
-    if (project?.script && !editedScript) {
+    if (project?.script && !hasInitializedScript) {
       setEditedScript(JSON.stringify(project.script, null, 2));
+      setHasInitializedScript(true);
     }
-  }, [project?.script, editedScript]);
+  }, [project?.script, hasInitializedScript]);
 
   if (loading && !project) {
     return (
@@ -809,7 +818,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
       <ScriptEditor
         editedScript={editedScript}
-        setEditedScript={setEditedScript}
+        setEditedScript={setEditedScriptSafe}
         isSaving={isSaving}
         handleSaveScript={handleSaveScript}
       />
