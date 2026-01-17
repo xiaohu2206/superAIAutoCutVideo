@@ -52,10 +52,8 @@ class ProjectsStore:
     """基于JSON文件的项目存储管理器"""
 
     def __init__(self, db_path: Optional[Path] = None):
-        backend_dir = Path(__file__).resolve().parents[1]
-        data_dir = backend_dir / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-
+        from .app_paths import user_data_dir
+        data_dir = user_data_dir()
         self.db_path = db_path or (data_dir / "projects.json")
         self._lock = RLock()
         self._projects: Dict[str, Project] = {}

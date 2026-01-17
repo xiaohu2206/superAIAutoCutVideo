@@ -87,7 +87,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
       {/* 模态框内容 */}
       <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full">
           {/* 头部 */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
             <div className="flex items-center space-x-3">
@@ -129,11 +129,41 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="作为提示词，影视名称"
+                placeholder="必须填影视名称"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                 disabled={loading}
                 required
               />
+            </div>
+
+             {/* 推理模式 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                推理模式 <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 快速推理 - 选中状态 */}
+                <div className="relative p-4 border-2 border-green-500 bg-green-50 rounded-lg cursor-pointer transition-all">
+                  <div className="absolute top-3 right-3 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
+                  <h4 className="text-lg font-bold text-green-700 mb-2">字幕推理</h4>
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-500">适用：适用于普通话视频</p>
+                  </div>
+                </div>
+
+                {/* 深度推理 - 禁用状态 */}
+                <div className="relative p-4 border border-gray-200 bg-gray-50 rounded-lg opacity-60 cursor-not-allowed">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-lg font-bold text-gray-400">视觉推理</h4>
+                    <div className="flex flex-col items-end space-y-1">
+                      <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[10px] font-medium rounded border border-gray-300">未开始</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-400">适用：适用所有类型的视频</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* 项目描述 */}
@@ -149,7 +179,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="请输入项目描述（可选）"
-                rows={3}
+                rows={2}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none"
                 disabled={loading}
               />

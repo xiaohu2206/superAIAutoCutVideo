@@ -423,6 +423,7 @@ class GenerateScriptService:
         segments: List[Dict[str, Any]] = []
         subtitle_text: str = ""
         sub_abs: Optional[Path] = None
+        created_tmp: List[Path] = []
 
         if p.subtitle_path:
             cand = _resolve_path(p.subtitle_path)
@@ -562,13 +563,15 @@ class GenerateScriptService:
                     }))
                 except Exception:
                     pass
-                web_audio_path = _to_web_path(audio_out)
-                projects_store.update_project(project_id, {"audio_path": web_audio_path})
                 try:
-                    logger.info(f"audio ready project_id={project_id} audio_abs={audio_out} web_path={web_audio_path}")
+                    logger.info(f"audio ready project_id={project_id} audio_abs={audio_out}")
                 except Exception:
                     pass
                 audio_abs = audio_out
+                try:
+                    created_tmp.append(audio_out)
+                except Exception:
+                    pass
 
             asr = BcutASR(str(audio_abs))
             try:
@@ -618,12 +621,10 @@ class GenerateScriptService:
             srt_text = _compress_srt(srt_text)
             srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts}.srt"
             srt_out.write_text(srt_text, encoding="utf-8")
-            web_path = _to_web_path(srt_out)
-            projects_store.update_project(project_id, {"subtitle_path": web_path})
             sub_abs = srt_out
             logging.info(f"asr识别结果保存到 {srt_out}")
             try:
-                logger.info(f"subtitle saved project_id={project_id} subtitle_abs={srt_out} web_path={web_path}")
+                logger.info(f"subtitle saved project_id={project_id} subtitle_abs={srt_out}")
             except Exception:
                 pass
             try:
@@ -636,6 +637,10 @@ class GenerateScriptService:
                     "progress": 60,
                     "timestamp": _now_ts(),
                 }))
+            except Exception:
+                pass
+            try:
+                created_tmp.append(srt_out)
             except Exception:
                 pass
 
@@ -823,6 +828,16 @@ class GenerateScriptService:
             except Exception:
                 pass
             raise HTTPException(status_code=500, detail=f"脚本生成失败: {str(e)}")
+        finally:
+            try:
+                for f in created_tmp:
+                    try:
+                        if isinstance(f, Path) and f.exists():
+                            f.unlink()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
 
 generate_script_service = GenerateScriptService()

@@ -55,10 +55,8 @@ class TtsEngineConfigManager:
 
     def __init__(self, config_file: Optional[str] = None):
         if config_file is None:
-            backend_dir = Path(__file__).parent.parent.parent
-            config_dir = backend_dir / "config"
-            config_dir.mkdir(exist_ok=True)
-            config_file = config_dir / "tts_config.json"
+            from ..app_paths import user_config_dir
+            config_file = user_config_dir() / "tts_config.json"
 
         self.config_file = Path(config_file)
         self.configs: Dict[str, TtsEngineConfig] = {}

@@ -52,6 +52,7 @@ from routes.jianying_config_routes import router as jianying_router
 from routes.storage_routes import router as settings_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
+from modules.app_paths import ensure_defaults_migrated
 
 # 配置日志
 logging.basicConfig(
@@ -175,6 +176,7 @@ def get_app_paths():
 
 service_data_dir, uploads_dir = get_app_paths()
 os.environ["SACV_UPLOADS_DIR"] = str(uploads_dir)
+ensure_defaults_migrated()
 
 # 确保目录存在
 if not service_data_dir.exists():

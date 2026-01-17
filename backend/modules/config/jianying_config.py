@@ -18,10 +18,8 @@ class JianyingPathConfig(BaseModel):
 class JianyingConfigManager:
     def __init__(self, config_file: Optional[str] = None):
         if config_file is None:
-            backend_dir = Path(__file__).parent.parent.parent
-            cfg_dir = backend_dir / "config"
-            cfg_dir.mkdir(parents=True, exist_ok=True)
-            config_file = cfg_dir / "jianying_config.json"
+            from ..app_paths import user_config_dir
+            config_file = user_config_dir() / "jianying_config.json"
         self.config_file = Path(config_file)
         self.config = JianyingPathConfig()
         self.load()
@@ -96,6 +94,7 @@ class JianyingConfigManager:
             items.append(app_support / brand / "userdata" / "projects" / "com.lveditor.draft")
         items.append(home / "Movies" / "CapCut Projects" / "com.lveditor.draft")
         items.append(home / "Movies" / "CapCut" / "com.lveditor.draft")
+        items.append(home / "Movies" / "JianyingPro" / "User Data" / "Projects" / "com.lveditor.draft")
         items.append(home / "Documents" / "CapCut" / "com.lveditor.draft")
         items.append(home / "Documents" / "JianyingPro" / "com.lveditor.draft")
         return items

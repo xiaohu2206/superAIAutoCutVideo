@@ -736,7 +736,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
             高级配置
           </button>
         </div>
-
+        <p className="text-xs text-gray-500 mb-2">
+          自动解析字幕只支持中文语言
+        </p>
         {/* 解说类型（Figma 风格选择框）*/}
         {/* <div>
           <label

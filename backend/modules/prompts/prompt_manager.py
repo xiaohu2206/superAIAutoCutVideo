@@ -75,10 +75,9 @@ class PromptManager:
         self._category_index: Dict[str, List[str]] = {}
         self._default_by_category: Dict[str, str] = {}
 
-        # 配置文件路径（可选）
         if config_file is None:
-            backend_dir = Path(__file__).parent.parent.parent
-            config_file = backend_dir / "config" / "prompts.json"
+            from ..app_paths import user_config_dir
+            config_file = user_config_dir() / "prompts.json"
         self._config_file = Path(config_file)
 
         # 加载模板 + 自动发现模块 + 加载用户模板
@@ -312,8 +311,8 @@ class PromptManager:
             logger.error(f"读取提示词配置失败: {self._config_file}, error={e}")
 
     def _load_user_templates(self) -> None:
-        backend_dir = Path(__file__).parent.parent.parent
-        store_path = backend_dir / "data" / "user_prompts.json"
+        from ..app_paths import user_data_dir
+        store_path = user_data_dir() / "user_prompts.json"
         if not store_path.exists():
             return
         try:

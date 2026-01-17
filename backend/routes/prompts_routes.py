@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from modules.prompts.prompt_manager import prompt_manager, PromptTemplate
 from modules.projects_store import projects_store
+from modules.app_paths import user_data_dir
 
 router = APIRouter(prefix="/api/prompts", tags=["提示词"])
 
@@ -37,13 +38,8 @@ class RenderPreviewRequest(BaseModel):
     variables: Optional[Dict[str, Any]] = None
 
 
-def _backend_dir() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
 def _store_path() -> Path:
-    d = _backend_dir() / "data"
-    d.mkdir(parents=True, exist_ok=True)
+    d = user_data_dir()
     return d / "user_prompts.json"
 
 
@@ -209,4 +205,3 @@ async def get_project_prompt_selection(project_id: str):
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
     return {"data": p.prompt_selection or {}}
-

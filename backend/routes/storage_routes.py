@@ -5,29 +5,18 @@ import os
 import json
 import shutil
 import sys
+from modules.app_paths import data_base_dir, app_settings_file, uploads_dir
 
 router = APIRouter(prefix="/api/settings", tags=["设置"])
 
 def _data_base_dir() -> Path:
-    if os.name == "nt":
-        return Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "SuperAutoCutVideo"
-    elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "SuperAutoCutVideo"
-    else:
-        return Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "SuperAutoCutVideo"
+    return data_base_dir()
 
 def _settings_file() -> Path:
-    base = _data_base_dir()
-    cfg = base / "config"
-    cfg.mkdir(parents=True, exist_ok=True)
-    return cfg / "app_settings.json"
+    return app_settings_file()
 
 def _current_uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    if env:
-        return Path(env)
-    base = _data_base_dir()
-    return base / "uploads"
+    return uploads_dir()
 
 class StorageUpdateRequest(BaseModel):
     uploads_root: str
