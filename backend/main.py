@@ -267,10 +267,13 @@ async def get_server_info():
     return {
         "message": "服务器信息",
         "data": {
+            "identifier": "super-auto-cut-video-backend",
+            "version": getattr(app, "version", "unknown"),
             "host": current_server_config["host"],
             "port": current_server_config["port"],
             "started_at": current_server_config["started_at"],
-            "status": "running"
+            "status": "running",
+            "boot_token": os.environ.get("SACV_BOOT_TOKEN", "")
         },
         "timestamp": datetime.now().isoformat()
     }

@@ -7,12 +7,14 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8000;
 const API_BASE_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const WS_BASE_URL = `ws://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+export const EXPECTED_BACKEND_IDENTIFIER = "super-auto-cut-video-backend";
 
 // 类型定义
 export interface BackendStatus {
   running: boolean;
   port: number;
   pid?: number;
+  boot_token?: string;
 }
 
 export interface ApiResponse<T = any> {
@@ -22,10 +24,13 @@ export interface ApiResponse<T = any> {
 }
 
 export interface ServerInfoData {
+  identifier: string;
+  version: string;
   host: string;
   port: number;
-  started_at: string;
+  started_at: string | null;
   status: string;
+  boot_token?: string;
 }
 
 export interface TaskStatus {
@@ -170,6 +175,10 @@ export class ApiClient {
   // 获取服务状态
   async getStatus(): Promise<any> {
     return this.get("/api/status");
+  }
+
+  async getServerInfo(): Promise<ApiResponse<ServerInfoData>> {
+    return this.get<ApiResponse<ServerInfoData>>("/api/server/info");
   }
 
   // 获取视频信息
@@ -461,29 +470,17 @@ export class TauriCommands {
   }
   // 启动后端
   static async startBackend(): Promise<BackendStatus> {
-    try {
-      return await TauriCommands.coreInvoke<BackendStatus>("start_backend");
-    } catch {
-      return { running: false, port: DEFAULT_PORT };
-    }
+    return TauriCommands.coreInvoke<BackendStatus>("start_backend");
   }
 
   // 停止后端
   static async stopBackend(): Promise<boolean> {
-    try {
-      return await TauriCommands.coreInvoke<boolean>("stop_backend");
-    } catch {
-      return false;
-    }
+    return TauriCommands.coreInvoke<boolean>("stop_backend");
   }
 
   // 获取后端状态
   static async getBackendStatus(): Promise<BackendStatus> {
-    try {
-      return await TauriCommands.coreInvoke<BackendStatus>("get_backend_status");
-    } catch {
-      return { running: false, port: DEFAULT_PORT };
-    }
+    return TauriCommands.coreInvoke<BackendStatus>("get_backend_status");
   }
 
   // 选择视频文件
@@ -557,6 +554,59 @@ export function configureBackend(port: number, host: string = DEFAULT_HOST) {
   wsClient.setUrl(wsBase);
 }
 
+export async function fetchServerInfo(
+  baseUrl: string,
+  timeoutMs: number = 900
+): Promise<ServerInfoData> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${baseUrl}/api/server/info`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    }
+    const json = (await resp.json()) as ApiResponse<ServerInfoData>;
+    if (!json?.data) {
+      throw new Error("server/info 响应缺少 data");
+    }
+    return json.data;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export function assertBackendIdentity(
+  info: ServerInfoData,
+  options: { expectedBootToken?: string | null; requireBootToken: boolean }
+) {
+  if (info?.identifier !== EXPECTED_BACKEND_IDENTIFIER) {
+    throw new Error("后端身份校验失败：identifier 不匹配");
+  }
+  if (options.requireBootToken) {
+    const expected = (options.expectedBootToken || "").trim();
+    const actual = String(info?.boot_token || "").trim();
+    if (!expected || !actual || expected !== actual) {
+      throw new Error("后端身份校验失败：boot_token 不匹配");
+    }
+  }
+}
+
+export async function handshakeVerifyBackend(
+  baseUrl: string,
+  options: { expectedBootToken?: string | null; requireBootToken: boolean; timeoutMs?: number }
+): Promise<ServerInfoData> {
+  const info = await fetchServerInfo(baseUrl, options.timeoutMs);
+  assertBackendIdentity(info, {
+    expectedBootToken: options.expectedBootToken,
+    requireBootToken: options.requireBootToken,
+  });
+  return info;
+}
+
 // 工具函数
 export const utils = {
   // 格式化文件大小
@@ -616,21 +666,16 @@ export const utils = {
   ): Promise<{ port: number; host: string } | null> {
     for (let i = 0; i < maxAttempts; i++) {
       const port = startPort + i;
-      const testUrl = `http://${host}:${port}/api/server/info`;
+      const baseUrl = `http://${host}:${port}`;
 
       try {
-        const response = await fetch(testUrl, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(800), // 缩短到800毫秒超时
+        const info = await handshakeVerifyBackend(baseUrl, {
+          requireBootToken: false,
+          timeoutMs: 800,
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.data && data.data.port) {
-            console.log(`发现后端服务运行在 ${host}:${port}`);
-            return { port: data.data.port, host };
-          }
+        if (info?.port) {
+          console.log(`发现后端服务运行在 ${host}:${info.port}`);
+          return { port: info.port, host };
         }
       } catch (error) {
         // 忽略连接错误，继续尝试下一个端口

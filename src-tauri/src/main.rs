@@ -9,15 +9,20 @@
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::net::TcpListener;
 
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+#[cfg(target_os = "windows")]
 use zip::ZipArchive;
+#[cfg(target_os = "windows")]
 use std::io::{Read, Write};
 
 // Windows: 隐藏子进程窗口（CREATE_NO_WINDOW）
@@ -26,12 +31,39 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+fn apply_windows_no_window(cmd: Command) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = cmd;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        return cmd;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        cmd
+    }
+}
+
 // 应用状态结构
-#[derive(Default)]
 struct AppState {
     backend_process: Arc<Mutex<Option<Child>>>,
     backend_port: Arc<Mutex<u16>>,
+    backend_starting: Arc<AtomicBool>,
+    backend_boot_token: Arc<Mutex<Option<String>>>,
 }
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            backend_process: Arc::new(Mutex::new(None)),
+            backend_port: Arc::new(Mutex::new(0)),
+            backend_starting: Arc::new(AtomicBool::new(false)),
+            backend_boot_token: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+const BACKEND_IDENTIFIER: &str = "super-auto-cut-video-backend";
 
 // 后端状态响应
 #[derive(Serialize, Deserialize, Debug)
@@ -40,6 +72,7 @@ struct BackendStatus {
     running: bool,
     port: u16,
     pid: Option<u32>,
+    boot_token: Option<String>,
 }
 
 // 文件选择结果
@@ -72,7 +105,17 @@ async fn wait_for_backend_ready(host: &str, port: u16, total_wait_secs: u64) -> 
     false
 }
 
-async fn discover_existing_backend_port(host: &str) -> Option<u16> {
+fn generate_boot_token() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
+async fn discover_existing_backend(host: &str, require_token: bool) -> Option<(u16, Option<String>)> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(600))
         .build()
@@ -80,12 +123,43 @@ async fn discover_existing_backend_port(host: &str) -> Option<u16> {
     let ranges: &[(u16, u16)] = &[(8000, 8101), (18000, 18101)];
     for (start, end) in ranges {
         for p in *start..*end {
-            let url = format!("http://{}:{}/api/hello", host, p);
-            if let Ok(resp) = client.get(&url).send().await {
-                if resp.status().is_success() {
-                    return Some(p);
-                }
+            let url = format!("http://{}:{}/api/server/info", host, p);
+            let resp = match client.get(&url).send().await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            if !resp.status().is_success() {
+                continue;
             }
+            let v: serde_json::Value = match resp.json().await {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let data = match v.get("data") {
+                Some(d) => d,
+                None => continue,
+            };
+            let identifier = match data.get("identifier").and_then(|s| s.as_str()) {
+                Some(s) => s,
+                None => continue,
+            };
+            if identifier != BACKEND_IDENTIFIER {
+                continue;
+            }
+            let reported_port = data
+                .get("port")
+                .and_then(|n| n.as_u64())
+                .and_then(|n| u16::try_from(n).ok())
+                .unwrap_or(p);
+            let boot_token = data
+                .get("boot_token")
+                .and_then(|t| t.as_str())
+                .map(|t| t.to_string())
+                .filter(|t| !t.is_empty());
+            if require_token && boot_token.is_none() {
+                continue;
+            }
+            return Some((reported_port, boot_token));
         }
     }
     None
@@ -202,22 +276,40 @@ fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).map(|_l| ()).is_ok()
 }
 
-fn choose_available_port(preferred: u16) -> u16 {
-    if is_port_available(preferred) {
-        return preferred;
-    }
-    for p in preferred..=preferred + 100 {
-        if is_port_available(p) {
-            return p;
+fn choose_backend_port(is_dev_mode: bool) -> u16 {
+    if is_dev_mode {
+        let preferred = 8000;
+        if is_port_available(preferred) {
+            return preferred;
         }
-    }
-    for p in 18000..=18100 {
-        if is_port_available(p) {
-            return p;
+        for p in preferred..=preferred + 100 {
+            if is_port_available(p) {
+                return p;
+            }
         }
+        for p in 18000..=18100 {
+            if is_port_available(p) {
+                return p;
+            }
+        }
+        preferred
+    } else {
+        for p in 18000..=18100 {
+            if is_port_available(p) {
+                return p;
+            }
+        }
+        for p in 8000..=8100 {
+            if is_port_available(p) {
+                return p;
+            }
+        }
+        TcpListener::bind(("127.0.0.1", 0))
+            .ok()
+            .and_then(|l| l.local_addr().ok())
+            .map(|a| a.port())
+            .unwrap_or(18000)
     }
-    // 兜底返回首选端口（可能被占用，后续就绪检测会失败并反馈日志）
-    preferred
 }
 
 
@@ -239,10 +331,17 @@ async fn start_backend(
                 Ok(None) => {
                     // 进程仍在运行
                     let port = *state.backend_port.lock().unwrap();
+                    let boot_token = state.backend_boot_token.lock().unwrap().clone();
+                    println!(
+                        "[backend] 已在运行：http://127.0.0.1:{} (pid={})",
+                        port,
+                        child.id()
+                    );
                     return Ok(BackendStatus {
                         running: true,
                         port,
                         pid: Some(child.id()),
+                        boot_token,
                     });
                 }
                 Err(_) => {
@@ -256,12 +355,29 @@ async fn start_backend(
     let host = "127.0.0.1";
     let is_dev_mode = cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     if is_dev_mode {
-        if let Some(p) = discover_existing_backend_port(host).await {
+        if let Some((p, boot_token)) = discover_existing_backend(host, false).await {
             *state.backend_port.lock().unwrap() = p;
+            *state.backend_boot_token.lock().unwrap() = boot_token.clone();
+            println!("[backend] 已发现运行中的后端：http://{}:{}", host, p);
             return Ok(BackendStatus {
                 running: true,
                 port: p,
                 pid: None,
+                boot_token,
+            });
+        }
+    }
+    // 生产环境也尝试发现已运行的后端，避免重复启动
+    if !is_dev_mode {
+        if let Some((p, boot_token)) = discover_existing_backend(host, true).await {
+            *state.backend_port.lock().unwrap() = p;
+            *state.backend_boot_token.lock().unwrap() = boot_token.clone();
+            println!("[backend] 已发现运行中的后端：http://{}:{}", host, p);
+            return Ok(BackendStatus {
+                running: true,
+                port: p,
+                pid: None,
+                boot_token,
             });
         }
     }
@@ -318,10 +434,7 @@ async fn start_backend(
     let mut cmd = if !prefer_python_backend && backend_executable.exists() {
         // 使用打包的可执行文件
         println!("使用打包的后端可执行文件: {:?}", backend_executable);
-        let mut c = Command::new(backend_executable);
-        #[cfg(target_os = "windows")]
-        { c.creation_flags(CREATE_NO_WINDOW); }
-        c
+        apply_windows_no_window(Command::new(backend_executable))
     } else {
         // 未发现打包的后端
         // 生产环境严格要求存在打包后端；开发环境允许回退到 Python
@@ -393,14 +506,34 @@ async fn start_backend(
         }
     };
 
+    // 并发启动防护：若已有启动流程进行中，则不再重复启动
+    if state.backend_starting.swap(true, Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let port = *state.backend_port.lock().unwrap();
+        let boot_token = state.backend_boot_token.lock().unwrap().clone();
+        if port != 0 {
+            println!("[backend] 启动中（复用已有启动流程）：http://{}:{}", host, port);
+        }
+        return Ok(BackendStatus {
+            running: port != 0,
+            port,
+            pid: None,
+            boot_token,
+        });
+    }
+
     // 设置环境变量
-    let port: u16 = choose_available_port(8000);
+    let port: u16 = choose_backend_port(is_dev_mode);
+    let boot_token = generate_boot_token();
     let orig_path = std::env::var("PATH").unwrap_or_default();
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
     let new_path = format!("{}{}{}", resource_dir.to_string_lossy(), sep, orig_path);
+    *state.backend_port.lock().unwrap() = port;
+    *state.backend_boot_token.lock().unwrap() = Some(boot_token.clone());
     cmd.env("HOST", host)
         .env("PORT", port.to_string())
         .env("PATH", new_path)
+        .env("SACV_BOOT_TOKEN", boot_token.clone())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -408,6 +541,12 @@ async fn start_backend(
     // 启动进程
     match cmd.spawn() {
         Ok(mut child) => {
+            println!(
+                "[backend] 已启动进程，等待就绪：http://{}:{} (pid={})",
+                host,
+                port,
+                child.id()
+            );
             // 捕获日志到临时文件
             let log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
             let _ = std::fs::OpenOptions::new()
@@ -439,10 +578,11 @@ async fn start_backend(
                 let mut process_guard = state.backend_process.lock().unwrap();
                 *process_guard = Some(child);
             }
-            *state.backend_port.lock().unwrap() = port;
+            state.backend_starting.store(false, Ordering::SeqCst);
 
             // 等待后端就绪（最多 60 秒，避免首次解压或冷启动偏慢）
             if wait_for_backend_ready(host, port, 60).await {
+                println!("[backend] 已就绪：http://{}:{}", host, port);
                 let _ = tauri_plugin_notification::NotificationExt::notification(&app_handle)
                     .builder()
                     .title("AI智能视频剪辑")
@@ -453,23 +593,29 @@ async fn start_backend(
                     running: true,
                     port,
                     pid: Some(pid),
+                    boot_token: Some(boot_token),
                 })
             } else {
                 // 超时未就绪，尝试从日志解析实际监听端口
                 if let Some(found_port) = parse_backend_port_from_log() {
                     *state.backend_port.lock().unwrap() = found_port;
+                    println!("[backend] 从日志解析到监听端口：http://{}:{}", host, found_port);
                     Ok(BackendStatus {
                         running: true,
                         port: found_port,
                         pid: Some(pid),
+                        boot_token: state.backend_boot_token.lock().unwrap().clone(),
                     })
                 } else {
-                    if let Some(found_port) = discover_existing_backend_port(host).await {
+                    if let Some((found_port, found_token)) = discover_existing_backend(host, !is_dev_mode).await {
                         *state.backend_port.lock().unwrap() = found_port;
+                        *state.backend_boot_token.lock().unwrap() = found_token.clone();
+                        println!("[backend] 已发现运行中的后端：http://{}:{}", host, found_port);
                         Ok(BackendStatus {
                             running: true,
                             port: found_port,
                             pid: Some(pid),
+                            boot_token: found_token,
                         })
                     } else {
                         // 未发现已就绪端口，保留已启动的进程，返回错误以提示检查日志，但不杀进程
@@ -478,7 +624,12 @@ async fn start_backend(
                 }
             }
         }
-        Err(e) => Err(format!("启动后端失败: {}", e)),
+        Err(e) => {
+            state.backend_starting.store(false, Ordering::SeqCst);
+            *state.backend_port.lock().unwrap() = 0;
+            *state.backend_boot_token.lock().unwrap() = None;
+            Err(format!("启动后端失败: {}", e))
+        },
     }
 }
 
@@ -488,9 +639,13 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
     let mut process_guard = state.backend_process.lock().unwrap();
     
     if let Some(mut child) = process_guard.take() {
+        let pid = child.id();
         match child.kill() {
             Ok(_) => {
                 let _ = child.wait(); // 等待进程完全退出
+                *state.backend_port.lock().unwrap() = 0;
+                *state.backend_boot_token.lock().unwrap() = None;
+                println!("[backend] 已停止 (pid={})", pid);
                 Ok(true)
             }
             Err(e) => Err(format!("停止后端失败: {}", e)),
@@ -514,6 +669,7 @@ async fn get_backend_status(state: State<'_, AppState>) -> Result<BackendStatus,
                     running: false,
                     port: 0,
                     pid: None,
+                    boot_token: None,
                 })
             }
             Ok(None) => {
@@ -523,6 +679,7 @@ async fn get_backend_status(state: State<'_, AppState>) -> Result<BackendStatus,
                     running: true,
                     port,
                     pid: Some(child.id()),
+                    boot_token: state.backend_boot_token.lock().unwrap().clone(),
                 })
             }
             Err(e) => Err(format!("检查进程状态失败: {}", e)),
@@ -532,6 +689,7 @@ async fn get_backend_status(state: State<'_, AppState>) -> Result<BackendStatus,
             running: false,
             port: 0,
             pid: None,
+            boot_token: None,
         })
     }
 }
@@ -615,8 +773,6 @@ async fn open_external_link(app: AppHandle, url: String) -> Result<(), String> {
 
 // 应用启动时的初始化
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let app_handle = app.handle();
-
     // 若未由配置自动创建窗口，则显式创建主窗口
     if app.get_webview_window("main").is_none() {
         tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
@@ -627,23 +783,24 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             .build()?;
     }
 
-    // 在后台线程中自动启动后端
-    let app_handle_clone = app_handle.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(1)); // 等待应用完全启动
-
-        let state = app_handle_clone.state::<AppState>();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-
-        match rt.block_on(start_backend(state, app_handle_clone.clone())) {
-            Ok(status) => {
-                println!("后端自动启动成功: {:?}", status);
+    let is_dev_mode =
+        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    if is_dev_mode {
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app_handle.state::<AppState>();
+            match start_backend(state, app_handle.clone()).await {
+                Ok(status) => {
+                    if status.running && status.port != 0 {
+                        println!("[backend] 自动启动完成：http://127.0.0.1:{}", status.port);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[backend] 自动启动失败: {}", e);
+                }
             }
-            Err(e) => {
-                eprintln!("后端自动启动失败: {}", e);
-            }
-        }
-    });
+        });
+    }
 
     Ok(())
 }

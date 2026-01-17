@@ -11,13 +11,16 @@ import {
   apiClient,
   autoConfigureBackend,
   configureBackend,
+  handshakeVerifyBackend,
   wsClient,
 } from "./services/clients";
+import { message } from "./services/message";
 
 interface BackendStatus {
   running: boolean;
   port: number;
   pid?: number;
+  boot_token?: string;
 }
 
 const App: React.FC = () => {
@@ -33,6 +36,8 @@ const App: React.FC = () => {
   });
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [initPhase, setInitPhase] = useState("初始化");
+  const [initError, setInitError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
@@ -73,8 +78,11 @@ const App: React.FC = () => {
   const initializeApp = async () => {
     try {
       setIsLoading(true);
+      setInitError(null);
+      setInitPhase("检查后端服务");
 
       const status = await checkBackendStatus();
+      setInitPhase("检查 API 连接");
       await testApiConnection();
 
       if (status && status.running) {
@@ -92,7 +100,10 @@ const App: React.FC = () => {
         console.log("后端未运行，跳过WebSocket连接");
       }
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error || "初始化失败");
       console.error("初始化应用失败:", error);
+      setInitError(errMsg);
+      message.error(`${errMsg}（可查看临时日志 super_auto_cut_backend.log）`, 5);
     } finally {
       setIsLoading(false);
     }
@@ -118,41 +129,53 @@ const App: React.FC = () => {
         setConnectionStatus((prev) => ({ ...prev, websocket: false }));
       }
     } catch (e) {
-      setConnectionStatus((prev) => ({ ...prev, websocket: false }));
+      setConnectionStatus((prev) => ({ ...prev, backend: false, api: false, websocket: false }));
     }
   };
 
   const checkBackendStatus = async (): Promise<BackendStatus | null> => {
     try {
       let status: BackendStatus;
+      const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
+      const requireBootToken = isTauri && import.meta.env.PROD;
+
+      const ensureHandshake = async (s: BackendStatus) => {
+        if (!s?.port) return;
+        configureBackend(s.port);
+        await handshakeVerifyBackend(apiClient.getBaseUrl(), {
+          expectedBootToken: s.boot_token ?? null,
+          requireBootToken,
+          timeoutMs: 1200,
+        });
+      };
       // 检查是否在Tauri环境中
-      if (typeof (window as any).__TAURI_IPC__ === "function") {
+      if (isTauri) {
         status = await TauriCommands.getBackendStatus();
-        // 根据返回端口动态配置 API 与 WS 端点
-        if (status?.port) {
-          configureBackend(status.port);
+        if (status?.running && status.port) {
+          await ensureHandshake(status);
         }
-        // 若 Tauri 管理的后端未运行（例如你手动单独启动了后端），尝试自动发现外部后端端口
         if (!status?.running) {
-          const discoveredOk = await autoConfigureBackend();
-          if (discoveredOk) {
-            // 读取服务端口信息，更新状态
-            try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 1000);
-              const serverInfo = await fetch(
-                `${apiClient.getBaseUrl()}/api/server/info`,
-                {
-                  method: "GET",
-                  headers: { "Content-Type": "application/json" },
-                  signal: controller.signal,
-                }
-              ).then((res) => res.json());
-              clearTimeout(timeoutId);
-              const port = serverInfo?.data?.port ?? 8000;
-              status = { running: true, port };
-            } catch {
-              status = { running: true, port: 8000 };
+          try {
+            const started = await TauriCommands.startBackend();
+            if (!started?.running || !started.port) {
+              throw new Error("后端未能启动");
+            }
+            status = started;
+            await ensureHandshake(status);
+          } catch (e) {
+            if (import.meta.env.DEV) {
+              const discoveredOk = await autoConfigureBackend();
+              if (discoveredOk) {
+                const info = await handshakeVerifyBackend(apiClient.getBaseUrl(), {
+                  requireBootToken: false,
+                  timeoutMs: 1200,
+                });
+                status = { running: true, port: info.port };
+              } else {
+                throw e;
+              }
+            } else {
+              throw e;
             }
           }
         }
@@ -161,31 +184,11 @@ const App: React.FC = () => {
         console.log("浏览器环境，尝试自动发现后端端口...");
         const discovered = await autoConfigureBackend();
         if (discovered) {
-          // 获取实际配置的端口信息（添加超时）
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1000);
-
-            const serverInfo = await fetch(
-              `${apiClient.getBaseUrl()}/api/server/info`,
-              {
-                method: "GET",
-                headers: { "Content-Type": "application/json" },
-                signal: controller.signal,
-              }
-            ).then((res) => res.json());
-
-            clearTimeout(timeoutId);
-
-            if (serverInfo.data && serverInfo.data.port) {
-              status = { running: true, port: serverInfo.data.port };
-            } else {
-              status = { running: true, port: 8000 };
-            }
-          } catch (error) {
-            console.warn("获取服务器信息失败，使用默认端口:", error);
-            status = { running: true, port: 8000 };
-          }
+          const info = await handshakeVerifyBackend(apiClient.getBaseUrl(), {
+            requireBootToken: false,
+            timeoutMs: 1200,
+          });
+          status = { running: true, port: info.port };
         } else {
           console.warn("无法发现后端服务，使用默认配置");
           status = { running: false, port: 8000 };
@@ -197,7 +200,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("检查后端状态失败:", error);
       setConnectionStatus((prev) => ({ ...prev, backend: false }));
-      return null;
+      throw error;
     }
   };
 
@@ -215,7 +218,35 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">正在初始化应用...</p>
+          <p className="text-gray-600">{initPhase}...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
+        <div className="max-w-xl w-full bg-white border border-gray-200 rounded-lg shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">后端启动失败</h2>
+          <p className="text-sm text-gray-700 break-words">{initError}</p>
+          <p className="text-sm text-gray-500 mt-2 break-words">
+            可查看临时日志：super_auto_cut_backend.log
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={initializeApp}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              重试
+            </button>
+            <button
+              onClick={() => setInitError(null)}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            >
+              继续进入
+            </button>
+          </div>
         </div>
       </div>
     );

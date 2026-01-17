@@ -4,7 +4,6 @@ import {
     Settings
 } from 'lucide-react'
 import React from 'react'
-// @ts-expect-error asset import via Vite alias
 import Logo from '@/assets/logo.png'
 import { TauriCommands } from '@/services/clients'
 
