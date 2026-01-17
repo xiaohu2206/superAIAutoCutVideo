@@ -53,7 +53,7 @@ from routes.jianying_config_routes import router as jianying_router
 from routes.storage_routes import router as settings_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import ensure_defaults_migrated
+from modules.app_paths import ensure_defaults_migrated, user_data_dir
 from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
@@ -62,6 +62,105 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+_single_instance_lock_handle = None
+
+
+def _get_runtime_scope() -> str:
+    scope = str(os.environ.get("SACV_RUNTIME") or "").strip().lower()
+    if scope in {"dev", "tauri"}:
+        return scope
+    if os.environ.get("SACV_BOOT_TOKEN"):
+        return "tauri"
+    if getattr(sys, "frozen", False):
+        return "tauri"
+    return "dev"
+
+
+def _get_single_instance_lock_path() -> Path:
+    scope = _get_runtime_scope()
+    d = user_data_dir() / "locks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"backend.{scope}.lock"
+
+
+def acquire_single_instance_lock() -> None:
+    global _single_instance_lock_handle
+    if _single_instance_lock_handle is not None:
+        return
+
+    scope = _get_runtime_scope()
+    lock_path = _get_single_instance_lock_path()
+    f = lock_path.open("a+", encoding="utf-8")
+
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            f.seek(0)
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise RuntimeError(f"后端服务已在 {scope} 环境运行中，无法重复启动")
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError(f"后端服务已在 {scope} 环境运行中，无法重复启动")
+
+        f.seek(0)
+        f.truncate()
+        f.write(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "scope": scope,
+                    "started_at": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            )
+        )
+        f.flush()
+
+        _single_instance_lock_handle = f
+    except Exception:
+        try:
+            f.close()
+        except Exception:
+            pass
+        raise
+
+
+def release_single_instance_lock() -> None:
+    global _single_instance_lock_handle
+    f = _single_instance_lock_handle
+    if f is None:
+        return
+
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            f.seek(0)
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+        _single_instance_lock_handle = None
 
 
 class RuntimeLogHandler(logging.Handler):
@@ -552,6 +651,7 @@ async def send_periodic_heartbeat():
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
+    acquire_single_instance_lock()
     logger.info("AI智能视频剪辑后端服务启动")
     # 启动心跳任务
     asyncio.create_task(send_periodic_heartbeat())
@@ -565,6 +665,7 @@ async def startup_event():
 async def shutdown_event():
     """应用关闭事件"""
     logger.info("AI智能视频剪辑后端服务关闭")
+    release_single_instance_lock()
 
 if __name__ == "__main__":
     # 获取端口配置
@@ -573,6 +674,7 @@ if __name__ == "__main__":
     logger.info(f"启动使用的 Python 解释器: {sys.executable}")
 
     try:
+        acquire_single_instance_lock()
         # 查找可用端口
         port = find_available_port(host, initial_port)
         

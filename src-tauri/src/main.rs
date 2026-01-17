@@ -534,6 +534,7 @@ async fn start_backend(
         .env("PORT", port.to_string())
         .env("PATH", new_path)
         .env("SACV_BOOT_TOKEN", boot_token.clone())
+        .env("SACV_RUNTIME", "tauri")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -825,6 +826,13 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
 
         .manage(AppState::default())
         .setup(setup_app)
