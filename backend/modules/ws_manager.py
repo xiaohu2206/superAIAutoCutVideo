@@ -5,6 +5,7 @@
 """
 
 import logging
+import json
 from typing import List
 from fastapi import WebSocket
 
@@ -32,6 +33,31 @@ class ConnectionManager:
             logger.error(f"发送个人消息失败: {e}")
 
     async def broadcast(self, message: str):
+        try:
+            from modules.runtime_log_store import runtime_log_store
+
+            try:
+                obj = json.loads(message)
+                if isinstance(obj, dict) and (obj.get("_stored") or (obj.get("id") is not None and obj.get("channel"))):
+                    message = json.dumps(obj, ensure_ascii=False)
+                elif isinstance(obj, dict) and not obj.get("_stored"):
+                    stored = runtime_log_store.append({**obj, "_stored": True}, project_id=obj.get("project_id"))
+                    message = json.dumps(stored, ensure_ascii=False)
+                elif isinstance(obj, dict):
+                    pass
+                else:
+                    runtime_log_store.append(
+                        {"type": "ws_text", "scope": "broadcast", "message": str(message)},
+                        project_id=None,
+                    )
+            except Exception:
+                runtime_log_store.append(
+                    {"type": "ws_text", "scope": "broadcast", "message": str(message)},
+                    project_id=None,
+                )
+        except Exception:
+            pass
+
         disconnected = []
         for connection in list(self.active_connections):
             try:

@@ -23,8 +23,8 @@ import asyncio
 import logging
 import re
 import cv2
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request, Query
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import json
 import uuid
@@ -47,6 +47,7 @@ from modules.config.content_model_config import content_model_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.config.video_model_config import video_model_config_manager
 from modules.ws_manager import manager
+from modules.runtime_log_store import runtime_log_store
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -355,6 +356,70 @@ async def delete_project(project_id: str):
         "success": True,
         "timestamp": now_ts(),
     }
+
+@router.get("/{project_id}/logs")
+async def list_project_logs(
+    project_id: str,
+    after_id: Optional[int] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    items = runtime_log_store.list(project_id=project_id, after_id=after_id, limit=limit)
+    next_after_id = None
+    try:
+        next_after_id = int(items[-1]["id"]) if items else after_id
+    except Exception:
+        next_after_id = after_id
+    return {
+        "message": "获取日志成功",
+        "data": {
+            "items": items,
+            "next_after_id": next_after_id,
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/logs/clear")
+async def clear_project_logs(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    runtime_log_store.clear(project_id=project_id)
+    return {"message": "清空日志成功", "success": True, "timestamp": now_ts()}
+
+
+@router.get("/{project_id}/logs/stream")
+async def stream_project_logs(
+    project_id: str,
+    after_id: Optional[int] = Query(default=None),
+):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    async def _gen():
+        items = runtime_log_store.list(project_id=project_id, after_id=after_id, limit=2000)
+        for it in items:
+            yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
+        handle = runtime_log_store.subscribe(project_id=project_id)
+        try:
+            while True:
+                try:
+                    it = await asyncio.wait_for(handle.queue.get(), timeout=15)
+                    yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ":keep-alive\n\n"
+        finally:
+            runtime_log_store.unsubscribe(handle)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=headers)
 
 
 # ========================= 文件上传 =========================

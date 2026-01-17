@@ -27,6 +27,6 @@ export const sections: SettingsSection[] = [
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
   { id: "storage", label: "存储设置", icon: HardDrive },
   { id: "tts", label: "音色设置（TTS）", icon: Mic },
-  { id: "monitor", label: "健康监测", icon: Activity },
+  { id: "monitor", label: "状态监控", icon: Activity },
   { id: "about", label: "关于", icon: Info },
 ];

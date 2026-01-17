@@ -12,15 +12,16 @@ import os
 import socket
 import sys
 import time
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 # 解决 PyInstaller 打包后 uvicorn 日志报错 "AttributeError: 'NoneType' object has no attribute 'isatty'"
@@ -53,6 +54,7 @@ from routes.storage_routes import router as settings_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import ensure_defaults_migrated
+from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
 logging.basicConfig(
@@ -60,6 +62,34 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class RuntimeLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.getMessage()
+            runtime_log_store.append(
+                {
+                    "type": "log",
+                    "scope": "server_log",
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": msg,
+                    "_stored": True,
+                },
+                project_id=None,
+            )
+        except Exception:
+            pass
+
+
+try:
+    root_logger = logging.getLogger()
+    has_handler = any(isinstance(h, RuntimeLogHandler) for h in root_logger.handlers)
+    if not has_handler:
+        root_logger.addHandler(RuntimeLogHandler(level=logging.INFO))
+except Exception:
+    pass
 
 def _inject_ffmpeg_into_path() -> None:
     try:
@@ -118,6 +148,58 @@ app.include_router(tts_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
 app.include_router(settings_router)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    try:
+        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
+        project_id = m.group(1) if m else None
+    except Exception:
+        project_id = None
+    payload = runtime_log_store.append(
+        {
+            "type": "error",
+            "scope": "http_exception",
+            "method": request.method,
+            "path": str(request.url.path),
+            "status_code": int(exc.status_code),
+            "detail": str(exc.detail),
+            "_stored": True,
+        },
+        project_id=project_id,
+    )
+    try:
+        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    try:
+        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
+        project_id = m.group(1) if m else None
+    except Exception:
+        project_id = None
+    payload = runtime_log_store.append(
+        {
+            "type": "error",
+            "scope": "unhandled_exception",
+            "method": request.method,
+            "path": str(request.url.path),
+            "status_code": 500,
+            "error": str(exc),
+            "_stored": True,
+        },
+        project_id=project_id,
+    )
+    try:
+        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 def get_app_paths():
     """
@@ -260,6 +342,58 @@ async def get_status():
         "tasks_count": len(tasks_status),
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.get("/api/logs")
+async def list_global_logs(
+    after_id: Optional[int] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+):
+    items = runtime_log_store.list(project_id=None, after_id=after_id, limit=limit)
+    next_after_id = None
+    try:
+        next_after_id = int(items[-1]["id"]) if items else after_id
+    except Exception:
+        next_after_id = after_id
+    return {
+        "message": "获取日志成功",
+        "data": {
+            "items": items,
+            "next_after_id": next_after_id,
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/logs/clear")
+async def clear_global_logs():
+    runtime_log_store.clear(project_id=None)
+    return {"message": "清空日志成功", "success": True, "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/logs/stream")
+async def stream_global_logs(after_id: Optional[int] = Query(default=None)):
+    async def _gen():
+        items = runtime_log_store.list(project_id=None, after_id=after_id, limit=2000)
+        for it in items:
+            yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
+        handle = runtime_log_store.subscribe(project_id=None)
+        try:
+            while True:
+                try:
+                    it = await asyncio.wait_for(handle.queue.get(), timeout=15)
+                    yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ":keep-alive\n\n"
+        finally:
+            runtime_log_store.unsubscribe(handle)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=headers)
+
 
 @app.get("/api/server/info")
 async def get_server_info():
