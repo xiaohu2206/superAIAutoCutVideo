@@ -3,6 +3,8 @@ import type {
   FileUploadResponse,
   GenerateScriptRequest,
   Project,
+  SubtitleResult,
+  SubtitleSegment,
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
@@ -266,6 +268,41 @@ export class ProjectService {
     // 后端返回形如 { message, data: { script, plot_analysis }, timestamp }
     // 这里只提取脚本对象返回
     return response.data?.script as VideoScript;
+  }
+
+  async extractSubtitle(projectId: string, force?: boolean): Promise<SubtitleResult> {
+    const response = await apiClient.post<ApiResponse<SubtitleResult>>(
+      `/api/projects/${projectId}/extract-subtitle`,
+      force ? { force: true } : undefined
+    );
+    if (!response.data) {
+      throw new Error("字幕提取失败：响应为空");
+    }
+    return response.data;
+  }
+
+  async getSubtitle(projectId: string): Promise<SubtitleResult> {
+    const response = await apiClient.get<ApiResponse<SubtitleResult>>(
+      `/api/projects/${projectId}/subtitle`
+    );
+    if (!response.data) {
+      throw new Error("获取字幕失败：响应为空");
+    }
+    return response.data;
+  }
+
+  async saveSubtitle(
+    projectId: string,
+    payload: { segments?: SubtitleSegment[]; content?: string }
+  ): Promise<SubtitleResult> {
+    const response = await apiClient.post<ApiResponse<SubtitleResult>>(
+      `/api/projects/${projectId}/subtitle`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error("保存字幕失败：响应为空");
+    }
+    return response.data;
   }
 
   /**

@@ -13,11 +13,13 @@ import type { VideoScript } from "../types/project";
 import AdvancedConfigSection from "../components/projectEdit/AdvancedConfigSection";
 import ProjectOperations from "../components/projectEdit/ProjectOperations";
 import ScriptEditor from "../components/projectEdit/ScriptEditor";
+import SubtitleEditor from "../components/projectEdit/SubtitleEditor";
 import VideoSourcesManager from "../components/projectEdit/VideoSourcesManager";
 import type { WebSocketMessage } from "../services/clients";
 import { wsClient } from "../services/clients";
 import { message } from "../services/message";
 import { projectService } from "../services/projectService";
+import type { SubtitleSegment } from "../types/project";
 
 interface ProjectEditPageProps {
   projectId: string;
@@ -38,6 +40,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     uploadVideos,
     uploadSubtitle,
     deleteSubtitle,
+    extractSubtitle,
+    fetchSubtitle,
+    saveSubtitle,
+    subtitleSegments,
+    subtitleMeta,
+    subtitleLoading,
     deleteVideoItem,
     reorderVideos,
     generateScript,
@@ -72,6 +80,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
   // 合并视频预览弹层
   const [showMergedPreview, setShowMergedPreview] = useState(false);
+  const [extractingSubtitle, setExtractingSubtitle] = useState(false);
+  const [subtitleExtractProgress, setSubtitleExtractProgress] = useState(0);
+  const [subtitleExtractLogs, setSubtitleExtractLogs] = useState<
+    { timestamp: string; message: string; phase?: string; type?: string }[]
+  >([]);
+  const [subtitleDraft, setSubtitleDraft] = useState<SubtitleSegment[]>([]);
+  const [subtitleSaving, setSubtitleSaving] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -429,6 +444,18 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       showErrorText("请先上传视频文件");
       return;
     }
+    if (!project?.subtitle_path) {
+      showErrorText("请先提取字幕或上传字幕");
+      return;
+    }
+    if (project?.subtitle_status && project.subtitle_status !== "ready") {
+      if (project.subtitle_status === "extracting") {
+        showErrorText("字幕提取中，请稍后再试");
+        return;
+      }
+      showErrorText("请先提取字幕或上传字幕");
+      return;
+    }
 
     setIsGenerating(true);
     setScriptGenProgress(0);
@@ -455,6 +482,61 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       showError(err, "生成脚本失败");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleExtractSubtitle = async () => {
+    if (!project?.video_path) {
+      showErrorText("请先上传视频文件");
+      return;
+    }
+    if (project?.subtitle_source === "user" && project?.subtitle_path) {
+      showErrorText("已上传字幕，需先删除才能提取");
+      return;
+    }
+    if (project?.subtitle_status === "extracting") {
+      showErrorText("正在提取中");
+      return;
+    }
+    let force = false;
+    if (project?.subtitle_updated_by_user) {
+      force = window.confirm("字幕已被编辑，重新提取将覆盖修改内容，是否继续？");
+      if (!force) return;
+    }
+
+    setExtractingSubtitle(true);
+    setSubtitleExtractProgress(0);
+    setSubtitleExtractLogs([]);
+    try {
+      await extractSubtitle(force);
+      showSuccess("字幕提取成功！");
+    } catch (err) {
+      showError(err, "提取字幕失败");
+      setExtractingSubtitle(false);
+    }
+  };
+
+  const handleReloadSubtitle = async () => {
+    try {
+      await fetchSubtitle();
+    } catch (err) {
+      showError(err, "获取字幕失败");
+    }
+  };
+
+  const handleSaveSubtitle = async () => {
+    if (!subtitleDraft.length) {
+      showErrorText("字幕内容为空");
+      return;
+    }
+    setSubtitleSaving(true);
+    try {
+      await saveSubtitle({ segments: subtitleDraft });
+      showSuccess("字幕保存成功！");
+    } catch (err) {
+      showError(err, "保存字幕失败");
+    } finally {
+      setSubtitleSaving(false);
     }
   };
 
@@ -494,6 +576,58 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       wsClient.off("*", handler);
     };
   }, [project?.id, showSuccess, showErrorText]);
+
+  React.useEffect(() => {
+    const handler = (message: WebSocketMessage) => {
+      if (
+        message &&
+        (message.type === "progress" || message.type === "completed" || message.type === "error") &&
+        (message as any).scope === "extract_subtitle" &&
+        (message as any).project_id === project?.id
+      ) {
+        if (typeof message.progress === "number") {
+          setSubtitleExtractProgress(Math.max(0, Math.min(100, message.progress)));
+        }
+        const msgText = message.message || "";
+        setSubtitleExtractLogs((prev) => [
+          ...prev,
+          {
+            timestamp: message.timestamp,
+            message: msgText,
+            phase: (message as any).phase,
+            type: message.type,
+          },
+        ]);
+        if (message.type === "completed") {
+          setExtractingSubtitle(false);
+          showSuccess("字幕提取成功！");
+          void refreshProject();
+          void fetchSubtitle().catch(() => void 0);
+        }
+        if (message.type === "error") {
+          setExtractingSubtitle(false);
+          showErrorText(msgText || "字幕提取失败");
+        }
+      }
+    };
+
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id, refreshProject, fetchSubtitle, showSuccess, showErrorText]);
+
+  React.useEffect(() => {
+    if (project?.subtitle_path) {
+      void fetchSubtitle().catch(() => void 0);
+    } else {
+      setSubtitleDraft([]);
+    }
+  }, [project?.id, project?.subtitle_path, fetchSubtitle]);
+
+  React.useEffect(() => {
+    setSubtitleDraft(subtitleSegments || []);
+  }, [subtitleSegments]);
 
   /**
    * 处理保存脚本
@@ -699,6 +833,16 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     );
   }
 
+  const subtitleReady = Boolean(project.subtitle_path) && (project.subtitle_status ? project.subtitle_status === "ready" : true);
+  const generateScriptDisabledReason = !project.video_path
+    ? "请先上传视频"
+    : extractingSubtitle || project.subtitle_status === "extracting"
+      ? "字幕提取中"
+      : !subtitleReady
+        ? "请先提取字幕或上传字幕"
+        : undefined;
+  const generateScriptDisabled = Boolean(generateScriptDisabledReason);
+
   return (
     <div className="space-y-6">
       {/* 页面头部 */}
@@ -803,6 +947,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           project={project}
           isGeneratingScript={isGenerating}
           handleGenerateScript={handleGenerateScript}
+          generateScriptDisabled={generateScriptDisabled}
+          generateScriptDisabledReason={generateScriptDisabledReason}
           scriptGenProgress={scriptGenProgress}
           scriptGenLogs={scriptGenLogs}
           isGeneratingVideo={isGeneratingVideo}
@@ -817,6 +963,79 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           setShowMergedPreview={setShowMergedPreview}
         />
       </div>
+
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-semibold text-gray-900">字幕提取</h2>
+            {project.subtitle_source === "user" && project.subtitle_path ? (
+              <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100">
+                已上传字幕
+              </span>
+            ) : null}
+            {project.subtitle_source === "extracted" && project.subtitle_path ? (
+              <span className="text-xs px-2.5 py-1 bg-violet-50 text-violet-700 font-medium rounded-full border border-violet-100">
+                已提取字幕
+              </span>
+            ) : null}
+            {project.subtitle_updated_by_user ? (
+              <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 font-medium rounded-full border border-amber-100">
+                已编辑
+              </span>
+            ) : null}
+          </div>
+          <button
+            onClick={handleExtractSubtitle}
+            disabled={
+              subtitleLoading ||
+              extractingSubtitle ||
+              !project.video_path ||
+              (project.subtitle_source === "user" && Boolean(project.subtitle_path)) ||
+              project.subtitle_status === "extracting"
+            }
+            className="flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {extractingSubtitle ? (
+              <>
+                <Loader className="h-4 w-4 mr-2 animate-spin" />
+                提取中...
+              </>
+            ) : (
+              <>提取字幕</>
+            )}
+          </button>
+        </div>
+
+        {(extractingSubtitle || (subtitleExtractProgress > 0 && subtitleExtractProgress < 100)) && (
+          <div className="w-full">
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+              <span>字幕提取进度</span>
+              <span>{Math.round(subtitleExtractProgress)}%</span>
+            </div>
+            <div className="w-full h-2 bg-gray-200 rounded">
+              <div
+                className="h-2 bg-blue-600 rounded transition-all"
+                style={{ width: `${Math.round(subtitleExtractProgress)}%` }}
+              />
+            </div>
+            {subtitleExtractLogs.length > 0 ? (
+              <div className="mt-2 text-xs text-gray-700 break-all">
+                {subtitleExtractLogs.slice(-1)[0]?.message}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <SubtitleEditor
+        segments={subtitleDraft}
+        subtitleMeta={subtitleMeta}
+        loading={subtitleLoading}
+        saving={subtitleSaving}
+        onReload={handleReloadSubtitle}
+        onSave={handleSaveSubtitle}
+        onChange={setSubtitleDraft}
+      />
 
       <ScriptEditor
         editedScript={editedScript}
