@@ -94,10 +94,10 @@ export function useProjectEditGenerateStep(
       return;
     }
     if (project.subtitle_status && project.subtitle_status !== "ready") {
-      if (project.subtitle_status === "extracting") {
-        options.showErrorText("字幕提取中，请稍后再试");
-        return;
-      }
+      // if (project.subtitle_status === "extracting") {
+      //   options.showErrorText("字幕提取中，请稍后再试");
+      //   return;
+      // }
       options.showErrorText("请先提取字幕或上传字幕");
       return;
     }
@@ -107,6 +107,7 @@ export function useProjectEditGenerateStep(
     setScriptGenLogs([]);
 
     try {
+      await projectService.flushPendingUpdates(project.id);
       const script = await options.generateScript({
         project_id: project.id,
         video_path: project.video_path,

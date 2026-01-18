@@ -55,7 +55,6 @@ interface ProjectEditUploadStepProps {
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
-  projectId,
   project,
   showAdvancedConfig,
   setShowAdvancedConfig,
@@ -181,9 +180,10 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             disabled={
               subtitleLoading ||
               extractingSubtitle ||
-              !project.video_path ||
-              (project.subtitle_source === "user" && Boolean(project.subtitle_path)) ||
-              project.subtitle_status === "extracting"
+              (!project.video_path &&
+              !project.merged_video_path) ||
+              (project.subtitle_source === "user" && (Boolean(project.subtitle_path))) 
+              // project.subtitle_status === "extracting"
             }
             className="flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >

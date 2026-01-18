@@ -1,5 +1,5 @@
 import { Check, Copy, X } from "lucide-react";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePrompts } from "../../hooks/usePrompts";
 import type { CreatePromptPayload } from "../../types/prompts";
 import { NarrationType, type ScriptLengthOption } from "../../types/project";
@@ -8,6 +8,95 @@ import { projectService } from "../../services/projectService";
 interface GenerateAdvancedConfigSectionProps {
   projectId: string;
   narrationType?: NarrationType;
+}
+
+const DEFAULT_SCRIPT_LENGTH: ScriptLengthOption = "30～40条";
+
+const SCRIPT_LENGTH_OPTIONS: Array<{
+  value: ScriptLengthOption;
+  title: string;
+  subtitle: string;
+}> = [
+  { value: "15～20条", title: "15～20 条", subtitle: "预计最少 1 次模型调用" },
+  { value: "30～40条", title: "30～40 条", subtitle: "预计最少 3 次模型调用" },
+  { value: "40～60条", title: "40～60 条", subtitle: "预计最少 4 次模型调用" },
+  { value: "60～80条", title: "60～80 条", subtitle: "预计最少 5 次模型调用" },
+  { value: "80～100条", title: "80～100 条", subtitle: "预计最少 6 次模型调用" },
+];
+
+const normalizeScriptLength = (value: unknown): ScriptLengthOption => {
+  const v = typeof value === "string" ? value : "";
+  const allowed = new Set<ScriptLengthOption>([
+    "15～20条",
+    "30～40条",
+    "40～60条",
+    "60～80条",
+    "80～100条",
+  ]);
+  if (allowed.has(v as ScriptLengthOption)) return v as ScriptLengthOption;
+  if (v === "短篇") return "15～20条";
+  if (v === "中偏") return "40～60条";
+  if (v === "长偏") return "80～100条";
+  return DEFAULT_SCRIPT_LENGTH;
+};
+
+function useProjectScriptLength(projectId: string): {
+  scriptLength: ScriptLengthOption;
+  loading: boolean;
+  saving: boolean;
+  setScriptLengthAndPersist: (value: ScriptLengthOption) => Promise<void>;
+} {
+  const [scriptLength, setScriptLength] = useState<ScriptLengthOption>(DEFAULT_SCRIPT_LENGTH);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveSeqRef = useRef(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = await projectService.getProject(projectId);
+      const normalized = normalizeScriptLength(p?.script_length);
+      setScriptLength(normalized);
+
+      if (p?.script_length && p.script_length !== normalized) {
+        const seq = ++saveSeqRef.current;
+        setSaving(true);
+        try {
+          await projectService.updateProjectQueued(projectId, { script_length: normalized });
+        } catch {
+          void 0;
+        } finally {
+          if (saveSeqRef.current === seq) setSaving(false);
+        }
+      }
+    } catch {
+      void 0;
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const setScriptLengthAndPersist = useCallback(
+    async (value: ScriptLengthOption) => {
+      setScriptLength(value);
+      const seq = ++saveSeqRef.current;
+      setSaving(true);
+      try {
+        await projectService.updateProjectQueued(projectId, { script_length: value });
+      } catch {
+        void 0;
+      } finally {
+        if (saveSeqRef.current === seq) setSaving(false);
+      }
+    },
+    [projectId]
+  );
+
+  return { scriptLength, loading, saving, setScriptLengthAndPersist };
 }
 
 const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps> = ({
@@ -37,33 +126,11 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [templateModalMode, setTemplateModalMode] = useState<"create" | "edit">("create");
   const [copied, setCopied] = useState(false);
-  const [scriptLength, setScriptLength] = useState<ScriptLengthOption>("长偏");
-
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const p = await projectService.getProject(projectId);
-        if (p && p.script_length) {
-          setScriptLength(p.script_length);
-        }
-      } catch (e) {
-        // ignore
-      }
-    })();
-  }, [projectId]);
-
-  const handleScriptLengthChange = async (len: ScriptLengthOption) => {
-    setScriptLength(len);
-    try {
-      await projectService.updateProject(projectId, { script_length: len });
-    } catch (e) {
-      // ignore network error
-    }
-  };
+  const { scriptLength, loading: scriptLengthLoading, saving: scriptLengthSaving, setScriptLengthAndPersist } =
+    useProjectScriptLength(projectId);
 
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
-  console.log("items", items)
   const otherOfficialItems = (items || []).filter((it) => it.origin === "official" && it.id_or_key !== featureKey);
 
   const handleSelect = async (origin: "official" | "user", id_or_key: string) => {
@@ -157,58 +224,38 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
 
   return (
     <div className="border-gray-200 pt-4 space-y-3">
-      {narrationType === NarrationType.MOVIE ? (
-        <div className="border-t border-gray-200 pt-4">
-          <div className="flex items-center justify-between">
-            <label className="block text-sm font-medium text-gray-700 mb-2">电影脚本长度</label>
-            <span className="text-xs text-gray-500">若视频时长小于30分钟仅建议短篇</span>
-          </div>
-          <div className="space-y-2">
-            <div
-              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
-              onClick={() => handleScriptLengthChange("短篇")}
-            >
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="script-length"
-                  checked={scriptLength === "短篇"}
-                  onChange={() => handleScriptLengthChange("短篇")}
-                />
-                <span className="text-sm">短篇（保留约 1/3 片段）</span>
-              </label>
-            </div>
-            <div
-              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
-              onClick={() => handleScriptLengthChange("中偏")}
-            >
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="script-length"
-                  checked={scriptLength === "中偏"}
-                  onChange={() => handleScriptLengthChange("中偏")}
-                />
-                <span className="text-sm">中偏（保留约 2/3 片段）</span>
-              </label>
-            </div>
-            <div
-              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
-              onClick={() => handleScriptLengthChange("长偏")}
-            >
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="script-length"
-                  checked={scriptLength === "长偏"}
-                  onChange={() => handleScriptLengthChange("长偏")}
-                />
-                <span className="text-sm">长偏（保留全部片段）</span>
-              </label>
-            </div>
-          </div>
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between">
+          <label className="block text-sm font-medium text-gray-700 mb-2">解说脚本条数</label>
+          {scriptLengthLoading ? (
+            <span className="text-xs text-gray-500">加载中</span>
+          ) : scriptLengthSaving ? (
+            <span className="text-xs text-gray-500">保存中</span>
+          ) : (
+            <span className="text-xs text-gray-500">条数越多，生成更慢且消耗更高</span>
+          )}
         </div>
-      ) : null}
+        <div className="space-y-2">
+          {SCRIPT_LENGTH_OPTIONS.map((opt) => (
+            <div
+              key={opt.value}
+              className="flex items-center justify-between bg-gray-50 p-2 rounded cursor-pointer"
+              onClick={() => void setScriptLengthAndPersist(opt.value)}
+            >
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="script-length"
+                  checked={scriptLength === opt.value}
+                  onChange={() => void setScriptLengthAndPersist(opt.value)}
+                />
+                <span className="text-sm">{opt.title}</span>
+              </label>
+              <span className="text-xs text-gray-500">{opt.subtitle}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="border-gray-200">
         <div className="flex items-center justify-between">

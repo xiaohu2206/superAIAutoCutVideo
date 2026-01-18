@@ -36,6 +36,7 @@ from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
 from services.extract_subtitle_service import extract_subtitle_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
+from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
 from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
@@ -63,6 +64,16 @@ def uploads_dir() -> Path:
     (up / "audios").mkdir(parents=True, exist_ok=True)
     (up / "analyses").mkdir(parents=True, exist_ok=True)
     return up
+
+
+def safe_dir_name(name: str, fallback: str) -> str:
+    invalid = '<>:"/\\|?*'
+    safe = "".join("_" if ch in invalid else ch for ch in (name or "").strip())
+    safe = safe.strip()
+    if not safe:
+        safe = f"project_{fallback}"
+    safe = safe.replace(".", "_").strip()
+    return safe
 
 
 def to_web_path(p: Path) -> str:
@@ -525,7 +536,15 @@ async def save_subtitle(project_id: str, req: SaveSubtitleRequest):
 
 @router.post("/{project_id}")
 async def update_project(project_id: str, req: UpdateProjectRequest):
-    p = projects_store.update_project(project_id, req.model_dump(exclude_unset=True))
+    updates = req.model_dump(exclude_unset=True)
+    if "script_length" in updates:
+        try:
+            updates["script_length"] = normalize_script_length_selection(
+                updates.get("script_length")
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    p = projects_store.update_project(project_id, updates)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
     return {
@@ -843,7 +862,8 @@ async def merge_videos(project_id: str):
                     return
                 inputs.append(abs_path)
 
-            out_dir = uploads_dir() / "videos" / "outputs" / p.name
+            project_dir_name = safe_dir_name(p.name or p.id, p.id)
+            out_dir = uploads_dir() / "videos" / "merged" / project_dir_name
             out_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_name = f"{p.id}_merged_{ts}.mp4"

@@ -8,7 +8,14 @@ export enum NarrationType {
   MOVIE = "电影解说",
 }
 
-export type ScriptLengthOption = "短篇" | "中偏" | "长偏";
+export type ScriptLengthOption =
+  | "15～20条"
+  | "30～40条"
+  | "40～60条"
+  | "60～80条"
+  | "80～100条";
+
+export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
 /**
  * 项目状态枚举
@@ -78,7 +85,7 @@ export interface Project {
   name: string; // 项目名称
   description?: string; // 项目描述
   narration_type: NarrationType; // 解说类型
-  script_length?: ScriptLengthOption; // 电影脚本长度（仅电影解说生效）
+  script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径

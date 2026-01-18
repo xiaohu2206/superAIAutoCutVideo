@@ -14,6 +14,8 @@ import { apiClient, type ApiResponse } from "./clients";
  * 项目管理服务类
  */
 export class ProjectService {
+  private pendingUpdateChains = new Map<string, Promise<Project>>();
+
   /**
    * 获取项目列表
    */
@@ -58,6 +60,34 @@ export class ProjectService {
       data
     );
     return response.data;
+  }
+
+  async updateProjectQueued(
+    projectId: string,
+    data: UpdateProjectRequest
+  ): Promise<Project> {
+    const prev = this.pendingUpdateChains.get(projectId);
+    const chainBase = prev ? prev.catch(() => undefined as unknown as Project) : Promise.resolve(undefined as unknown as Project);
+
+    const next = chainBase.then(() => this.updateProject(projectId, data));
+    this.pendingUpdateChains.set(projectId, next);
+    next.finally(() => {
+      const cur = this.pendingUpdateChains.get(projectId);
+      if (cur === next) {
+        this.pendingUpdateChains.delete(projectId);
+      }
+    });
+    return next;
+  }
+
+  async flushPendingUpdates(projectId: string): Promise<void> {
+    const pending = this.pendingUpdateChains.get(projectId);
+    if (!pending) return;
+    try {
+      await pending;
+    } catch {
+      void 0;
+    }
   }
 
   /**

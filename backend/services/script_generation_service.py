@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
-from typing import Any, Dict, List, Tuple, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Optional, cast
 import asyncio
 import json
 
@@ -23,12 +25,156 @@ from modules.prompts.prompt_manager import prompt_manager
 from services.ai_service import ai_service
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
 from modules.projects_store import projects_store
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SCRIPT_LENGTH_SELECTION = "30～40条"
+SCRIPT_LENGTH_PRESETS: Dict[str, Tuple[int, int, int]] = {
+    "15～20条": (15, 20, 1),
+    "30～40条": (30, 40, 2),
+    "40～60条": (40, 60, 3),
+    "60～80条": (60, 80, 4),
+    "80～100条": (80, 100, 5),
+}
+MAX_SUBTITLE_ITEMS_PER_CALL = 2000
+SOFT_INPUT_FACTOR = 1.8
+MAX_SUBTITLE_CHARS_PER_CALL = 20000
+
+
+@dataclass(frozen=True)
+class ScriptTargetPlan:
+    normalized_selection: str
+    target_min: int
+    target_max: int
+    preferred_calls: int
+    final_target_count: int
+
+
+def normalize_script_length_selection(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = str(value).strip()
+    if not v:
+        return None
+    v = (
+        v.replace(" ", "")
+        .replace("~", "～")
+        .replace("-", "～")
+        .replace("—", "～")
+        .replace("–", "～")
+    )
+    if not v.endswith("条") and re.search(r"\d", v):
+        v = v + "条"
+    if v in SCRIPT_LENGTH_PRESETS:
+        return v
+    m = re.search(r"(\d+)\D+(\d+)", v)
+    if m:
+        a = int(m.group(1))
+        b = int(m.group(2))
+        key = f"{a}～{b}条"
+        if key in SCRIPT_LENGTH_PRESETS:
+            return key
+    allowed = " | ".join(SCRIPT_LENGTH_PRESETS.keys())
+    raise ValueError(f"script_length 无效，可选值: {allowed}")
+
+
+def parse_script_length_selection(value: Optional[str]) -> ScriptTargetPlan:
+    try:
+        normalized = normalize_script_length_selection(value) or DEFAULT_SCRIPT_LENGTH_SELECTION
+    except ValueError:
+        normalized = DEFAULT_SCRIPT_LENGTH_SELECTION
+    if normalized not in SCRIPT_LENGTH_PRESETS:
+        normalized = DEFAULT_SCRIPT_LENGTH_SELECTION
+    target_min, target_max, calls = SCRIPT_LENGTH_PRESETS[normalized]
+    final_target_count = int(target_max)
+    return ScriptTargetPlan(
+        normalized_selection=normalized,
+        target_min=int(target_min),
+        target_max=int(target_max),
+        preferred_calls=int(calls),
+        final_target_count=final_target_count,
+    )
+
+
+def _split_subtitles_if_oversize(
+    subtitles: List[Dict[str, Any]],
+    max_items: int,
+    soft_factor: float,
+) -> List[List[Dict[str, Any]]]:
+    soft_max = int(math.ceil(float(max_items) * float(soft_factor)))
+    if soft_max <= 0 or len(subtitles) <= soft_max:
+        return [subtitles]
+    mid = len(subtitles) // 2
+    if mid <= 0:
+        return [subtitles[:soft_max]]
+    left = subtitles[:mid]
+    right = subtitles[mid:]
+    out: List[List[Dict[str, Any]]] = []
+    out.extend(_split_subtitles_if_oversize(left, max_items, soft_factor))
+    out.extend(_split_subtitles_if_oversize(right, max_items, soft_factor))
+    return [c for c in out if c]
+
+
+def compute_subtitle_chunks(
+    subtitles: List[Dict[str, Any]],
+    desired_calls: int,
+    max_items: int,
+    soft_factor: float,
+) -> List[Dict[str, Any]]:
+    n = len(subtitles)
+    if n <= 0:
+        return []
+    soft_max = int(math.ceil(float(max_items) * float(soft_factor)))
+    min_calls = max(1, int(math.ceil(n / soft_max))) if soft_max > 0 else 1
+    calls = max(1, int(desired_calls or 1), min_calls)
+    base_slices: List[List[Dict[str, Any]]] = []
+    for i in range(calls):
+        start = (i * n) // calls
+        end = ((i + 1) * n) // calls
+        ch = subtitles[start:end]
+        if ch:
+            base_slices.append(ch)
+    split_slices: List[List[Dict[str, Any]]] = []
+    for ch in base_slices:
+        split_slices.extend(_split_subtitles_if_oversize(ch, max_items, soft_factor))
+    chunks: List[Dict[str, Any]] = []
+    for idx, ch in enumerate(split_slices):
+        try:
+            start_s = float(ch[0].get("start") or 0.0)
+            end_s = float(ch[-1].get("end") or start_s)
+        except Exception:
+            start_s = 0.0
+            end_s = 0.0
+        chunks.append(
+            {
+                "idx": idx,
+                "start": start_s,
+                "end": end_s,
+                "subs": ch,
+            }
+        )
+    return chunks
+
+
+def allocate_output_counts(total_target_count: int, chunk_count: int) -> List[int]:
+    t = int(total_target_count or 0)
+    c = int(chunk_count or 0)
+    if c <= 0:
+        return []
+    if t <= 0:
+        return [1] * c
+    if c <= t:
+        base = t // c
+        rem = t % c
+        out = [base + 1 if i < rem else base for i in range(c)]
+        return [max(1, int(x)) for x in out]
+    return [1] * c
 
 
 def _parse_timestamp_pair(ts_range: str) -> Tuple[float, float]:
     """将 "HH:MM:SS,mmm-HH:MM:SS,mmm" 解析为秒数对"""
+
     def _to_seconds(ts: str) -> float:
         h, m, rest = ts.split(":")
         s, ms = rest.split(",")
@@ -78,7 +224,7 @@ class ScriptGenerationService:
             ),
         ]
         resp = await ai_service.send_chat(messages)
-        return resp.content
+        return str(resp.content)
 
     @staticmethod
     def _chunk_text(
@@ -452,14 +598,15 @@ class ScriptGenerationService:
         plot_analysis_snippet: str,
         drama_name: str,
         project_id: Optional[str] = None,
+        target_items_count: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         subs_text_lines = []
         for s in subtitles:
             ts = _format_timestamp_range(float(s["start"]), float(s["end"]))
             subs_text_lines.append(f"[{ts}] {s['text']}")
         subs_text = "\n".join(subs_text_lines)
-        if len(subs_text) > 6000:
-            subs_text = subs_text[:6000]
+        if len(subs_text) > MAX_SUBTITLE_CHARS_PER_CALL:
+            subs_text = subs_text[:MAX_SUBTITLE_CHARS_PER_CALL]
         default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
         key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
         variables = {
@@ -482,6 +629,20 @@ class ScriptGenerationService:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+        if target_items_count and int(target_items_count) > 0:
+            n = int(target_items_count)
+            messages.insert(
+                0,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        f"你必须仅输出一个JSON对象，键为'items'。"
+                        f"items数组长度必须严格等于{n}，不能多不能少。"
+                        f"每条必须包含'_id','timestamp','picture','narration','OST'。"
+                        f"不得输出除JSON以外的任何文字。"
+                    ),
+                ),
+            )
         try:
             resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
             data, _ = sanitize_json_text_to_dict(resp.content)
@@ -493,16 +654,40 @@ class ScriptGenerationService:
                     s_t, e_t = _parse_timestamp_pair(str(it.get("timestamp")))
                     if e_t < start_time - 5 or s_t > end_time + 5:
                         continue
-                    valid_items.append({
-                        "_id": it.get("_id"),
-                        "timestamp": str(it.get("timestamp")),
-                        "picture": it.get("picture"),
-                        "narration": str(it.get("narration", "")),
-                        "OST": 1 if it.get("OST") == 1 else 0,
-                        "_chunk_idx": chunk_idx,
-                    })
+                    valid_items.append(
+                        {
+                            "_id": it.get("_id"),
+                            "timestamp": str(it.get("timestamp")),
+                            "picture": it.get("picture"),
+                            "narration": str(it.get("narration", "")),
+                            "OST": 1 if it.get("OST") == 1 else 0,
+                            "_chunk_idx": chunk_idx,
+                        }
+                    )
                 except Exception:
                     continue
+            if target_items_count and int(target_items_count) > 0:
+                n = int(target_items_count)
+                out: List[Dict[str, Any]] = []
+                for it in valid_items:
+                    if len(out) >= n:
+                        break
+                    out.append(it)
+                if len(out) < n:
+                    for it in items:
+                        if len(out) >= n:
+                            break
+                        out.append(
+                            {
+                                "_id": it.get("_id"),
+                                "timestamp": str(it.get("timestamp")),
+                                "picture": it.get("picture"),
+                                "narration": str(it.get("narration", "")),
+                                "OST": 1 if it.get("OST") == 1 else 0,
+                                "_chunk_idx": chunk_idx,
+                            }
+                        )
+                return out
             return valid_items
         except Exception as e:
             logger.error(f"Chunk {chunk_idx} generation failed: {e}")
@@ -547,22 +732,26 @@ class ScriptGenerationService:
         drama_name: str,
         plot_analysis: str,
         length_mode: Optional[str] = None,
+        target_count: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         items = segments
         if not items:
             return []
         draft_str = json.dumps(items, ensure_ascii=False)
         n = len(items)
-        mode = (str(length_mode or "长偏") or "长偏").strip()
-        if mode == "短篇":
-            target = max(1, round(n / 3))
-            retain_desc = f"必须仅保留 {target} 条最关键条目，其余全部删除（必须遵守）。返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
-        elif mode == "中偏":
-            target = max(1, round(n * 2 / 3))
-            retain_desc = f"必须仅保留 {target} 条关键条目，其余全部删除（必须遵守）。返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
+        if target_count and int(target_count) > 0:
+            target = int(target_count)
         else:
-            target = n
+            target = int(n)
+        if target < 1:
+            target = 1
+        if target >= n:
             retain_desc = ""
+        else:
+            retain_desc = (
+                f"必须仅保留 {target} 条最关键条目，其余全部删除（必须遵守）。"
+                f"返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
+            )
 
         system_prompt = (
             "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
@@ -612,13 +801,13 @@ class ScriptGenerationService:
                 orig["_id"] = _id_val
                 return orig
 
-            if mode == "长偏" or target >= n:
-                final_items: List[Dict[str, Any]] = []
+            if target >= n:
+                final_items_all: List[Dict[str, Any]] = []
                 for i, it in enumerate(items, start=1):
                     _id = int(it.get("_id") or i)
                     it["_id"] = _id
-                    final_items.append(_update_item(it, new_items_map.get(_id)))
-                return final_items
+                    final_items_all.append(_update_item(it, new_items_map.get(_id)))
+                return final_items_all
 
             keep_ids: List[int] = []
             if llm_ids_ordered:
@@ -640,13 +829,13 @@ class ScriptGenerationService:
                     if len(keep_ids) >= target:
                         break
 
-            final_items: List[Dict[str, Any]] = []
+            final_items_selected: List[Dict[str, Any]] = []
             for i, it in enumerate(items, start=1):
                 _id = int(it.get("_id") or i)
                 if _id in keep_ids:
                     it["_id"] = _id
-                    final_items.append(_update_item(it, new_items_map.get(_id)))
-            return final_items
+                    final_items_selected.append(_update_item(it, new_items_map.get(_id)))
+            return final_items_selected
         except Exception as e:
             logger.warning(f"Refine script failed, returning draft: {e}")
             return items
@@ -656,123 +845,87 @@ class ScriptGenerationService:
         """
         生成解说脚本（Map-Reduce-Refine 模式）
         1. 解析字幕
-        2. 滑动窗口分块 (Map)
-        3. 并发生成各块脚本
+        2. 按目标条数规划调用次数，并按字幕条数切分子任务 (Map)
+        3. 并发生成各子任务脚本（每次强制输出指定条数）
         4. 合并去重 (Reduce)
-        5. 全局润色 (Refine)
+        5. 全局润色并强制输出最终条数 (Refine)
         """
         # 1. 解析字幕
         subtitles = ScriptGenerationService._parse_srt_subtitles(subtitle_content)
         if not subtitles:
-            # Fallback to simple generation if parsing fails
-            logger.warning("Subtitle parsing failed, fallback to simple generation")
-            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
-            # 统一走 refine 控制比例
-            sel_mode = None
-            try:
-                if project_id:
-                    p = projects_store.get_project(project_id)
-                    if p and getattr(p, "script_length", None):
-                        sel_mode = p.script_length
-            except Exception:
-                sel_mode = None
-            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
-            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
-            data = {"items": final_items}
-            data = validate_script_items(data)
-            return data
+            logger.warning("Subtitle parsing failed")
+            raise HTTPException(status_code=400, detail="字幕解析失败：请上传有效的SRT字幕或标准时间戳格式")
         total_duration = subtitles[-1]["end"] if subtitles else 0
         if total_duration == 0:
-            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
-            sel_mode = None
-            try:
-                if project_id:
-                    p = projects_store.get_project(project_id)
-                    if p and getattr(p, "script_length", None):
-                        sel_mode = p.script_length
-            except Exception:
-                sel_mode = None
-            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
-            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
-            data = {"items": final_items}
-            data = validate_script_items(data)
-            return data
+            logger.warning("Subtitle total duration invalid")
+            raise HTTPException(status_code=400, detail="字幕解析失败：字幕时间戳无效")
 
-        # 2. 分块配置
-        WINDOW_SIZE = 2000 
-        OVERLAP = 60       # 1分钟重叠
-        if total_duration < WINDOW_SIZE * 1.8:
-            simple = await ScriptGenerationService._generate_script_json_simple(drama_name, plot_analysis, subtitle_content, project_id)
-            # 若小于30分钟，强制短篇
-            force_short = total_duration > 0 and total_duration < 1800
-            sel_mode = None
+        sel_length: Optional[str] = None
+        if project_id:
             try:
-                if project_id:
-                    p = projects_store.get_project(project_id)
-                    if p and getattr(p, "script_length", None):
-                        sel_mode = p.script_length
+                p = projects_store.get_project(project_id)
+                if p:
+                    if getattr(p, "script_length", None):
+                        sel_length = str(getattr(p, "script_length", None))
             except Exception:
-                sel_mode = None
-            if force_short:
-                sel_mode = "短篇"
-            merged_items = ScriptGenerationService._merge_items(simple.get("items", []))
-            final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
-            data = {"items": final_items}
-            data = validate_script_items(data)
-            return data
-        chunks = []
-        curr_time = 0
-        idx = 0
-        while curr_time < total_duration:
-            end_time = curr_time + WINDOW_SIZE
-            # 获取该时间段内的字幕
-            chunk_subs = [s for s in subtitles if s["start"] >= curr_time and s["start"] < end_time]
-            if chunk_subs:
-                chunks.append({
-                    "idx": idx,
-                    "start": curr_time,
-                    "end": end_time,
-                    "subs": chunk_subs
-                })
-                idx += 1
-            if curr_time + WINDOW_SIZE >= total_duration:
-                break
-            curr_time += (WINDOW_SIZE - OVERLAP)
-
-        # 3. 并发生成 (限制并发数为 5)
+                sel_length = None
+        plan = parse_script_length_selection(sel_length)
+        chunks = compute_subtitle_chunks(
+            subtitles=subtitles,
+            desired_calls=plan.preferred_calls,
+            max_items=MAX_SUBTITLE_ITEMS_PER_CALL,
+            soft_factor=SOFT_INPUT_FACTOR,
+        )
+        if not chunks:
+            raise HTTPException(status_code=400, detail="字幕解析失败：字幕内容为空")
+        per_call_counts = allocate_output_counts(plan.final_target_count, len(chunks))
         sem = asyncio.Semaphore(5)
 
         async def generate_one(chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
             async with sem:
-                # 筛选相关的剧情爆点
-                local_plot = ScriptGenerationService._filter_plot_analysis_by_time(plot_analysis, chunk["start"], chunk["end"])
-                return await ScriptGenerationService._generate_script_chunk(
-                    chunk["idx"], chunk["start"], chunk["end"], chunk["subs"], local_plot, drama_name, project_id
+                local_plot = ScriptGenerationService._filter_plot_analysis_by_time(
+                    plot_analysis, chunk["start"], chunk["end"]
                 )
+                return await ScriptGenerationService._generate_script_chunk(
+                    chunk["idx"],
+                    chunk["start"],
+                    chunk["end"],
+                    chunk["subs"],
+                    local_plot,
+                    drama_name,
+                    project_id,
+                    per_call_counts[int(chunk["idx"])],
+                )
+
         tasks = [generate_one(c) for c in chunks]
         results = await asyncio.gather(*tasks)
         all_items: List[Dict[str, Any]] = []
         for res in results:
             all_items.extend(res)
         merged_items = ScriptGenerationService._merge_items(all_items)
-        force_short = total_duration > 0 and total_duration < 1800
-        sel_mode = None
-        try:
-            if project_id:
-                p = projects_store.get_project(project_id)
-                if p and getattr(p, "script_length", None):
-                    sel_mode = p.script_length
-        except Exception:
-            sel_mode = None
-        if force_short:
-            sel_mode = "短篇"
-        final_items = await ScriptGenerationService._refine_full_script(merged_items, drama_name, plot_analysis, sel_mode)
+        effective_target = min(len(merged_items), int(plan.final_target_count))
+        if len(chunks) <= 1:
+            final_items = merged_items[:effective_target] if effective_target > 0 else []
+        else:
+            final_items = await ScriptGenerationService._refine_full_script(
+                merged_items,
+                drama_name,
+                plot_analysis,
+                None,
+                effective_target,
+            )
         data = {"items": final_items}
-        data = validate_script_items(data)
-        return data
+        validated = validate_script_items(data)
+        return cast(Dict[str, Any], validated)
 
     @staticmethod
-    async def _generate_script_json_simple(drama_name: str, plot_analysis: str, subtitle_content: str, project_id: Optional[str] = None) -> Dict[str, Any]:
+    async def _generate_script_json_simple(
+        drama_name: str,
+        plot_analysis: str,
+        subtitle_content: str,
+        project_id: Optional[str] = None,
+        target_items_count: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """(旧版逻辑) 直接调用提示词模块生成"""
         default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
         key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
@@ -796,13 +949,27 @@ class ScriptGenerationService:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+        if target_items_count and int(target_items_count) > 0:
+            n = int(target_items_count)
+            messages.insert(
+                0,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        f"你必须仅输出一个JSON对象，键为'items'。"
+                        f"items数组长度必须严格等于{n}，不能多不能少。"
+                        f"每条必须包含'_id','timestamp','picture','narration','OST'。"
+                        f"不得输出除JSON以外的任何文字。"
+                    ),
+                ),
+            )
         resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
         raw_text = resp.content
 
         # 清洗与校验
         data, raw_json = sanitize_json_text_to_dict(raw_text)
-        data = validate_script_items(data)
-        return data
+        validated = validate_script_items(data)
+        return cast(Dict[str, Any], validated)
 
     @staticmethod
     def to_video_script(data: Dict[str, Any], total_duration: float) -> Dict[str, Any]:

@@ -24,7 +24,7 @@ class ScriptGenerationPrompt(TextPrompt):
         )
         super().__init__(metadata)
         
-        self._system_prompt = "你是一位顶级的短剧解说up主，精通短视频创作的所有核心技巧。你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
+        self._system_prompt = "你是一位顶级的短剧解说up主，精通短视频创作的所有核心技巧。你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。强制必须输出3000字符以上的解说脚本。"
         
     def get_template(self) -> str:
         return """# 短剧解说脚本创作任务

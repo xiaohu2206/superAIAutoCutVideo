@@ -327,7 +327,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               </div>
               <button
                 onClick={handleOpenOutputVideoInExplorer}
-                className="ml-2 text-xs px-2 py-1 bg-white border border-gray-200 text-gray-600 rounded hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
+                className="ml-2 text-xs px-2 py-1 text-gray-600 rounded hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
