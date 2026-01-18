@@ -5,6 +5,7 @@ import { message } from "./message";
 // API基础配置（默认端口，运行时可通过 configureBackend 动态覆盖）
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8000;
+const DEFAULT_START_PORT = import.meta.env.DEV ? 8000 : 18000;
 const API_BASE_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const WS_BASE_URL = `ws://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 export const EXPECTED_BACKEND_IDENTIFIER = "super-auto-cut-video-backend";
@@ -661,7 +662,7 @@ export const utils = {
   // 端口发现功能
   async discoverBackendPort(
     host: string = DEFAULT_HOST,
-    startPort: number = DEFAULT_PORT,
+    startPort: number = DEFAULT_START_PORT,
     maxAttempts: number = 20
   ): Promise<{ port: number; host: string } | null> {
     for (let i = 0; i < maxAttempts; i++) {
@@ -695,7 +696,7 @@ export const utils = {
 // 自动配置后端连接
 export async function autoConfigureBackend(
   host: string = DEFAULT_HOST,
-  startPort: number = DEFAULT_PORT
+  startPort: number = DEFAULT_START_PORT
 ): Promise<boolean> {
   try {
     const discovered = await utils.discoverBackendPort(host, startPort);

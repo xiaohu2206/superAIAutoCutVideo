@@ -24,6 +24,8 @@ use tauri::{AppHandle, Manager, State};
 use zip::ZipArchive;
 #[cfg(target_os = "windows")]
 use std::io::{Read, Write};
+#[cfg(target_os = "windows")]
+use std::process::Stdio as _;
 
 // Windows: 隐藏子进程窗口（CREATE_NO_WINDOW）
 #[cfg(target_os = "windows")]
@@ -42,6 +44,14 @@ fn apply_windows_no_window(cmd: Command) -> Command {
     {
         cmd
     }
+}
+
+#[cfg(target_os = "windows")]
+fn kill_all_backend_processes() {
+    // 强制结束所有后端进程（包括可能残留的 PyInstaller 子进程）
+    let mut cmd = Command::new("taskkill");
+    cmd.args(["/F", "/IM", "superAutoCutVideoBackend.exe", "/T"]);
+    let _ = apply_windows_no_window(cmd).status();
 }
 
 // 应用状态结构
@@ -160,6 +170,52 @@ async fn discover_existing_backend(host: &str, require_token: bool) -> Option<(u
                 continue;
             }
             return Some((reported_port, boot_token));
+        }
+    }
+    None
+}
+
+async fn check_backend_on_port(host: &str, port: u16, timeout_ms: u64, require_token: bool) -> Option<(u16, Option<String>)> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .build()
+        .ok()?;
+    let url = format!("http://{}:{}/api/server/info", host, port);
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    let data = v.get("data")?;
+    let identifier = data.get("identifier").and_then(|s| s.as_str())?;
+    if identifier != BACKEND_IDENTIFIER {
+        return None;
+    }
+    let reported_port = data
+        .get("port")
+        .and_then(|n| n.as_u64())
+        .and_then(|n| u16::try_from(n).ok())
+        .unwrap_or(port);
+    let boot_token = data
+        .get("boot_token")
+        .and_then(|t| t.as_str())
+        .map(|t| t.to_string())
+        .filter(|t| !t.is_empty());
+    if require_token && boot_token.is_none() {
+        return None;
+    }
+    Some((reported_port, boot_token))
+}
+
+async fn discover_existing_backend_quick(host: &str, require_token: bool) -> Option<(u16, Option<String>)> {
+    if let Some(p) = parse_backend_port_from_log() {
+        if let Some(found) = check_backend_on_port(host, p, 200, require_token).await {
+            return Some(found);
+        }
+    }
+    for p in [18000u16, 8000u16] {
+        if let Some(found) = check_backend_on_port(host, p, 200, require_token).await {
+            return Some(found);
         }
     }
     None
@@ -319,6 +375,9 @@ async fn start_backend(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<BackendStatus, String> {
+    let early_log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
+    let _ = std::fs::OpenOptions::new().create(true).append(true).open(&early_log_path);
+    append_log_line(early_log_path.clone(), "[meta] start_backend invoked");
     // 先短暂持锁检查和清理状态，避免并发重复启动
     {
         let mut process_guard = state.backend_process.lock().unwrap();
@@ -369,7 +428,7 @@ async fn start_backend(
     }
     // 生产环境也尝试发现已运行的后端，避免重复启动
     if !is_dev_mode {
-        if let Some((p, boot_token)) = discover_existing_backend(host, true).await {
+        if let Some((p, boot_token)) = discover_existing_backend_quick(host, true).await {
             *state.backend_port.lock().unwrap() = p;
             *state.backend_boot_token.lock().unwrap() = boot_token.clone();
             println!("[backend] 已发现运行中的后端：http://{}:{}", host, p);
@@ -409,17 +468,25 @@ async fn start_backend(
     } else {
         resource_dir.join("superAutoCutVideoBackend")
     };
-    let fallback_path = exe_dir_fallback.as_ref().map(|dir| {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.push(primary_path.clone());
+    if let Some(dir) = &exe_dir_fallback {
         if cfg!(target_os = "windows") {
-            dir.join("resources").join("superAutoCutVideoBackend.exe")
+            candidates.push(dir.join("resources").join("superAutoCutVideoBackend.exe"));
         } else {
-            dir.join("resources").join("superAutoCutVideoBackend")
+            candidates.push(dir.join("resources").join("superAutoCutVideoBackend"));
         }
-    });
-
-    let backend_executable = if primary_path.exists() {
-        primary_path
-    } else if let Some(fp) = &fallback_path { fp.clone() } else { primary_path };
+        for anc in dir.ancestors().take(8) {
+            if cfg!(target_os = "windows") {
+                candidates.push(anc.join("src-tauri").join("resources").join("superAutoCutVideoBackend.exe"));
+                candidates.push(anc.join("resources").join("superAutoCutVideoBackend.exe"));
+            } else {
+                candidates.push(anc.join("src-tauri").join("resources").join("superAutoCutVideoBackend"));
+                candidates.push(anc.join("resources").join("superAutoCutVideoBackend"));
+            }
+        }
+    }
+    let backend_executable = candidates.into_iter().find(|p| p.exists()).unwrap_or(primary_path.clone());
 
     #[cfg(target_os = "windows")]
     {
@@ -502,7 +569,10 @@ async fn start_backend(
 
             c
         } else {
-            return Err("未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string());
+            let err = "未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string();
+            let path = std::env::temp_dir().join("super_auto_cut_backend.log");
+            append_log_line(path, &format!("[error] {}", err));
+            return Err(err);
         }
     };
 
@@ -608,12 +678,12 @@ async fn start_backend(
                         boot_token: state.backend_boot_token.lock().unwrap().clone(),
                     })
                 } else {
-                    if let Some((found_port, found_token)) = discover_existing_backend(host, !is_dev_mode).await {
-                        *state.backend_port.lock().unwrap() = found_port;
-                        *state.backend_boot_token.lock().unwrap() = found_token.clone();
-                        println!("[backend] 已发现运行中的后端：http://{}:{}", host, found_port);
-                        Ok(BackendStatus {
-                            running: true,
+                if let Some((found_port, found_token)) = discover_existing_backend_quick(host, !is_dev_mode).await {
+                    *state.backend_port.lock().unwrap() = found_port;
+                    *state.backend_boot_token.lock().unwrap() = found_token.clone();
+                    println!("[backend] 已发现运行中的后端：http://{}:{}", host, found_port);
+                    Ok(BackendStatus {
+                        running: true,
                             port: found_port,
                             pid: Some(pid),
                             boot_token: found_token,
@@ -647,11 +717,21 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
                 *state.backend_port.lock().unwrap() = 0;
                 *state.backend_boot_token.lock().unwrap() = None;
                 println!("[backend] 已停止 (pid={})", pid);
+                #[cfg(target_os = "windows")]
+                {
+                    // 额外兜底：强制结束所有同名后端进程，避免残留
+                    kill_all_backend_processes();
+                }
                 Ok(true)
             }
             Err(e) => Err(format!("停止后端失败: {}", e)),
         }
     } else {
+        #[cfg(target_os = "windows")]
+        {
+            // 无记录的子进程，但可能仍有残留后端，兜底清理
+            kill_all_backend_processes();
+        }
         Ok(false) // 没有运行的进程
     }
 }
@@ -786,7 +866,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let is_dev_mode =
         cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
-    if is_dev_mode {
+    {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
             let state = app_handle.state::<AppState>();

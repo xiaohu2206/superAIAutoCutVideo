@@ -14,7 +14,7 @@ import {
   handshakeVerifyBackend,
   wsClient,
 } from "./services/clients";
-import { message } from "./services/message";
+
 
 interface BackendStatus {
   running: boolean;
@@ -22,6 +22,8 @@ interface BackendStatus {
   pid?: number;
   boot_token?: string;
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const App: React.FC = () => {
   // 状态管理
@@ -36,8 +38,6 @@ const App: React.FC = () => {
   });
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [initPhase, setInitPhase] = useState("初始化");
-  const [initError, setInitError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
@@ -76,37 +76,31 @@ const App: React.FC = () => {
   }, []);
 
   const initializeApp = async () => {
-    try {
-      setIsLoading(true);
-      setInitError(null);
-      setInitPhase("检查后端服务");
+    setIsLoading(true);
 
-      const status = await checkBackendStatus();
-      setInitPhase("检查 API 连接");
-      await testApiConnection();
-
-      if (status && status.running) {
-        console.log("后端正在运行，尝试连接WebSocket...");
-        const wsTimeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
-        );
-        try {
-          await Promise.race([wsClient.connect(), wsTimeout]);
-          console.log("WebSocket连接成功");
-        } catch (error) {
-          console.error("WebSocket连接失败:", error);
+    let attempts = 0;
+    let ready = false;
+    do {
+      try {
+        const status = await checkBackendStatus();
+        const apiOk = await apiClient.testConnection();
+        if (status && status.running && apiOk) {
+          try {
+            const wsTimeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
+            );
+            await Promise.race([wsClient.connect(), wsTimeout]);
+          } catch {}
+          setIsLoading(false);
+          ready = true;
+          continue;
         }
-      } else {
-        console.log("后端未运行，跳过WebSocket连接");
+      } catch (e) {
+        console.debug("初始化中，后端未就绪，继续重试");
       }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error || "初始化失败");
-      console.error("初始化应用失败:", error);
-      setInitError(errMsg);
-      message.error(`${errMsg}（可查看临时日志 super_auto_cut_backend.log）`, 5);
-    } finally {
-      setIsLoading(false);
-    }
+      attempts += 1;
+      await sleep(Math.min(800 + attempts * 200, 3000));
+    } while (!ready);
   };
 
   const refreshConnections = async () => {
@@ -218,40 +212,11 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">{initPhase}...</p>
+          <p className="text-gray-600">SuperAI</p>
         </div>
       </div>
     );
   }
-
-  if (initError) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
-        <div className="max-w-xl w-full bg-white border border-gray-200 rounded-lg shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">后端启动失败</h2>
-          <p className="text-sm text-gray-700 break-words">{initError}</p>
-          <p className="text-sm text-gray-500 mt-2 break-words">
-            可查看临时日志：super_auto_cut_backend.log
-          </p>
-          <div className="mt-4 flex gap-3">
-            <button
-              onClick={initializeApp}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-            >
-              重试
-            </button>
-            <button
-              onClick={() => setInitError(null)}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-            >
-              继续进入
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
 
   return (
     <div className="min-h-screen bg-gray-50">
