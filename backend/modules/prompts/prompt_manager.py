@@ -227,13 +227,14 @@ class PromptManager:
                     cat = key.split(":", 1)[0]
                 except Exception:
                     cat = p.metadata.category
-                if cat == category:
+                if cat == category and p.metadata.name != "plot_analysis":
                     add_prompt(key, p)
         else:
             for tid, tpl in self._templates.items():
                 add_tpl(tid, tpl)
             for key, p in self._prompts.items():
-                add_prompt(key, p)
+                if p.metadata.name != "plot_analysis":
+                    add_prompt(key, p)
         return items
 
     def describe_item(self, key_or_id: str) -> Dict[str, Any]:

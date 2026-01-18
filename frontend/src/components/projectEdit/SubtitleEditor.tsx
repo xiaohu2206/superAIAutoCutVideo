@@ -68,7 +68,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
           <button
             onClick={onReload}
             disabled={loading || saving}
-            className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center py-2  text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
@@ -77,8 +77,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
               </>
             ) : (
               <>
-                <RefreshCcw className="h-4 w-4 mr-2" />
-                重新加载
+                <RefreshCcw className="h-4 w-4 ml-2 mr-2" />
               </>
             )}
           </button>
@@ -94,8 +93,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
               </>
             ) : (
               <>
-                <Save className="h-4 w-4 mr-2" />
-                保存字幕
+                <Save className="h-4 w-4" />
               </>
             )}
           </button>

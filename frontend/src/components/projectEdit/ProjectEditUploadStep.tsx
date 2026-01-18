@@ -1,4 +1,4 @@
-import { Loader } from "lucide-react";
+import { ArrowRight, Loader } from "lucide-react";
 import React from "react";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../../types/project";
 import AdvancedConfigSection from "./AdvancedConfigSection";
@@ -51,6 +51,7 @@ interface ProjectEditUploadStepProps {
   onReloadSubtitle: () => void;
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
+  onNextStep: () => void;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -94,6 +95,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onReloadSubtitle,
   onSaveSubtitle,
   onSubtitleDraftChange,
+  onNextStep,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
@@ -105,29 +107,8 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">项目配置</h2>
-          <button
-            onClick={() => setShowAdvancedConfig((v) => !v)}
-            className="text-blue-600 hover:text-blue-800 text-sm"
-          >
-            <span className="text-xs text-gray-500">（支持上传-字幕）</span>
-            高级配置
-          </button>
+          <p className="text-xs text-gray-500 mb-2">自动解析字幕只支持中文语言</p>
         </div>
-        <p className="text-xs text-gray-500 mb-2">自动解析字幕只支持中文语言</p>
-
-        {showAdvancedConfig && (
-          <AdvancedConfigSection
-            uploadingSubtitle={uploadingSubtitle}
-            subtitleUploadProgress={subtitleUploadProgress}
-            subtitlePath={project.subtitle_path}
-            onSubtitleFileChange={onSubtitleFileChange}
-            onDeleteSubtitle={onDeleteSubtitle}
-            isDraggingSubtitle={isDraggingSubtitle}
-            onSubtitleDragOver={onSubtitleDragOver}
-            onSubtitleDragLeave={onSubtitleDragLeave}
-            onSubtitleDrop={onSubtitleDrop}
-          />
-        )}
 
         <VideoSourcesManager
           project={project}
@@ -152,6 +133,30 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
       </div>
 
       <div className="bg-white rounded-lg shadow-md p-6 space-y-3">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900"></h2>
+          <button
+            onClick={() => setShowAdvancedConfig((v) => !v)}
+            className="text-blue-600 hover:text-blue-800 text-sm"
+          >
+            <span className="text-xs text-gray-500">（可选-上传字幕）</span>
+            高级配置
+          </button>
+        </div>
+          {showAdvancedConfig && (
+          <AdvancedConfigSection
+            uploadingSubtitle={uploadingSubtitle}
+            subtitleUploadProgress={subtitleUploadProgress}
+            subtitlePath={project.subtitle_path}
+            onSubtitleFileChange={onSubtitleFileChange}
+            onDeleteSubtitle={onDeleteSubtitle}
+            isDraggingSubtitle={isDraggingSubtitle}
+            onSubtitleDragOver={onSubtitleDragOver}
+            onSubtitleDragLeave={onSubtitleDragLeave}
+            onSubtitleDrop={onSubtitleDrop}
+          />
+        )}
+
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-semibold text-gray-900">字幕提取</h2>
@@ -214,16 +219,38 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
         )}
       </div>
-
-      <SubtitleEditor
-        segments={subtitleDraft}
-        subtitleMeta={subtitleMeta}
-        loading={subtitleLoading}
-        saving={subtitleSaving}
-        onReload={onReloadSubtitle}
-        onSave={onSaveSubtitle}
-        onChange={onSubtitleDraftChange}
-      />
+      <div className="flex justify-end">
+          <button
+            onClick={onNextStep}
+            disabled={!project.subtitle_path}
+            className={`
+              group flex items-center px-4 py-2 mr-6 rounded-lg text-white font-medium shadow-md transition-all duration-300
+              ${
+                project.subtitle_path
+                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5"
+                  : "bg-gray-300 cursor-not-allowed opacity-60"
+              }
+            `}
+          >
+            <span>生成脚本</span>
+            <ArrowRight
+              className={`ml-2 h-5 w-5 transition-transform duration-300 ${
+                project.subtitle_path ? "group-hover:translate-x-1" : ""
+              }`}
+            />
+          </button>
+        </div>
+        {project.subtitle_source === "extracted" && (
+          <SubtitleEditor
+            segments={subtitleDraft}
+            subtitleMeta={subtitleMeta}
+            loading={subtitleLoading}
+            saving={subtitleSaving}
+            onReload={onReloadSubtitle}
+            onSave={onSaveSubtitle}
+            onChange={onSubtitleDraftChange}
+          />
+        )}
     </>
   );
 };

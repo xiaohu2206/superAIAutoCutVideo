@@ -44,7 +44,7 @@ const StorageSettingsSection: React.FC = () => {
           <div className="flex items-center justify-between mb-2">
             <div>
               <p className="text-sm font-medium text-gray-700">当前 uploads 根路径（缓存数据存储目录,建议卸载时手动清理）</p>
-              <p className="text-xs text-gray-500">更改后重启应用可生效</p>
+              <p className="text-xs text-red-500 ">更改后重启应用可生效</p>
             </div>
             <div className="flex items-center space-x-2">
               <button
@@ -100,9 +100,9 @@ const StorageSettingsSection: React.FC = () => {
               checked={migrate}
               onChange={(e) => setMigrate(e.target.checked)}
             />
-            <span className="text-sm text-gray-700">迁移旧数据</span>
+            <span className="text-sm text-gray-700">迁移旧数据<span className="text-xs text-gray-500">(谨慎操作，迁移可能耗时)</span></span>
           </label>
-          <span className="text-xs text-gray-500">谨慎操作，迁移可能耗时</span>
+          
         </div>
 
         {error ? (

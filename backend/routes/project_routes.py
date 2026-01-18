@@ -330,7 +330,11 @@ async def get_project_detail(project_id: str):
 async def create_project(req: CreateProjectRequest):
     if not req.name or not req.name.strip():
         raise HTTPException(status_code=400, detail="项目名称无效")
-    p = projects_store.create_project(req.name.strip(), req.description, req.narration_type or "短剧解说")
+    name_clean = req.name.strip()
+    for existing in projects_store.list_projects():
+        if (existing.name or "").strip() == name_clean:
+            raise HTTPException(status_code=400, detail="项目名称已存在")
+    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说")
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),
@@ -359,7 +363,28 @@ async def generate_script(req: GenerateScriptRequest):
             subtitle_path=req.subtitle_path,
             narration_type=req.narration_type,
         )
-    except HTTPException:
+    except HTTPException as e:
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_script",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "脚本生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_script",
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "脚本生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
         raise
     except Exception as e:
         projects_store.update_project(req.project_id, {"status": "failed"})

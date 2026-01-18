@@ -40,6 +40,16 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
   } = useProjectDetail(projectId);
 
   const [currentStep, setCurrentStep] = useState<"upload" | "generate">("upload");
+  const [hasInitializedStep, setHasInitializedStep] = useState(false);
+
+  useEffect(() => {
+    if (!loading && project && !hasInitializedStep) {
+      if (project.subtitle_status === "ready") {
+        setCurrentStep("generate");
+      }
+      setHasInitializedStep(true);
+    }
+  }, [loading, project, hasInitializedStep]);
 
   const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
     if (err && typeof err === "object") {
@@ -121,7 +131,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
       </div>
     );
   }
-
+  console.log("project---", project)
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-md p-3">
@@ -152,10 +162,18 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
               1. 上传视频
             </button>
             <button
-              onClick={() => setCurrentStep("generate")}
+              onClick={() => {
+                if (project?.subtitle_status === "ready") {
+                  setCurrentStep("generate");
+                } else {
+                  message.warning("请先提取或上传字幕");
+                }
+              }}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
                 currentStep === "generate"
                   ? "bg-white text-gray-900 shadow-sm"
+                  : project?.subtitle_status !== "ready"
+                  ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
@@ -173,6 +191,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
           mergeProgress={mergeProgress}
           subtitleLoading={subtitleLoading}
           subtitleMeta={subtitleMeta}
+          onNextStep={() => {
+            if (project?.subtitle_status === "ready") {
+              setCurrentStep("generate");
+            } else {
+              message.warning("请先提取或上传字幕");
+            }
+          }}
           {...uploadStep}
         />
       )}

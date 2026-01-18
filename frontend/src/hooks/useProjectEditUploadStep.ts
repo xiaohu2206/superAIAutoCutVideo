@@ -94,6 +94,7 @@ export function useProjectEditUploadStep(
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const uploadingVideoRef = useRef(false);
+  const subtitleSegmentsSerializedRef = useRef<string | null>(null);
 
   useEffect(() => {
     uploadingVideoRef.current = uploadingVideo;
@@ -388,7 +389,13 @@ export function useProjectEditUploadStep(
   }, [options.project?.id, options.project?.subtitle_path, options.fetchSubtitle]);
 
   useEffect(() => {
-    setSubtitleDraft(options.subtitleSegments || []);
+    const incoming = options.subtitleSegments || [];
+    const serialized = JSON.stringify(incoming);
+    if (subtitleSegmentsSerializedRef.current === serialized) {
+      return;
+    }
+    subtitleSegmentsSerializedRef.current = serialized;
+    setSubtitleDraft(incoming);
   }, [options.subtitleSegments]);
 
   const onReloadSubtitle = useCallback(async () => {

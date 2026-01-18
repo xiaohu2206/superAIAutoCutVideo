@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 export interface UseTauriFileDropOptions {
@@ -10,6 +10,16 @@ export interface UseTauriFileDropOptions {
 
 export function useTauriFileDrop(options?: UseTauriFileDropOptions) {
   const preventWindowDrop = options?.preventWindowDrop ?? true;
+  const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
+  const hoveredRef = useRef(options?.onHovered);
+  const cancelledRef = useRef(options?.onCancelled);
+  const droppedRef = useRef(options?.onDropped);
+
+  useEffect(() => {
+    hoveredRef.current = options?.onHovered;
+    cancelledRef.current = options?.onCancelled;
+    droppedRef.current = options?.onDropped;
+  }, [options?.onCancelled, options?.onDropped, options?.onHovered]);
 
   useEffect(() => {
     const onGlobalDragOver = (ev: DragEvent) => {
@@ -38,15 +48,18 @@ export function useTauriFileDrop(options?: UseTauriFileDropOptions) {
 
     const setup = async () => {
       try {
+        if (!isTauri) {
+          return;
+        }
         unlistenHover = await listen<string[]>("tauri://file-drop-hovered", () => {
-          options?.onHovered?.();
+          hoveredRef.current?.();
         });
         unlistenCancel = await listen<string[]>("tauri://file-drop-cancelled", () => {
-          options?.onCancelled?.();
+          cancelledRef.current?.();
         });
         unlistenDrop = await listen<string[]>("tauri://file-drop", async (event) => {
           const payload = Array.isArray(event.payload) ? (event.payload as string[]) : [];
-          await options?.onDropped?.(payload);
+          await droppedRef.current?.(payload);
         });
       } catch (e) {
         console.error(e);
@@ -66,6 +79,5 @@ export function useTauriFileDrop(options?: UseTauriFileDropOptions) {
         console.error(e);
       }
     };
-  }, [options?.onCancelled, options?.onDropped, options?.onHovered, preventWindowDrop]);
+  }, [preventWindowDrop, isTauri]);
 }
-

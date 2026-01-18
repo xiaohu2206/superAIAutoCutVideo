@@ -127,7 +127,25 @@ export class ApiClient {
   }
 
   // POST请求
-  async post<T>(endpoint: string, data?: any): Promise<T> {
+  async post<T>(endpoint: string, data?: any, timeoutMs?: number): Promise<T> {
+    if (typeof timeoutMs === "number" && timeoutMs > 0) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await this.request<T>(endpoint, {
+          method: "POST",
+          body: data ? JSON.stringify(data) : undefined,
+          signal: controller.signal,
+        });
+      } catch (e: any) {
+        if (e && e.name === "AbortError") {
+          throw new Error("请求超时");
+        }
+        throw e;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
     return this.request<T>(endpoint, {
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,

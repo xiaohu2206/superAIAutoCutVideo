@@ -40,7 +40,8 @@ export class ProjectService {
   async createProject(data: CreateProjectRequest): Promise<Project> {
     const response = await apiClient.post<{ data: Project }>(
       "/api/projects",
-      data
+      data,
+      10000
     );
     return response.data;
   }

@@ -63,6 +63,7 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
 
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
+  console.log("items", items)
   const otherOfficialItems = (items || []).filter((it) => it.origin === "official" && it.id_or_key !== featureKey);
 
   const handleSelect = async (origin: "official" | "user", id_or_key: string) => {
@@ -155,7 +156,7 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
   };
 
   return (
-    <div className="border-t border-gray-200 pt-4 space-y-3">
+    <div className="border-gray-200 pt-4 space-y-3">
       {narrationType === NarrationType.MOVIE ? (
         <div className="border-t border-gray-200 pt-4">
           <div className="flex items-center justify-between">
@@ -209,7 +210,7 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
         </div>
       ) : null}
 
-      <div className="border-t border-gray-200 pt-4">
+      <div className="border-gray-200">
         <div className="flex items-center justify-between">
           <label className="block text-sm font-medium text-gray-700 mb-2">{`提示词选择（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
           {loading ? <span className="text-xs text-gray-500">加载中</span> : null}

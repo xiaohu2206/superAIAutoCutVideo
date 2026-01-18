@@ -25,7 +25,7 @@ const AdvancedConfigSection: React.FC<AdvancedConfigSectionProps> = ({
   onSubtitleDrop,
 }) => {
   return (
-    <div className="border-t border-gray-200 pt-4 space-y-3">
+    <div className="border-gray-200 pt-4 space-y-3">
       <SubtitleUploader
         uploading={uploadingSubtitle}
         progress={subtitleUploadProgress}
