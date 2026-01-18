@@ -46,6 +46,30 @@ export interface VideoScript {
   };
 }
 
+export type SubtitleSource = null | "user" | "extracted";
+export type SubtitleStatus = null | "none" | "extracting" | "ready" | "failed";
+
+export interface SubtitleSegment {
+  id?: string;
+  start_time: number;
+  end_time: number;
+  text: string;
+}
+
+export interface SubtitleMeta {
+  file_path?: string | null;
+  source?: SubtitleSource;
+  status?: SubtitleStatus;
+  updated_by_user?: boolean;
+  updated_at?: string | null;
+  format?: string | null;
+}
+
+export interface SubtitleResult {
+  segments: SubtitleSegment[];
+  subtitle_meta: SubtitleMeta;
+}
+
 /**
  * 项目接口
  */
@@ -63,6 +87,11 @@ export interface Project {
   video_names?: Record<string, string>;
   video_current_name?: string;
   subtitle_path?: string; // 字幕文件路径
+  subtitle_source?: SubtitleSource;
+  subtitle_status?: SubtitleStatus;
+  subtitle_updated_by_user?: boolean;
+  subtitle_updated_at?: string | null;
+  subtitle_format?: string | null;
   output_video_path?: string; // 输出视频文件路径
   // 剪映草稿相关
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径
@@ -95,6 +124,11 @@ export interface UpdateProjectRequest {
   video_paths?: string[];
   merged_video_path?: string;
   subtitle_path?: string;
+  subtitle_source?: SubtitleSource;
+  subtitle_status?: SubtitleStatus;
+  subtitle_updated_by_user?: boolean;
+  subtitle_updated_at?: string | null;
+  subtitle_format?: string | null;
   output_video_path?: string;
   script?: VideoScript;
 }

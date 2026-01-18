@@ -24,7 +24,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({
         <button
           onClick={handleSaveScript}
           disabled={!editedScript.trim() || isSaving}
-          className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSaving ? (
             <>
@@ -33,8 +33,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({
             </>
           ) : (
             <>
-              <Save className="h-4 w-4 mr-2" />
-              保存脚本
+              <Save className="h-4 w-4" />
             </>
           )}
         </button>

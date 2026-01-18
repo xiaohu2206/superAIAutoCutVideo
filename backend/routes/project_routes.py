@@ -15,7 +15,6 @@
 """
 
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -28,24 +27,16 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import json
 import uuid
-import zipfile
 import subprocess
-from starlette.background import BackgroundTask
-import shutil
 import platform
 
-from modules.projects_store import projects_store, Project
+from modules.projects_store import projects_store
 from modules.video_processor import video_processor
-from services.script_generation_service import ScriptGenerationService
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
+from services.extract_subtitle_service import extract_subtitle_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from modules.config.jianying_config import jianying_config_manager
-from services.asr_bcut import BcutASR
-from services.asr_utils import utterances_to_srt
-from modules.config.content_model_config import content_model_config_manager
-from modules.config.tts_config import tts_engine_config_manager
-from modules.config.video_model_config import video_model_config_manager
 from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
 
@@ -80,6 +71,7 @@ def to_web_path(p: Path) -> str:
     rel = p.relative_to(up)
     return "/uploads/" + str(rel).replace("\\", "/")
 
+
 def resolve_abs_path(path_str: str) -> Path:
     s = (path_str or "").strip()
     if not s:
@@ -109,6 +101,7 @@ def resolve_abs_path(path_str: str) -> Path:
         return project_root_dir() / s_norm[1:]
     return Path(s)
 
+
 class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
@@ -131,12 +124,14 @@ class UpdateProjectRequest(BaseModel):
 class DeleteVideoRequest(BaseModel):
     file_path: Optional[str] = None
 
+
 class MergeTaskStatus(BaseModel):
     task_id: str
     status: str
     progress: float
     message: str
     file_path: Optional[str] = None
+
 
 MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
 
@@ -152,6 +147,52 @@ class GenerateScriptRequest(BaseModel):
     video_path: str
     subtitle_path: Optional[str] = None
     narration_type: str
+
+
+class ExtractSubtitleRequest(BaseModel):
+    force: bool = False
+
+
+class SubtitleSegmentInput(BaseModel):
+    id: Optional[str] = None
+    start_time: float
+    end_time: float
+    text: str
+
+
+class SaveSubtitleRequest(BaseModel):
+    segments: Optional[List[SubtitleSegmentInput]] = None
+    content: Optional[str] = None
+
+
+def _format_ts(seconds: float) -> str:
+    if seconds < 0:
+        seconds = 0.0
+    ms_total = int(round(seconds * 1000))
+    ms = ms_total % 1000
+    s_total = ms_total // 1000
+    s = s_total % 60
+    m_total = s_total // 60
+    m = m_total % 60
+    h = m_total // 60
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
+    items = list(segments or [])
+    items.sort(key=lambda x: (float(x.start_time), float(x.end_time)))
+    out_lines: List[str] = []
+    for seg in items:
+        start = float(seg.start_time)
+        end = float(seg.end_time)
+        if start < 0 or end < 0 or start >= end:
+            raise HTTPException(status_code=400, detail="字幕时间戳无效")
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        normalized_text = re.sub(r"\s+", " ", text)
+        out_lines.append(f"[{_format_ts(start)}-{_format_ts(end)}] {normalized_text}")
+    return ("\n".join(out_lines) + ("\n" if out_lines else ""))
 
 
 def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
@@ -190,16 +231,16 @@ def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
             # 兼容标准SRT解析
             blocks = [b.strip() for b in norm.split("\n\n") if b.strip()]
             for idx, block in enumerate(blocks, start=1):
-                ls = [l for l in block.splitlines() if l.strip()]
-                if len(ls) < 2:
+                lines_in_block = [line for line in block.splitlines() if line.strip()]
+                if len(lines_in_block) < 2:
                     continue
-                timing_line = ls[1] if "-->" in ls[1] else ls[0]
+                timing_line = lines_in_block[1] if "-->" in lines_in_block[1] else lines_in_block[0]
                 if "-->" not in timing_line:
                     continue
                 start_str, end_str = [t.strip() for t in timing_line.split("-->")]
                 start_t = _parse_ts(start_str)
                 end_t = _parse_ts(end_str)
-                text_lines = ls[2:] if timing_line == ls[1] else ls[1:]
+                text_lines = lines_in_block[2:] if timing_line == lines_in_block[1] else lines_in_block[1:]
                 text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
                 if not text:
                     text = f"字幕段{idx}"
@@ -214,6 +255,7 @@ def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
         # 解析失败返回空
         pass
     return segments
+
 
 def compress_srt(content: str) -> str:
     text = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
@@ -288,7 +330,11 @@ async def get_project_detail(project_id: str):
 async def create_project(req: CreateProjectRequest):
     if not req.name or not req.name.strip():
         raise HTTPException(status_code=400, detail="项目名称无效")
-    p = projects_store.create_project(req.name.strip(), req.description, req.narration_type or "短剧解说")
+    name_clean = req.name.strip()
+    for existing in projects_store.list_projects():
+        if (existing.name or "").strip() == name_clean:
+            raise HTTPException(status_code=400, detail="项目名称已存在")
+    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说")
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),
@@ -302,7 +348,13 @@ async def create_project(req: CreateProjectRequest):
 async def generate_script(req: GenerateScriptRequest):
     try:
         try:
-            logger.info(f"route generate-script project_id={req.project_id} video_path={req.video_path} subtitle_path={req.subtitle_path} narration_type={req.narration_type}")
+            logger.info(
+                "route generate-script project_id=%s video_path=%s subtitle_path=%s narration_type=%s",
+                req.project_id,
+                req.video_path,
+                req.subtitle_path,
+                (req.narration_type or "")[:50],
+            )
         except Exception:
             pass
         return await generate_script_service.generate_script(
@@ -311,7 +363,28 @@ async def generate_script(req: GenerateScriptRequest):
             subtitle_path=req.subtitle_path,
             narration_type=req.narration_type,
         )
-    except HTTPException:
+    except HTTPException as e:
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_script",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "脚本生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_script",
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "脚本生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
         raise
     except Exception as e:
         projects_store.update_project(req.project_id, {"status": "failed"})
@@ -327,6 +400,127 @@ async def generate_script(req: GenerateScriptRequest):
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"脚本生成失败: {str(e)}")
+
+
+@router.post("/{project_id}/extract-subtitle")
+async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
+    try:
+        data = await extract_subtitle_service.extract_subtitle(project_id=project_id, force=bool(req.force))
+        return {
+            "message": "字幕提取成功",
+            "data": data,
+            "timestamp": now_ts(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            projects_store.update_project(project_id, {"subtitle_status": "failed"})
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"字幕提取失败: {str(e)}")
+
+
+@router.get("/{project_id}/subtitle")
+async def get_subtitle(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.subtitle_path:
+        raise HTTPException(status_code=404, detail="字幕不存在")
+    abs_path = resolve_abs_path(p.subtitle_path.strip())
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="字幕文件不存在")
+    segments = parse_srt(abs_path)
+    subtitle_meta = {
+        "file_path": p.subtitle_path,
+        "source": getattr(p, "subtitle_source", None),
+        "status": getattr(p, "subtitle_status", None),
+        "updated_by_user": bool(getattr(p, "subtitle_updated_by_user", False)),
+        "updated_at": getattr(p, "subtitle_updated_at", None),
+        "format": getattr(p, "subtitle_format", None),
+    }
+    return {
+        "message": "获取字幕成功",
+        "data": {
+            "segments": segments,
+            "subtitle_meta": subtitle_meta,
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/subtitle")
+async def save_subtitle(project_id: str, req: SaveSubtitleRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    content: Optional[str] = (req.content or "").strip() if req.content is not None else None
+    if content:
+        if len(content) > 2_000_000:
+            raise HTTPException(status_code=400, detail="字幕内容过大")
+        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+        final_content = normalized + ("\n" if normalized and not normalized.endswith("\n") else "")
+    else:
+        segments_in = req.segments or []
+        if not segments_in:
+            raise HTTPException(status_code=400, detail="未提供字幕内容")
+        if len(segments_in) > 5000:
+            raise HTTPException(status_code=400, detail="字幕段数过多")
+        total_chars = sum(len((s.text or "")) for s in segments_in)
+        if total_chars > 2_000_000:
+            raise HTTPException(status_code=400, detail="字幕文本过大")
+        final_content = _segments_to_compressed_srt(segments_in)
+
+    target_abs: Optional[Path] = None
+    if p.subtitle_path:
+        cand = resolve_abs_path(p.subtitle_path.strip())
+        if cand.exists():
+            target_abs = cand
+    if not target_abs:
+        up_dir = uploads_dir() / "subtitles"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        out_name = f"{project_id}_subtitle_edit_{ts}.srt"
+        target_abs = up_dir / out_name
+
+    try:
+        target_abs.write_text(final_content, encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"字幕保存失败: {str(e)}")
+
+    web_path = to_web_path(target_abs)
+    src = getattr(p, "subtitle_source", None)
+    if src not in {"user", "extracted"}:
+        src = "extracted"
+    p2 = projects_store.update_project(project_id, {
+        "subtitle_path": web_path,
+        "subtitle_source": src,
+        "subtitle_status": "ready",
+        "subtitle_updated_by_user": True,
+        "subtitle_updated_at": now_ts(),
+        "subtitle_format": "compressed_srt_v1",
+    })
+    if not p2:
+        raise HTTPException(status_code=500, detail="服务器错误")
+
+    segments = parse_srt(target_abs)
+    subtitle_meta = {
+        "file_path": p2.subtitle_path,
+        "source": getattr(p2, "subtitle_source", None),
+        "status": getattr(p2, "subtitle_status", None),
+        "updated_by_user": bool(getattr(p2, "subtitle_updated_by_user", False)),
+        "updated_at": getattr(p2, "subtitle_updated_at", None),
+        "format": getattr(p2, "subtitle_format", None),
+    }
+    return {
+        "message": "字幕保存成功",
+        "data": {
+            "segments": segments,
+            "subtitle_meta": subtitle_meta,
+        },
+        "timestamp": now_ts(),
+    }
 
 
 @router.post("/{project_id}")
@@ -356,6 +550,7 @@ async def delete_project(project_id: str):
         "success": True,
         "timestamp": now_ts(),
     }
+
 
 @router.get("/{project_id}/logs")
 async def list_project_logs(
@@ -509,7 +704,14 @@ async def upload_subtitle(project_id: str, file: UploadFile = File(...)):
         await file.close()
 
     web_path = to_web_path(out_path)
-    projects_store.update_project(project_id, {"subtitle_path": web_path})
+    projects_store.update_project(project_id, {
+        "subtitle_path": web_path,
+        "subtitle_source": "user",
+        "subtitle_status": "ready",
+        "subtitle_updated_by_user": False,
+        "subtitle_updated_at": now_ts(),
+        "subtitle_format": "compressed_srt_v1",
+    })
 
     return {
         "message": "字幕上传成功",
@@ -523,6 +725,7 @@ async def upload_subtitle(project_id: str, file: UploadFile = File(...)):
     }
 
 # ========================= 文件删除 =========================
+
 
 @router.post("/{project_id}/delete/video")
 async def delete_video_file(project_id: str, request: Request, req: Optional[DeleteVideoRequest] = Body(None), file_path_form: Optional[str] = Form(None)):
@@ -725,6 +928,7 @@ async def merge_videos(project_id: str):
         "timestamp": now_ts(),
     }
 
+
 @router.get("/{project_id}/merge/videos/status/{task_id}")
 async def merge_videos_status(project_id: str, task_id: str):
     t = MERGE_TASKS.get(task_id)
@@ -889,6 +1093,7 @@ async def download_output_video(project_id: str):
         headers=headers,
     )
 
+
 @router.get("/{project_id}/output-video/download")
 async def download_output_video_attachment(project_id: str):
     p = projects_store.get_project(project_id)
@@ -916,6 +1121,7 @@ async def download_output_video_attachment(project_id: str):
         headers=headers,
     )
 # ========================= 合并视频播放 =========================
+
 
 @router.get("/{project_id}/merged-video")
 async def get_merged_video(project_id: str):
@@ -1064,6 +1270,7 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"打开文件管理器失败: {str(e)}")
+
 
 async def _run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()

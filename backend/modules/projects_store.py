@@ -35,6 +35,11 @@ class Project(BaseModel):
     video_names: Dict[str, str] = Field(default_factory=dict)
     video_current_name: Optional[str] = None
     subtitle_path: Optional[str] = None
+    subtitle_source: Optional[str] = None
+    subtitle_status: Optional[str] = Field(default="none")
+    subtitle_updated_by_user: bool = Field(default=False)
+    subtitle_updated_at: Optional[str] = None
+    subtitle_format: Optional[str] = None
     audio_path: Optional[str] = None
     plot_analysis_path: Optional[str] = None
     output_video_path: Optional[str] = None
@@ -87,6 +92,17 @@ class ProjectsStore:
                                 p["jianying_draft_dirs"] = []
                             if "jianying_draft_last_zip" in p:
                                 p.pop("jianying_draft_last_zip", None)
+                            # 兼容旧数据：字幕元信息字段
+                            if "subtitle_source" not in p:
+                                p["subtitle_source"] = None
+                            if "subtitle_status" not in p:
+                                p["subtitle_status"] = "ready" if p.get("subtitle_path") else "none"
+                            if "subtitle_updated_by_user" not in p:
+                                p["subtitle_updated_by_user"] = False
+                            if "subtitle_updated_at" not in p:
+                                p["subtitle_updated_at"] = p.get("updated_at") or None
+                            if "subtitle_format" not in p:
+                                p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -129,6 +145,11 @@ class ProjectsStore:
             video_paths=[],
             merged_video_path=None,
             subtitle_path=None,
+            subtitle_source=None,
+            subtitle_status="none",
+            subtitle_updated_by_user=False,
+            subtitle_updated_at=None,
+            subtitle_format=None,
             audio_path=None,
             plot_analysis_path=None,
             output_video_path=None,
@@ -160,6 +181,11 @@ class ProjectsStore:
                 "video_names",
                 "video_current_name",
                 "subtitle_path",
+                "subtitle_source",
+                "subtitle_status",
+                "subtitle_updated_by_user",
+                "subtitle_updated_at",
+                "subtitle_format",
                 "audio_path",
                 "plot_analysis_path",
                 "output_video_path",
@@ -228,6 +254,11 @@ class ProjectsStore:
                 return None
             data = project.model_dump()
             data["subtitle_path"] = None
+            data["subtitle_source"] = None
+            data["subtitle_status"] = "none"
+            data["subtitle_updated_by_user"] = False
+            data["subtitle_updated_at"] = datetime.now().isoformat()
+            data["subtitle_format"] = None
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)

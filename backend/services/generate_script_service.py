@@ -13,14 +13,9 @@ import cv2
 from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
-from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from services.script_generation_service import ScriptGenerationService
-from services.asr_bcut import BcutASR
-from services.asr_utils import utterances_to_srt
 from modules.config.content_model_config import content_model_config_manager
-from modules.config.tts_config import tts_engine_config_manager
-from modules.config.video_model_config import video_model_config_manager
 
 
 logger = logging.getLogger(__name__)
@@ -151,16 +146,16 @@ def _parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
         else:
             blocks = [b.strip() for b in norm.split("\n\n") if b.strip()]
             for idx, block in enumerate(blocks, start=1):
-                ls = [l for l in block.splitlines() if l.strip()]
-                if len(ls) < 2:
+                lines_in_block = [line for line in block.splitlines() if line.strip()]
+                if len(lines_in_block) < 2:
                     continue
-                timing_line = ls[1] if "-->" in ls[1] else ls[0]
+                timing_line = lines_in_block[1] if "-->" in lines_in_block[1] else lines_in_block[0]
                 if "-->" not in timing_line:
                     continue
                 start_str, end_str = [t.strip() for t in timing_line.split("-->")]
                 start_t = _parse_ts(start_str)
                 end_t = _parse_ts(end_str)
-                text_lines = ls[2:] if timing_line == ls[1] else ls[1:]
+                text_lines = lines_in_block[2:] if timing_line == lines_in_block[1] else lines_in_block[1:]
                 text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
                 if not text:
                     text = f"字幕段{idx}"
@@ -372,7 +367,10 @@ class GenerateScriptService:
             raise HTTPException(status_code=404, detail="项目不存在")
 
         try:
-            logger.info(f"generate_script start project_id={project_id} video_path={video_path} subtitle_path={subtitle_path} uploads_env={os.environ.get('SACV_UPLOADS_DIR')}")
+            uploads_env = os.environ.get("SACV_UPLOADS_DIR")
+            logger.info(
+                f"generate_script start project_id={project_id} video_path={video_path} subtitle_path={subtitle_path} uploads_env={uploads_env}"
+            )
         except Exception:
             pass
         try:
@@ -425,6 +423,21 @@ class GenerateScriptService:
         sub_abs: Optional[Path] = None
         created_tmp: List[Path] = []
 
+        subtitle_status = getattr(p, "subtitle_status", None)
+        if subtitle_status and subtitle_status != "ready":
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "scope": "generate_script",
+                    "project_id": project_id,
+                    "phase": "subtitle_not_ready",
+                    "message": "字幕尚未就绪，请先提取字幕或上传字幕",
+                    "timestamp": _now_ts(),
+                }))
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
+
         if p.subtitle_path:
             cand = _resolve_path(p.subtitle_path)
             try:
@@ -443,6 +456,11 @@ class GenerateScriptService:
                         "progress": 60,
                         "timestamp": _now_ts(),
                     }))
+                except Exception:
+                    pass
+                try:
+                    if getattr(p, "subtitle_status", None) != "ready":
+                        projects_store.update_project(project_id, {"subtitle_status": "ready"})
                 except Exception:
                     pass
 
@@ -466,183 +484,29 @@ class GenerateScriptService:
                     }))
                 except Exception:
                     pass
+                try:
+                    if not getattr(p, "subtitle_path", None):
+                        projects_store.update_project(project_id, {
+                            "subtitle_path": subtitle_path,
+                            "subtitle_status": "ready",
+                            "subtitle_updated_at": _now_ts(),
+                        })
+                except Exception:
+                    pass
 
         if not sub_abs:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             try:
                 await manager.broadcast(json.dumps({
-                    "type": "progress",
+                    "type": "error",
                     "scope": "generate_script",
                     "project_id": project_id,
-                    "phase": "validating_asr",
-                    "message": "正在验证ASR服务是否可用",
-                    "progress": 25,
+                    "phase": "subtitle_missing",
+                    "message": "请先提取字幕或上传字幕",
                     "timestamp": _now_ts(),
                 }))
             except Exception:
                 pass
-
-            asr_check = await _run_in_thread(BcutASR.test_connection)
-            if not asr_check.get("success", False):
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "error",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "asr_unavailable",
-                        "message": asr_check.get("error") or asr_check.get("message") or "ASR服务不可用",
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
-
-            audio_abs: Optional[Path] = None
-            if getattr(p, "audio_path", None):
-                a_cand = _resolve_path(p.audio_path)
-                try:
-                    logger.info(f"audio candidate project_id={project_id} cand_input={p.audio_path} cand_resolved={a_cand} exists={a_cand.exists()}")
-                except Exception:
-                    pass
-                if a_cand.exists():
-                    audio_abs = a_cand
-                    try:
-                        await manager.broadcast(json.dumps({
-                            "type": "progress",
-                            "scope": "generate_script",
-                            "project_id": project_id,
-                            "phase": "audio_exists",
-                            "message": "已存在提取音频，跳过音频提取",
-                            "progress": 35,
-                            "timestamp": _now_ts(),
-                        }))
-                    except Exception:
-                        pass
-
-            if not audio_abs:
-                audio_out = _uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3"
-                try:
-                    logger.info(f"extract audio project_id={project_id} input_video={video_abs} output_audio={audio_out}")
-                except Exception:
-                    pass
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "extract_audio",
-                        "message": "正在提取音频",
-                        "progress": 30,
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
-                if not ok_audio:
-                    try:
-                        await manager.broadcast(json.dumps({
-                            "type": "error",
-                            "scope": "generate_script",
-                            "project_id": project_id,
-                            "phase": "extract_audio_failed",
-                            "message": "音频提取失败",
-                            "timestamp": _now_ts(),
-                        }))
-                    except Exception:
-                        pass
-                    raise HTTPException(status_code=500, detail="音频提取失败")
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "audio_ready",
-                        "message": "音频提取完成",
-                        "progress": 40,
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                try:
-                    logger.info(f"audio ready project_id={project_id} audio_abs={audio_out}")
-                except Exception:
-                    pass
-                audio_abs = audio_out
-                try:
-                    created_tmp.append(audio_out)
-                except Exception:
-                    pass
-
-            asr = BcutASR(str(audio_abs))
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "progress",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "asr_start",
-                    "message": "正在提取视频字幕（ASR）",
-                    "progress": 45,
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-            try:
-                data = asr.run()
-            except Exception as e:
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "error",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "asr_exception",
-                        "message": f"语音识别服务异常：{str(e)}",
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                raise HTTPException(status_code=500, detail="语音识别失败")
-
-            utterances = data.get("utterances") if isinstance(data, dict) else None
-            if not isinstance(utterances, list) or not utterances:
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "error",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "asr_failed",
-                        "message": "语音识别失败",
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                raise HTTPException(status_code=500, detail="语音识别失败")
-
-            srt_text = utterances_to_srt(utterances)
-            srt_text = _compress_srt(srt_text)
-            srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts}.srt"
-            srt_out.write_text(srt_text, encoding="utf-8")
-            sub_abs = srt_out
-            logging.info(f"asr识别结果保存到 {srt_out}")
-            try:
-                logger.info(f"subtitle saved project_id={project_id} subtitle_abs={srt_out}")
-            except Exception:
-                pass
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "progress",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "subtitle_ready",
-                    "message": "字幕提取完成",
-                    "progress": 60,
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-            try:
-                created_tmp.append(srt_out)
-            except Exception:
-                pass
+            raise HTTPException(status_code=400, detail="请先提取字幕或上传字幕")
 
         if sub_abs and sub_abs.exists():
             try:
@@ -684,13 +548,11 @@ class GenerateScriptService:
         try:
             drama_name = p.name or "剧名"
             plot_analysis: str = ""
-            reused_analysis = False
             if getattr(p, "plot_analysis_path", None):
                 plot_abs_cand = _resolve_path(p.plot_analysis_path)
                 if plot_abs_cand.exists():
                     try:
                         plot_analysis = plot_abs_cand.read_text(encoding="utf-8", errors="ignore")
-                        reused_analysis = True
                     except Exception:
                         plot_analysis = ""
             if not plot_analysis:
@@ -785,7 +647,7 @@ class GenerateScriptService:
                 }))
             except Exception:
                 pass
-            p2 = projects_store.save_script(project_id, script)
+            projects_store.save_script(project_id, script)
             projects_store.update_project(project_id, {"status": "completed"})
             try:
                 logger.info(f"script saved project_id={project_id} segments_count={len(script.get('segments', []))}")

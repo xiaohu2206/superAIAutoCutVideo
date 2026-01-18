@@ -256,6 +256,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         project_id = m.group(1) if m else None
     except Exception:
         project_id = None
+    if not project_id:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                pid = body.get("project_id") or body.get("projectId")
+                if pid:
+                    project_id = str(pid)
+        except Exception:
+            pass
     payload = runtime_log_store.append(
         {
             "type": "error",
@@ -282,6 +291,15 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         project_id = m.group(1) if m else None
     except Exception:
         project_id = None
+    if not project_id:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                pid = body.get("project_id") or body.get("projectId")
+                if pid:
+                    project_id = str(pid)
+        except Exception:
+            pass
     payload = runtime_log_store.append(
         {
             "type": "error",

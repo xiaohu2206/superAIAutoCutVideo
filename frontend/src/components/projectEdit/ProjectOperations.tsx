@@ -9,6 +9,8 @@ interface ProjectOperationsProps {
   project: Project;
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
+  generateScriptDisabled: boolean;
+  generateScriptDisabledReason?: string;
   scriptGenProgress: number;
   scriptGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingVideo: boolean;
@@ -27,6 +29,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   project,
   isGeneratingScript,
   handleGenerateScript,
+  generateScriptDisabled,
+  generateScriptDisabledReason,
   scriptGenProgress,
   scriptGenLogs,
   isGeneratingVideo,
@@ -105,8 +109,9 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
       <button
         onClick={handleGenerateScript}
-        disabled={!project.video_path || isGeneratingScript}
-        className="bg-violet-600 mt-2 flex items-center px-6 py-2 bg-violet-300 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled={generateScriptDisabled || isGeneratingScript}
+        title={generateScriptDisabled ? (generateScriptDisabledReason || "暂不可生成脚本") : undefined}
+        className="mt-2 flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGeneratingScript ? (
           <>

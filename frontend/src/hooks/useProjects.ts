@@ -7,6 +7,8 @@ import type {
   CreateProjectRequest,
   GenerateScriptRequest,
   Project,
+  SubtitleMeta,
+  SubtitleSegment,
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
@@ -147,6 +149,12 @@ export interface UseProjectDetailReturn {
   uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
   uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   deleteSubtitle: () => Promise<void>;
+  extractSubtitle: (force?: boolean) => Promise<void>;
+  fetchSubtitle: () => Promise<{ segments: SubtitleSegment[]; subtitle_meta: SubtitleMeta } | null>;
+  saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
+  subtitleSegments: SubtitleSegment[] | null;
+  subtitleMeta: SubtitleMeta | null;
+  subtitleLoading: boolean;
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
   reorderVideos: (orderedPaths: string[]) => Promise<void>;
@@ -171,6 +179,9 @@ export const useProjectDetail = (
   const [error, setError] = useState<string | null>(null);
   const [mergeProgress, setMergeProgress] = useState<number>(0);
   const [merging, setMerging] = useState(false);
+  const [subtitleSegments, setSubtitleSegments] = useState<SubtitleSegment[] | null>(null);
+  const [subtitleMeta, setSubtitleMeta] = useState<SubtitleMeta | null>(null);
+  const [subtitleLoading, setSubtitleLoading] = useState(false);
 
   /**
    * 获取项目详情
@@ -257,7 +268,21 @@ export const useProjectDetail = (
       setLoading(true);
       try {
         const response = await projectService.uploadSubtitle(project.id, file, onProgress);
-        setProject((prev) => (prev ? { ...prev, subtitle_path: response.file_path } : null));
+        setProject((prev) => (
+          prev
+            ? {
+              ...prev,
+              subtitle_path: response.file_path,
+              subtitle_source: "user",
+              subtitle_status: "ready",
+              subtitle_updated_by_user: false,
+              subtitle_updated_at: response.upload_time,
+              subtitle_format: "compressed_srt_v1",
+            }
+            : null
+        ));
+        setSubtitleSegments(null);
+        setSubtitleMeta(null);
       } catch (err) {
         setError(getErrorMessage(err, "上传字幕失败"));
         throw err;
@@ -274,7 +299,21 @@ export const useProjectDetail = (
     setLoading(true);
     try {
       await projectService.deleteSubtitle(project.id);
-      setProject((prev) => (prev ? { ...prev, subtitle_path: undefined } : null));
+      setProject((prev) => (
+        prev
+          ? {
+            ...prev,
+            subtitle_path: undefined,
+            subtitle_source: null,
+            subtitle_status: "none",
+            subtitle_updated_by_user: false,
+            subtitle_updated_at: new Date().toISOString(),
+            subtitle_format: null,
+          }
+          : null
+      ));
+      setSubtitleSegments(null);
+      setSubtitleMeta(null);
     } catch (err) {
       setError(getErrorMessage(err, "删除字幕失败"));
       throw err;
@@ -282,6 +321,69 @@ export const useProjectDetail = (
       setLoading(false);
     }
   }, [project]);
+
+  const fetchSubtitle = useCallback(async () => {
+    if (!project) return null;
+    setError(null);
+    setSubtitleLoading(true);
+    try {
+      const res = await projectService.getSubtitle(project.id);
+      setSubtitleSegments(res.segments || []);
+      setSubtitleMeta(res.subtitle_meta || null);
+      return res;
+    } catch (err) {
+      const msg = getErrorMessage(err, "获取字幕失败");
+      if (msg.includes("字幕不存在") || msg.includes("字幕文件不存在")) {
+        setSubtitleSegments(null);
+        setSubtitleMeta(null);
+        return null;
+      }
+      setError(msg);
+      throw err;
+    } finally {
+      setSubtitleLoading(false);
+    }
+  }, [project]);
+
+  const saveSubtitle = useCallback(
+    async (payload: { segments?: SubtitleSegment[]; content?: string }) => {
+      if (!project) return;
+      setError(null);
+      setSubtitleLoading(true);
+      try {
+        const res = await projectService.saveSubtitle(project.id, payload);
+        setSubtitleSegments(res.segments || []);
+        setSubtitleMeta(res.subtitle_meta || null);
+        await fetchProject(project.id);
+      } catch (err) {
+        setError(getErrorMessage(err, "保存字幕失败"));
+        throw err;
+      } finally {
+        setSubtitleLoading(false);
+      }
+    },
+    [project, fetchProject]
+  );
+
+  const extractSubtitle = useCallback(
+    async (force?: boolean) => {
+      if (!project) return;
+      setError(null);
+      setSubtitleLoading(true);
+      try {
+        const res = await projectService.extractSubtitle(project.id, force);
+        setSubtitleSegments(res.segments || []);
+        setSubtitleMeta(res.subtitle_meta || null);
+        await fetchProject(project.id);
+      } catch (err) {
+        setError(getErrorMessage(err, "提取字幕失败"));
+        throw err;
+      } finally {
+        setSubtitleLoading(false);
+      }
+    },
+    [project, fetchProject]
+  );
 
   /**
    * 删除视频
@@ -536,6 +638,12 @@ export const useProjectDetail = (
     uploadVideos,
     uploadSubtitle,
     deleteSubtitle,
+    extractSubtitle,
+    fetchSubtitle,
+    saveSubtitle,
+    subtitleSegments,
+    subtitleMeta,
+    subtitleLoading,
     deleteVideo,
     deleteVideoItem,
     reorderVideos,
