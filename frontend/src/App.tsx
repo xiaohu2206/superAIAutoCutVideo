@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import Navigation from "./components/Navigation";
 import MessageHost from "./components/ui/MessageHost";
 import SettingsPage from "./components/settingsPage";
-import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
 import {
   TauriCommands,
@@ -14,6 +13,7 @@ import {
   handshakeVerifyBackend,
   wsClient,
 } from "./services/clients";
+import ProjectEditPage from "./pages/ProjectEditPage";
 
 
 interface BackendStatus {
@@ -90,7 +90,9 @@ const App: React.FC = () => {
               setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
             );
             await Promise.race([wsClient.connect(), wsTimeout]);
-          } catch {}
+          } catch (e) {
+            console.debug("WebSocket连接失败");
+          }
           setIsLoading(false);
           ready = true;
           continue;

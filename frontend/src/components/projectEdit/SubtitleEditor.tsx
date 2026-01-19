@@ -1,5 +1,5 @@
 import React from "react";
-import { Loader, RefreshCcw, Save } from "lucide-react";
+import { Loader, RefreshCcw, Save, Trash2 } from "lucide-react";
 import type { SubtitleMeta, SubtitleSegment } from "../../types/project";
 
 interface SubtitleEditorProps {
@@ -116,8 +116,19 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
                       <span className="mx-1">-</span>
                       <span className="font-mono">{formatTime(seg.end_time)}</span>
                     </div>
-                    <div className="text-xs text-gray-400">
-                      #{idx + 1}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">#{idx + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = segments.filter((_, i) => i !== idx);
+                          onChange(next);
+                        }}
+                        className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded border border-red-100"
+                        title="删除该字幕"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
                   </div>
                   <textarea
@@ -139,4 +150,3 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
 };
 
 export default SubtitleEditor;
-

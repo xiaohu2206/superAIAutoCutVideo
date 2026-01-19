@@ -1,7 +1,7 @@
 // 项目管理页面（一级页面）
 
 import React, { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle, Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw } from "lucide-react";
 import ProjectList from "../components/projectManagement/ProjectList";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
@@ -118,25 +118,63 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* 页面头部 */}
-      <div className="bg-white rounded-lg shadow-md">
-        {/* 统计信息 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 ">
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-sm text-gray-600">总项目数</p>
-            <p className="mt-2 text-3xl font-bold text-gray-900">{projects.length}</p>
+      {/* 统计信息 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* 总项目数 */}
+        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">总项目数</p>
+              <p className="text-xl font-bold text-gray-900">{projects.length}</p>
+            </div>
+            <div className="p-1.5 bg-gray-50 rounded-md">
+              <Folder className="h-4 w-4 text-gray-400" />
+            </div>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-sm text-gray-600">草稿箱</p>
-            <p className="mt-2 text-3xl font-bold text-gray-500">{projects.filter((p) => p.status === "draft").length}</p>
+        </div>
+
+        {/* 草稿箱 */}
+        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">草稿箱</p>
+              <p className="text-xl font-bold text-gray-500">
+                {projects.filter((p) => p.status === "draft").length}
+              </p>
+            </div>
+            <div className="p-1.5 bg-gray-50 rounded-md">
+              <Edit className="h-4 w-4 text-gray-400" />
+            </div>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-sm text-gray-600">处理中</p>
-            <p className="mt-2 text-3xl font-bold text-blue-600">{projects.filter((p) => p.status === "processing").length}</p>
+        </div>
+
+        {/* 处理中 */}
+        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">处理中</p>
+              <p className="text-xl font-bold text-blue-600">
+                {projects.filter((p) => p.status === "processing").length}
+              </p>
+            </div>
+            <div className="p-1.5 bg-blue-50 rounded-md">
+              <Clock className="h-4 w-4 text-blue-500" />
+            </div>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <p className="text-sm text-gray-600">已完成</p>
-            <p className="mt-2 text-3xl font-bold text-green-600">{projects.filter((p) => p.status === "completed").length}</p>
+        </div>
+
+        {/* 已完成 */}
+        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">已完成</p>
+              <p className="text-xl font-bold text-green-600">
+                {projects.filter((p) => p.status === "completed").length}
+              </p>
+            </div>
+            <div className="p-1.5 bg-green-50 rounded-md">
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            </div>
           </div>
         </div>
       </div>

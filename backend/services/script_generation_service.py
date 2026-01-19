@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional, cast
 import asyncio
@@ -592,6 +593,7 @@ class ScriptGenerationService:
     @staticmethod
     async def _generate_script_chunk(
         chunk_idx: int,
+        chunk_total: int,
         start_time: float,
         end_time: float,
         subtitles: List[Dict[str, Any]],
@@ -629,6 +631,28 @@ class ScriptGenerationService:
                 key = default_key
                 messages_dicts = prompt_manager.build_chat_messages(key, variables)
         messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+        
+        logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
+
+        if int(chunk_total or 0) > 0:
+            total = int(chunk_total)
+            idx = int(chunk_idx)
+            if idx <= 0:
+                pos_label = "开始段"
+            elif idx >= total - 1:
+                pos_label = "末尾段"
+            else:
+                pos_label = "中间段"
+            messages.insert(
+                0,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        f"这是分段生成脚本的第{idx + 1}段/共{total}段，位置为{pos_label}。"
+                        "开始（1）段可引入剧情，中间段不要重复开场或收尾（因为需要合并其它段进来），末尾段需要收束剧情并避免新开头。"
+                    ),
+                ),
+            )
         if target_items_count and int(target_items_count) > 0:
             n = int(target_items_count)
             messages.insert(
@@ -638,6 +662,7 @@ class ScriptGenerationService:
                     content=(
                         f"你必须仅输出一个JSON对象，键为'items'。"
                         f"items数组长度必须严格等于{n}，不能多不能少。"
+                        f"start_time和end_time时间间隔不能低于1s"
                         f"每条必须包含'_id','timestamp','picture','narration','OST'。"
                         f"不得输出除JSON以外的任何文字。"
                     ),
@@ -648,6 +673,7 @@ class ScriptGenerationService:
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             items = data.get("items") or []
+            logger.info(f"v{int(chunk_idx)+1} 生成分段, 共{len(items)}条")
             valid_items: List[Dict[str, Any]] = []
             for it in items:
                 try:
@@ -722,9 +748,19 @@ class ScriptGenerationService:
                 merged.append(current)
                 current = next_it
         merged.append(current)
-        for i, it in enumerate(merged, start=1):
+        min_duration = 0.8
+        filtered: List[Dict[str, Any]] = []
+        for it in merged:
+            try:
+                s, e = _parse_timestamp_pair(str(it["timestamp"]))
+                if max(0.0, e - s) < min_duration:
+                    continue
+            except Exception:
+                pass
+            filtered.append(it)
+        for i, it in enumerate(filtered, start=1):
             it["_id"] = i
-        return merged
+        return filtered
 
     @staticmethod
     async def _refine_full_script(
@@ -759,6 +795,7 @@ class ScriptGenerationService:
             "**原声与解说比例**：7:3（原声70%，解说30%）"
             "**原声片段标识**：OST=1表示原声，OST=0表示解说"
             "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
+            "对于所有脚本内容，是通过多个模型生成的，每个模型生成的脚本段容易出现开头语和结尾语，但可能是中间段，如果是中间段应该把开头语或结尾语条目删除"
             "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
             "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
         )
@@ -774,6 +811,7 @@ class ScriptGenerationService:
             ChatMessage(role="user", content=user_content)
         ]
         try:
+            logger.info(f"✨ 正在进行全局润色... (目标条数: {target})")
             resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
@@ -869,6 +907,16 @@ class ScriptGenerationService:
                         sel_length = str(getattr(p, "script_length", None))
             except Exception:
                 sel_length = None
+
+        # Log model info for user visibility
+        try:
+            model_info = ai_service.get_provider_info()
+            m_name = model_info.get("active_model", "Unknown")
+            m_prov = model_info.get("active_provider", "Unknown")
+            logger.info(f"🚀 开始生成脚本 | 剧名: {drama_name} | 模型: {m_name} ({m_prov})")
+        except Exception:
+            logger.info(f"🚀 开始生成脚本 | 剧名: {drama_name}")
+
         plan = parse_script_length_selection(sel_length)
         chunks = compute_subtitle_chunks(
             subtitles=subtitles,
@@ -878,6 +926,8 @@ class ScriptGenerationService:
         )
         if not chunks:
             raise HTTPException(status_code=400, detail="字幕解析失败：字幕内容为空")
+
+        logger.info(f"📋 执行计划: 共 {len(chunks)} 个分段任务 | 目标总条数: {plan.final_target_count}")
         per_call_counts = allocate_output_counts(plan.final_target_count, len(chunks))
         sem = asyncio.Semaphore(5)
 
@@ -888,6 +938,7 @@ class ScriptGenerationService:
                 )
                 return await ScriptGenerationService._generate_script_chunk(
                     chunk["idx"],
+                    len(chunks),
                     chunk["start"],
                     chunk["end"],
                     chunk["subs"],
@@ -918,58 +969,58 @@ class ScriptGenerationService:
         validated = validate_script_items(data)
         return cast(Dict[str, Any], validated)
 
-    @staticmethod
-    async def _generate_script_json_simple(
-        drama_name: str,
-        plot_analysis: str,
-        subtitle_content: str,
-        project_id: Optional[str] = None,
-        target_items_count: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """(旧版逻辑) 直接调用提示词模块生成"""
-        default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
-        key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
-        variables = {
-            "drama_name": drama_name,
-            "plot_analysis": plot_analysis,
-            "subtitle_content": subtitle_content,
-        }
-        try:
-            messages_dicts = prompt_manager.build_chat_messages(key, variables)
-        except KeyError:
-            try:
-                cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
-                if cat == "movie_narration":
-                    from modules.prompts.movie_narration import register_prompts
-                else:
-                    from modules.prompts.short_drama_narration import register_prompts
-                register_prompts()
-                messages_dicts = prompt_manager.build_chat_messages(key, variables)
-            except Exception:
-                key = default_key
-                messages_dicts = prompt_manager.build_chat_messages(key, variables)
-        messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
-        if target_items_count and int(target_items_count) > 0:
-            n = int(target_items_count)
-            messages.insert(
-                0,
-                ChatMessage(
-                    role="system",
-                    content=(
-                        f"你必须仅输出一个JSON对象，键为'items'。"
-                        f"items数组长度必须严格等于{n}，不能多不能少。"
-                        f"每条必须包含'_id','timestamp','picture','narration','OST'。"
-                        f"不得输出除JSON以外的任何文字。"
-                    ),
-                ),
-            )
-        resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
-        raw_text = resp.content
+    # @staticmethod
+    # async def _generate_script_json_simple(
+    #     drama_name: str,
+    #     plot_analysis: str,
+    #     subtitle_content: str,
+    #     project_id: Optional[str] = None,
+    #     target_items_count: Optional[int] = None,
+    # ) -> Dict[str, Any]:
+    #     """(旧版逻辑) 直接调用提示词模块生成"""
+    #     default_key = ScriptGenerationService._default_prompt_key_for_project(project_id)
+    #     key = ScriptGenerationService._resolve_prompt_key(project_id, default_key)
+    #     variables = {
+    #         "drama_name": drama_name,
+    #         "plot_analysis": plot_analysis,
+    #         "subtitle_content": subtitle_content,
+    #     }
+    #     try:
+    #         messages_dicts = prompt_manager.build_chat_messages(key, variables)
+    #     except KeyError:
+    #         try:
+    #             cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
+    #             if cat == "movie_narration":
+    #                 from modules.prompts.movie_narration import register_prompts
+    #             else:
+    #                 from modules.prompts.short_drama_narration import register_prompts
+    #             register_prompts()
+    #             messages_dicts = prompt_manager.build_chat_messages(key, variables)
+    #         except Exception:
+    #             key = default_key
+    #             messages_dicts = prompt_manager.build_chat_messages(key, variables)
+    #     messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+    #     if target_items_count and int(target_items_count) > 0:
+    #         n = int(target_items_count)
+    #         messages.insert(
+    #             0,
+    #             ChatMessage(
+    #                 role="system",
+    #                 content=(
+    #                     f"你必须仅输出一个JSON对象，键为'items'。"
+    #                     f"items数组长度必须严格等于{n}，不能多不能少。"
+    #                     f"每条必须包含'_id','timestamp','picture','narration','OST'。"
+    #                     f"不得输出除JSON以外的任何文字。"
+    #                 ),
+    #             ),
+    #         )
+    #     resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+    #     raw_text = resp.content
 
-        # 清洗与校验
-        data, raw_json = sanitize_json_text_to_dict(raw_text)
-        validated = validate_script_items(data)
-        return cast(Dict[str, Any], validated)
+    #     # 清洗与校验
+    #     data, raw_json = sanitize_json_text_to_dict(raw_text)
+    #     validated = validate_script_items(data)
+    #     return cast(Dict[str, Any], validated)
 
     @staticmethod
     def to_video_script(data: Dict[str, Any], total_duration: float) -> Dict[str, Any]:
@@ -994,11 +1045,16 @@ class ScriptGenerationService:
                 seg["subtitle"] = str(pic)
             segments.append(seg)
 
+        now = datetime.now()
+        generated_time = now.isoformat()
+        version = f"{now.strftime('%Y%m%d%H%M%S')}"
         return {
-            "version": "v2.0",
+            "生成时间": generated_time,
+            '条数': len(segments),
+            "version": version,
             "total_duration": float(total_duration or 0.0),
             "segments": segments,
             "metadata": {
-                "created_at": None,
+                "created_at": generated_time,
             },
         }

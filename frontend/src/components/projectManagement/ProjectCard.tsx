@@ -79,25 +79,29 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 overflow-hidden">
+    <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden border border-gray-100 flex flex-col h-full">
       {/* 卡片内容 */}
-      <div className="p-6 min-h-[224px]">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-lg">
-              <Folder className="h-6 w-6 text-blue-600" />
+      <div className="p-4 flex-1">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center space-x-3 w-full">
+            <div className="flex items-center justify-center w-10 h-10 bg-blue-50 rounded-lg flex-shrink-0">
+              <Folder className="h-5 w-5 text-blue-600" />
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 line-clamp-1">
-                {project.name}
-              </h3>
-              <div className="flex items-center mt-1">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-gray-900 truncate mr-2">
+                  {project.name}
+                </h3>
                 <span
-                  className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${statusConfig.bg} ${statusConfig.color}`}
+                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${statusConfig.bg} ${statusConfig.color}`}
                 >
                   <StatusIcon className="h-3 w-3 mr-1" />
                   {statusConfig.label}
                 </span>
+              </div>
+              <div className="flex items-center mt-1 text-xs text-gray-500">
+                <Calendar className="h-3 w-3 mr-1 text-gray-400" />
+                <span>{formatDate(project.created_at)}</span>
               </div>
             </div>
           </div>
@@ -105,48 +109,30 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
 
         {/* 项目描述 */}
         {project.description && (
-          <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+          <p className="text-xs text-gray-500 mb-3 line-clamp-2 h-8">
             {project.description}
           </p>
         )}
 
         {/* 项目信息 */}
-        <div className="space-y-2">
+        <div className="space-y-1">
           {/* 解说类型 */}
-          <div className="flex items-center text-sm text-gray-600">
-            <FileText className="h-4 w-4 mr-2 text-gray-400" />
-            <span>{project.narration_type}</span>
-          </div>
-
-          {/* 视频文件 */}
-          {/* {project.video_path && (
-            <div className="flex items-center text-sm text-gray-600">
-              <Video className="h-4 w-4 mr-2 text-gray-400" />
-              <span className="truncate">
-                {project.video_current_name || project.video_path.split("/").pop() || "视频文件"}
-              </span>
-            </div>
-          )} */}
-
-          {/* 创建时间 */}
-          <div className="flex items-center text-sm text-gray-600">
-            <Calendar className="h-4 w-4 mr-2 text-gray-400" />
-            <span>{formatDate(project.created_at)}</span>
+          <div className="flex items-center text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+            <FileText className="h-3 w-3 mr-2 text-gray-400" />
+            <span className="truncate">{project.narration_type}</span>
           </div>
         </div>
       </div>
 
-      {/* 分隔线 */}
-      <div className="h-px bg-gray-100" />
-
       {/* 卡片底部操作栏 */}
-      <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
+      <div className="bg-gray-50 px-3 py-2 flex items-center justify-between border-t border-gray-100 gap-2">
         <button
           onClick={() => onEdit(project)}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          // className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="bg-blue-600 flex-1 flex items-center text-white  justify-center px-3 py-1.5 border border-gray-200 rounded text-xs font-medium hover:bg-blue-700 hover:border-blue-300  transition-colors"
         >
-          <Edit className="h-4 w-4 mr-2" />
-          编辑项目
+          <Edit className="h-3 w-3 mr-1.5" />
+          编辑
         </button>
 
         <button
@@ -154,10 +140,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
             e.stopPropagation();
             onDelete(project);
           }}
-          className="flex items-center px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors"
+          className="flex items-center justify-center px-3 py-1.5 text-red-600 hover:bg-red-50 rounded text-xs font-medium transition-colors"
         >
-          <Trash2 className="h-4 w-4 mr-2" />
-          删除
+          <Trash2 className="h-3 w-3" />
         </button>
       </div>
     </div>

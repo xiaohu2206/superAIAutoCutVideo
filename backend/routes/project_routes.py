@@ -15,6 +15,7 @@
 """
 
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -111,6 +112,106 @@ def resolve_abs_path(path_str: str) -> Path:
     if s_norm.startswith("/"):
         return project_root_dir() / s_norm[1:]
     return Path(s)
+
+
+def resolve_any_path(path_str: str) -> Path:
+    s = (path_str or "").strip()
+    if not s:
+        return Path("")
+    try:
+        p = Path(s)
+        if p.is_absolute():
+            return p
+    except Exception:
+        pass
+    return resolve_abs_path(s)
+
+
+def remove_path(target: Path) -> bool:
+    try:
+        if not target:
+            return False
+        if target.exists():
+            if target.is_file() or target.is_symlink():
+                target.unlink()
+            elif target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def remove_prefix_entries(dir_path: Path, prefix: str) -> int:
+    removed = 0
+    try:
+        if dir_path.exists() and dir_path.is_dir():
+            for item in dir_path.iterdir():
+                if item.name.startswith(prefix):
+                    if remove_path(item):
+                        removed += 1
+    except Exception:
+        pass
+    return removed
+
+
+def remove_matching_glob(dir_path: Path, pattern: str) -> int:
+    removed = 0
+    try:
+        if dir_path.exists() and dir_path.is_dir():
+            for item in dir_path.glob(pattern):
+                if remove_path(item):
+                    removed += 1
+    except Exception:
+        pass
+    return removed
+
+
+def cleanup_project_assets(p) -> None:
+    paths: List[str] = []
+
+    def _add(v):
+        if v is None:
+            return
+        s = str(v).strip()
+        if s:
+            paths.append(s)
+
+    _add(getattr(p, "video_path", None))
+    for v in (getattr(p, "video_paths", None) or []):
+        _add(v)
+    _add(getattr(p, "merged_video_path", None))
+    _add(getattr(p, "subtitle_path", None))
+    _add(getattr(p, "audio_path", None))
+    _add(getattr(p, "plot_analysis_path", None))
+    _add(getattr(p, "output_video_path", None))
+    _add(getattr(p, "jianying_draft_last_dir", None))
+    _add(getattr(p, "jianying_draft_last_dir_web", None))
+    for v in (getattr(p, "jianying_draft_dirs", None) or []):
+        _add(v)
+
+    seen = set()
+    for s in paths:
+        if s in seen:
+            continue
+        seen.add(s)
+        abs_path = resolve_any_path(s)
+        remove_path(abs_path)
+
+    up = uploads_dir()
+    project_dir_name = safe_dir_name(getattr(p, "name", None) or getattr(p, "id", ""), getattr(p, "id", ""))
+    remove_path(up / "videos" / "outputs" / project_dir_name)
+    remove_path(up / "videos" / "merged" / project_dir_name)
+    remove_path(up / "jianying_drafts" / "outputs" / str(getattr(p, "id", "")))
+
+    prefix = f"{getattr(p, 'id', '')}_"
+    remove_prefix_entries(up / "videos" / "tmp", prefix)
+    remove_prefix_entries(up / "audios" / "tmp", prefix)
+    remove_prefix_entries(up / "jianying_drafts" / "tmp", prefix)
+    remove_matching_glob(up / "videos", f"{getattr(p, 'id', '')}_video_*")
+    remove_matching_glob(up / "subtitles", f"{getattr(p, 'id', '')}_subtitle_*")
+    remove_matching_glob(up / "audios", f"{getattr(p, 'id', '')}_audio_*")
+    remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_analysis_*")
 
 
 class CreateProjectRequest(BaseModel):
@@ -561,6 +662,14 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
 
 @router.post("/{project_id}/delete")
 async def delete_project(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        cleanup_project_assets(p)
+    except Exception:
+        pass
+    runtime_log_store.clear(project_id=project_id)
     ok = projects_store.delete_project(project_id)
     if not ok:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -831,6 +940,7 @@ async def merge_videos(project_id: str):
     if not p.video_paths or len(p.video_paths) < 2:
         raise HTTPException(status_code=400, detail="需要至少两个视频进行合并")
 
+    old_merged_path = (p.merged_video_path or "").strip()
     task_id = f"merge_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     MERGE_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备合并")
 
@@ -903,6 +1013,12 @@ async def merge_videos(project_id: str):
                 return
 
             web_path = to_web_path(out_path)
+            if old_merged_path and old_merged_path != web_path:
+                try:
+                    old_abs = resolve_abs_path(old_merged_path)
+                    remove_path(old_abs)
+                except Exception:
+                    pass
             MERGE_TASKS[task_id].file_path = web_path
             MERGE_TASKS[task_id].progress = 100.0
             MERGE_TASKS[task_id].status = "completed"
