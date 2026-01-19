@@ -40,7 +40,6 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           选择模型提供商
-          <span className="text-xs text-gray-500">（OpenRouter的openai/gpt-5效果更佳）</span>
         </label>
         <select
           value={contentSelectedProvider}
@@ -94,7 +93,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
       </div>
 
       {/* 接口地址 */}
-      <div>
+      {/* <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           大模型接口地址
         </label>
@@ -112,7 +111,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <p className="text-xs text-gray-500 mt-1">模型API的基础URL地址</p>
-      </div>
+      </div> */}
 
       {/* 模型名称 */}
       <div>

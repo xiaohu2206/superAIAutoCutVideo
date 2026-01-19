@@ -225,6 +225,7 @@ class UpdateProjectRequest(BaseModel):
     description: Optional[str] = None
     narration_type: Optional[str] = None
     script_length: Optional[str] = None
+    original_ratio: Optional[int] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
@@ -645,6 +646,14 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+    if "original_ratio" in updates:
+        try:
+            ratio_val = int(updates.get("original_ratio"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="原片占比必须为整数")
+        if ratio_val < 10 or ratio_val > 90:
+            raise HTTPException(status_code=400, detail="原片占比范围为 10%~90%")
+        updates["original_ratio"] = ratio_val
     p = projects_store.update_project(project_id, updates)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")

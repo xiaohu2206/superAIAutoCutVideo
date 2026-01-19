@@ -1,0 +1,15 @@
+from typing import Dict, Tuple
+
+DEFAULT_SCRIPT_LENGTH_SELECTION = "30～40条"
+SCRIPT_LENGTH_PRESETS: Dict[str, Tuple[int, int, int]] = {
+    "15～20条": (15, 20, 1),
+    "30～40条": (30, 40, 2),
+    "40～60条": (40, 60, 3),
+    "60～80条": (60, 80, 4),
+    "80～100条": (80, 100, 5),
+}
+CUSTOM_SCRIPT_LENGTH_MIN = 5
+CUSTOM_SCRIPT_LENGTH_MAX = 200
+MAX_SUBTITLE_ITEMS_PER_CALL = 400
+SOFT_INPUT_FACTOR = 1.5
+MAX_SUBTITLE_CHARS_PER_CALL = 20000

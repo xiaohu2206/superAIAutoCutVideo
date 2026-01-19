@@ -13,7 +13,9 @@ export type ScriptLengthOption =
   | "30～40条"
   | "40～60条"
   | "60～80条"
-  | "80～100条";
+  | "80～100条"
+  | `${number}～${number}条`
+  | `${number}条`;
 
 export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
@@ -86,6 +88,7 @@ export interface Project {
   description?: string; // 项目描述
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
+  original_ratio?: number;
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -126,6 +129,7 @@ export interface UpdateProjectRequest {
   description?: string;
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
+  original_ratio?: number;
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];

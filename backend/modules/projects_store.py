@@ -26,6 +26,7 @@ class Project(BaseModel):
     description: Optional[str] = None
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
+    original_ratio: int = Field(default=70)
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -103,6 +104,8 @@ class ProjectsStore:
                                 p["subtitle_updated_at"] = p.get("updated_at") or None
                             if "subtitle_format" not in p:
                                 p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
+                            if "original_ratio" not in p:
+                                p["original_ratio"] = 70
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -174,6 +177,7 @@ class ProjectsStore:
                 "description",
                 "narration_type",
                 "script_length",
+                "original_ratio",
                 "status",
                 "video_path",
                 "video_paths",

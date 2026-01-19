@@ -26,6 +26,9 @@ const SCRIPT_LENGTH_OPTIONS: Array<{
 
 const CUSTOM_SCRIPT_LENGTH_MIN = 5;
 const CUSTOM_SCRIPT_LENGTH_MAX = 200;
+const ORIGINAL_RATIO_MIN = 10;
+const ORIGINAL_RATIO_MAX = 90;
+const DEFAULT_ORIGINAL_RATIO = 70;
 
 const normalizeRangeSeparators = (value: string) =>
   value
@@ -102,6 +105,13 @@ const normalizeScriptLength = (value: unknown): ScriptLengthOption => {
   return DEFAULT_SCRIPT_LENGTH;
 };
 
+const normalizeOriginalRatio = (value: unknown): number => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return DEFAULT_ORIGINAL_RATIO;
+  const rounded = Math.round(num);
+  return Math.min(ORIGINAL_RATIO_MAX, Math.max(ORIGINAL_RATIO_MIN, rounded));
+};
+
 function useProjectScriptLength(projectId: string): {
   scriptLength: ScriptLengthOption;
   loading: boolean;
@@ -161,6 +171,66 @@ function useProjectScriptLength(projectId: string): {
   return { scriptLength, loading, saving, setScriptLengthAndPersist };
 }
 
+function useProjectOriginalRatio(projectId: string): {
+  originalRatio: number;
+  loading: boolean;
+  saving: boolean;
+  setOriginalRatioAndPersist: (value: number) => Promise<void>;
+} {
+  const [originalRatio, setOriginalRatio] = useState(DEFAULT_ORIGINAL_RATIO);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveSeqRef = useRef(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = await projectService.getProject(projectId);
+      const normalized = normalizeOriginalRatio(p?.original_ratio);
+      setOriginalRatio(normalized);
+
+      if (p?.original_ratio !== undefined && p.original_ratio !== normalized) {
+        const seq = ++saveSeqRef.current;
+        setSaving(true);
+        try {
+          await projectService.updateProjectQueued(projectId, { original_ratio: normalized });
+        } catch {
+          void 0;
+        } finally {
+          if (saveSeqRef.current === seq) setSaving(false);
+        }
+      }
+    } catch {
+      void 0;
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const setOriginalRatioAndPersist = useCallback(
+    async (value: number) => {
+      const normalized = normalizeOriginalRatio(value);
+      setOriginalRatio(normalized);
+      const seq = ++saveSeqRef.current;
+      setSaving(true);
+      try {
+        await projectService.updateProjectQueued(projectId, { original_ratio: normalized });
+      } catch {
+        void 0;
+      } finally {
+        if (saveSeqRef.current === seq) setSaving(false);
+      }
+    },
+    [projectId]
+  );
+
+  return { originalRatio, loading, saving, setOriginalRatioAndPersist };
+}
+
 const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps> = ({
   projectId,
   narrationType,
@@ -198,6 +268,12 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
   const [customError, setCustomError] = useState<string | null>(null);
   const { scriptLength, loading: scriptLengthLoading, saving: scriptLengthSaving, setScriptLengthAndPersist } =
     useProjectScriptLength(projectId);
+  const {
+    originalRatio,
+    loading: originalRatioLoading,
+    saving: originalRatioSaving,
+    setOriginalRatioAndPersist,
+  } = useProjectOriginalRatio(projectId);
 
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
@@ -430,7 +506,34 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
           </button>
         </div>
       </div>
-      // TODO
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between">
+          <label className="block text-sm font-medium text-gray-700 mb-2">原片占比</label>
+          {originalRatioLoading ? (
+            <span className="text-xs text-gray-500">加载中</span>
+          ) : originalRatioSaving ? (
+            <span className="text-xs text-gray-500">保存中</span>
+          ) : (
+            <span className="text-xs text-gray-500">10% - 90%</span>
+          )}
+        </div>
+        <div className="flex items-center gap-4">
+          <input
+            type="range"
+            min={ORIGINAL_RATIO_MIN}
+            max={ORIGINAL_RATIO_MAX}
+            step={1}
+            value={originalRatio}
+            onChange={(e) => void setOriginalRatioAndPersist(Number(e.target.value))}
+            className="flex-1"
+          />
+          <div className="text-sm text-gray-800 w-28">
+            <div>{originalRatio}%</div>
+            <div className="text-gray-500">{`解说 ${100 - originalRatio}%`}</div>
+          </div>
+        </div>
+        <div className="text-xs text-gray-500 mt-2">滑动时自动保存</div>
+      </div>
       <div className="border-gray-200">
         <div className="flex items-center justify-between">
           <label className="block text-sm font-medium text-gray-700 mb-2">{`提示词选择（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>

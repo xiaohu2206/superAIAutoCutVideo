@@ -249,7 +249,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       {(isGeneratingScript || (scriptGenProgress > 0 && scriptGenProgress < 100)) && (
         <div className="w-full ml-0 mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-            <span>脚本生成进度</span>
+            <span>脚本生成进度(预计3～5分钟)</span>
             <span>{Math.round(scriptGenProgress)}%</span>
           </div>
           <div className="w-full h-2 mb-2 bg-gray-200 rounded">
