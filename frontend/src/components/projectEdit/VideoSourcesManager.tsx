@@ -154,7 +154,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
       {merging && Array.isArray(project.video_paths) && project.video_paths.length >= 2 && !project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
         <div className="mt-2">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-            <span>合并进度</span>
+            <span>合并进度（预计2分钟）</span>
             <span>{mergeProgress}%</span>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
@@ -185,7 +185,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
       {merging && project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
         <div className="mt-2">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-            <span>合并进度</span>
+            <span>合并进度（预计2分钟）</span>
             <span>{mergeProgress}%</span>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
