@@ -210,6 +210,7 @@ class JianyingDraftManager:
                     "end_time": et,
                     "text": str(seg.get("text") or ""),
                     "subtitle": str(seg.get("subtitle") or ""),
+                    "OST": seg.get("OST", 0),
                 })
         if segs:
             return segs
@@ -789,7 +790,10 @@ class JianyingDraftManager:
                 dur = max(0.0, et - st)
                 text = str(seg.get("text") or "").strip()
                 subtitle = str(seg.get("subtitle") or "").strip()
-                if text.startswith("播放原片"):
+                ost_flag = seg.get("OST")
+                is_original = (ost_flag == 1) or text.startswith("播放原片")
+
+                if is_original:
                     timeline_items.append({
                         "kind": "original",
                         "duration_us": _s_to_us(dur),
