@@ -4,7 +4,8 @@ Param(
     [string] $Subtitles,
     [string] $PlotAnalysisPath,
     [string] $SubtitlesPath,
-    [string] $OutputPath
+    [string] $OutputPath,
+    [ValidateSet('zh','en')][string] $Language = 'zh'
 )
 
 Set-StrictMode -Version Latest
@@ -48,7 +49,8 @@ $TempDir = $env:TEMP
 if (-not $TempDir) { $TempDir = [System.IO.Path]::GetTempPath() }
 $pyTemp = Join-Path $TempDir ("get_narration_prompt_" + [Guid]::NewGuid().ToString() + ".py")
 $jsonTemp = Join-Path $TempDir ("get_narration_vars_" + [Guid]::NewGuid().ToString() + ".json")
-$pyCode = @'
+$keyOrId = if ($Language -eq 'en') { 'short_drama_narration:script_generation_en' } else { 'short_drama_narration:script_generation' }
+$pyCode = @"
 import json, sys
 try:
     from modules.prompts.prompt_manager import prompt_manager
@@ -56,7 +58,7 @@ except Exception as e:
     print(json.dumps({"error": f"导入提示词管理器失败: {e}"}, ensure_ascii=False))
     sys.exit(1)
 
-KEY = "short_drama_narration:script_generation"
+KEY = "$keyOrId"
 
 def main():
     if len(sys.argv) < 2:
@@ -78,7 +80,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'@
+"@
 
 Set-Content -LiteralPath $pyTemp -Value $pyCode -Encoding UTF8
 Set-Content -LiteralPath $jsonTemp -Value $varsJson -Encoding UTF8

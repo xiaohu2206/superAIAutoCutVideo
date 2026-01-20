@@ -19,6 +19,8 @@ export type ScriptLengthOption =
 
 export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
+export type ScriptLanguage = "zh" | "en";
+
 /**
  * 项目状态枚举
  */
@@ -89,6 +91,7 @@ export interface Project {
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number;
+  script_language?: ScriptLanguage;
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -130,6 +133,7 @@ export interface UpdateProjectRequest {
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number;
+  script_language?: ScriptLanguage;
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];

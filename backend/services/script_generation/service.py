@@ -59,6 +59,7 @@ class ScriptGenerationService:
 
         sel_length: Optional[str] = None
         original_ratio: Optional[int] = None
+        script_language: Optional[str] = None
         if project_id:
             try:
                 p = projects_store.get_project(project_id)
@@ -70,6 +71,11 @@ class ScriptGenerationService:
                             original_ratio = int(getattr(p, "original_ratio", None))
                         except Exception:
                             original_ratio = None
+                    if getattr(p, "script_language", None):
+                        try:
+                            script_language = str(getattr(p, "script_language", None))
+                        except Exception:
+                            script_language = None
             except Exception:
                 sel_length = None
 
@@ -111,6 +117,7 @@ class ScriptGenerationService:
                     project_id,
                     per_call_counts[int(chunk["idx"])],
                     original_ratio,
+                    script_language,
                 )
 
         tasks = [generate_one(c) for c in chunks]
@@ -130,6 +137,7 @@ class ScriptGenerationService:
                 None,
                 effective_target,
                 original_ratio,
+                script_language,
             )
         data = {"items": final_items}
         validated = validate_script_items(data)

@@ -226,6 +226,7 @@ class UpdateProjectRequest(BaseModel):
     narration_type: Optional[str] = None
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
+    script_language: Optional[str] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
@@ -654,6 +655,17 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
         if ratio_val < 10 or ratio_val > 90:
             raise HTTPException(status_code=400, detail="原片占比范围为 10%~90%")
         updates["original_ratio"] = ratio_val
+    if "script_language" in updates:
+        try:
+            lang_raw = (updates.get("script_language") or "").strip().lower()
+        except Exception:
+            lang_raw = ""
+        if lang_raw in {"zh", "zh-cn", "中文", "cn", "chinese"}:
+            updates["script_language"] = "zh"
+        elif lang_raw in {"en", "en-us", "英文", "us", "english"}:
+            updates["script_language"] = "en"
+        else:
+            raise HTTPException(status_code=400, detail="脚本语言仅支持 zh 或 en")
     p = projects_store.update_project(project_id, updates)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")

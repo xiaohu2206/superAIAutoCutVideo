@@ -2,13 +2,14 @@
 # -*- coding: UTF-8 -*-
 
 from ..base import TextPrompt, PromptMetadata, ModelType, OutputFormat
+from ..common.output_format_blocks import movie
 
 
 class MovieScriptGenerationPrompt(TextPrompt):
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = "zh", name: str = "script_generation") -> None:
         metadata = PromptMetadata(
-            name="script_generation",
+            name=name,
             category="movie_narration",
             version="v2.0",
             description=(
@@ -29,9 +30,10 @@ class MovieScriptGenerationPrompt(TextPrompt):
             "你是一位顶级的电影解说up主，精通短视频创作的所有核心技巧。"
             "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
         )
+        self._language = language
 
     def get_template(self) -> str:
-        return """# 电影解说脚本创作任务
+        prefix = """# 电影解说脚本创作任务
 
 ## 任务目标
 我是一位专业的电影解说up主，需要为电影《${drama_name}》创作一份高质量的解说脚本。目标是让观众在短时间内了解剧情精华，并产生强烈的继续观看欲望。
@@ -154,18 +156,6 @@ ${subtitle_content}
 
 ## 原声片段使用规范
 
-### 原声片段格式要求
-原声片段必须严格按照以下JSON格式：
-```json
-{
-  "_id": 序号,
-  "timestamp": "开始时间-结束时间",
-  "picture": "画面内容描述",
-  "narration": "播放原片+序号",
-  "OST": 1
-}
-```
-
 ### 原声片段插入策略
 
 #### 1. 关键情绪爆发点
@@ -227,36 +217,6 @@ ${subtitle_content}
 - **视听效果**：考虑台词的声音效果和表演张力
 - **代入感强**：选择能让观众产生强烈代入感的对话
 
-## 输出格式要求
-
-请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
-
-{
-  "items": [
-    {
-        "_id": 1,
-        "timestamp": "00:00:01,000-00:00:05,500",
-        "picture": "镜头快速切入核心冲突，主角面临抉择",
-        "narration": "开场就抛出致命难题，这一刻改变了他的人生轨迹……",
-        "OST": 0
-    },
-    {
-        "_id": 2,
-        "timestamp": "00:00:05,500-00:00:08,000",
-        "picture": "角色正面对白关键台词，情绪达到峰值",
-        "narration": "播放原片2",
-        "OST": 1
-    },
-    {
-        "_id": 3,
-        "timestamp": "00:00:08,000-00:00:12,000",
-        "picture": "镜头推进，冲突加剧，剧情进入主线",
-        "narration": "而这时，命运的齿轮开始转动，真相正在逼近……",
-        "OST": 0
-    }
-  ]
-}
-
 ## 质量标准
 
 ### 解说文案要求：
@@ -297,4 +257,6 @@ ${subtitle_content}
 - **悬念设置**："那么，UDC究竟是谁呢？"
 - **反转预告**："而从这句话开始，所有的专业、体面和虚伪的平静都将分崩瓦解"
 
-现在请基于以上要求，为电影《${drama_name}》创作解说脚本："""
+现在请基于以上要求，为电影《${drama_name}》创作解说脚本：
+"""
+        return prefix + movie(self._language)

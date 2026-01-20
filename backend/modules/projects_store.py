@@ -27,6 +27,7 @@ class Project(BaseModel):
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
     original_ratio: int = Field(default=70)
+    script_language: str = Field(default="zh")
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -106,6 +107,8 @@ class ProjectsStore:
                                 p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
                             if "original_ratio" not in p:
                                 p["original_ratio"] = 70
+                            if "script_language" not in p:
+                                p["script_language"] = "zh"
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -143,6 +146,7 @@ class ProjectsStore:
             description=description,
             narration_type=narration_type or "短剧解说",
             script_length=None,
+            script_language="zh",
             status="draft",
             video_path=None,
             video_paths=[],
@@ -178,6 +182,7 @@ class ProjectsStore:
                 "narration_type",
                 "script_length",
                 "original_ratio",
+                "script_language",
                 "status",
                 "video_path",
                 "video_paths",

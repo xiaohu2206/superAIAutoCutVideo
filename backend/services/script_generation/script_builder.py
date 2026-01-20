@@ -37,6 +37,7 @@ async def _generate_script_chunk(
     project_id: Optional[str] = None,
     target_items_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
+    script_language: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     subs_text_lines = []
     for s in subtitles:
@@ -47,6 +48,25 @@ async def _generate_script_chunk(
         subs_text = subs_text[:MAX_SUBTITLE_CHARS_PER_CALL]
     default_key = _default_prompt_key_for_project(project_id)
     key = _resolve_prompt_key(project_id, default_key)
+    if script_language and ":" in key:
+        lang = str(script_language).strip().lower()
+        cat, name = key.split(":", 1)
+        if lang in {"en", "en-us", "英文", "english"}:
+            if name != "script_generation_en":
+                candidate = f"{cat}:script_generation_en"
+                try:
+                    if prompt_manager.get_prompt(candidate):
+                        key = candidate
+                except Exception:
+                    pass
+        elif lang in {"zh", "zh-cn", "中文", "chinese"}:
+            if name != "script_generation":
+                candidate = f"{cat}:script_generation"
+                try:
+                    if prompt_manager.get_prompt(candidate):
+                        key = candidate
+                except Exception:
+                    pass
     variables = {
         "drama_name": drama_name,
         "plot_analysis": plot_analysis_snippet or "",
@@ -115,6 +135,28 @@ async def _generate_script_chunk(
             ),
         ),
     )
+    if script_language:
+        lang = str(script_language).strip().lower()
+        if lang in {"en", "en-us", "英文", "english"}:
+            messages.insert(
+                0,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "你必须将所有 'narration' 文本严格用英文撰写；不得输出中文或其他语言。"
+                    ),
+                ),
+            )
+        elif lang in {"zh", "zh-cn", "中文", "chinese"}:
+            messages.insert(
+                0,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "你必须将所有 'narration' 文本严格用中文撰写；不得输出英文或其他语言。"
+                    ),
+                ),
+            )
     system_contents: List[str] = []
     non_system_messages: List[ChatMessage] = []
     for message in messages:
@@ -237,6 +279,7 @@ async def _refine_full_script(
     length_mode: Optional[str] = None,
     target_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
+    script_language: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     items = segments
     if not items:
@@ -268,6 +311,12 @@ async def _refine_full_script(
         "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
         "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
     )
+    if script_language:
+        lang = str(script_language).strip().lower()
+        if lang in {"en", "en-us", "英文", "english"}:
+            system_prompt += "你必须将所有 'narration' 文本严格用英文撰写；不得输出中文或其他语言。"
+        elif lang in {"zh", "zh-cn", "中文", "chinese"}:
+            system_prompt += "你必须将所有 'narration' 文本严格用中文撰写；不得输出英文或其他语言。"
     user_content = (
         f"{retain_desc}\n\n"
         f"剧名：{drama_name}\n"
