@@ -22,7 +22,11 @@ class ScriptGenerationPrompt(TextPrompt):
             parameters=["drama_name", "plot_analysis", "subtitle_content"]
         )
         super().__init__(metadata)
-        self._system_prompt = "你是一位顶级的短剧解说up主，精通短视频创作的所有核心技巧。你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。强制必须输出3000字符以上的解说脚本。"
+        self._system_prompt = (
+            "你是一位顶级的短剧解说up主，精通短视频创作的所有核心技巧。"
+            "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
+            "强制必须输出3000字符以上的解说脚本。\n\n"
+        ) + short_drama(language)
         self._language = language
         
     def get_template(self) -> str:
@@ -30,18 +34,6 @@ class ScriptGenerationPrompt(TextPrompt):
 
 ## 任务目标
 我是一位专业的短剧解说up主，需要为短剧《${drama_name}》创作一份高质量的解说脚本。目标是让观众在短时间内了解剧情精华，并产生强烈的继续观看欲望。
-
-## 素材信息
-
-### 剧情概述
-<plot>
-${plot_analysis}
-</plot>
-
-### 原始字幕（含精确时间戳）
-<subtitles>
-${subtitle_content}
-</subtitles>
 
 ## 短剧解说创作核心要素
 
@@ -259,7 +251,19 @@ ${subtitle_content}
 - **悬念设置**："那么，UDC究竟是谁呢？"
 - **反转预告**："而从这句话开始，所有的专业、体面和虚伪的平静都将分崩瓦解"
 
+## 素材信息
+
+### 剧情概述
+<plot>
+${plot_analysis}
+</plot>
+
+### 原始字幕（含精确时间戳）
+<subtitles>
+${subtitle_content}
+</subtitles>
+
 """
-        return prefix + short_drama(self._language)
+        return prefix
 
 

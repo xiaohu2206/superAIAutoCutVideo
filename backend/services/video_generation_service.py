@@ -183,7 +183,7 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            for idx, seg in enumerate(segments, start=1):
+            for idx, seg in enumerate[Dict[str, Any]](segments, start=1):
                 start = float(seg.get("start_time", 0.0))
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
@@ -199,7 +199,11 @@ class VideoGenerationService:
                     raise RuntimeError(f"剪切片段失败: {idx}")
 
                 text = str(seg.get("text", "") or "").strip()
-                if text.startswith("播放原片"):
+                ost_flag = seg.get("OST")
+                # 优先使用OST字段判断(OST=1为原声)，兼容旧逻辑(text以"播放原片"开头)
+                is_original = (ost_flag == 1) or text.startswith("播放原片")
+
+                if is_original:
                     clip_paths.append(str(clip_abs))
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"

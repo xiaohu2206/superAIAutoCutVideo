@@ -67,7 +67,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
             onClick={() => setShowAdvancedConfig((v) => !v)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-             <span className="text-xs text-gray-500">（脚本条数、原片占比范围、提示词）</span>
+             <span className="text-xs text-gray-500">（脚本条数、原片占比范围、生成语言、提示词）</span>
             高级配置
           </button>
         </div>

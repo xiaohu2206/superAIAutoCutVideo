@@ -155,6 +155,7 @@ class ScriptGenerationService:
                 "start_time": float(start_s),
                 "end_time": float(end_s),
                 "text": text,
+                "OST": it.get("OST", 0),
             }
             pic = it.get("picture")
             if pic:

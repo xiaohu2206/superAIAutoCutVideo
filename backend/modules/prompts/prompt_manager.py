@@ -227,13 +227,13 @@ class PromptManager:
                     cat = key.split(":", 1)[0]
                 except Exception:
                     cat = p.metadata.category
-                if cat == category and p.metadata.name != "plot_analysis":
+                if cat == category and p.metadata.name not in ["plot_analysis", "script_generation_en"]:
                     add_prompt(key, p)
         else:
             for tid, tpl in self._templates.items():
                 add_tpl(tid, tpl)
             for key, p in self._prompts.items():
-                if p.metadata.name != "plot_analysis":
+                if p.metadata.name not in ["plot_analysis", "script_generation_en"]:
                     add_prompt(key, p)
         return items
 

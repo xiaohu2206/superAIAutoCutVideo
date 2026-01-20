@@ -10,6 +10,7 @@ from services.ai_service import ai_service
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
+from modules.prompts.common.output_format_blocks import short_drama, movie
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,26 @@ async def _generate_script_chunk(
             key = default_key
             messages_dicts = prompt_manager.build_chat_messages(key, variables)
     messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+
+    # 如果是用户自定义提示词（或提示词中缺少格式要求），需要根据语言拼接 output_format_blocks
+    sys_msgs_content = "".join([m.content for m in messages if m.role == "system" and m.content])
+    if "## 原声片段格式要求" not in sys_msgs_content:
+        current_lang = "zh"
+        if script_language:
+            l = str(script_language).strip().lower()
+            if l in {"en", "en-us", "英文", "english"}:
+                current_lang = "en"
+
+        prompt_cat = "short_drama_narration"
+        if ":" in key:
+            prompt_cat = key.split(":", 1)[0]
+
+        if prompt_cat == "movie_narration":
+            format_block = movie(current_lang)
+        else:
+            format_block = short_drama(current_lang)
+
+        messages.append(ChatMessage(role="system", content=format_block))
 
     logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
 

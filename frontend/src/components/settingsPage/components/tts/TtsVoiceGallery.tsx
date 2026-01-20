@@ -242,10 +242,13 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
     return () => stopCurrent();
   }, []);
   
-  // 仅展示中文音色（Edge TTS）
+  // 仅展示中文和英文音色
   const voicesForDisplay = React.useMemo(() => {
-    return voices;
-  }, [voices, provider]);
+    return voices.filter(v => {
+      const lang = (v.language || "").toLowerCase();
+      return lang.startsWith("zh") || lang.startsWith("en");
+    });
+  }, [voices]);
 
   const grouped = React.useMemo(() => {
     const buckets: Record<string, TtsVoice[]> = {};
