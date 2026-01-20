@@ -129,6 +129,14 @@ class ProjectsStore:
             except Exception as e:
                 logger.error(f"保存项目数据失败: {e}")
 
+    def _get_default_script_length(self, narration_type: str) -> str:
+        """根据解说类型获取默认脚本长度"""
+        if "电影" in narration_type:
+            return "60～80条"
+        elif "短剧" in narration_type:
+            return "30～40条"
+        return "30～40条"
+
     def list_projects(self) -> List[Project]:
         with self._lock:
             return list(self._projects.values())
@@ -140,12 +148,13 @@ class ProjectsStore:
     def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说") -> Project:
         now = datetime.now().isoformat()
         new_id = str(uuid.uuid4())
+        effective_narration_type = narration_type or "短剧解说"
         project = Project(
             id=new_id,
             name=name,
             description=description,
-            narration_type=narration_type or "短剧解说",
-            script_length=None,
+            narration_type=effective_narration_type,
+            script_length=self._get_default_script_length(effective_narration_type),
             script_language="zh",
             status="draft",
             video_path=None,
