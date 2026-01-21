@@ -990,6 +990,18 @@ async def merge_videos(project_id: str):
                 if not abs_path.exists():
                     MERGE_TASKS[task_id].status = "failed"
                     MERGE_TASKS[task_id].message = f"源视频不存在: {s}"
+                    try:
+                        await manager.broadcast(json.dumps({
+                            "type": "error",
+                            "scope": "merge_videos",
+                            "project_id": project_id,
+                            "task_id": task_id,
+                            "message": f"源视频不存在: {s}",
+                            "progress": 0,
+                            "timestamp": now_ts(),
+                        }))
+                    except Exception:
+                        pass
                     return
                 inputs.append(abs_path)
 

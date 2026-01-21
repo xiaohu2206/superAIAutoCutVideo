@@ -7,6 +7,7 @@
 """
 
 import logging
+import asyncio
 from datetime import datetime
 import shutil
 import os
@@ -108,6 +109,8 @@ class VideoGenerationService:
         if not p.script or not isinstance(p.script, dict):
             raise ValueError("项目未设置有效的脚本")
 
+        logger.info(f"DEBUG generate_video start project_id={project_id} video_path={p.video_path} name={p.name}")
+
         # 广播：开始生成视频
         try:
             await manager.broadcast(
@@ -132,6 +135,11 @@ class VideoGenerationService:
         if not input_abs.exists():
             raise ValueError("原始视频文件不存在")
         input_dur = await video_processor._ffprobe_duration(str(input_abs), "format") or 0.0
+        try:
+            input_size = input_abs.stat().st_size
+        except Exception:
+            input_size = None
+        logger.info(f"DEBUG input_file path={input_abs} size={input_size} duration={input_dur} segments={len(segments)}")
 
         # 片段输出与最终输出路径
         uploads_root = _uploads_dir()
@@ -168,6 +176,7 @@ class VideoGenerationService:
 
             clip_paths: List[str] = []
             total_segments = len(segments)
+            logger.info(f"DEBUG segments_total count={total_segments}")
             try:
                 await manager.broadcast(
                     __import__("json").dumps({
@@ -183,7 +192,7 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            for idx, seg in enumerate[Dict[str, Any]](segments, start=1):
+            for idx, seg in enumerate(segments, start=1):
                 start = float(seg.get("start_time", 0.0))
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
@@ -191,6 +200,10 @@ class VideoGenerationService:
                 duration = max(0.0, end - start)
                 clip_name = f"clip_{idx:04d}.mp4"
                 clip_abs = tmp_dir / clip_name
+                text = str(seg.get("text", "") or "").strip()
+                ost_flag = seg.get("OST")
+                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                logger.info(f"DEBUG segment_init idx={idx} start={start} end={end} duration={duration} ost={ost_flag} text_len={len(text)} is_original={is_original}")
 
                 ok = await video_processor.cut_video_segment(
                     str(input_abs), str(clip_abs), start, duration
@@ -198,13 +211,15 @@ class VideoGenerationService:
                 if not ok:
                     raise RuntimeError(f"剪切片段失败: {idx}")
 
-                text = str(seg.get("text", "") or "").strip()
-                ost_flag = seg.get("OST")
-                # 优先使用OST字段判断(OST=1为原声)，兼容旧逻辑(text以"播放原片"开头)
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                try:
+                    clip_size = clip_abs.stat().st_size
+                except Exception:
+                    clip_size = None
+                logger.info(f"DEBUG segment_clip idx={idx} path={clip_abs} size={clip_size}")
 
                 if is_original:
                     clip_paths.append(str(clip_abs))
+                    logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
                     sy = await tts_service.synthesize(text, str(seg_audio), None)
@@ -213,6 +228,11 @@ class VideoGenerationService:
                     adur = float(sy.get("duration") or 0.0) if isinstance(sy.get("duration"), (int, float)) else 0.0
                     if adur <= 0.0:
                         adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                    try:
+                        seg_audio_size = seg_audio.stat().st_size
+                    except Exception:
+                        seg_audio_size = None
+                    logger.info(f"DEBUG tts_audio idx={idx} path={seg_audio} size={seg_audio_size} duration={adur}")
                     if adur > 0.0 and input_dur > 0.0 and adur > duration:
                         ext = adur - duration
                         fwd = max(0.0, input_dur - end)
@@ -223,6 +243,7 @@ class VideoGenerationService:
                             shortage = ext - fwd
                             new_start = max(0.0, start - shortage)
                             new_dur = input_dur - new_start
+                        logger.info(f"DEBUG segment_extend idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2 = await video_processor.cut_video_segment(
                             str(input_abs), str(clip_abs), new_start, new_dur
                         )
@@ -231,6 +252,7 @@ class VideoGenerationService:
                     elif adur > 0.0 and (adur + 0.05) < duration:
                         new_start = start
                         new_dur = adur
+                        logger.info(f"DEBUG segment_shorten idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2s = await video_processor.cut_video_segment(
                             str(input_abs), str(clip_abs), new_start, new_dur
                         )
@@ -240,6 +262,38 @@ class VideoGenerationService:
                     rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
                     if not rep_ok:
                         raise RuntimeError(f"片段配音替换失败: {idx}")
+                    try:
+                        clip_nar_size = clip_nar_abs.stat().st_size
+                    except Exception:
+                        clip_nar_size = None
+                    logger.info(f"DEBUG segment_narration idx={idx} path={clip_nar_abs} size={clip_nar_size}")
+                    vinfo_chk, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
+                    if vinfo_chk is None:
+                        logger.info(f"DEBUG segment_narration_fallback idx={idx} reencode nar to ensure video stream")
+                        cmd_fb = [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-i", str(clip_abs),
+                            "-i", str(seg_audio),
+                            "-map", "0:v:0", "-map", "1:a:0",
+                            "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+                            "-pix_fmt", "yuv420p",
+                            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                            "-shortest",
+                            "-y", str(clip_nar_abs),
+                        ]
+                        p3 = await asyncio.create_subprocess_exec(
+                            *cmd_fb,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
+                        )
+                        _, e3 = await p3.communicate()
+                        if p3.returncode != 0:
+                            raise RuntimeError(f"片段配音替换失败(强制重编码): {idx} - {e3.decode(errors='ignore')}")
+                        vinfo_chk2, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
+                        if vinfo_chk2 is None:
+                            logger.warning(f"片段配音替换失败(无视频流), 降级使用原片音轨: {idx}")
+                            clip_paths.append(str(clip_abs))
+                            continue
                     clip_paths.append(str(clip_nar_abs))
 
                 try:
@@ -262,6 +316,17 @@ class VideoGenerationService:
 
             if not clip_paths:
                 raise ValueError("未生成任何有效片段，无法拼接")
+
+            missing_paths = [p for p in clip_paths if not Path(p).exists()]
+            logger.info(f"DEBUG clip_paths_ready count={len(clip_paths)} missing={len(missing_paths)} output={output_abs}")
+            for cidx, pth in enumerate(clip_paths, start=1):
+                p_path = Path(pth)
+                try:
+                    p_size = p_path.stat().st_size
+                except Exception:
+                    p_size = None
+                vinfo, ainfo = await video_processor._probe_stream_info(str(p_path))
+                logger.info(f"DEBUG concat_input idx={cidx} path={p_path} size={p_size} vinfo={vinfo} ainfo={ainfo}")
 
             try:
                 await manager.broadcast(

@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
-import { notifyError } from "../../services/notification";
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -22,6 +21,15 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const getErrorMessage = (err: unknown, fallback: string): string => {
+    if (err && typeof err === "object") {
+      const anyErr = err as any;
+      if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
+      if (typeof anyErr.detail === "string" && anyErr.detail) return anyErr.detail;
+    }
+    if (typeof err === "string" && err) return err;
+    return fallback;
+  };
 
   useEffect(() => {
     if (isOpen) setError(null);
@@ -37,7 +45,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       await onConfirm();
       onClose();
     } catch (err) {
-      const msg = await notifyError("错误", err as any, "删除项目失败");
+      const msg = getErrorMessage(err, "删除项目失败");
       setError(msg);
     } finally {
       setLoading(false);

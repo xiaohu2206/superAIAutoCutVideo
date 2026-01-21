@@ -222,12 +222,14 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <MessageHost />
       {/* 导航栏 */}
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* 主要内容区域 */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <div className="mb-4">
+          <MessageHost />
+        </div>
         {/* 标签页内容 */}
         {activeTab === "home" && !currentProjectId && (
           <ProjectManagementPage

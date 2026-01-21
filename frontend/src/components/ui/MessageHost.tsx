@@ -20,58 +20,44 @@ function getTypeIcon(type: MessageType) {
 }
 
 export default function MessageHost() {
-  const [items, setItems] = useState<MessageItem[]>([]);
-  const timersRef = useRef<Map<string, number>>(new Map());
+  const [current, setCurrent] = useState<MessageItem | null>(null);
+  const timersRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const removeById = (id: string) => {
-      setItems((prev) => prev.filter((x) => x.id !== id));
-      const t = timersRef.current.get(id);
-      if (t) {
-        window.clearTimeout(t);
-        timersRef.current.delete(id);
-      }
-    };
-
     const handler = (event: Event) => {
       const e = event as CustomEvent<MessageEventDetail>;
       const detail = e.detail;
       if (!detail || !detail.id) return;
-      setItems((prev) => {
-        const next: MessageItem[] = [...prev, { ...detail, createdAt: Date.now() }];
-        if (next.length > 5) return next.slice(next.length - 5);
-        return next;
-      });
-
+      setCurrent({ ...detail, createdAt: Date.now() });
+      if (timersRef.current) {
+        window.clearTimeout(timersRef.current);
+        timersRef.current = null;
+      }
       if (typeof detail.duration === "number" && detail.duration > 0) {
-        const timeoutId = window.setTimeout(() => removeById(detail.id), Math.round(detail.duration * 1000));
-        timersRef.current.set(detail.id, timeoutId);
+        timersRef.current = window.setTimeout(() => setCurrent(null), Math.round(detail.duration * 1000));
       }
     };
 
     window.addEventListener(messageEventName, handler as EventListener);
     return () => {
       window.removeEventListener(messageEventName, handler as EventListener);
-      timersRef.current.forEach((t) => window.clearTimeout(t));
-      timersRef.current.clear();
+      if (timersRef.current) {
+        window.clearTimeout(timersRef.current);
+        timersRef.current = null;
+      }
     };
   }, []);
 
-  if (items.length === 0) return null;
+  if (!current) return null;
 
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] space-y-2 pointer-events-none">
-      {items.map((it) => (
-        <div
-          key={it.id}
-          className={`pointer-events-none bg-white border shadow-sm rounded-lg px-4 py-2 flex items-center gap-2 min-w-[240px] max-w-[560px] ${getTypeClassName(it.type)}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span className="flex-shrink-0">{getTypeIcon(it.type)}</span>
-          <div className="text-sm break-words">{it.content}</div>
-        </div>
-      ))}
+    <div
+      className={`bg-white border shadow-sm rounded-lg px-4 py-2 flex items-center gap-2 w-full ${getTypeClassName(current.type)}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="flex-shrink-0">{getTypeIcon(current.type)}</span>
+      <div className="text-sm truncate flex-1 whitespace-nowrap">{current.content}</div>
     </div>
   );
 }

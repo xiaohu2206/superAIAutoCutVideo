@@ -1,13 +1,12 @@
 // 项目管理页面（一级页面）
 
-import React, { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw } from "lucide-react";
-import ProjectList from "../components/projectManagement/ProjectList";
+import React, { useCallback, useEffect, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
+import ProjectList from "../components/projectManagement/ProjectList";
 import { useProjects } from "../hooks/useProjects";
-import { notifyError, notifySuccess } from "../services/notification";
-import type { Project, CreateProjectRequest } from "../types/project";
+import type { CreateProjectRequest, Project } from "../types/project";
 
 interface ProjectManagementPageProps {
   onEditProject: (projectId: string) => void;
@@ -37,22 +36,32 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
 
+  const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
+    if (err && typeof err === "object") {
+      const anyErr = err as any;
+      if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
+      if (typeof anyErr.detail === "string" && anyErr.detail) return anyErr.detail;
+    }
+    if (typeof err === "string" && err) return err;
+    return fallback;
+  }, []);
+
   // 初始加载项目列表
   useEffect(() => {
     void fetchProjects().catch((e) => {
-      void notifyError("错误", e, "获取项目列表失败");
+      const msg = getErrorMessage(e, "获取项目列表失败");
+      setActionErrorMessage(msg);
     });
-  }, [fetchProjects]);
+  }, [fetchProjects, getErrorMessage]);
 
   const showSuccess = (message: string, timeoutMs: number = 2500) => {
     setSuccessMessage(message);
     setActionErrorMessage(null);
-    void notifySuccess("成功", message);
     setTimeout(() => setSuccessMessage(null), timeoutMs);
   };
 
   const showError = async (err: unknown, fallback: string, timeoutMs: number = 4000) => {
-    const msg = await notifyError("错误", err as any, fallback);
+    const msg = getErrorMessage(err, fallback);
     setActionErrorMessage(msg);
     setTimeout(() => setActionErrorMessage(null), timeoutMs);
   };

@@ -516,13 +516,14 @@ class VideoProcessor:
         await self._detect_cuda()
         names = await self._detect_encoders()
         seq: List[List[str]] = []
-        if "h264_nvenc" in names:
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names):
             seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
         if "h264_qsv" in names:
             seq.append(["-c:v", "h264_qsv"])
         if "h264_amf" in names:
             seq.append(["-c:v", "h264_amf"])
-        seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+        # 将 CPU 编码优先级提升，确保在常见无CUDA环境下优先使用稳定的 libx264
+        seq.insert(0, ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
         return seq
 
     async def _detect_encoders(self) -> List[str]:
@@ -738,7 +739,7 @@ class VideoProcessor:
                     "-i", narr_used,
                     "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "copy",
-                    "-c:a", "aac", "-b:a", "192k",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest",
                     "-movflags", "+faststart",
                     "-y", output_path,
@@ -750,7 +751,31 @@ class VideoProcessor:
                 )
                 stdout, stderr = await process.communicate()
                 if process.returncode == 0:
-                    return True
+                    vinfo, _ = await self._probe_stream_info(output_path)
+                    if vinfo is not None:
+                        return True
+                    vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                    cmd_fb_direct = [
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-i", video_path,
+                        "-i", narr_used,
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        *vcodec_args_fb,
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                        "-shortest",
+                        "-y", output_path,
+                    ]
+                    p2 = await asyncio.create_subprocess_exec(
+                        *cmd_fb_direct,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    _, e2 = await p2.communicate()
+                    if p2.returncode == 0:
+                        return True
+                    err = stderr.decode(errors="ignore")
+                    logger.error(f"配音替换失败(无视频流回退): {err}\n{e2.decode(errors='ignore')}")
+                    return False
                 else:
                     err = stderr.decode(errors="ignore")
                     logger.error(f"配音替换失败(拷贝路径): {err}")
@@ -782,7 +807,7 @@ class VideoProcessor:
                 "-filter_complex", filter_complex,
                 *map_args,
                 *vcodec_args,
-                "-c:a", "aac", "-b:a", "192k",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                 *extra,
                 "-y", output_path,
             ]
@@ -794,7 +819,32 @@ class VideoProcessor:
             )
             stdout, stderr = await process.communicate()
             if process.returncode == 0:
-                return True
+                vinfo, _ = await self._probe_stream_info(output_path)
+                if vinfo is not None:
+                    return True
+                vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                cmd_fb = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-i", video_path,
+                    "-i", narr_used,
+                    "-filter_complex", filter_complex,
+                    *map_args,
+                    *vcodec_args_fb,
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    *extra,
+                    "-y", output_path,
+                ]
+                p2 = await asyncio.create_subprocess_exec(
+                    *cmd_fb,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                _, e2 = await p2.communicate()
+                if p2.returncode == 0:
+                    return True
+                err = stderr.decode(errors="ignore")
+                logger.error(f"片段音频替换失败(无视频流回退): {err}\n{e2.decode(errors='ignore')}")
+                return False
             else:
                 err = stderr.decode(errors="ignore")
                 if ("Cannot load nvcuda.dll" in err) or ("Error while opening encoder" in err) or ("Could not open encoder" in err):
@@ -806,7 +856,7 @@ class VideoProcessor:
                         "-filter_complex", filter_complex,
                         *map_args,
                         *vcodec_args_fb,
-                        "-c:a", "aac", "-b:a", "192k",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                         *extra,
                         "-y", output_path,
                     ]
