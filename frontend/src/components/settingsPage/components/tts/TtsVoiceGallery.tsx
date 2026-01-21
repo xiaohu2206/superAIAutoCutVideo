@@ -26,7 +26,7 @@ const VoiceRow = React.memo(({
   progress,
   onPreview, 
   onSelect, 
-  hasCredentials 
+  canSelect 
 }: {
   voice: TtsVoice;
   isActive: boolean;
@@ -36,7 +36,7 @@ const VoiceRow = React.memo(({
   progress?: number;
   onPreview: (v: TtsVoice) => void;
   onSelect: (id: string) => void;
-  hasCredentials: boolean;
+  canSelect: boolean;
 }) => {
   return (
     <div className={`
@@ -109,16 +109,16 @@ const VoiceRow = React.memo(({
            </div>
         ) : (
             <button
-                onClick={() => onSelect(voice.id)}
-                disabled={!hasCredentials}
-                className={`
-                    text-xs px-3 py-1.5 rounded-md border transition-all font-medium
-                    ${hasCredentials 
-                        ? "bg-white border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 hover:shadow-sm" 
-                        : "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed"}
-                `}
+              onClick={() => onSelect(voice.id)}
+              disabled={!canSelect}
+              className={`
+                text-xs px-3 py-1.5 rounded-md border transition-all font-medium
+                ${canSelect 
+                  ? "bg-white border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 hover:shadow-sm" 
+                  : "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed"}
+              `}
             >
-                选择
+              选择
             </button>
         )}
       </div>
@@ -141,6 +141,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
   const [playProgress, setPlayProgress] = React.useState<number>(0);
   void testResult;
   void testDurationMs;
+  const canSelect = provider === "tencent_tts" ? true : hasCredentials;
 
   const stopCurrent = () => {
     const a = audioRef.current;
@@ -244,26 +245,32 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
   
   // 仅展示中文和英文音色
   const voicesForDisplay = React.useMemo(() => {
+    if (provider === "tencent_tts") return voices;
     return voices.filter(v => {
       const lang = (v.language || "").toLowerCase();
       return lang.startsWith("zh") || lang.startsWith("en");
     });
-  }, [voices]);
+  }, [provider, voices]);
 
   const grouped = React.useMemo(() => {
     const buckets: Record<string, TtsVoice[]> = {};
     voicesForDisplay.forEach(v => {
       const lang = (v.language || "").toLowerCase();
-      const key = lang.startsWith("zh") ? "中文" : lang.startsWith("en") ? "英文" : (v.language || "未标注语言");
+      const key = provider === "tencent_tts"
+        ? (v.category || "其他")
+        : (lang.startsWith("zh") ? "中文" : lang.startsWith("en") ? "英文" : (v.language || "未标注语言"));
       if (!buckets[key]) buckets[key] = [];
       buckets[key].push(v);
     });
     return buckets;
-  }, [voicesForDisplay]);
+  }, [provider, voicesForDisplay]);
 
   const groupNames = React.useMemo(() => {
     const names = Object.keys(grouped);
-    const priority = (x: string) => (x === "中文" ? 0 : x === "英文" ? 1 : 2);
+    const priority = (x: string) => {
+      if (provider === "tencent_tts") return 0;
+      return x === "中文" ? 0 : x === "英文" ? 1 : 2;
+    };
     return names.sort((a, b) => {
       const pa = priority(a);
       const pb = priority(b);
@@ -275,7 +282,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
   const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({});
   const toggleGroup = (name: string) => {
     setOpenGroups(prev => {
-      const current = prev[name] ?? (name === "中文" || name === "英文");
+      const current = prev[name] ?? (provider === "tencent_tts" ? true : (name === "中文" || name === "英文"));
       return { ...prev, [name]: !current };
     });
   };
@@ -303,14 +310,14 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
                    {grouped[groupName].length}
                 </span>
               </div>
-              {(openGroups[groupName] ?? (groupName === "中文" || groupName === "英文")) ? (
+              {(openGroups[groupName] ?? (provider === "tencent_tts" ? true : (groupName === "中文" || groupName === "英文"))) ? (
                 <ChevronUp className="h-4 w-4 text-gray-400" />
               ) : (
                 <ChevronDown className="h-4 w-4 text-gray-400" />
               )}
             </div>
           </div>
-          {(openGroups[groupName] ?? (groupName === "中文" || groupName === "英文")) && (
+          {(openGroups[groupName] ?? (provider === "tencent_tts" ? true : (groupName === "中文" || groupName === "英文"))) && (
             <div className="divide-y divide-gray-100">
               {grouped[groupName].map((v) => (
                 <VoiceRow 
@@ -323,7 +330,7 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
                   progress={playingVoiceId === v.id ? playProgress : 0}
                   onPreview={handlePreview}
                   onSelect={onSetActive}
-                  hasCredentials={hasCredentials}
+                  canSelect={canSelect}
                 />
               ))}
             </div>

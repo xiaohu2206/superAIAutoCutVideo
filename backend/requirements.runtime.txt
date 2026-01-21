@@ -6,4 +6,4 @@ python-dotenv==1.0.0
 loguru==0.7.2
 tencentcloud-sdk-python==3.0.1220
 aiohttp==3.9.0
-edge-tts==6.1.19
+edge-tts

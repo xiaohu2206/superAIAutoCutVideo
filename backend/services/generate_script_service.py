@@ -548,60 +548,40 @@ class GenerateScriptService:
         try:
             drama_name = p.name or "剧名"
             plot_analysis: str = ""
-            if getattr(p, "plot_analysis_path", None):
-                plot_abs_cand = _resolve_path(p.plot_analysis_path)
-                if plot_abs_cand.exists():
-                    try:
-                        plot_analysis = plot_abs_cand.read_text(encoding="utf-8", errors="ignore")
-                    except Exception:
-                        plot_analysis = ""
-            if not plot_analysis:
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "llm_analyze_subtitle",
-                        "message": "大模型分析字幕",
-                        "progress": 70,
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-                plot_analysis = await ScriptGenerationService.generate_plot_analysis_pipeline(subtitle_text)
-                ts_pa = datetime.now().strftime("%Y%m%d_%H%M%S")
-                pa_out = _uploads_dir() / "analyses" / f"{project_id}_analysis_{ts_pa}.txt"
-                try:
-                    pa_out.write_text(plot_analysis, encoding="utf-8")
-                    web_pa = _to_web_path(pa_out)
-                    projects_store.update_project(project_id, {"plot_analysis_path": web_pa})
-                except Exception:
-                    pass
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "llm_analysis_done",
-                        "message": "字幕分析完成",
-                        "progress": 75,
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
-            else:
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "generate_script",
-                        "project_id": project_id,
-                        "phase": "llm_analysis_done",
-                        "message": "已复用历史字幕分析",
-                        "progress": 75,
-                        "timestamp": _now_ts(),
-                    }))
-                except Exception:
-                    pass
+            # Always generate plot analysis, ignore cache
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "progress",
+                    "scope": "generate_script",
+                    "project_id": project_id,
+                    "phase": "llm_analyze_subtitle",
+                    "message": "大模型分析字幕",
+                    "progress": 70,
+                    "timestamp": _now_ts(),
+                }))
+            except Exception:
+                pass
+            plot_analysis = await ScriptGenerationService.generate_plot_analysis_pipeline(subtitle_text)
+            ts_pa = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pa_out = _uploads_dir() / "analyses" / f"{project_id}_analysis_{ts_pa}.txt"
+            try:
+                pa_out.write_text(plot_analysis, encoding="utf-8")
+                web_pa = _to_web_path(pa_out)
+                projects_store.update_project(project_id, {"plot_analysis_path": web_pa})
+            except Exception:
+                pass
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "progress",
+                    "scope": "generate_script",
+                    "project_id": project_id,
+                    "phase": "llm_analysis_done",
+                    "message": "字幕分析完成",
+                    "progress": 75,
+                    "timestamp": _now_ts(),
+                }))
+            except Exception:
+                pass
 
             try:
                 await manager.broadcast(json.dumps({
