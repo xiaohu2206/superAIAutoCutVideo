@@ -1,6 +1,6 @@
 // 项目管理页面（一级页面）
 
-import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw, X } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
@@ -35,6 +35,12 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
+  // 用于显示来自 hook 的全局错误，并允许手动关闭
+  const [visibleGlobalError, setVisibleGlobalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVisibleGlobalError(error);
+  }, [error]);
 
   const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
     if (err && typeof err === "object") {
@@ -54,16 +60,16 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
     });
   }, [fetchProjects, getErrorMessage]);
 
-  const showSuccess = (message: string, timeoutMs: number = 2500) => {
+  const showSuccess = (message: string) => {
     setSuccessMessage(message);
     setActionErrorMessage(null);
-    setTimeout(() => setSuccessMessage(null), timeoutMs);
+    setVisibleGlobalError(null);
   };
 
-  const showError = async (err: unknown, fallback: string, timeoutMs: number = 4000) => {
+  const showError = async (err: unknown, fallback: string) => {
     const msg = getErrorMessage(err, fallback);
     setActionErrorMessage(msg);
-    setTimeout(() => setActionErrorMessage(null), timeoutMs);
+    setSuccessMessage(null);
   };
 
   /**
@@ -222,21 +228,45 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
       {/* 错误提示 */}
       {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
-          <CheckCircle className="h-5 w-5 mr-2" />
-          {successMessage}
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <div className="flex items-center">
+            <CheckCircle className="h-5 w-5 mr-2" />
+            {successMessage}
+          </div>
+          <button
+            onClick={() => setSuccessMessage(null)}
+            className="p-1 hover:bg-green-100 rounded-full transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
       {actionErrorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {actionErrorMessage}
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 mr-2" />
+            {actionErrorMessage}
+          </div>
+          <button
+            onClick={() => setActionErrorMessage(null)}
+            className="p-1 hover:bg-red-100 rounded-full transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center">
-          <AlertCircle className="h-5 w-5 mr-2" />
-          {error}
+      {visibleGlobalError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 mr-2" />
+            {visibleGlobalError}
+          </div>
+          <button
+            onClick={() => setVisibleGlobalError(null)}
+            className="p-1 hover:bg-red-100 rounded-full transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 

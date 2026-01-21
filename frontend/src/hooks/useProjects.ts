@@ -13,6 +13,8 @@ import type {
   VideoScript,
 } from "../types/project";
 
+import { message as uiMessage } from "../services/message";
+
 // 统一提取错误信息，优先使用后端提供的 detail/message
 const getErrorMessage = (err: unknown, fallback: string): string => {
   if (err && typeof err === "object") {
@@ -583,6 +585,12 @@ export const useProjectDetail = (
   // 订阅 WebSocket 消息以更新合并进度（页面存在时持续监听）
   useEffect(() => {
     const handler = (message: WebSocketMessage & { [key: string]: any }) => {
+      // 调试日志：打印收到的所有相关消息
+      if ((message as any).scope === "merge_videos") {
+        console.log("WebSocket [merge_videos] received:", message);
+        console.log("Current Project ID:", project?.id);
+      }
+
       if (
         message &&
         (message.type === "progress" || message.type === "completed" || message.type === "error") &&
@@ -594,6 +602,7 @@ export const useProjectDetail = (
           setMerging(true);
         }
         if (message.type === "completed") {
+          console.log("Merge completed, updating project state...");
           const fp = (message as any).file_path as string | undefined;
           if (fp) {
             const fileName = fp.split("/").pop();
@@ -602,6 +611,9 @@ export const useProjectDetail = (
           setMerging(false);
         }
         if (message.type === "error") {
+          console.error("Merge error:", message.message);
+          const msg = message.message || "合并失败";
+          uiMessage.error(msg);
           setMerging(false);
         }
       }

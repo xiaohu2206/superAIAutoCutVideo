@@ -402,13 +402,25 @@ export class WebSocketClient {
     // 触发对应类型的监听器
     const typeListeners = this.listeners.get(message.type);
     if (typeListeners) {
-      typeListeners.forEach((listener) => listener(message));
+      typeListeners.forEach((listener) => {
+        try {
+          listener(message);
+        } catch (e) {
+          console.error(`WebSocket listener error (type=${message.type}):`, e);
+        }
+      });
     }
 
     // 触发通用监听器
     const allListeners = this.listeners.get("*");
     if (allListeners) {
-      allListeners.forEach((listener) => listener(message));
+      allListeners.forEach((listener) => {
+        try {
+          listener(message);
+        } catch (e) {
+          console.error("WebSocket listener error (type=*):", e);
+        }
+      });
     }
   }
 
