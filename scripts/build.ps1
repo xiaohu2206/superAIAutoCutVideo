@@ -2,7 +2,7 @@ param(
   [switch]$FullBackend
 )
 
-Set-StrictMode -Version Latest
+# Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Step($msg) { Write-Host "[+] $msg" -ForegroundColor Cyan }
