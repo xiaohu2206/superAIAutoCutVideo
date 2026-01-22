@@ -188,7 +188,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: superAIAutoCutVideo-1.0.1
+        name: superAIAutoCutVideo-1.0.2
         path: src-tauri/target/release/bundle/nsis/*-setup.exe
 
     - name: Create Release
