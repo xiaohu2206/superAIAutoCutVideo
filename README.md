@@ -5,8 +5,10 @@
 
 
 ## 软件版本
-- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.1/superAIAutoCutVideo-1.0.1.zip">SuperAI-v1.0.1</a>
+- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.2/superAIAutoCutVideo-1.0.2.zip">SuperAI-v1.0.2</a>
 
+### 帮忙点个star，感谢兄弟 ❤❤❤
+<img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
 ## 亮点特性
 - 2026-01-14: 打包成 Windows 版本
@@ -23,8 +25,8 @@
 
 
 ### 添加功能
-1. edge-tts支持英文、错误日志
-2. 可配置（生成脚本条数、解说和原片的占比、生成脚本语言
+1. 2026-01-22：edge-tts支持英文、错误日志
+2. 2026-01-22：可配置（生成脚本条数、解说和原片的占比、生成脚本语言
 
 ### 解决问题
 1. 对uploads的垃圾数据进行清理
@@ -33,10 +35,9 @@
 4. 添加可以看到解析的字幕
 5. 添加生成时间
 6. 有时候生成的脚本不更新，一直是初次生成的脚本。
-7. 删除plot_analysis
-8. edge-tts试音添加loading
-9. PC版本不会保存记录，间隔几个小时，打开需要重新配置
-10. 无效片段："start_time": 160.63, "end_time": 160.63,
+7. edge-tts试音添加loading
+8. PC版本不会保存记录，间隔几个小时，打开需要重新配置
+等等若干问题....
 
 
 ## 更新计划（持续更新优化中....
@@ -51,9 +52,6 @@
 ## 文档与支持
 - 打包说明：`docs/打包说明.md`
 
-
-## 帮忙点个star，感谢兄弟一❤❤❤
-<img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
 ## 联系方式
 <img src="docs/image/weixinqun.png" alt="微信码" width="300" />
