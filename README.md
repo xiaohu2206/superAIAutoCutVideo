@@ -56,7 +56,7 @@
 <img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
 ## 联系方式
-<img src="docs/image/weixinqun.png" alt="微信码" width="160" />
+<img src="docs/image/weixinqun.png" alt="微信码" width="300" />
 - 微信群
 
 <img src="docs/image/douyin.png" alt="抖音码" width="160" />
