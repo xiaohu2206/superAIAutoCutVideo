@@ -265,12 +265,13 @@ class EdgeTtsService:
 
             if errs:
                 last = errs[-1]
-                if (platform.system().lower() == "darwin"):
-                    mac_voice = _map_edge_to_mac_voice(voice_id)
-                    ok = await _mac_say_to_mp3(text, mac_voice, out_path)
-                    if ok:
-                        dur = await _ffprobe_duration(str(out_path))
-                        return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
+                logger.error(f"Edge TTS failed (all proxies tried). Last error: {last['message']}")
+                # if (platform.system().lower() == "darwin"):
+                #     mac_voice = _map_edge_to_mac_voice(voice_id)
+                #     ok = await _mac_say_to_mp3(text, mac_voice, out_path)
+                #     if ok:
+                #         dur = await _ffprobe_duration(str(out_path))
+                #         return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
                 return {"success": False, "error": last["message"], "message": last["message"], "requires_proxy": bool(last.get("requires_proxy", False))}
             return {"success": False, "error": "edge_tts_unknown_error"}
         except Exception as e:

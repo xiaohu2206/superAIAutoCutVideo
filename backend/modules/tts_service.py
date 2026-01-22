@@ -75,6 +75,7 @@ class TencentTtsService:
             except Exception:
                 override = None
             try:
+                logger.info(f"配音角色： edge_tts_synthesize voice={vid} speed={speed_ratio} text_len={len(text)}")
                 res = await edge_tts_service.synthesize(
                     text=text,
                     voice_id=vid,

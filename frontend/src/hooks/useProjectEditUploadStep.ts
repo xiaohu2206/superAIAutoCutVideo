@@ -341,11 +341,8 @@ export function useProjectEditUploadStep(
       options.showErrorText("正在提取中");
       return;
     }
-    const hasExtractedSubtitle =
-      project.subtitle_source === "extracted" &&
-      Boolean(project.subtitle_path) &&
-      project.subtitle_status === "ready";
-    let force = hasExtractedSubtitle;
+    // 每次都强制重新提取，不使用缓存的音频
+    let force = true;
     if (project.subtitle_updated_by_user) {
       force = window.confirm("字幕已被编辑，重新提取将覆盖修改内容，是否继续？");
       if (!force) return;

@@ -224,13 +224,25 @@ class ExtractSubtitleService:
 
         audio_abs: Optional[Path] = None
         audio_web: Optional[str] = None
-        if getattr(p, "audio_path", None):
+
+        if not force and getattr(p, "audio_path", None):
             a_cand = _resolve_path(p.audio_path)
             if a_cand.exists():
                 audio_abs = a_cand
                 await _ws(project_id, "progress", "audio_exists", "复用已提取音频", 20)
 
         if not audio_abs:
+            # 清理旧音频
+            old_audio_path = getattr(p, "audio_path", None)
+            if old_audio_path:
+                try:
+                    old_f = _resolve_path(old_audio_path)
+                    if old_f.exists():
+                        old_f.unlink()
+                        await _ws(project_id, "progress", "cleanup_old_audio", "清理旧音频", 25)
+                except Exception:
+                    pass
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             audio_out = _uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3"
             await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)

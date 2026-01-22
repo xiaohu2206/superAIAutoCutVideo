@@ -72,6 +72,7 @@ export interface TtsVoice {
   voice_quality?: string;
   voice_type_tag?: string;
   voice_human_style?: string;
+  category?: string;
 }
 
 /**

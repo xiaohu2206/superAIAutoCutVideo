@@ -154,9 +154,28 @@ export const TtsSettings: React.FC = () => {
   const handleProviderChange = async (prov: string) => {
     setProvider(prov);
     const cid = getTtsConfigIdByProvider(prov);
+    
+    // 1. 确保配置存在
     if (!configs[cid]) {
       await createOrUpdateDefaultConfig(cid, prov);
     }
+
+    // 2. 立即激活该配置（应用到 Project）
+    try {
+      setSaveState("saving");
+      const res = await ttsService.activateConfig(cid);
+      if (res?.success) {
+        await refreshConfigs();
+        markSaved();
+      } else {
+        markFailed();
+      }
+    } catch (error) {
+      console.error("激活配置失败:", error);
+      markFailed();
+    }
+
+    // 3. 加载音色
     await loadVoices(prov);
   };
 
