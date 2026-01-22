@@ -3,11 +3,12 @@
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-# 收集所有 cv2 和相关依赖
+# 基础数据文件：将 serviceData 目录打包进 exe
 datas = [
     ('serviceData', 'serviceData'),
 ]
 binaries = []
+# 基础隐式导入
 hiddenimports = [
     'uvicorn.logging',
     'uvicorn.loops',
@@ -23,19 +24,19 @@ hiddenimports = [
     'pydantic',
     'starlette',
     'multipart',
+    'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
 ]
 
-# 收集 cv2 的所有依赖
-tmp_ret = collect_all('cv2')
-datas += tmp_ret[0]
-binaries += tmp_ret[1]
-hiddenimports += tmp_ret[2]
-
-# 收集 numpy
-tmp_ret = collect_all('numpy')
-datas += tmp_ret[0]
-binaries += tmp_ret[1]
-hiddenimports += tmp_ret[2]
+# 自动收集关键库的所有依赖（数据、二进制、隐式导入）
+# 这样比手动写 hiddenimports 更稳健
+for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic']:
+    try:
+        tmp_ret = collect_all(package)
+        datas += tmp_ret[0]
+        binaries += tmp_ret[1]
+        hiddenimports += tmp_ret[2]
+    except Exception as e:
+        print(f"Warning: Failed to collect {package}: {e}")
 
 a = Analysis(
     ['main.py'],
@@ -66,7 +67,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False, # 关闭控制台窗口，避免弹黑框
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
