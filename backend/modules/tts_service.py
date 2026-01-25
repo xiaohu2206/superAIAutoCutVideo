@@ -137,25 +137,36 @@ class TencentTtsService:
                 volume = 10.0
             params["Volume"] = volume
 
-            vt = extra.get("VoiceType", None)
-            if vt is not None:
-                try:
-                    params["VoiceType"] = int(vt)
-                except Exception:
-                    pass
-            else:
+            vt_from_vid = None
+            try:
                 if isinstance(vid, int) or (isinstance(vid, str) and str(vid).isdigit()):
-                    params["VoiceType"] = int(vid)
+                    vt_from_vid = int(vid)
                 else:
                     try:
-                        provider = (cfg.provider if cfg else "tencent_tts")
-                        voices = tts_engine_config_manager.get_voices(provider)
+                        provider2 = (cfg.provider if cfg else "tencent_tts")
+                        voices = tts_engine_config_manager.get_voices(provider2)
                         sid = str(vid) if vid is not None else ""
                         m = next((v for v in voices if v.id == sid or v.name == sid), None)
                         if m and isinstance(m.voice_type, int):
-                            params["VoiceType"] = int(m.voice_type)
+                            vt_from_vid = int(m.voice_type)
                     except Exception:
-                        pass
+                        vt_from_vid = None
+            except Exception:
+                vt_from_vid = None
+
+            vt_from_extra = None
+            try:
+                vt_val = extra.get("VoiceType", None)
+                if vt_val is not None:
+                    vt_from_extra = int(vt_val)
+            except Exception:
+                vt_from_extra = None
+
+            final_vt = vt_from_vid if vt_from_vid is not None else vt_from_extra
+            if vt_from_vid is not None and vt_from_extra is not None and vt_from_vid != vt_from_extra:
+                logger.info(f"VoiceType mismatch resolved: voice_id={vid} extra={vt_from_extra} use={final_vt}")
+            if final_vt is not None:
+                params["VoiceType"] = final_vt
 
             req.from_json_string(json.dumps(params))
 

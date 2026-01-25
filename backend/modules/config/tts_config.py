@@ -373,6 +373,37 @@ class TtsEngineConfigManager:
         self._voices_cache[provider] = voices
         return voices
 
+    async def get_voices_async(self, provider: str) -> List[TtsVoice]:
+        """异步获取音色列表；Edge TTS 直接拉取最新官方列表，不使用本地缓存文件。"""
+        provider = provider.lower()
+        if provider == 'edge_tts':
+            try:
+                from modules.edge_tts_service import edge_tts_service
+                raw_list = await edge_tts_service.list_voices()
+                voices: List[TtsVoice] = []
+                for item in (raw_list or []):
+                    voices.append(TtsVoice(
+                        id=str(item.get('id') or ''),
+                        name=str(item.get('name') or ''),
+                        description=item.get('description') or None,
+                        sample_wav_url=item.get('sample_wav_url') or None,
+                        language=item.get('language') or None,
+                        gender=item.get('gender') or None,
+                        tags=item.get('tags') or [],
+                        voice_type=None,
+                        category=None,
+                        voice_quality=item.get('voice_quality') or None,
+                        voice_type_tag=item.get('voice_type_tag') or None,
+                        voice_human_style=item.get('voice_human_style') or None,
+                    ))
+                self._voices_cache[provider] = voices
+                return voices
+            except Exception as e:
+                logger.error(f"获取 Edge TTS 最新音色失败: {e}")
+                return self.get_voices(provider)
+        else:
+            return self.get_voices(provider)
+
     async def test_connection(self, config_id: str, proxy_url: Optional[str] = None) -> Dict[str, Any]:
         """测试指定配置的连通性：根据 provider 分支校验"""
         config = self.get_config(config_id)
@@ -399,6 +430,7 @@ class TtsEngineConfigManager:
                     speed_ratio=config.speed_ratio,
                     out_path=out_path,
                     proxy_override=(proxy_url if isinstance(proxy_url, str) and proxy_url.strip() else cfg_proxy),
+                    delete_after=True,
                 )
                 if res.get("success"):
                     return {

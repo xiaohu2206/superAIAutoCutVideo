@@ -5,8 +5,7 @@ TTS引擎与音色配置API路由
 提供TTS引擎元数据、音色列表、配置管理、激活与测试接口。
 """
 
-from typing import Dict, List, Optional, Any
-from pathlib import Path
+from typing import Dict, Optional, Any
 import time
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -59,7 +58,7 @@ async def get_tts_engines():
 @router.get("/voices", summary="获取音色列表")
 async def get_tts_voices(provider: str = Query(..., description="提供商标识，如tencent_tts")):
     try:
-        voices = tts_engine_config_manager.get_voices(provider)
+        voices = await tts_engine_config_manager.get_voices_async(provider)
         data = []
         for v in voices:
             d = v.dict()
@@ -173,7 +172,7 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
                     if aid_s.isdigit():
                         vt_val = int(aid_s)
                     else:
-                        voices = tts_engine_config_manager.get_voices(provider)
+                        voices = await tts_engine_config_manager.get_voices_async(provider)
                         m = next((v for v in voices if v.id == aid_s or v.name == aid_s), None)
                         if m and isinstance(m.voice_type, int):
                             vt_val = m.voice_type
@@ -182,7 +181,7 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
                 if isinstance(update_data.get('extra_params'), dict):
                     merged_ep.update(update_data['extra_params'])
                 merged_ep['VoiceType'] = vt_val
-                voices = tts_engine_config_manager.get_voices(provider)
+                voices = await tts_engine_config_manager.get_voices_async(provider)
                 mv = next((v for v in voices if isinstance(v.voice_type, int) and v.voice_type == vt_val), None)
                 if mv:
                     merged_ep['VoiceName'] = mv.name
@@ -251,33 +250,23 @@ class VoicePreviewRequest(BaseModel):
 async def preview_voice(voice_id: str, req: VoicePreviewRequest):
     try:
         provider = (req.provider or (tts_engine_config_manager.get_active_config() or TtsEngineConfig(provider='tencent_tts')).provider)
-        voices = tts_engine_config_manager.get_voices(provider)
+        voices = await tts_engine_config_manager.get_voices_async(provider)
         match = next((v for v in voices if v.id == voice_id), None)
         # Edge TTS：若缓存列表未包含该音色，仍允许尝试合成（避免误报不存在）
         if provider == 'edge_tts':
             try:
                 from modules.edge_tts_service import edge_tts_service, PREVIEWS_DIR
-                backend_dir = Path(__file__).resolve().parent.parent
-                # 缓存文件名：edge_<voice>_preview.mp3（若存在则直接复用）
                 vid = (match.id if match else voice_id)
-                cache_filename = f"edge_{vid}_preview.mp3"
-                cache_path = PREVIEWS_DIR / cache_filename
-                if cache_path.exists():
-                    audio_url = f"/backend/serviceData/tts/previews/{cache_filename}"
-                    return {
-                        "success": True,
-                        "data": {
-                            "voice_id": vid,
-                            "name": (match.name if match else vid),
-                            "audio_url": audio_url,
-                            "description": (match.description if match else None),
-                            "duration": None
-                        },
-                        "message": "已使用本地缓存试听音频"
-                    }
+                raw_voices = await edge_tts_service.list_voices()
+                found_raw = next((v for v in raw_voices if (isinstance(v.get("id"), str) and v.get("id", "").lower() == str(vid).lower()) or (isinstance(v.get("name"), str) and v.get("name", "").lower() == str(vid).lower())), None)
+                if found_raw:
+                    vid = found_raw.get("id", vid)
+                ts = int(time.time() * 1000)
+                filename = f"edge_{vid}_preview_{ts}.mp3"
+                out_path = PREVIEWS_DIR / filename
 
                 # 文本使用请求或默认（前端写死即可，这里保持回退）
-                lang = (match.language if match else None) or ""
+                lang = (match.language if match else (found_raw.get("language") if isinstance(found_raw, dict) else None)) or ""
                 prefix = (lang.lower().split("-")[0] if isinstance(lang, str) else "")
                 default_map = {
                     "zh": "您好，欢迎使用智能配音。",
@@ -300,17 +289,17 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 text = req.text or default_map.get(prefix, "Hello, welcome to smart voiceover.")
                 cfg = tts_engine_config_manager.get_active_config()
                 speed_ratio = (cfg.speed_ratio if cfg else 1.0)
-                res = await edge_tts_service.synthesize(text=text, voice_id=vid, speed_ratio=speed_ratio, out_path=cache_path)
+                res = await edge_tts_service.synthesize(text=text, voice_id=vid, speed_ratio=speed_ratio, out_path=out_path)
                 if not res.get("success"):
                     raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
-                audio_url = f"/backend/serviceData/tts/previews/{cache_filename}"
+                audio_url = f"/backend/serviceData/tts/previews/{filename}"
                 return {
                     "success": True,
                     "data": {
                         "voice_id": vid,
-                        "name": (match.name if match else vid),
+                        "name": (match.name if match else (found_raw.get("name") if isinstance(found_raw, dict) else vid)),
                         "audio_url": audio_url,
-                        "description": (match.description if match else None),
+                        "description": (match.description if match else ((found_raw.get("description") if isinstance(found_raw, dict) else None))),
                         "duration": res.get("duration")
                     },
                     "message": "已生成并保存 Edge TTS 试听音频"
@@ -325,7 +314,59 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
         if not match:
             raise HTTPException(status_code=404, detail=f"音色 '{voice_id}' 不存在")
 
-        # 默认（腾讯云）返回示例音频链接
+        # 腾讯云：直接调用合成，并清理旧的本地预览音频
+        if provider == 'tencent_tts':
+            try:
+                from modules.tts_service import tts_service
+                from modules.edge_tts_service import PREVIEWS_DIR
+                vid = match.id
+                base_name = f"tencent_{vid}_preview"
+                try:
+                    PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                try:
+                    if PREVIEWS_DIR.exists():
+                        for p in PREVIEWS_DIR.iterdir():
+                            if p.is_file() and (p.name.startswith(base_name + "_") or p.stem.startswith(base_name + "_") or p.stem == base_name):
+                                try:
+                                    p.unlink()
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+                text = (req.text or "您好，欢迎使用智能配音。")
+                cfg = tts_engine_config_manager.get_active_config()
+                codec = "mp3"
+                try:
+                    extra = (cfg.extra_params if cfg else {}) or {}
+                    codec = str(extra.get("Codec", codec))
+                except Exception:
+                    pass
+                ts = int(time.time() * 1000)
+                out_path = PREVIEWS_DIR / f"{base_name}_{ts}.{codec}"
+                res = await tts_service.synthesize(text=text, out_path=str(out_path), voice_id=vid)
+                if not res.get("success"):
+                    raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                audio_url = f"/backend/serviceData/tts/previews/{out_path.name}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": vid,
+                        "name": match.name,
+                        "audio_url": audio_url,
+                        "description": match.description,
+                        "duration": res.get("duration")
+                    },
+                    "message": "已生成并保存 腾讯云 TTS 试听音频"
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"腾讯云 TTS 试听失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # 其他提供商：返回示例音频链接
         return {
             "success": True,
             "data": {

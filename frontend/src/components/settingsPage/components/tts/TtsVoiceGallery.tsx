@@ -69,7 +69,7 @@ const VoiceRow = React.memo(({
 
       {/* Main Info */}
       <div className="flex-1 min-w-0 flex items-center gap-3">
-        <span className={`text-sm font-medium truncate min-w-[80px] ${isActive ? "text-blue-700" : "text-gray-900"}`}>
+        <span className={`text-sm font-medium truncate min-w-[150px] ${isActive ? "text-blue-700" : "text-gray-900"}`}>
           {voice.name}
         </span>
         
@@ -194,6 +194,11 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
     }
     try {
       const getDefaultPreviewText = (v: TtsVoice): string => {
+        if (provider === "tencent_tts") {
+          const cat = (v.category || "").toLowerCase();
+          const isForeign = cat.includes("外语");
+          return isForeign ? "Hello, welcome to smart voiceover." : "您好，欢迎使用智能配音。";
+        }
         const lang = (v.language || "").toLowerCase();
         const code = (lang.split("-")[0] || "");
         if (code === "zh") return "您好，欢迎使用智能配音。";
@@ -214,7 +219,6 @@ export const TtsVoiceGallery: React.FC<Props> = ({ voices, activeVoiceId, config
         if (code === "id") return "Halo, selamat datang di sulih suara pintar.";
         return "Hello, welcome to smart voiceover.";
       };
-
       if (hasCredentials && configId) {
         setPreviewLoadingVoiceId(voice.id);
         const res = await ttsService.previewVoice(voice.id, {
