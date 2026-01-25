@@ -152,10 +152,25 @@ class EdgeTtsService:
                 styles = voice_tag.get("StyleList") or []
                 if isinstance(styles, list):
                     tags.extend([str(s) for s in styles if s])
+                # 精简展示名称：优先从 ShortName 提取人名部分（去掉语言与 Neural 后缀），否则从 FriendlyName 取第二个词（去掉前缀 Microsoft）
+                simple_name = short_name
+                try:
+                    parts = short_name.split("-")
+                    simple_name = parts[-1] if parts else short_name
+                    simple_name = simple_name.replace("Neural", "-Neural")
+                except Exception:
+                    simple_name = short_name
+                if not simple_name or simple_name == short_name:
+                    try:
+                        toks = display_name.split()
+                        if len(toks) >= 2 and toks[0].lower() == "microsoft":
+                            simple_name = toks[1]
+                    except Exception:
+                        pass
                 description = f"{display_name}（{locale}）"
                 voices.append({
                     "id": short_name,
-                    "name": display_name,
+                    "name": simple_name,
                     "description": description,
                     "language": locale,
                     "gender": gender,
@@ -175,7 +190,7 @@ class EdgeTtsService:
             logger.error(f"获取 Edge TTS 音色失败: {e}")
             return []
 
-    async def synthesize(self, text: str, voice_id: str, speed_ratio: Optional[float], out_path: Path, proxy_override: Optional[str] = None) -> Dict[str, Any]:
+    async def synthesize(self, text: str, voice_id: str, speed_ratio: Optional[float], out_path: Path, proxy_override: Optional[str] = None, delete_after: bool = False) -> Dict[str, Any]:
         """
         使用 Edge TTS 合成语音到指定文件。
         返回包含路径与时长信息的结果。
@@ -240,6 +255,12 @@ class EdgeTtsService:
                         with open(str(out_path), "wb") as f:
                             f.write(audio_data)
                     dur = await _ffprobe_duration(str(out_path))
+                    if delete_after:
+                        try:
+                            if out_path.exists():
+                                out_path.unlink()
+                        except Exception:
+                            pass
                     return {"success": True, "path": str(out_path), "duration": dur, "codec": "mp3", "sample_rate": None}
                 except Exception as e:
                     msg = str(e)
