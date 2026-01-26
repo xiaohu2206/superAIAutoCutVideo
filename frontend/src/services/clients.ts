@@ -129,6 +129,9 @@ export class ApiClient {
     const isFormDataBody =
       typeof FormData !== "undefined" && options.body instanceof FormData;
 
+    const isFormDataBody =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
+
     const defaultOptions: RequestInit = {
       headers: isFormDataBody
         ? {
