@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_all
 # 基础数据文件：将 serviceData 目录打包进 exe
 datas = [
     ('serviceData', 'serviceData'),
+    ('../.trae/cache/Qwen3-TTS', '.trae/cache/Qwen3-TTS'),
 ]
 binaries = []
 # 基础隐式导入
@@ -29,7 +30,7 @@ hiddenimports = [
 
 # 自动收集关键库的所有依赖（数据、二进制、隐式导入）
 # 这样比手动写 hiddenimports 更稳健
-for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic']:
+for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic', 'transformers', 'huggingface_hub', 'librosa', 'soundfile', 'modelscope']:
     try:
         tmp_ret = collect_all(package)
         datas += tmp_ret[0]

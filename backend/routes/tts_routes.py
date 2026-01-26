@@ -258,7 +258,20 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 from modules.edge_tts_service import edge_tts_service, PREVIEWS_DIR
                 vid = (match.id if match else voice_id)
                 raw_voices = await edge_tts_service.list_voices()
-                found_raw = next((v for v in raw_voices if (isinstance(v.get("id"), str) and v.get("id", "").lower() == str(vid).lower()) or (isinstance(v.get("name"), str) and v.get("name", "").lower() == str(vid).lower())), None)
+                wanted = str(vid).lower()
+
+                def _raw_voice_match(v: Any, wanted_id: str) -> bool:
+                    if not isinstance(v, dict):
+                        return False
+                    v_id = v.get("id")
+                    v_name = v.get("name")
+                    if isinstance(v_id, str) and v_id.lower() == wanted_id:
+                        return True
+                    if isinstance(v_name, str) and v_name.lower() == wanted_id:
+                        return True
+                    return False
+
+                found_raw = next((v for v in raw_voices if _raw_voice_match(v, wanted)), None)
                 if found_raw:
                     vid = found_raw.get("id", vid)
                 ts = int(time.time() * 1000)
@@ -308,6 +321,85 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 raise
             except Exception as e:
                 logger.error(f"Edge TTS 试听失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        if provider == 'qwen3_tts':
+            try:
+                from modules.edge_tts_service import PREVIEWS_DIR
+                from modules.qwen3_tts_service import qwen3_tts_service
+
+                cfg = tts_engine_config_manager.get_active_config()
+                extra = (cfg.extra_params if cfg else {}) or {}
+                model_key = str(extra.get("ModelKey") or "custom_0_6b")
+                language = str(extra.get("Language") or "Auto")
+                device = extra.get("Device")
+                device_s = str(device).strip() if isinstance(device, str) else None
+                instruct = str(extra.get("Instruct") or "").strip() or None
+                ref_audio = str(extra.get("RefAudio") or "").strip() or None
+                ref_text = str(extra.get("RefText") or "").strip() or None
+                xvec_in = extra.get("XVectorOnly", None)
+                x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
+
+                speaker = None
+                if model_key == "custom_0_6b":
+                    speaker = str(extra.get("Speaker") or voice_id or "").strip() or None
+                else:
+                    vid = (voice_id or "").strip()
+                    if not ref_audio and vid:
+                        try:
+                            from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+
+                            vv = qwen3_tts_voice_store.get(vid)
+                            if vv:
+                                ref_audio = str(vv.ref_audio_path or "").strip() or None
+                                if not ref_text:
+                                    ref_text = vv.ref_text
+                                if not instruct:
+                                    instruct = vv.instruct
+                                if xvec_in is None:
+                                    x_vector_only_mode = bool(vv.x_vector_only_mode)
+                                if "ModelKey" not in extra:
+                                    model_key = str(vv.model_key or model_key)
+                                if "Language" not in extra:
+                                    language = str(vv.language or language)
+                        except Exception:
+                            pass
+
+                ts = int(time.time() * 1000)
+                filename = f"qwen3_{voice_id}_preview_{ts}.wav"
+                out_path = PREVIEWS_DIR / filename
+
+                text = (req.text or "您好，欢迎使用智能配音。")
+                res = await qwen3_tts_service.synthesize_to_wav(
+                    text=text,
+                    out_path=out_path,
+                    model_key=model_key,
+                    language=language,
+                    speaker=speaker,
+                    instruct=instruct,
+                    ref_audio=ref_audio,
+                    ref_text=ref_text,
+                    x_vector_only_mode=x_vector_only_mode,
+                    device=device_s,
+                )
+                if not res.get("success"):
+                    raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                audio_url = f"/backend/serviceData/tts/previews/{filename}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": voice_id,
+                        "name": voice_id,
+                        "audio_url": audio_url,
+                        "description": None,
+                        "duration": res.get("duration"),
+                    },
+                    "message": "已生成并保存 Qwen3-TTS 试听音频"
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Qwen3-TTS 试听失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 非 Edge：严格校验音色存在

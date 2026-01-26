@@ -87,6 +87,66 @@ class TencentTtsService:
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
+        if provider == "qwen3_tts":
+            try:
+                from modules.qwen3_tts_service import qwen3_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"qwen3_tts_import_failed:{e}"}
+
+            out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            model_key = str(ep.get("ModelKey") or "custom_0_6b")
+            language = str(ep.get("Language") or "Auto")
+            device = ep.get("Device")
+            device_s = str(device).strip() if isinstance(device, str) else None
+
+            instruct = str(ep.get("Instruct") or "").strip() or None
+            ref_audio = str(ep.get("RefAudio") or "").strip() or None
+            ref_text = str(ep.get("RefText") or "").strip() or None
+            xvec_in = ep.get("XVectorOnly", None)
+            x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
+
+            speaker = None
+            if model_key == "custom_0_6b":
+                speaker = str(ep.get("Speaker") or (voice_id or (cfg.active_voice_id if cfg else "")) or "").strip() or None
+            else:
+                vid = (voice_id or "").strip()
+                if not ref_audio and vid:
+                    try:
+                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+
+                        vv = qwen3_tts_voice_store.get(vid)
+                        if vv:
+                            ref_audio = str(vv.ref_audio_path or "").strip() or None
+                            if not ref_text:
+                                ref_text = vv.ref_text
+                            if not instruct:
+                                instruct = vv.instruct
+                            if xvec_in is None:
+                                x_vector_only_mode = bool(vv.x_vector_only_mode)
+                            if not ep.get("ModelKey"):
+                                model_key = str(vv.model_key or model_key)
+                            if not ep.get("Language"):
+                                language = str(vv.language or language)
+                    except Exception:
+                        pass
+
+            try:
+                return await qwen3_tts_service.synthesize_to_wav(
+                    text=text,
+                    out_path=out,
+                    model_key=model_key,
+                    language=language,
+                    speaker=speaker,
+                    instruct=instruct,
+                    ref_audio=ref_audio,
+                    ref_text=ref_text,
+                    x_vector_only_mode=x_vector_only_mode,
+                    device=device_s,
+                )
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
         # 腾讯云 TTS 合成路径（需凭据）
         env_sid = (os.getenv("TENCENTCLOUD_SECRET_ID") or "").strip()
         env_skey = (os.getenv("TENCENTCLOUD_SECRET_KEY") or "").strip()
@@ -112,7 +172,8 @@ class TencentTtsService:
             client = tts_client.TtsClient(cred, region, client_profile)
 
             req = models.TextToVoiceRequest()
-            import json, uuid
+            import json
+            import uuid
             vid = voice_id or (cfg.active_voice_id if cfg else None)
             params: Dict[str, Any] = {
                 "Text": text,

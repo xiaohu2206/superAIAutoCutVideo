@@ -162,6 +162,12 @@ module = [
     "cv2.*",
     "numpy.*",
     "PIL.*",
+    "torch.*",
+    "transformers.*",
+    "huggingface_hub.*",
+    "librosa.*",
+    "soundfile.*",
+    "modelscope.*",
 ]
 ignore_missing_imports = true
 
