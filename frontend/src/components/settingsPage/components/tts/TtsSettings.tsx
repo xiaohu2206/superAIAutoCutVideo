@@ -11,6 +11,7 @@ import { getSpeedLabel, getTtsConfigIdByProvider } from "../../utils";
  
 import { LabeledChip } from "./LabeledGroup";
 import { getGenderLabel } from "./utils";
+import Qwen3VoiceSection from "@/features/qwen3Tts/components/Qwen3VoiceSection";
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
@@ -40,6 +41,7 @@ export const TtsSettings: React.FC = () => {
   const hasCredentials = useMemo(() => {
     // Edge TTS 免凭据：只要当前提供商为 edge_tts，则视为具备“连通性测试许可”
     if (provider === "edge_tts") return true;
+    if (provider === "qwen3_tts") return true;
     // 腾讯云：后端返回时会将已设置的敏感值脱敏为“***”，以此判断是否已配置
     return Boolean(currentConfig?.secret_id === "***" && currentConfig?.secret_key === "***");
   }, [provider, currentConfig]);
@@ -319,20 +321,29 @@ export const TtsSettings: React.FC = () => {
 
         {/* 凭据设置 */}
         <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
-          <TtsCredentialForm
-            configId={currentConfigId}
-            config={currentConfig}
-            hasCredentials={hasCredentials}
-            onUpdate={handleCredentialUpdate}
-            onTest={handleTestConnection}
-            testing={testing}
-            testDurationMs={testDurationMs}
-            testResult={testResult}
-            activeConfigId={activeConfigId}
-          />
+          {provider === "qwen3_tts" ? (
+            <Qwen3VoiceSection
+              configId={currentConfigId}
+              activeVoiceId={currentConfig?.active_voice_id || ""}
+              onSetActive={handleSetActiveVoice}
+            />
+          ) : (
+            <TtsCredentialForm
+              configId={currentConfigId}
+              config={currentConfig}
+              hasCredentials={hasCredentials}
+              onUpdate={handleCredentialUpdate}
+              onTest={handleTestConnection}
+              testing={testing}
+              testDurationMs={testDurationMs}
+              testResult={testResult}
+              activeConfigId={activeConfigId}
+            />
+          )}
         </section>
 
         {/* 音色库 */}
+        {provider === "qwen3_tts" ? null : (
         <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-md font-semibold text-gray-900">音色库</h4>
@@ -392,6 +403,7 @@ export const TtsSettings: React.FC = () => {
           />
           </div>
         </section>
+        )}
 
         {/* 语速 */}
         <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">

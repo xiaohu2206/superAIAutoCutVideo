@@ -79,11 +79,18 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
+    const isFormDataBody =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
+
     const defaultOptions: RequestInit = {
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
+      headers: isFormDataBody
+        ? {
+            ...options.headers,
+          }
+        : {
+            "Content-Type": "application/json",
+            ...options.headers,
+          },
       ...options,
     };
 
@@ -153,10 +160,44 @@ export class ApiClient {
     });
   }
 
+  // POST multipart/form-data
+  async postFormData<T>(endpoint: string, formData: FormData, timeoutMs?: number): Promise<T> {
+    if (typeof timeoutMs === "number" && timeoutMs > 0) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await this.request<T>(endpoint, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+      } catch (e: any) {
+        if (e && e.name === "AbortError") {
+          throw new Error("请求超时");
+        }
+        throw e;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+    return this.request<T>(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   // PUT请求
   async put<T>(endpoint: string, data?: any): Promise<T> {
     return this.request<T>(endpoint, {
       method: "PUT",
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  // PATCH请求
+  async patch<T>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: "PATCH",
       body: data ? JSON.stringify(data) : undefined,
     });
   }

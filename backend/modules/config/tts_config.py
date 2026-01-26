@@ -44,7 +44,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -227,6 +227,13 @@ class TtsEngineConfigManager:
                 'provider': 'edge_tts',
                 'display_name': 'Edge TTS',
                 'description': '微软 Edge 在线语音，免凭据，适合中文合成测试与预览',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'qwen3_tts',
+                'display_name': 'Qwen3-TTS 本地模型',
+                'description': '离线语音合成与快速声音克隆（需先下载模型）',
                 'required_fields': [],
                 'optional_fields': []
             }
