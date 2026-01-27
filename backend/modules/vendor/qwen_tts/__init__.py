@@ -39,7 +39,19 @@ def _ensure_qwen_tts_importable() -> None:
 
 
 _ensure_qwen_tts_importable()
-_m = importlib.import_module("qwen_tts")
+try:
+    _m = importlib.import_module("qwen_tts")
+except Exception as e:
+    msg = str(e)
+    if "No module named 'qwen_tts'" in msg or 'No module named "qwen_tts"' in msg:
+        raise ModuleNotFoundError(
+            "qwen_tts_not_installed: 请安装官方依赖 `qwen-tts`（模块名为 qwen_tts），并重新安装后端依赖"
+        ) from e
+    if "No module named 'qwen'" in msg or 'No module named "qwen"' in msg:
+        raise ModuleNotFoundError(
+            "qwen_tts_bad_install: 检测到 qwen_tts 导入时缺少模块 qwen。通常是安装了非官方/不完整的 qwen_tts 包；请卸载后改装官方 `qwen-tts`"
+        ) from e
+    raise
 
 Qwen3TTSModel = getattr(_m, "Qwen3TTSModel")
 Qwen3TTSTokenizer = getattr(_m, "Qwen3TTSTokenizer")

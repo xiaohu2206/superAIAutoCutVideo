@@ -112,6 +112,24 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('edge_tts_default')
 
+                if 'qwen3_tts_default' not in self.configs:
+                    self.configs['qwen3_tts_default'] = TtsEngineConfig(
+                        provider='qwen3_tts',
+                        secret_id=None,
+                        secret_key=None,
+                        region=None,
+                        description='Qwen3-TTS 默认配置（本地模型）',
+                        enabled=False,
+                        active_voice_id=None,
+                        speed_ratio=1.0,
+                        extra_params={
+                            "ModelKey": "custom_0_6b",
+                            "Language": "Auto",
+                            "XVectorOnly": True,
+                        }
+                    )
+                    missing_defaults.append('qwen3_tts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -168,7 +186,25 @@ class TtsEngineConfigManager:
                     speed_ratio=1.0,
                     extra_params={}
                 )
-            )
+            ),
+            (
+                'qwen3_tts_default',
+                TtsEngineConfig(
+                    provider='qwen3_tts',
+                    secret_id=None,
+                    secret_key=None,
+                    region=None,
+                    description='Qwen3-TTS 默认配置（本地模型）',
+                    enabled=False,
+                    active_voice_id=None,
+                    speed_ratio=1.0,
+                    extra_params={
+                        "ModelKey": "custom_0_6b",
+                        "Language": "Auto",
+                        "XVectorOnly": True,
+                    }
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -177,8 +213,7 @@ class TtsEngineConfigManager:
     def update_config(self, config_id: str, config: TtsEngineConfig) -> bool:
         """更新配置，确保同时只有一个配置被启用"""
         try:
-            if config_id not in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 不存在")
+            is_new = config_id not in self.configs
 
             # 若启用该配置，则禁用其他配置
             if config.enabled:
@@ -189,7 +224,7 @@ class TtsEngineConfigManager:
 
             self.configs[config_id] = config
             self.save_configs()
-            logger.info(f"更新TTS引擎配置成功: {config_id}")
+            logger.info(f"{'创建' if is_new else '更新'}TTS引擎配置成功: {config_id}")
             return True
         except Exception as e:
             logger.error(f"更新TTS引擎配置失败: {e}")

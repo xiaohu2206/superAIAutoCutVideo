@@ -81,6 +81,15 @@ class Qwen3TTSService:
         if m is None:
             raise RuntimeError("qwen3_tts_model_not_loaded")
 
+        if model_key == "custom_0_6b":
+            spk_in = (speaker or "").strip()
+            if not spk_in:
+                supported = await self.list_supported_speakers(model_key=model_key, device=device)
+                first = next((str(x).strip() for x in supported if x is not None and str(x).strip()), "")
+                if not first:
+                    raise ValueError("speaker_required_for_custom_voice")
+                speaker = first
+
         def _run() -> Tuple[np.ndarray, int]:
             if model_key == "custom_0_6b":
                 spk = (speaker or "").strip()
@@ -131,6 +140,25 @@ class Qwen3TTSService:
 
         duration = float(len(wav) / sr) if sr > 0 else None
         return {"success": True, "path": str(out_path), "duration": duration, "sample_rate": sr}
+
+    async def list_supported_speakers(self, model_key: str, device: Optional[str] = None) -> list[str]:
+        model_key = (model_key or "").strip() or "custom_0_6b"
+        await self._load_model(model_key=model_key, device=device)
+        m = cast(Any, self._model)
+        if m is None:
+            return []
+        for fn in [
+            getattr(getattr(m, "model", None), "get_supported_speakers", None),
+            getattr(m, "get_supported_speakers", None),
+        ]:
+            if callable(fn):
+                try:
+                    v = fn()
+                    if isinstance(v, list):
+                        return [str(x) for x in v if x is not None]
+                except Exception:
+                    continue
+        return []
 
 
 qwen3_tts_service = Qwen3TTSService()
