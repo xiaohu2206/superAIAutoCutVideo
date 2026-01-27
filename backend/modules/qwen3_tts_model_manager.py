@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from modules.app_paths import user_data_dir
+from modules.app_paths import uploads_dir
 
 
 QWEN3_TTS_MODEL_REGISTRY: Dict[str, Dict[str, str]] = {
@@ -39,7 +39,7 @@ class Qwen3TTSPathManager:
         if base and base.strip():
             self.base_dir = Path(base.strip())
         else:
-            self.base_dir = user_data_dir() / "models" / "Qwen"
+            self.base_dir = uploads_dir() / "models" / "Qwen"
 
     def model_path(self, key: str) -> Path:
         if key not in QWEN3_TTS_MODEL_REGISTRY:
