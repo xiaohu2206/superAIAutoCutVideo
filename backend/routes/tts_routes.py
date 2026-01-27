@@ -249,7 +249,18 @@ class VoicePreviewRequest(BaseModel):
 @router.post("/voices/{voice_id}/preview", summary="音色试听（返回示例wav链接）")
 async def preview_voice(voice_id: str, req: VoicePreviewRequest):
     try:
-        provider = (req.provider or (tts_engine_config_manager.get_active_config() or TtsEngineConfig(provider='tencent_tts')).provider)
+        cfg_by_id = None
+        if isinstance(req.config_id, str) and req.config_id.strip():
+            cfg_by_id = tts_engine_config_manager.get_config(req.config_id.strip())
+
+        active_cfg = tts_engine_config_manager.get_active_config()
+
+        if cfg_by_id:
+            provider = cfg_by_id.provider
+        else:
+            provider = (req.provider or (active_cfg or TtsEngineConfig(provider='tencent_tts')).provider)
+
+        cfg = cfg_by_id if (cfg_by_id and cfg_by_id.provider == provider) else (active_cfg if (active_cfg and active_cfg.provider == provider) else (cfg_by_id or active_cfg))
         voices = await tts_engine_config_manager.get_voices_async(provider)
         match = next((v for v in voices if v.id == voice_id), None)
         # Edge TTS：若缓存列表未包含该音色，仍允许尝试合成（避免误报不存在）
@@ -300,7 +311,6 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     "id": "Halo, selamat datang di sulih suara pintar.",
                 }
                 text = req.text or default_map.get(prefix, "Hello, welcome to smart voiceover.")
-                cfg = tts_engine_config_manager.get_active_config()
                 speed_ratio = (cfg.speed_ratio if cfg else 1.0)
                 res = await edge_tts_service.synthesize(text=text, voice_id=vid, speed_ratio=speed_ratio, out_path=out_path)
                 if not res.get("success"):
@@ -328,7 +338,6 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 from modules.edge_tts_service import PREVIEWS_DIR
                 from modules.qwen3_tts_service import qwen3_tts_service
 
-                cfg = tts_engine_config_manager.get_active_config()
                 extra = (cfg.extra_params if cfg else {}) or {}
                 model_key = str(extra.get("ModelKey") or "custom_0_6b")
                 language = str(extra.get("Language") or "Auto")
@@ -341,47 +350,64 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
 
                 speaker = None
-                if model_key == "custom_0_6b":
-                    speaker = str(extra.get("Speaker") or voice_id or "").strip() or None
-                else:
-                    vid = (voice_id or "").strip()
-                    if not ref_audio and vid:
-                        try:
-                            from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+                vid = (voice_id or "").strip()
+                vv = None
+                if vid:
+                    try:
+                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 
-                            vv = qwen3_tts_voice_store.get(vid)
-                            if vv:
-                                ref_audio = str(vv.ref_audio_path or "").strip() or None
-                                if not ref_text:
-                                    ref_text = vv.ref_text
-                                if not instruct:
-                                    instruct = vv.instruct
-                                if xvec_in is None:
-                                    x_vector_only_mode = bool(vv.x_vector_only_mode)
-                                if "ModelKey" not in extra:
-                                    model_key = str(vv.model_key or model_key)
-                                if "Language" not in extra:
-                                    language = str(vv.language or language)
-                        except Exception:
-                            pass
+                        vv = qwen3_tts_voice_store.get(vid)
+                    except Exception:
+                        vv = None
+
+                if vv and not ref_audio:
+                    ref_audio = str(vv.ref_audio_path or "").strip() or None
+                if vv and not ref_text:
+                    ref_text = vv.ref_text
+                if vv and not instruct:
+                    instruct = vv.instruct
+                if vv and xvec_in is None:
+                    x_vector_only_mode = bool(vv.x_vector_only_mode)
+
+                if vv and model_key == "custom_0_6b":
+                    model_key = str(vv.model_key or "base_0_6b")
+                    if "Language" not in extra:
+                        language = str(vv.language or language)
+                elif vv:
+                    if "ModelKey" not in extra:
+                        model_key = str(vv.model_key or model_key)
+                    if "Language" not in extra:
+                        language = str(vv.language or language)
+
+                if model_key == "custom_0_6b":
+                    speaker = str(extra.get("Speaker") or (match.name if match else "") or voice_id or "").strip() or None
+                    supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
+                    if supported:
+                        wanted = (speaker or "").lower()
+                        if not wanted or all(str(s).lower() != wanted for s in supported):
+                            speaker = str(supported[0]).strip() or speaker
 
                 ts = int(time.time() * 1000)
-                filename = f"qwen3_{voice_id}_preview_{ts}.wav"
+                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in (voice_id or "voice"))[:64]
+                filename = f"qwen3_{safe_vid}_preview_{ts}.wav"
                 out_path = PREVIEWS_DIR / filename
 
                 text = (req.text or "您好，欢迎使用智能配音。")
-                res = await qwen3_tts_service.synthesize_to_wav(
-                    text=text,
-                    out_path=out_path,
-                    model_key=model_key,
-                    language=language,
-                    speaker=speaker,
-                    instruct=instruct,
-                    ref_audio=ref_audio,
-                    ref_text=ref_text,
-                    x_vector_only_mode=x_vector_only_mode,
-                    device=device_s,
-                )
+                try:
+                    res = await qwen3_tts_service.synthesize_to_wav(
+                        text=text,
+                        out_path=out_path,
+                        model_key=model_key,
+                        language=language,
+                        speaker=speaker,
+                        instruct=instruct,
+                        ref_audio=ref_audio,
+                        ref_text=ref_text,
+                        x_vector_only_mode=x_vector_only_mode,
+                        device=device_s,
+                    )
+                except ValueError as ve:
+                    raise HTTPException(status_code=400, detail=str(ve))
                 if not res.get("success"):
                     raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
                 audio_url = f"/backend/serviceData/tts/previews/{filename}"
@@ -400,7 +426,10 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 raise
             except Exception as e:
                 logger.error(f"Qwen3-TTS 试听失败: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                msg = str(e)
+                if "qwen_tts_not_installed" in msg or "qwen_tts_bad_install" in msg or "qwen_tts_import_failed" in msg:
+                    raise HTTPException(status_code=503, detail=msg)
+                raise HTTPException(status_code=500, detail=msg)
 
         # 非 Edge：严格校验音色存在
         if not match:
@@ -428,7 +457,6 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 except Exception:
                     pass
                 text = (req.text or "您好，欢迎使用智能配音。")
-                cfg = tts_engine_config_manager.get_active_config()
                 codec = "mp3"
                 try:
                     extra = (cfg.extra_params if cfg else {}) or {}

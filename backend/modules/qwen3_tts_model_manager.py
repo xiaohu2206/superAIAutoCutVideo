@@ -99,6 +99,38 @@ def validate_model_dir(key: str, model_dir: Path) -> Tuple[bool, List[str]]:
     return len(missing) == 0, missing
 
 
+def _merge_move(src: Path, dst: Path) -> None:
+    if not src.exists():
+        return
+
+    if src.is_dir():
+        if dst.exists() and not dst.is_dir():
+            if dst.is_symlink() or dst.is_file():
+                dst.unlink()
+            else:
+                shutil.rmtree(dst)
+        if not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for child in src.iterdir():
+            _merge_move(child, dst / child.name)
+        try:
+            src.rmdir()
+        except Exception:
+            pass
+        return
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        if dst.is_dir():
+            shutil.rmtree(dst)
+        else:
+            dst.unlink()
+    shutil.move(str(src), str(dst))
+
+
 def download_model_snapshot(key: str, provider: str, target_dir: Path) -> Dict[str, Any]:
     if key not in QWEN3_TTS_MODEL_REGISTRY:
         raise ValueError(f"unknown_model_key: {key}")
@@ -128,16 +160,24 @@ def download_model_snapshot(key: str, provider: str, target_dir: Path) -> Dict[s
         raise RuntimeError(f"missing_dependency:modelscope:{e}")
 
     model_id = QWEN3_TTS_MODEL_REGISTRY[key]["ms"]
-    downloaded = ms_snapshot_download(model_id=model_id, cache_dir=str(target_dir))
+    ms_cache_dir = target_dir / ".modelscope_cache"
+    ms_cache_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = ms_snapshot_download(model_id=model_id, cache_dir=str(ms_cache_dir))
     downloaded_dir = Path(str(downloaded))
     if downloaded_dir.exists() and downloaded_dir.is_dir() and downloaded_dir.resolve() != target_dir.resolve():
         for item in downloaded_dir.iterdir():
-            dst = target_dir / item.name
-            if item.is_dir():
-                shutil.copytree(item, dst, dirs_exist_ok=True)
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, dst)
+            _merge_move(item, target_dir / item.name)
+        try:
+            shutil.rmtree(ms_cache_dir)
+        except Exception:
+            pass
+
+    legacy_owner_dir = target_dir / (model_id.split("/", 1)[0] if "/" in model_id else model_id)
+    if legacy_owner_dir.exists() and legacy_owner_dir.is_dir() and (target_dir / "config.json").exists():
+        try:
+            shutil.rmtree(legacy_owner_dir)
+        except Exception:
+            pass
     return {
         "provider": "modelscope",
         "model_id": model_id,

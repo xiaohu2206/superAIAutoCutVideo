@@ -109,6 +109,13 @@ class TencentTtsService:
             speaker = None
             if model_key == "custom_0_6b":
                 speaker = str(ep.get("Speaker") or (voice_id or (cfg.active_voice_id if cfg else "")) or "").strip() or None
+                if not speaker:
+                    try:
+                        supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
+                        if supported:
+                            speaker = str(supported[0]).strip() or speaker
+                    except Exception:
+                        pass
             else:
                 vid = (voice_id or "").strip()
                 if not ref_audio and vid:
