@@ -106,35 +106,30 @@ class TencentTtsService:
             xvec_in = ep.get("XVectorOnly", None)
             x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
 
+            vid = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+            if vid:
+                try:
+                    from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+
+                    vv = qwen3_tts_voice_store.get(vid)
+                    if vv:
+                        model_key = str(vv.model_key or model_key)
+                        language = str(vv.language or language)
+                        x_vector_only_mode = bool(vv.x_vector_only_mode)
+                        ref_audio = str(vv.ref_audio_path or "").strip() or ref_audio
+                        ref_text = (vv.ref_text or "").strip() or ref_text
+                        instruct = (vv.instruct or "").strip() or instruct
+                except Exception:
+                    pass
+
             speaker = None
-            if model_key == "custom_0_6b":
-                speaker = str(ep.get("Speaker") or (voice_id or (cfg.active_voice_id if cfg else "")) or "").strip() or None
+            if model_key.startswith("custom_"):
+                speaker = str(ep.get("Speaker") or (vid or "")).strip() or None
                 if not speaker:
                     try:
                         supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
                         if supported:
                             speaker = str(supported[0]).strip() or speaker
-                    except Exception:
-                        pass
-            else:
-                vid = (voice_id or "").strip()
-                if not ref_audio and vid:
-                    try:
-                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
-
-                        vv = qwen3_tts_voice_store.get(vid)
-                        if vv:
-                            ref_audio = str(vv.ref_audio_path or "").strip() or None
-                            if not ref_text:
-                                ref_text = vv.ref_text
-                            if not instruct:
-                                instruct = vv.instruct
-                            if xvec_in is None:
-                                x_vector_only_mode = bool(vv.x_vector_only_mode)
-                            if not ep.get("ModelKey"):
-                                model_key = str(vv.model_key or model_key)
-                            if not ep.get("Language"):
-                                language = str(vv.language or language)
                     except Exception:
                         pass
 
