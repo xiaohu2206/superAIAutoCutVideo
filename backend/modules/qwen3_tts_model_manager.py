@@ -23,6 +23,21 @@ QWEN3_TTS_MODEL_REGISTRY: Dict[str, Dict[str, str]] = {
         "ms": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         "local": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
     },
+    "base_1_7b": {
+        "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "local": "Qwen3-TTS-12Hz-1.7B-Base",
+    },
+    "custom_1_7b": {
+        "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "local": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    },
+    "voice_design_1_7b": {
+        "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "local": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    },
 }
 
 

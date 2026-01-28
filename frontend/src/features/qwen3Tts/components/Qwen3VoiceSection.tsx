@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { message } from "@/services/message";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
+import { useQwen3Models } from "../hooks/useQwen3Models";
 import Qwen3ModelSection from "./Qwen3ModelSection";
 import Qwen3VoiceEditDialog from "./Qwen3VoiceEditDialog";
 import Qwen3VoiceList from "./Qwen3VoiceList";
@@ -16,15 +17,20 @@ export type Qwen3VoiceSectionProps = {
 
 export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, activeVoiceId, onSetActive }) => {
   const { voices, loading, error, cloneEventByVoiceId, refresh, upload, patch, remove, startClone } = useQwen3Voices();
+  const { models: localModels } = useQwen3Models();
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
   const [editVoice, setEditVoice] = useState<Qwen3TtsVoice | null>(null);
 
   const modelKeys = useMemo(() => {
-    const keys = Array.from(new Set((voices || []).map((v) => String(v.model_key || "").trim()).filter(Boolean)));
+    const fromVoices = (voices || []).map((v) => String(v.model_key || "").trim()).filter(Boolean);
+    const fromModels = (localModels || [])
+      .map((m) => String(m.key || "").trim())
+      .filter((k) => Boolean(k) && k.startsWith("base_"));
+    const keys = Array.from(new Set([...fromModels, ...fromVoices]));
     const base = "base_0_6b";
     if (!keys.includes(base)) keys.unshift(base);
     return keys.length ? keys : [base];
-  }, [voices]);
+  }, [voices, localModels]);
 
   const handleUploadSubmit = async (result: Qwen3VoiceUploadDialogResult) => {
     const created = await upload(result.input);

@@ -49,7 +49,7 @@ const statusText = (status: string) => {
 const getDefaultPreviewText = (v: Qwen3TtsVoice) => {
   const lang = String(v.language || "").toLowerCase();
   const code = (lang.split("-")[0] || "").trim();
-  if (!code || code === "auto" || code === "zh") return "您好，欢迎使用智能配音。";
+  if (!code || code === "auto" || code === "zh") return "您好大哥，我是智障配音。";
   if (code === "en") return "Hello, welcome to smart voiceover.";
   return "Hello, welcome to smart voiceover.";
 };

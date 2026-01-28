@@ -81,7 +81,7 @@ class Qwen3TTSService:
         if m is None:
             raise RuntimeError("qwen3_tts_model_not_loaded")
 
-        if model_key == "custom_0_6b":
+        if model_key.startswith("custom_"):
             spk_in = (speaker or "").strip()
             if not spk_in:
                 supported = await self.list_supported_speakers(model_key=model_key, device=device)
@@ -91,7 +91,7 @@ class Qwen3TTSService:
                 speaker = first
 
         def _run() -> Tuple[np.ndarray, int]:
-            if model_key == "custom_0_6b":
+            if model_key.startswith("custom_"):
                 spk = (speaker or "").strip()
                 if not spk:
                     raise ValueError("speaker_required_for_custom_voice")
