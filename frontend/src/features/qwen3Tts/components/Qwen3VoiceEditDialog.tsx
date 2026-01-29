@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader, Save, X } from "lucide-react";
 import type { Qwen3TtsPatchVoiceInput, Qwen3TtsVoice } from "../types";
+import { LANGUAGE_OPTIONS } from "../constants";
 
 export type Qwen3VoiceEditDialogProps = {
   isOpen: boolean;
@@ -60,7 +62,7 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
 
   if (!isOpen || !voice) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={loading ? undefined : onClose} />
       <div className="flex items-center justify-center min-h-screen p-4">
@@ -110,13 +112,18 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm text-gray-700 mb-1">语言</label>
-                <input
-                  type="text"
+                <select
                   value={language}
                   disabled={loading}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white"
+                >
+                  {LANGUAGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-2 mt-6">
                 <input
@@ -175,7 +182,8 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
