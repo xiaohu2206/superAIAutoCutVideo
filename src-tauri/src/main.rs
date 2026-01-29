@@ -7,25 +7,25 @@
 )]
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
-use std::net::TcpListener;
 
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
-#[cfg(target_os = "windows")]
-use zip::ZipArchive;
 #[cfg(target_os = "windows")]
 use std::io::{Read, Write};
 #[cfg(target_os = "windows")]
 use std::process::Stdio as _;
+use tauri::{AppHandle, Manager, State};
+#[cfg(target_os = "windows")]
+use zip::ZipArchive;
 
 // Windows: 隐藏子进程窗口（CREATE_NO_WINDOW）
 #[cfg(target_os = "windows")]
@@ -76,8 +76,7 @@ impl Default for AppState {
 const BACKEND_IDENTIFIER: &str = "super-auto-cut-video-backend";
 
 // 后端状态响应
-#[derive(Serialize, Deserialize, Debug)
-]
+#[derive(Serialize, Deserialize, Debug)]
 struct BackendStatus {
     running: bool,
     port: u16,
@@ -91,7 +90,6 @@ struct FileSelection {
     path: Option<String>,
     cancelled: bool,
 }
-
 
 async fn wait_for_backend_ready(host: &str, port: u16, total_wait_secs: u64) -> bool {
     let url = format!("http://{}:{}/api/hello", host, port);
@@ -125,7 +123,10 @@ fn generate_boot_token() -> String {
     out
 }
 
-async fn discover_existing_backend(host: &str, require_token: bool) -> Option<(u16, Option<String>)> {
+async fn discover_existing_backend(
+    host: &str,
+    require_token: bool,
+) -> Option<(u16, Option<String>)> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(600))
         .build()
@@ -175,7 +176,12 @@ async fn discover_existing_backend(host: &str, require_token: bool) -> Option<(u
     None
 }
 
-async fn check_backend_on_port(host: &str, port: u16, timeout_ms: u64, require_token: bool) -> Option<(u16, Option<String>)> {
+async fn check_backend_on_port(
+    host: &str,
+    port: u16,
+    timeout_ms: u64,
+    require_token: bool,
+) -> Option<(u16, Option<String>)> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms))
         .build()
@@ -207,7 +213,10 @@ async fn check_backend_on_port(host: &str, port: u16, timeout_ms: u64, require_t
     Some((reported_port, boot_token))
 }
 
-async fn discover_existing_backend_quick(host: &str, require_token: bool) -> Option<(u16, Option<String>)> {
+async fn discover_existing_backend_quick(
+    host: &str,
+    require_token: bool,
+) -> Option<(u16, Option<String>)> {
     if let Some(p) = parse_backend_port_from_log() {
         if let Some(found) = check_backend_on_port(host, p, 200, require_token).await {
             return Some(found);
@@ -255,9 +264,9 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
     if ffmpeg_path.exists() && ffprobe_path.exists() {
         return Ok(());
     }
-    let url = std::env::var("FFMPEG_WIN_ZIP_URL")
-        .ok()
-        .unwrap_or_else(|| "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string());
+    let url = std::env::var("FFMPEG_WIN_ZIP_URL").ok().unwrap_or_else(|| {
+        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string()
+    });
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
@@ -275,19 +284,30 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
         .await
         .map_err(|e| format!("读取FFmpeg压缩包内容失败: {}", e))?;
     let cursor = std::io::Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor).map_err(|e| format!("解析FFmpeg压缩包失败: {}", e))?;
+    let mut archive =
+        ZipArchive::new(cursor).map_err(|e| format!("解析FFmpeg压缩包失败: {}", e))?;
 
     let mut found_ffmpeg = false;
     let mut found_ffprobe = false;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| format!("读取压缩包文件失败: {}", e))?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取压缩包文件失败: {}", e))?;
         let name = file.name().to_string();
-        let is_ffmpeg = name.ends_with("/bin/ffmpeg.exe") || name.ends_with("\\bin\\ffmpeg.exe") || name.ends_with("ffmpeg.exe");
-        let is_ffprobe = name.ends_with("/bin/ffprobe.exe") || name.ends_with("\\bin\\ffprobe.exe") || name.ends_with("ffprobe.exe");
+        let is_ffmpeg = name.ends_with("/bin/ffmpeg.exe")
+            || name.ends_with("\\bin\\ffmpeg.exe")
+            || name.ends_with("ffmpeg.exe");
+        let is_ffprobe = name.ends_with("/bin/ffprobe.exe")
+            || name.ends_with("\\bin\\ffprobe.exe")
+            || name.ends_with("ffprobe.exe");
 
         if is_ffmpeg || is_ffprobe {
-            let out_path = if is_ffmpeg { ffmpeg_path.clone() } else { ffprobe_path.clone() };
+            let out_path = if is_ffmpeg {
+                ffmpeg_path.clone()
+            } else {
+                ffprobe_path.clone()
+            };
             // 确保资源目录存在
             if let Err(e) = std::fs::create_dir_all(&resource_dir) {
                 return Err(format!("创建资源目录失败: {}", e));
@@ -368,7 +388,6 @@ fn choose_backend_port(is_dev_mode: bool) -> u16 {
     }
 }
 
-
 // Tauri命令：启动Python后端
 #[tauri::command]
 async fn start_backend(
@@ -376,7 +395,10 @@ async fn start_backend(
     app_handle: AppHandle,
 ) -> Result<BackendStatus, String> {
     let early_log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
-    let _ = std::fs::OpenOptions::new().create(true).append(true).open(&early_log_path);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&early_log_path);
     append_log_line(early_log_path.clone(), "[meta] start_backend invoked");
     // 先短暂持锁检查和清理状态，避免并发重复启动
     {
@@ -412,7 +434,8 @@ async fn start_backend(
     }
 
     let host = "127.0.0.1";
-    let is_dev_mode = cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let is_dev_mode =
+        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     if is_dev_mode {
         if let Some((p, boot_token)) = discover_existing_backend(host, false).await {
             *state.backend_port.lock().unwrap() = p;
@@ -449,8 +472,12 @@ async fn start_backend(
     let exe_dir_fallback = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let install_dir = exe_dir_fallback
+        .clone()
+        .or_else(|| resource_dir.parent().map(|p| p.to_path_buf()));
 
-    let force_packaged_backend = std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
+    let force_packaged_backend =
+        std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
     let prefer_python_backend = is_dev_mode && !force_packaged_backend;
 
     #[cfg(target_os = "windows")]
@@ -478,15 +505,26 @@ async fn start_backend(
         }
         for anc in dir.ancestors().take(8) {
             if cfg!(target_os = "windows") {
-                candidates.push(anc.join("src-tauri").join("resources").join("superAutoCutVideoBackend.exe"));
+                candidates.push(
+                    anc.join("src-tauri")
+                        .join("resources")
+                        .join("superAutoCutVideoBackend.exe"),
+                );
                 candidates.push(anc.join("resources").join("superAutoCutVideoBackend.exe"));
             } else {
-                candidates.push(anc.join("src-tauri").join("resources").join("superAutoCutVideoBackend"));
+                candidates.push(
+                    anc.join("src-tauri")
+                        .join("resources")
+                        .join("superAutoCutVideoBackend"),
+                );
                 candidates.push(anc.join("resources").join("superAutoCutVideoBackend"));
             }
         }
     }
-    let backend_executable = candidates.into_iter().find(|p| p.exists()).unwrap_or(primary_path.clone());
+    let backend_executable = candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or(primary_path.clone());
 
     #[cfg(target_os = "windows")]
     {
@@ -528,7 +566,8 @@ async fn start_backend(
                 }
             }
 
-            let backend_script = backend_script.ok_or_else(|| "后端脚本不存在: backend/main.py".to_string())?;
+            let backend_script =
+                backend_script.ok_or_else(|| "后端脚本不存在: backend/main.py".to_string())?;
 
             if !backend_script.exists() {
                 return Err(format!("后端脚本不存在: {:?}", backend_script));
@@ -564,7 +603,9 @@ async fn start_backend(
             let mut c = Command::new(python_cmd);
             c.arg(backend_script);
             #[cfg(target_os = "windows")]
-            { c.creation_flags(CREATE_NO_WINDOW); }
+            {
+                c.creation_flags(CREATE_NO_WINDOW);
+            }
             c.current_dir(backend_dir);
 
             c
@@ -582,7 +623,10 @@ async fn start_backend(
         let port = *state.backend_port.lock().unwrap();
         let boot_token = state.backend_boot_token.lock().unwrap().clone();
         if port != 0 {
-            println!("[backend] 启动中（复用已有启动流程）：http://{}:{}", host, port);
+            println!(
+                "[backend] 启动中（复用已有启动流程）：http://{}:{}",
+                host, port
+            );
         }
         return Ok(BackendStatus {
             running: port != 0,
@@ -596,7 +640,11 @@ async fn start_backend(
     let port: u16 = choose_backend_port(is_dev_mode);
     let boot_token = generate_boot_token();
     let orig_path = std::env::var("PATH").unwrap_or_default();
-    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let sep = if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    };
     let new_path = format!("{}{}{}", resource_dir.to_string_lossy(), sep, orig_path);
     *state.backend_port.lock().unwrap() = port;
     *state.backend_boot_token.lock().unwrap() = Some(boot_token.clone());
@@ -605,6 +653,13 @@ async fn start_backend(
         .env("PATH", new_path)
         .env("SACV_BOOT_TOKEN", boot_token.clone())
         .env("SACV_RUNTIME", "tauri")
+        .env(
+            "SACV_INSTALL_DIR",
+            install_dir
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -630,7 +685,9 @@ async fn start_backend(
                 thread::spawn(move || {
                     let reader = BufReader::new(stdout);
                     for line in reader.lines() {
-                        if let Ok(l) = line { append_log_line(path_clone.clone(), &format!("[stdout] {}", l)); }
+                        if let Ok(l) = line {
+                            append_log_line(path_clone.clone(), &format!("[stdout] {}", l));
+                        }
                     }
                 });
             }
@@ -639,7 +696,9 @@ async fn start_backend(
                 thread::spawn(move || {
                     let reader = BufReader::new(stderr);
                     for line in reader.lines() {
-                        if let Ok(l) = line { append_log_line(path_clone.clone(), &format!("[stderr] {}", l)); }
+                        if let Ok(l) = line {
+                            append_log_line(path_clone.clone(), &format!("[stderr] {}", l));
+                        }
                     }
                 });
             }
@@ -670,7 +729,10 @@ async fn start_backend(
                 // 超时未就绪，尝试从日志解析实际监听端口
                 if let Some(found_port) = parse_backend_port_from_log() {
                     *state.backend_port.lock().unwrap() = found_port;
-                    println!("[backend] 从日志解析到监听端口：http://{}:{}", host, found_port);
+                    println!(
+                        "[backend] 从日志解析到监听端口：http://{}:{}",
+                        host, found_port
+                    );
                     Ok(BackendStatus {
                         running: true,
                         port: found_port,
@@ -678,12 +740,17 @@ async fn start_backend(
                         boot_token: state.backend_boot_token.lock().unwrap().clone(),
                     })
                 } else {
-                if let Some((found_port, found_token)) = discover_existing_backend_quick(host, !is_dev_mode).await {
-                    *state.backend_port.lock().unwrap() = found_port;
-                    *state.backend_boot_token.lock().unwrap() = found_token.clone();
-                    println!("[backend] 已发现运行中的后端：http://{}:{}", host, found_port);
-                    Ok(BackendStatus {
-                        running: true,
+                    if let Some((found_port, found_token)) =
+                        discover_existing_backend_quick(host, !is_dev_mode).await
+                    {
+                        *state.backend_port.lock().unwrap() = found_port;
+                        *state.backend_boot_token.lock().unwrap() = found_token.clone();
+                        println!(
+                            "[backend] 已发现运行中的后端：http://{}:{}",
+                            host, found_port
+                        );
+                        Ok(BackendStatus {
+                            running: true,
                             port: found_port,
                             pid: Some(pid),
                             boot_token: found_token,
@@ -700,7 +767,7 @@ async fn start_backend(
             *state.backend_port.lock().unwrap() = 0;
             *state.backend_boot_token.lock().unwrap() = None;
             Err(format!("启动后端失败: {}", e))
-        },
+        }
     }
 }
 
@@ -708,7 +775,7 @@ async fn start_backend(
 #[tauri::command]
 async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
     let mut process_guard = state.backend_process.lock().unwrap();
-    
+
     if let Some(mut child) = process_guard.take() {
         let pid = child.id();
         match child.kill() {
@@ -740,7 +807,7 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 async fn get_backend_status(state: State<'_, AppState>) -> Result<BackendStatus, String> {
     let mut process_guard = state.backend_process.lock().unwrap();
-    
+
     if let Some(ref mut child) = *process_guard {
         match child.try_wait() {
             Ok(Some(_)) => {
@@ -824,7 +891,10 @@ async fn get_app_info(app_handle: AppHandle) -> Result<HashMap<String, String>, 
     let version = pkg.version.to_string();
     info.insert("name".to_string(), "AI智能视频剪辑".to_string());
     info.insert("version".to_string(), version);
-    info.insert("description".to_string(), "基于AI技术的智能视频剪辑工具".to_string());
+    info.insert(
+        "description".to_string(),
+        "基于AI技术的智能视频剪辑工具".to_string(),
+    );
     Ok(info)
 }
 
@@ -890,7 +960,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 fn cleanup_app(app_handle: AppHandle) {
     let state = app_handle.state::<AppState>();
     let rt = tokio::runtime::Runtime::new().unwrap();
-    
+
     if let Err(e) = rt.block_on(stop_backend(state)) {
         eprintln!("清理后端进程失败: {}", e);
     }
@@ -913,7 +983,6 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
-
         .manage(AppState::default())
         .setup(setup_app)
         .on_window_event(|window, event| {
