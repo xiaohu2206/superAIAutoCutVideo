@@ -338,16 +338,33 @@ def get_app_paths():
             base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
         settings_dir = base_data / "SuperAutoCutVideo" / "config"
         settings_file = settings_dir / "app_settings.json"
-        uploads_dir_default = base_data / "SuperAutoCutVideo" / "uploads"
+        uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
+        install_dir_raw = str(os.environ.get("SACV_INSTALL_DIR") or "").strip()
+        if install_dir_raw:
+            install_dir = Path(install_dir_raw).expanduser()
+        else:
+            install_dir = exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir
+        uploads_dir_default = install_dir / "uploads"
         try:
+            used_default = True
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
                 cand = str(data.get("uploads_root") or "").strip()
-                uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
+                if cand:
+                    uploads_dir = Path(cand).expanduser()
+                    used_default = False
+                else:
+                    uploads_dir = uploads_dir_default
             else:
                 uploads_dir = uploads_dir_default
         except Exception:
             uploads_dir = uploads_dir_default
+            used_default = True
+        if used_default:
+            try:
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                uploads_dir = uploads_dir_default_fallback
     else:
         base_path = Path(__file__).resolve().parent
         project_root = base_path.parent
