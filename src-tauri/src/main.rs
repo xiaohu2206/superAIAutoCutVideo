@@ -21,6 +21,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 use std::io::{Read, Write};
+#[cfg(target_os = "windows")]
+use std::process::Stdio as _;
 use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
@@ -567,7 +569,8 @@ async fn start_backend(
     }
 
     let host = "127.0.0.1";
-    let is_dev_mode = std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let is_dev_mode =
+        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     let forced_port_opt = std::env::var("SACV_FORCE_PORT")
         .ok()
         .and_then(|s| s.parse::<u16>().ok())
