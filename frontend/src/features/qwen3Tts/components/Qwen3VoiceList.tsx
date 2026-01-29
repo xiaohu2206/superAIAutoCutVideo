@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from "react";
-import { Check, Loader, Pause, Play, Trash2, Wand2, Pencil } from "lucide-react";
 import { apiClient } from "@/services/clients";
 import { message } from "@/services/message";
 import { ttsService } from "@/services/ttsService";
-import Qwen3CloneProgressItem from "./Qwen3CloneProgressItem";
+import { Check, Loader, Pause, Pencil, Play, Trash2, Wand2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
 import type { Qwen3CloneEvent } from "../hooks/useQwen3Voices";
 import type { Qwen3TtsVoice } from "../types";
+import Qwen3CloneProgressItem from "./Qwen3CloneProgressItem";
 
 export type Qwen3VoiceListProps = {
   voices: Qwen3TtsVoice[];
@@ -66,6 +66,7 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
   onDelete,
 }) => {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const previewTokenRef = React.useRef(0);
   const [playingVoiceId, setPlayingVoiceId] = React.useState<string | null>(null);
   const [previewLoadingVoiceId, setPreviewLoadingVoiceId] = React.useState<string | null>(null);
 
@@ -103,12 +104,18 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
       stopCurrent();
       return;
     }
+    if (previewLoadingVoiceId === voice.id) {
+      previewTokenRef.current += 1;
+      setPreviewLoadingVoiceId(null);
+      return;
+    }
     const busyVoiceId = previewLoadingVoiceId || playingVoiceId;
     if (busyVoiceId && busyVoiceId !== voice.id) return;
     if (!configId) {
       message.error("缺少 config_id，无法试听");
       return;
     }
+    const token = (previewTokenRef.current += 1);
     try {
       setPreviewLoadingVoiceId(voice.id);
       const res = await ttsService.previewVoice(voice.id, {
@@ -116,6 +123,7 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
         config_id: configId,
         text: getDefaultPreviewText(voice),
       });
+      if (previewTokenRef.current !== token) return;
       const url = res?.data?.audio_url || res?.data?.sample_wav_url;
       if (!url) {
         message.error("试听失败：未返回音频链接");
@@ -123,9 +131,13 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
       }
       playUrl(url, voice.id);
     } catch (e: any) {
-      message.error(e?.message || "试听失败");
+      if (previewTokenRef.current === token) {
+        message.error(e?.message || "试听失败");
+      }
     } finally {
-      setPreviewLoadingVoiceId((prev) => (prev === voice.id ? null : prev));
+      if (previewTokenRef.current === token) {
+        setPreviewLoadingVoiceId((prev) => (prev === voice.id ? null : prev));
+      }
     }
   };
 
