@@ -7,7 +7,7 @@ loguru==0.7.2
 tencentcloud-sdk-python==3.0.1220
 aiohttp==3.9.0
 edge-tts==7.2.6
-transformers==4.57.3
+transformers==4.46.3
 qwen-tts
 huggingface_hub==0.22.2
 librosa==0.10.1
