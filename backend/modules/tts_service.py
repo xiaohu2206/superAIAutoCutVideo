@@ -95,57 +95,75 @@ class TencentTtsService:
 
             out = Path(out_path)
             ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-            model_key = str(ep.get("ModelKey") or "custom_0_6b")
-            language = str(ep.get("Language") or "Auto")
             device = ep.get("Device")
             device_s = str(device).strip() if isinstance(device, str) else None
 
-            instruct = str(ep.get("Instruct") or "").strip() or None
-            ref_audio = str(ep.get("RefAudio") or "").strip() or None
-            ref_text = str(ep.get("RefText") or "").strip() or None
-            xvec_in = ep.get("XVectorOnly", None)
-            x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
-
             vid = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+
             if vid:
                 try:
                     from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 
                     vv = qwen3_tts_voice_store.get(vid)
                     if vv:
-                        model_key = str(vv.model_key or model_key)
-                        language = str(vv.language or language)
-                        x_vector_only_mode = bool(vv.x_vector_only_mode)
-                        ref_audio = str(vv.ref_audio_path or "").strip() or ref_audio
-                        ref_text = (vv.ref_text or "").strip() or ref_text
-                        instruct = (vv.instruct or "").strip() or instruct
+                        try:
+                            return await qwen3_tts_service.synthesize_by_voice_asset(
+                                text=text,
+                                out_path=out,
+                                voice_asset=vv,
+                                device=device_s,
+                            )
+                        except Exception as e:
+                            return {"success": False, "error": str(e)}
                 except Exception:
                     pass
 
-            speaker = None
-            if model_key.startswith("custom_"):
-                speaker = str(ep.get("Speaker") or (vid or "")).strip() or None
-                if not speaker:
-                    try:
-                        supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
-                        if supported:
-                            speaker = str(supported[0]).strip() or speaker
-                    except Exception:
-                        pass
+            # Legacy / Config-only Fallback
+            model_key = str(ep.get("ModelKey") or "custom_0_6b")
+            language = str(ep.get("Language") or "Auto")
+            instruct = str(ep.get("Instruct") or "").strip() or None
 
             try:
-                return await qwen3_tts_service.synthesize_to_wav(
-                    text=text,
-                    out_path=out,
-                    model_key=model_key,
-                    language=language,
-                    speaker=speaker,
-                    instruct=instruct,
-                    ref_audio=ref_audio,
-                    ref_text=ref_text,
-                    x_vector_only_mode=x_vector_only_mode,
-                    device=device_s,
-                )
+                if model_key.startswith("custom_"):
+                    speaker = str(ep.get("Speaker") or (vid or "")).strip() or None
+                    if not speaker:
+                        try:
+                            supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
+                            if supported:
+                                speaker = str(supported[0]).strip() or speaker
+                        except Exception:
+                            pass
+                    if not speaker:
+                        return {"success": False, "error": "speaker_required_for_custom_voice"}
+
+                    return await qwen3_tts_service.synthesize_custom_voice_to_wav(
+                        text=text,
+                        out_path=out,
+                        model_key=model_key,
+                        language=language,
+                        speaker=speaker,
+                        instruct=instruct,
+                        device=device_s,
+                    )
+                else:
+                    ref_audio = str(ep.get("RefAudio") or "").strip() or None
+                    ref_text = str(ep.get("RefText") or "").strip() or None
+                    xvec_in = ep.get("XVectorOnly", None)
+                    x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
+
+                    if not ref_audio:
+                        return {"success": False, "error": "ref_audio_required_for_voice_clone"}
+
+                    return await qwen3_tts_service.synthesize_voice_clone_to_wav(
+                        text=text,
+                        out_path=out,
+                        model_key=model_key,
+                        language=language,
+                        ref_audio=ref_audio,
+                        ref_text=ref_text,
+                        x_vector_only_mode=x_vector_only_mode,
+                        device=device_s,
+                    )
             except Exception as e:
                 return {"success": False, "error": str(e)}
 

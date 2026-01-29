@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWsScopeProgress } from "@/hooks/useWsScopeProgress";
 import { message } from "@/services/message";
 import { qwen3TtsService } from "../services/qwen3TtsService";
-import type { Qwen3TtsPatchVoiceInput, Qwen3TtsUploadVoiceInput, Qwen3TtsVoice } from "../types";
+import type {
+  Qwen3TtsPatchVoiceInput,
+  Qwen3TtsUploadVoiceInput,
+  Qwen3TtsCustomRoleCreateInput,
+  Qwen3TtsDesignCloneCreateInput,
+  Qwen3TtsVoice,
+} from "../types";
 
 export type Qwen3CloneEvent = {
   voice_id: string;
@@ -37,14 +43,49 @@ export function useQwen3Voices() {
     }
   }, []);
 
-  const upload = useCallback(async (input: Qwen3TtsUploadVoiceInput) => {
-    const res = await qwen3TtsService.uploadVoice(input);
+  const upload = useCallback(
+    async (input: Qwen3TtsUploadVoiceInput) => {
+      const res = await qwen3TtsService.uploadVoice(input);
+      if (!res?.success || !res.data) {
+        throw new Error(res?.message || "上传失败");
+      }
+      await refresh();
+      return res.data;
+    },
+    [refresh]
+  );
+
+  const createCustomRole = useCallback(
+    async (input: Qwen3TtsCustomRoleCreateInput) => {
+      const res = await qwen3TtsService.createCustomRoleVoice(input);
+      if (!res?.success || !res.data) {
+        throw new Error(res?.message || "创建失败");
+      }
+      await refresh();
+      return res.data;
+    },
+    [refresh]
+  );
+
+  const createDesignClone = useCallback(
+    async (input: Qwen3TtsDesignCloneCreateInput) => {
+      const res = await qwen3TtsService.createDesignCloneVoice(input);
+      if (!res?.success || !res.data) {
+        throw new Error(res?.message || "创建失败");
+      }
+      await refresh();
+      return res.data; // { voice_id, job_id }
+    },
+    [refresh]
+  );
+
+  const getCapabilities = useCallback(async (modelKey: string) => {
+    const res = await qwen3TtsService.getModelCapabilities(modelKey);
     if (!res?.success || !res.data) {
-      throw new Error(res?.message || "上传失败");
+      throw new Error(res?.message || "获取模型能力失败");
     }
-    await refresh();
     return res.data;
-  }, [refresh]);
+  }, []);
 
   const patch = useCallback(async (id: string, partial: Qwen3TtsPatchVoiceInput) => {
     const res = await qwen3TtsService.patchVoice(id, partial);
@@ -178,6 +219,9 @@ export function useQwen3Voices() {
     cloneEventByVoiceId,
     refresh,
     upload,
+    createCustomRole,
+    createDesignClone,
+    getCapabilities,
     patch,
     remove,
     startClone,

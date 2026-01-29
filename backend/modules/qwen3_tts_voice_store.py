@@ -47,9 +47,11 @@ def _to_uploads_web_path(p: Path) -> Optional[str]:
 class Qwen3TTSVoice(BaseModel):
     id: str
     name: str
+    kind: str = Field(default="clone")  # clone | custom_role | design_clone
     model_key: str = Field(default="base_0_6b")
     language: str = Field(default="Auto")
-    ref_audio_path: str
+    speaker: Optional[str] = None
+    ref_audio_path: Optional[str] = None
     ref_audio_url: Optional[str] = None
     ref_text: Optional[str] = None
     instruct: Optional[str] = None
@@ -85,13 +87,17 @@ class Qwen3TTSVoiceStore:
                         try:
                             if "id" not in data:
                                 data["id"] = str(vid)
+                            if "kind" not in data:
+                                data["kind"] = "clone"
                             if "created_at" not in data:
                                 data["created_at"] = _now_iso()
                             if "updated_at" not in data:
                                 data["updated_at"] = data.get("created_at") or _now_iso()
                             p = Path(str(data.get("ref_audio_path") or ""))
-                            if p:
+                            if p and str(data.get("ref_audio_path")):
                                 data["ref_audio_url"] = _to_uploads_web_path(p)
+                            else:
+                                data["ref_audio_url"] = None
                             self._voices[str(vid)] = Qwen3TTSVoice(**data)
                         except Exception:
                             continue
@@ -141,6 +147,7 @@ class Qwen3TTSVoiceStore:
         v = Qwen3TTSVoice(
             id=voice_id,
             name=display_name,
+            kind="clone",
             model_key=(model_key or "base_0_6b").strip() or "base_0_6b",
             language=(language or "Auto").strip() or "Auto",
             ref_audio_path=str(raw_path),
@@ -160,6 +167,68 @@ class Qwen3TTSVoiceStore:
             self._persist()
         return v
 
+    def create_custom_role(
+        self,
+        name: str,
+        model_key: str,
+        language: str,
+        speaker: str,
+        instruct: Optional[str] = None,
+    ) -> Qwen3TTSVoice:
+        voice_id = str(uuid.uuid4())
+        now = _now_iso()
+
+        v = Qwen3TTSVoice(
+            id=voice_id,
+            name=(name or "").strip() or f"custom_{voice_id[:8]}",
+            kind="custom_role",
+            model_key=model_key,
+            language=language,
+            speaker=speaker,
+            instruct=(instruct or "").strip() or None,
+            status="ready",
+            progress=100,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._lock:
+            self._voices[voice_id] = v
+            self._persist()
+        return v
+
+    def create_design_clone(
+        self,
+        name: str,
+        model_key: str,
+        language: str,
+        text: str,
+        instruct: str,
+    ) -> Qwen3TTSVoice:
+        voice_id = str(uuid.uuid4())
+        now = _now_iso()
+
+        v = Qwen3TTSVoice(
+            id=voice_id,
+            name=(name or "").strip() or f"design_{voice_id[:8]}",
+            kind="design_clone",
+            model_key=model_key,
+            language=language,
+            ref_text=text,
+            instruct=instruct,
+            status="cloning",
+            progress=0,
+            created_at=now,
+            updated_at=now,
+            meta={
+                "voice_design_text": text,
+                "voice_design_instruct": instruct,
+            },
+        )
+        with self._lock:
+            self._voices[voice_id] = v
+            self._persist()
+        return v
+
     def update(self, voice_id: str, updates: Dict[str, Any]) -> Optional[Qwen3TTSVoice]:
         with self._lock:
             v = self._voices.get(str(voice_id))
@@ -168,8 +237,10 @@ class Qwen3TTSVoiceStore:
             data = v.model_dump()
             for key in [
                 "name",
+                "kind",
                 "model_key",
                 "language",
+                "speaker",
                 "ref_text",
                 "instruct",
                 "x_vector_only_mode",
@@ -183,8 +254,10 @@ class Qwen3TTSVoiceStore:
                     data[key] = updates[key]
             data["updated_at"] = _now_iso()
             p = Path(str(data.get("ref_audio_path") or ""))
-            if p:
+            if p and str(data.get("ref_audio_path")):
                 data["ref_audio_url"] = _to_uploads_web_path(p)
+            else:
+                data["ref_audio_url"] = None
             v2 = Qwen3TTSVoice(**data)
             self._voices[str(voice_id)] = v2
             self._persist()
@@ -199,7 +272,7 @@ class Qwen3TTSVoiceStore:
             self._persist()
         if remove_files:
             try:
-                p = Path(v.ref_audio_path)
+                p = Path(v.ref_audio_path) if v.ref_audio_path else None
                 root = _uploads_root() / "audios" / "qwen3_tts_voices" / str(voice_id)
                 if root.exists() and root.is_dir():
                     for it in root.iterdir():
@@ -213,7 +286,7 @@ class Qwen3TTSVoiceStore:
                     except Exception:
                         pass
                 else:
-                    if p.exists() and p.is_file():
+                    if p and p.exists() and p.is_file():
                         p.unlink()
             except Exception:
                 pass
@@ -223,10 +296,21 @@ class Qwen3TTSVoiceStore:
         v = self.get(voice_id)
         if not v:
             raise KeyError("voice_not_found")
-        raw_path = Path(v.ref_audio_path)
-        root = raw_path.parent
+        
+        if v.ref_audio_path:
+            raw_path = Path(v.ref_audio_path)
+            root = raw_path.parent
+        else:
+            root = _uploads_root() / "audios" / "qwen3_tts_voices" / voice_id
+            root.mkdir(parents=True, exist_ok=True)
+            if v.kind == "design_clone":
+                raw_path = root / "design_reference.wav"
+            else:
+                raw_path = root / "raw.wav"
+
         out_wav = root / "ref_16k_mono.wav"
         return raw_path, out_wav
+
 
     def set_clone_progress(self, voice_id: str, status: str, progress: int, message: Optional[str] = None) -> Optional[Qwen3TTSVoice]:
         updates: Dict[str, Any] = {"status": status, "progress": int(progress)}
