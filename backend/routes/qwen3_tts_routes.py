@@ -1,7 +1,10 @@
+import asyncio
 import json
+import shutil
 import uuid
+import wave
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
@@ -16,6 +19,8 @@ from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 from modules.ws_manager import manager
 
 
+from modules.qwen3_tts_service import qwen3_tts_service
+
 router = APIRouter(prefix="/api/tts/qwen3", tags=["Qwen3-TTS"])
 
 
@@ -26,6 +31,23 @@ class Qwen3TTSDownloadRequest(BaseModel):
 
 class Qwen3TTSValidateRequest(BaseModel):
     key: str = Field(..., description="模型key")
+
+
+class Qwen3TTSCustomRoleCreateRequest(BaseModel):
+    name: str
+    model_key: str
+    language: str
+    speaker: str
+    instruct: Optional[str] = None
+
+
+class Qwen3TTSDesignCloneCreateRequest(BaseModel):
+    name: str
+    model_key: str  # base model key
+    voice_design_model_key: str  # voice design model key
+    language: str
+    text: str
+    instruct: str
 
 
 @router.get("/models", summary="获取Qwen3-TTS本地模型状态")
@@ -42,6 +64,10 @@ async def list_qwen3_models() -> Dict[str, Any]:
                     "exists": s.exists,
                     "valid": ok,
                     "missing": missing,
+                    "model_type": getattr(s, "model_type", "base"),
+                    "size": getattr(s, "size", ""),
+                    "display_names": getattr(s, "display_names", []),
+                    "sources": getattr(s, "sources", {}),
                 }
             )
         return {"success": True, "data": data, "message": "ok"}
@@ -240,11 +266,92 @@ async def delete_qwen3_voice(voice_id: str, remove_files: bool = Query(False, de
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/voices/custom-role", summary="创建固定角色音色")
+async def create_qwen3_custom_role_voice(req: Qwen3TTSCustomRoleCreateRequest) -> Dict[str, Any]:
+    try:
+        v = qwen3_tts_voice_store.create_custom_role(
+            name=req.name,
+            model_key=req.model_key,
+            language=req.language,
+            speaker=req.speaker,
+            instruct=req.instruct,
+        )
+        return {"success": True, "data": v.model_dump(), "message": "created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/voices/design-clone", summary="创建设计克隆音色（异步）")
+async def create_qwen3_design_clone_voice(req: Qwen3TTSDesignCloneCreateRequest) -> Dict[str, Any]:
+    try:
+        v = qwen3_tts_voice_store.create_design_clone(
+            name=req.name,
+            model_key=req.model_key,
+            language=req.language,
+            text=req.text,
+            instruct=req.instruct,
+        )
+        qwen3_tts_voice_store.update(v.id, {"meta": {**v.meta, "voice_design_model_key": req.voice_design_model_key}})
+
+        job_id = str(uuid.uuid4())
+        __import__("asyncio").create_task(_run_voice_design_clone_job(voice_id=v.id, job_id=job_id))
+        return {"success": True, "data": {"voice_id": v.id, "job_id": job_id}, "message": "started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models/{model_key}/capabilities", summary="获取模型支持的语言与角色")
+async def get_qwen3_model_capabilities(model_key: str) -> Dict[str, Any]:
+    try:
+        langs = await qwen3_tts_service.list_supported_languages(model_key)
+        speakers = await qwen3_tts_service.list_supported_speakers(model_key)
+        return {"success": True, "data": {"languages": langs, "speakers": speakers}, "message": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
     except Exception:
         pass
+
+
+async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, Any]:
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("Missing dependency 'ffmpeg'. Please install it on server.")
+
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(raw_path),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(out_wav),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg_convert_failed: {stderr.decode(errors='ignore').strip()}")
+
+    with wave.open(str(out_wav), "rb") as wf:
+        frames = wf.getnframes()
+        rate = wf.getframerate()
+        dur = float(frames) / float(rate) if rate else None
+    return {"duration": dur, "sample_rate": 16000}
 
 
 async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
@@ -265,7 +372,8 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
     try:
         raw_path, out_wav = qwen3_tts_voice_store.prepare_clone_paths(voice_id)
     except Exception as e:
-        qwen3_tts_voice_store.set_clone_progress(voice_id, status="failed", progress=0, message=str(e))
+        # 出错时删除该记录，避免在列表中残留无效数据
+        qwen3_tts_voice_store.delete(voice_id, remove_files=True)
         await _broadcast_voice_clone(
             {
                 "type": "error",
@@ -294,18 +402,6 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
         )
         qwen3_tts_voice_store.set_clone_progress(voice_id, status="cloning", progress=20)
 
-        def _preprocess() -> Dict[str, Any]:
-            import librosa
-            import numpy as np
-            import soundfile as sf
-
-            wav, sr = librosa.load(str(raw_path), sr=16000, mono=True)
-            wav2 = np.asarray(wav, dtype=np.float32)
-            out_wav.parent.mkdir(parents=True, exist_ok=True)
-            sf.write(str(out_wav), wav2, 16000, format="WAV")
-            dur = float(len(wav2) / 16000) if 16000 > 0 else None
-            return {"duration": dur, "sample_rate": 16000}
-
         await _broadcast_voice_clone(
             {
                 "type": "progress",
@@ -320,9 +416,12 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
         )
         qwen3_tts_voice_store.set_clone_progress(voice_id, status="cloning", progress=70)
 
-        meta = await __import__("asyncio").get_running_loop().run_in_executor(None, _preprocess)
+        meta = await _convert_to_16k_mono_wav(raw_path, out_wav)
         existing = qwen3_tts_voice_store.get(voice_id)
-        base_meta: Dict[str, Any] = dict(existing.meta) if existing else {}
+        if not existing:
+            raise ValueError("voice_not_found_during_process")
+
+        base_meta: Dict[str, Any] = dict(existing.meta)
         qwen3_tts_voice_store.update(
             voice_id,
             {
@@ -346,7 +445,8 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
             }
         )
     except Exception as e:
-        qwen3_tts_voice_store.set_clone_progress(voice_id, status="failed", progress=0, message=str(e))
+        # 出错时删除该记录，避免在列表中残留无效数据
+        qwen3_tts_voice_store.delete(voice_id, remove_files=True)
         await _broadcast_voice_clone(
             {
                 "type": "error",
@@ -360,9 +460,101 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
         )
 
 
+async def _run_voice_design_clone_job(voice_id: str, job_id: str) -> None:
+    await _broadcast_voice_clone(
+        {
+            "type": "progress",
+            "scope": "qwen3_tts_voice_clone",
+            "voice_id": voice_id,
+            "job_id": job_id,
+            "phase": "design_generate",
+            "message": "正在生成设计参考音频...",
+            "progress": 10,
+        }
+    )
+    qwen3_tts_voice_store.set_clone_progress(voice_id, status="cloning", progress=10)
+
+    try:
+        v = qwen3_tts_voice_store.get(voice_id)
+        if not v:
+            raise ValueError("voice_not_found")
+
+        raw_path, out_wav = qwen3_tts_voice_store.prepare_clone_paths(voice_id)
+
+        design_model_key = v.meta.get("voice_design_model_key", "voice_design_1_7b")
+        text = v.meta.get("voice_design_text", "")
+        instruct = v.meta.get("voice_design_instruct", "")
+
+        await qwen3_tts_service.synthesize_voice_design_to_wav(
+            text=text,
+            out_path=raw_path,
+            model_key=design_model_key,
+            language=v.language,
+            instruct=instruct,
+        )
+
+        await _broadcast_voice_clone(
+            {
+                "type": "progress",
+                "scope": "qwen3_tts_voice_clone",
+                "voice_id": voice_id,
+                "job_id": job_id,
+                "phase": "load_audio",
+                "message": "处理参考音频...",
+                "progress": 50,
+            }
+        )
+        qwen3_tts_voice_store.set_clone_progress(voice_id, status="cloning", progress=50)
+        meta = await _convert_to_16k_mono_wav(raw_path, out_wav)
+        existing = qwen3_tts_voice_store.get(voice_id)
+        base_meta: Dict[str, Any] = dict(existing.meta) if existing else {}
+
+        qwen3_tts_voice_store.update(
+            voice_id,
+            {
+                "ref_audio_path": str(out_wav),
+                "status": "ready",
+                "progress": 100,
+                "meta": dict(base_meta, **meta),
+                "last_error": None,
+            },
+        )
+
+        await _broadcast_voice_clone(
+            {
+                "type": "completed",
+                "scope": "qwen3_tts_voice_clone",
+                "voice_id": voice_id,
+                "job_id": job_id,
+                "phase": "clone_done",
+                "message": "设计克隆音色创建完成",
+                "progress": 100,
+            }
+        )
+
+    except Exception as e:
+        # 出错时删除该记录
+        qwen3_tts_voice_store.delete(voice_id, remove_files=True)
+        await _broadcast_voice_clone(
+            {
+                "type": "error",
+                "scope": "qwen3_tts_voice_clone",
+                "voice_id": voice_id,
+                "job_id": job_id,
+                "phase": "clone_error",
+                "message": f"设计克隆失败: {e}",
+            }
+        )
+
+
 @router.post("/voices/{voice_id}/clone", summary="开始克隆音色（预处理参考音频）")
 async def start_qwen3_voice_clone(voice_id: str) -> Dict[str, Any]:
     try:
+        # 预先检查依赖
+        if shutil.which("ffmpeg") is None:
+            qwen3_tts_voice_store.delete(voice_id, remove_files=True)
+            raise HTTPException(status_code=500, detail="Missing dependency 'ffmpeg'. Please install it on server.")
+
         v = qwen3_tts_voice_store.get(voice_id)
         if not v:
             raise HTTPException(status_code=404, detail="voice_not_found")

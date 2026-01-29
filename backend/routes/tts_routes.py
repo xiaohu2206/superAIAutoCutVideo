@@ -550,98 +550,56 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
         if provider == 'qwen3_tts':
             try:
                 from modules.qwen3_tts_service import qwen3_tts_service
+                from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 
-                extra = (cfg.extra_params if cfg else {}) or {}
-                model_key = str(extra.get("ModelKey") or "custom_0_6b")
-                language = str(extra.get("Language") or "Auto")
-                device = extra.get("Device")
-                device_s = str(device).strip() if isinstance(device, str) else None
-                instruct = str(extra.get("Instruct") or "").strip() or None
-                ref_audio = str(extra.get("RefAudio") or "").strip() or None
-                ref_text = str(extra.get("RefText") or "").strip() or None
-                xvec_in = extra.get("XVectorOnly", None)
-                x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
-
-                speaker = None
-                vid = (voice_id or "").strip()
-                vv = None
-                if vid:
-                    try:
-                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
-
-                        vv = qwen3_tts_voice_store.get(vid)
-                    except Exception:
-                        vv = None
-
-                if vv and not ref_audio:
-                    ref_audio = str(vv.ref_audio_path or "").strip() or None
-                if vv and not ref_text:
-                    ref_text = vv.ref_text
-                if vv and not instruct:
-                    instruct = vv.instruct
-                if vv and xvec_in is None:
-                    x_vector_only_mode = bool(vv.x_vector_only_mode)
-
-                if vv and model_key.startswith("custom_"):
-                    model_key = str(vv.model_key or "base_0_6b")
-                    if "Language" not in extra:
-                        language = str(vv.language or language)
-                elif vv:
-                    if "ModelKey" not in extra:
-                        model_key = str(vv.model_key or model_key)
-                    if "Language" not in extra:
-                        language = str(vv.language or language)
-
-                if model_key.startswith("custom_"):
-                    speaker = str(extra.get("Speaker") or (match.name if match else "") or voice_id or "").strip() or None
-                    supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
-                    if supported:
-                        wanted = (speaker or "").lower()
-                        if not wanted or all(str(s).lower() != wanted for s in supported):
-                            speaker = str(supported[0]).strip() or speaker
+                vid = str(voice_id).strip()
+                v = qwen3_tts_voice_store.get(vid)
 
                 ts = int(time.time() * 1000)
-                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in (voice_id or "voice"))[:64]
+                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
                 filename = f"qwen3_{safe_vid}_preview_{ts}.wav"
                 out_path = _get_preview_tmp_dir() / filename
-
                 text = (req.text or "您好，欢迎使用智能配音。")
+
+                device_s = None
+                if cfg:
+                    extra = cfg.extra_params or {}
+                    device = extra.get("Device")
+                    device_s = str(device).strip() if isinstance(device, str) else None
+
                 try:
-                    try:
-                        res = await qwen3_tts_service.synthesize_to_wav(
+                    if v:
+                        res = await qwen3_tts_service.synthesize_by_voice_asset(
                             text=text,
                             out_path=out_path,
-                            model_key=model_key,
-                            language=language,
-                            speaker=speaker,
-                            instruct=instruct,
-                            ref_audio=ref_audio,
-                            ref_text=ref_text,
-                            x_vector_only_mode=x_vector_only_mode,
-                            device=device_s,
+                            voice_asset=v,
+                            device=device_s
                         )
-                        audio_bytes = out_path.read_bytes()
-                    finally:
-                        try:
-                            if out_path.exists():
-                                out_path.unlink()
-                        except Exception:
-                            pass
-                except ValueError as ve:
-                    raise HTTPException(status_code=400, detail=str(ve))
-                if not res.get("success"):
-                    raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                    else:
+                        raise HTTPException(status_code=404, detail="voice_not_found")
+
+                    if not res.get("success"):
+                        raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+
+                    audio_bytes = out_path.read_bytes()
+                finally:
+                    try:
+                        if out_path.exists():
+                            out_path.unlink()
+                    except Exception:
+                        pass
+
                 preview_id = await _preview_cache_put(
                     content=audio_bytes,
                     filename=filename,
-                    meta={"provider": "qwen3_tts", "voice_id": str(voice_id)},
+                    meta={"provider": "qwen3_tts", "voice_id": vid},
                 )
                 audio_url = f"/api/tts/voices/preview/{preview_id}"
                 return {
                     "success": True,
                     "data": {
-                        "voice_id": voice_id,
-                        "name": voice_id,
+                        "voice_id": vid,
+                        "name": v.name if v else vid,
                         "audio_url": audio_url,
                         "description": None,
                         "duration": res.get("duration"),
@@ -653,7 +611,16 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
             except Exception as e:
                 logger.error(f"Qwen3-TTS 试听失败: {e}")
                 msg = str(e)
-                if "qwen_tts_not_installed" in msg or "qwen_tts_bad_install" in msg or "qwen_tts_import_failed" in msg:
+                if (
+                    "qwen_tts_not_installed" in msg
+                    or "qwen_tts_bad_install" in msg
+                    or "qwen_tts_import_failed" in msg
+                    or "model_invalid:" in msg
+                    or "unknown_model_key:" in msg
+                    or "missing_dependency:" in msg
+                ):
+                    if "model_invalid:" in msg:
+                        msg = f"{msg}。请先下载/放置对应模型文件，或在设置里配置 QWEN_TTS_MODELS_DIR/SACV_UPLOADS_DIR。"
                     raise HTTPException(status_code=503, detail=msg)
                 raise HTTPException(status_code=500, detail=msg)
 

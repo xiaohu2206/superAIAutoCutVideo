@@ -1,11 +1,12 @@
 import { apiClient } from "@/services/clients";
 import { message } from "@/services/message";
 import { ttsService } from "@/services/ttsService";
-import { Check, Loader, Pause, Pencil, Play, Trash2, Wand2 } from "lucide-react";
+import { Check, Layers, Loader, Mic2, Palette, Pause, Pencil, Play, Trash2, Wand2 } from "lucide-react";
 import React, { useMemo, useState } from "react";
 import type { Qwen3CloneEvent } from "../hooks/useQwen3Voices";
 import type { Qwen3TtsVoice } from "../types";
 import Qwen3CloneProgressItem from "./Qwen3CloneProgressItem";
+import { createPortal } from "react-dom";
 
 export type Qwen3VoiceListProps = {
   voices: Qwen3TtsVoice[];
@@ -53,6 +54,32 @@ const getDefaultPreviewText = (v: Qwen3TtsVoice) => {
   if (code === "en") return "Hello, welcome to smart voiceover.";
   return "Hello, welcome to smart voiceover.";
 };
+
+const KindIcon = ({ kind }: { kind: string }) => {
+    if (kind === "custom_role") return <Mic2 className="w-3.5 h-3.5 text-purple-600" />;
+    if (kind === "design_clone") return <Palette className="w-3.5 h-3.5 text-indigo-600" />;
+    return <Layers className="w-3.5 h-3.5 text-blue-600" />;
+}
+
+const KindLabel = ({ kind }: { kind: string }) => {
+    if (kind === "custom_role") return <span className="text-purple-700">角色</span>;
+    if (kind === "design_clone") return <span className="text-indigo-700">设计</span>;
+    return <span className="text-blue-700">克隆</span>;
+}
+
+const KindBadge = ({ kind }: { kind: string }) => {
+    const k = kind || "clone";
+    let bg = "bg-blue-50 border-blue-200";
+    if (k === "custom_role") bg = "bg-purple-50 border-purple-200";
+    if (k === "design_clone") bg = "bg-indigo-50 border-indigo-200";
+    
+    return (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${bg}`}>
+            <KindIcon kind={k} />
+            <KindLabel kind={k} />
+        </span>
+    )
+}
 
 export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
   voices,
@@ -175,7 +202,7 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
         const isPlaying = playingVoiceId === v.id;
         const isLoading = previewLoadingVoiceId === v.id;
         const canSelect = String(v.status || "").toLowerCase() === "ready";
-        const canClone = ["uploaded", "failed"].includes(String(v.status || "").toLowerCase());
+        const canClone = v.kind !== "custom_role" && ["uploaded", "failed"].includes(String(v.status || "").toLowerCase());
         const isCloning = String(v.status || "").toLowerCase() === "cloning";
         const cloneEvt = cloneEventByVoiceId[v.id];
         return (
@@ -200,15 +227,29 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
               </button>
 
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="text-sm font-medium text-gray-900 truncate max-w-[240px]" title={v.id}>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <div className="text-sm font-medium text-gray-900 truncate max-w-[200px]" title={v.id}>
                     {v.name}
                   </div>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full border ${statusBadge(v.status)}`}>
+                  <KindBadge kind={v.kind || "clone"} />
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${statusBadge(v.status)}`}>
                     {statusText(v.status)}
                   </span>
-                  <span className="text-[11px] text-gray-500">模型: {v.model_key}</span>
-                  <span className="text-[11px] text-gray-500">语言: {v.language}</span>
+                </div>
+                
+                <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                    <span title="模型">{v.model_key}</span>
+                    <span className="w-px h-3 bg-gray-200" />
+                    <span title="语言">{v.language}</span>
+                    {v.speaker && (
+                        <>
+                            <span className="w-px h-3 bg-gray-200" />
+                            <span title="说话人" className="flex items-center gap-1">
+                                <Mic2 className="w-3 h-3" />
+                                {v.speaker}
+                            </span>
+                        </>
+                    )}
                 </div>
 
                 {isCloning ? (
@@ -223,11 +264,11 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
                 ) : null}
 
                 {String(v.status || "").toLowerCase() === "failed" && v.last_error ? (
-                  <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap break-words">{v.last_error}</div>
+                  <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap break-words bg-red-50 p-2 rounded border border-red-100">{v.last_error}</div>
                 ) : null}
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-shrink-0 self-center">
                 {isActive ? (
                   <div className="flex items-center gap-1.5 text-blue-600 bg-blue-100/50 px-2.5 py-1 rounded-full border border-blue-200/50">
                     <Check className="w-3.5 h-3.5" />
@@ -250,43 +291,36 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
                 <button
                   onClick={() => onEdit(v)}
                   disabled={isCloning}
-                  className={`text-xs px-3 py-1.5 rounded-md border font-medium ${
+                  className={`text-xs px-2 py-1.5 rounded-md border font-medium ${
                     isCloning ? "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                   }`}
                   title="编辑"
                 >
-                  <span className="inline-flex items-center gap-2">
-                    <Pencil className="h-4 w-4" />
-                    编辑
-                  </span>
+                  <Pencil className="h-3.5 w-3.5" />
                 </button>
 
-                <button
-                  onClick={() => onStartClone(v.id)}
-                  disabled={!canClone}
-                  className={`text-xs px-3 py-1.5 rounded-md border font-medium ${
-                    canClone ? "bg-white border-gray-200 text-gray-700 hover:bg-gray-50" : "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={canClone ? "开始克隆（预处理）" : "仅 uploaded/failed 可重新开始"}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <Wand2 className="h-4 w-4" />
-                    克隆
-                  </span>
-                </button>
+                {v.kind !== "custom_role" && (
+                    <button
+                    onClick={() => onStartClone(v.id)}
+                    disabled={!canClone}
+                    className={`text-xs px-2 py-1.5 rounded-md border font-medium ${
+                        canClone ? "bg-white border-gray-200 text-gray-700 hover:bg-gray-50" : "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed"
+                    }`}
+                    title={canClone ? "开始克隆（预处理）" : "仅 uploaded/failed 可重新开始"}
+                    >
+                        <Wand2 className="h-3.5 w-3.5" />
+                    </button>
+                )}
 
                 <button
                   onClick={() => openDelete(v)}
                   disabled={isCloning}
-                  className={`text-xs px-3 py-1.5 rounded-md border font-medium ${
+                  className={`text-xs px-2 py-1.5 rounded-md border font-medium ${
                     isCloning ? "bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed" : "bg-white border-gray-200 text-red-600 hover:bg-red-50 hover:border-red-200"
                   }`}
                   title="删除"
                 >
-                  <span className="inline-flex items-center gap-2">
-                    <Trash2 className="h-4 w-4" />
-                    删除
-                  </span>
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -294,9 +328,9 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
         );
       })}
 
-      {sorted.length === 0 ? <div className="text-sm text-gray-500">暂无音色，请先上传参考音频。</div> : null}
+      {sorted.length === 0 ? <div className="text-sm text-gray-500 text-center py-8">暂无音色，请先创建。</div> : null}
 
-      {deleteDialog.open && deleteDialog.voice ? (
+      {deleteDialog.open && deleteDialog.voice ? createPortal(
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={deleteBusy ? undefined : () => setDeleteDialog({ open: false, voice: null })} />
           <div className="flex items-center justify-center min-h-screen p-4">
@@ -315,12 +349,16 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
                 <div className="text-sm text-gray-700">
                   确定要删除音色 <span className="font-semibold">"{deleteDialog.voice.name}"</span> 吗？
                 </div>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={removeFiles} disabled={deleteBusy} onChange={(e) => setRemoveFiles(e.target.checked)} />
-                  同时删除本地音频文件
-                </label>
-                <div className="text-xs text-gray-500 break-words">
-                  voice_id: {deleteDialog.voice.id}
+                
+                {deleteDialog.voice.kind !== "custom_role" && (
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={removeFiles} disabled={deleteBusy} onChange={(e) => setRemoveFiles(e.target.checked)} />
+                    同时删除本地音频文件
+                    </label>
+                )}
+                
+                <div className="text-xs text-gray-500 break-words mt-2 p-2 bg-gray-50 rounded">
+                  ID: {deleteDialog.voice.id}
                 </div>
               </div>
               <div className="bg-gray-50 px-5 py-4 flex items-center justify-end gap-3 border-t border-gray-200">
@@ -346,7 +384,8 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );

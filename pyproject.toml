@@ -165,7 +165,6 @@ module = [
     "torch.*",
     "transformers.*",
     "huggingface_hub.*",
-    "librosa.*",
     "soundfile.*",
     "modelscope.*",
 ]

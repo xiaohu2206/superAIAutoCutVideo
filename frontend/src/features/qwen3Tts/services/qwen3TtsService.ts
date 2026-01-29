@@ -5,6 +5,8 @@ import type {
   Qwen3TtsModelStatus,
   Qwen3TtsPatchVoiceInput,
   Qwen3TtsUploadVoiceInput,
+  Qwen3TtsCustomRoleCreateInput,
+  Qwen3TtsDesignCloneCreateInput,
   Qwen3TtsVoice,
 } from "../types";
 
@@ -39,6 +41,18 @@ export const qwen3TtsService = {
     fd.append("instruct", input.instruct || "");
     fd.append("x_vector_only_mode", String(Boolean(input.x_vector_only_mode)));
     return apiClient.postFormData("/api/tts/qwen3/voices/upload", fd);
+  },
+
+  createCustomRoleVoice(input: Qwen3TtsCustomRoleCreateInput): Promise<ApiOk<Qwen3TtsVoice>> {
+    return apiClient.post("/api/tts/qwen3/voices/custom-role", input);
+  },
+
+  createDesignCloneVoice(input: Qwen3TtsDesignCloneCreateInput): Promise<ApiOk<{ voice_id: string; job_id: string }>> {
+    return apiClient.post("/api/tts/qwen3/voices/design-clone", input);
+  },
+
+  getModelCapabilities(modelKey: string): Promise<ApiOk<{ languages: string[]; speakers: string[] }>> {
+    return apiClient.get(`/api/tts/qwen3/models/${encodeURIComponent(modelKey)}/capabilities`);
   },
 
   getVoice(id: string): Promise<ApiOk<Qwen3TtsVoice>> {

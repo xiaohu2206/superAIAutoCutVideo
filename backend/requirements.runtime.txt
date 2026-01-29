@@ -9,7 +9,6 @@ aiohttp==3.9.0
 edge-tts==7.2.6
 transformers==4.46.3
 qwen-tts
-huggingface_hub==0.22.2
-librosa==0.10.1
+huggingface_hub==0.34.0
 soundfile==0.12.1
 modelscope==1.14.0

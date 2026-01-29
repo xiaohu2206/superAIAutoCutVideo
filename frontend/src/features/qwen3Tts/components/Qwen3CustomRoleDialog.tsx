@@ -1,66 +1,96 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader, Save, X } from "lucide-react";
-import type { Qwen3TtsPatchVoiceInput, Qwen3TtsVoice } from "../types";
+import { Loader, Mic2, X } from "lucide-react";
+import { useQwen3Voices } from "../hooks/useQwen3Voices";
 import { LANGUAGE_OPTIONS } from "../constants";
+import type { Qwen3TtsCustomRoleCreateInput } from "../types";
 
-export type Qwen3VoiceEditDialogProps = {
-  isOpen: boolean;
-  voice: Qwen3TtsVoice | null;
-  modelKeys: string[];
-  onClose: () => void;
-  onSubmit: (voiceId: string, patch: Qwen3TtsPatchVoiceInput) => Promise<void>;
+export type Qwen3CustomRoleDialogResult = {
+  input: Qwen3TtsCustomRoleCreateInput;
 };
 
-export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOpen, voice, modelKeys, onClose, onSubmit }) => {
+export type Qwen3CustomRoleDialogProps = {
+  isOpen: boolean;
+  modelKeys: string[];
+  onClose: () => void;
+  onSubmit: (result: Qwen3CustomRoleDialogResult) => Promise<void>;
+};
+
+export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ isOpen, modelKeys, onClose, onSubmit }) => {
+  const { getCapabilities } = useQwen3Voices();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultModelKey = useMemo(() => modelKeys[0] || "base_0_6b", [modelKeys]);
+  const defaultModelKey = useMemo(() => modelKeys[0] || "custom_0_6b", [modelKeys]);
 
   const [name, setName] = useState<string>("");
   const [modelKey, setModelKey] = useState<string>(defaultModelKey);
   const [language, setLanguage] = useState<string>("Auto");
-  const [refText, setRefText] = useState<string>("");
+  const [speaker, setSpeaker] = useState<string>("");
   const [instruct, setInstruct] = useState<string>("");
-  const [xVectorOnlyMode, setXVectorOnlyMode] = useState<boolean>(true);
+
+  const [supportedSpeakers, setSupportedSpeakers] = useState<string[]>([]);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
     setLoading(false);
-    setName(voice?.name || "");
-    setModelKey(voice?.model_key || defaultModelKey);
-    setLanguage(voice?.language || "Auto");
-    setRefText(voice?.ref_text || "");
-    setInstruct(voice?.instruct || "");
-    setXVectorOnlyMode(Boolean(voice?.x_vector_only_mode));
-  }, [isOpen, voice, defaultModelKey]);
+    setName("");
+    setModelKey(defaultModelKey);
+    setLanguage("Auto");
+    setSpeaker("");
+    setInstruct("");
+  }, [isOpen, defaultModelKey]);
 
-  const canSubmit = Boolean(voice?.id) && !loading;
+  // Fetch capabilities when modelKey changes
+  useEffect(() => {
+    if (!isOpen || !modelKey) return;
+    const fetchCap = async () => {
+      setCapabilitiesLoading(true);
+      try {
+        const caps = await getCapabilities(modelKey);
+        setSupportedSpeakers(caps.speakers || []);
+        if (caps.speakers?.length && !speaker) {
+          setSpeaker(caps.speakers[0]);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setCapabilitiesLoading(false);
+      }
+    };
+    void fetchCap();
+  }, [isOpen, modelKey, getCapabilities]);
+
+  const canSubmit = Boolean(name) && Boolean(speaker) && !loading && !capabilitiesLoading;
 
   const handleSubmit = async () => {
-    if (!voice?.id) return;
+    if (!name || !speaker) {
+      setError("请填写名称并选择角色");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      await onSubmit(voice.id, {
-        name: name.trim() || undefined,
-        model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
-        language: (language || "Auto").trim() || "Auto",
-        ref_text: refText.trim() || undefined,
-        instruct: instruct.trim() || undefined,
-        x_vector_only_mode: Boolean(xVectorOnlyMode),
+      await onSubmit({
+        input: {
+          name: name.trim(),
+          model_key: modelKey,
+          language: language.trim() || "Auto",
+          speaker: speaker.trim(),
+          instruct: instruct.trim() || undefined,
+        },
       });
       onClose();
     } catch (e: any) {
-      setError(e?.message || "保存失败");
+      setError(e?.message || "创建失败");
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isOpen || !voice) return null;
+  if (!isOpen) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -68,7 +98,10 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
       <div className="flex items-center justify-center min-h-screen p-4">
         <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
           <div className="flex items-center justify-between p-5 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">编辑音色</h3>
+            <div className="flex items-center gap-2">
+              <Mic2 className="h-5 w-5 text-purple-700" />
+              <h3 className="text-lg font-semibold text-gray-900">创建角色音色</h3>
+            </div>
             <button
               onClick={onClose}
               disabled={loading}
@@ -89,7 +122,8 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
                   value={name}
                   disabled={loading}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder="给音色起个名"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200"
                 />
               </div>
               <div>
@@ -116,7 +150,7 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
                   value={language}
                   disabled={loading}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200 bg-white"
                 >
                   {LANGUAGE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -125,25 +159,24 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-2 mt-6">
-                <input
-                  type="checkbox"
-                  checked={xVectorOnlyMode}
-                  disabled={loading}
-                  onChange={(e) => setXVectorOnlyMode(e.target.checked)}
-                />
-                <span className="text-sm text-gray-700">仅使用 x-vector 模式</span>
+              <div>
+                <label className="block text-sm text-gray-700 mb-1">
+                  说话人 {capabilitiesLoading ? <span className="text-xs text-gray-400 font-normal">(加载中...)</span> : null}
+                </label>
+                <select
+                  value={speaker}
+                  disabled={loading || capabilitiesLoading}
+                  onChange={(e) => setSpeaker(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                >
+                  {!speaker && <option value="">请选择</option>}
+                  {supportedSpeakers.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-700 mb-1">参考文本（可选）</label>
-              <textarea
-                value={refText}
-                disabled={loading}
-                onChange={(e) => setRefText(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 min-h-[72px]"
-              />
             </div>
 
             <div>
@@ -152,7 +185,8 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
                 value={instruct}
                 disabled={loading}
                 onChange={(e) => setInstruct(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 min-h-[72px]"
+                placeholder="可选的情感/风格指令"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200 min-h-[72px]"
               />
             </div>
           </div>
@@ -171,12 +205,12 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
               onClick={handleSubmit}
               disabled={!canSubmit}
               className={`px-5 py-2 rounded-lg font-medium transition-colors ${
-                canSubmit ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                canSubmit ? "bg-purple-600 text-white hover:bg-purple-700" : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
             >
               <span className="inline-flex items-center gap-2">
-                {loading ? <Loader className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                保存
+                {loading ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                创建
               </span>
             </button>
           </div>
@@ -187,5 +221,4 @@ export const Qwen3VoiceEditDialog: React.FC<Qwen3VoiceEditDialogProps> = ({ isOp
   );
 };
 
-export default Qwen3VoiceEditDialog;
-
+export default Qwen3CustomRoleDialog;

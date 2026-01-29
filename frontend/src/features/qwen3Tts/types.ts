@@ -11,6 +11,10 @@ export type Qwen3TtsModelStatus = {
   exists: boolean;
   valid: boolean;
   missing: string[];
+  model_type: "base" | "custom_voice" | "voice_design" | string;
+  size: string;
+  display_names: string[];
+  sources?: Record<string, string>;
 };
 
 export type Qwen3TtsVoiceStatus = "uploaded" | "cloning" | "ready" | "failed" | string;
@@ -18,9 +22,11 @@ export type Qwen3TtsVoiceStatus = "uploaded" | "cloning" | "ready" | "failed" | 
 export type Qwen3TtsVoice = {
   id: string;
   name: string;
+  kind: "clone" | "custom_role" | "design_clone" | string;
   model_key: string;
   language: string;
-  ref_audio_path: string;
+  speaker?: string | null;
+  ref_audio_path?: string | null;
   ref_audio_url?: string | null;
   ref_text?: string | null;
   instruct?: string | null;
@@ -45,8 +51,25 @@ export type Qwen3TtsUploadVoiceInput = {
   x_vector_only_mode: boolean;
 };
 
+export type Qwen3TtsCustomRoleCreateInput = {
+  name: string;
+  model_key: string;
+  language: string;
+  speaker: string;
+  instruct?: string;
+};
+
+export type Qwen3TtsDesignCloneCreateInput = {
+  name: string;
+  model_key: string;
+  voice_design_model_key: string;
+  language: string;
+  text: string;
+  instruct: string;
+};
+
 export type Qwen3TtsPatchVoiceInput = Partial<Pick<
   Qwen3TtsVoice,
-  "name" | "model_key" | "language" | "ref_text" | "instruct" | "x_vector_only_mode"
+  "name" | "model_key" | "language" | "ref_text" | "instruct" | "x_vector_only_mode" | "speaker"
 >>;
 

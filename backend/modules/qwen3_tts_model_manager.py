@@ -7,36 +7,46 @@ from typing import Any, Dict, List, Tuple
 from modules.app_paths import uploads_dir
 
 
-QWEN3_TTS_MODEL_REGISTRY: Dict[str, Dict[str, str]] = {
-    "tokenizer_12hz": {
-        "hf": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
-        "ms": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
-        "local": "Qwen3-TTS-Tokenizer-12Hz",
-    },
+QWEN3_TTS_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "base_0_6b": {
         "hf": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
         "ms": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
         "local": "Qwen3-TTS-12Hz-0.6B-Base",
+        "model_type": "base",
+        "size": "0.6B",
+        "display_names": ["Qwen3-TTS-12Hz-0.6B-Base"],
     },
     "custom_0_6b": {
         "hf": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         "ms": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         "local": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "model_type": "custom_voice",
+        "size": "0.6B",
+        "display_names": ["Qwen3-TTS-12Hz-0.6B-CustomVoice"],
     },
     "base_1_7b": {
         "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         "local": "Qwen3-TTS-12Hz-1.7B-Base",
+        "model_type": "base",
+        "size": "1.7B",
+        "display_names": ["Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"],
     },
     "custom_1_7b": {
         "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
         "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
         "local": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "model_type": "custom_voice",
+        "size": "1.7B",
+        "display_names": ["Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"],
     },
     "voice_design_1_7b": {
         "hf": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
         "ms": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
         "local": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "model_type": "voice_design",
+        "size": "1.7B",
+        "display_names": ["Qwen3-TTS-12Hz-1.7B-VoiceDesign", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"],
     },
 }
 
@@ -46,6 +56,10 @@ class Qwen3TTSModelStatus:
     key: str
     path: str
     exists: bool
+    model_type: str
+    size: str
+    display_names: List[str]
+    sources: Dict[str, str]
 
 
 class Qwen3TTSPathManager:
@@ -63,9 +77,23 @@ class Qwen3TTSPathManager:
 
     def list_status(self) -> List[Qwen3TTSModelStatus]:
         out: List[Qwen3TTSModelStatus] = []
-        for key in QWEN3_TTS_MODEL_REGISTRY.keys():
+        for key, info in QWEN3_TTS_MODEL_REGISTRY.items():
             p = self.model_path(key)
-            out.append(Qwen3TTSModelStatus(key=key, path=str(p), exists=p.exists()))
+            out.append(
+                Qwen3TTSModelStatus(
+                    key=key,
+                    path=str(p),
+                    exists=p.exists(),
+                    model_type=str(info.get("model_type", "base")),
+                    size=str(info.get("size", "")),
+                    display_names=info.get("display_names", []),
+                    sources={
+                        "hf": str(info.get("hf", "")),
+                        "ms": str(info.get("ms", "")),
+                        "local": str(info.get("local", "")),
+                    },
+                )
+            )
         return out
 
 
@@ -92,24 +120,13 @@ def validate_model_dir(key: str, model_dir: Path) -> Tuple[bool, List[str]]:
     if "config.json" not in files:
         missing.append("config.json")
 
-    if key == "tokenizer_12hz":
-        if "preprocessor_config.json" not in files and "feature_extractor_config.json" not in files:
-            missing.append("preprocessor_config.json|feature_extractor_config.json")
-        has_weights = any(
-            name.endswith(".safetensors") or name in {"pytorch_model.bin", "model.safetensors"}
-            for name in files
-        )
-        if not has_weights:
-            missing.append("weights(.safetensors|pytorch_model.bin)")
-    else:
-        has_weights = any(
-            name.endswith(".safetensors") or name in {"pytorch_model.bin", "model.safetensors"}
-            for name in files
-        )
-        if not has_weights:
-            missing.append("weights(.safetensors|pytorch_model.bin)")
-        if "processor_config.json" not in files and "preprocessor_config.json" not in files:
-            missing.append("processor_config.json|preprocessor_config.json")
+    has_weights = any(
+        name.endswith(".safetensors") or name in {"pytorch_model.bin", "model.safetensors"} for name in files
+    )
+    if not has_weights:
+        missing.append("weights(.safetensors|pytorch_model.bin)")
+    if "processor_config.json" not in files and "preprocessor_config.json" not in files:
+        missing.append("processor_config.json|preprocessor_config.json")
 
     return len(missing) == 0, missing
 
