@@ -7,6 +7,7 @@ import type {
   Qwen3TtsUploadVoiceInput,
   Qwen3TtsCustomRoleCreateInput,
   Qwen3TtsDesignCloneCreateInput,
+  Qwen3TtsDownloadTask,
   Qwen3TtsVoice,
 } from "../types";
 
@@ -21,6 +22,14 @@ export const qwen3TtsService = {
 
   downloadModel(key: string, provider: Qwen3TtsDownloadProvider): Promise<ApiOk<any>> {
     return apiClient.post("/api/tts/qwen3/models/download", { key, provider });
+  },
+
+  stopDownload(key: string): Promise<ApiOk<any>> {
+    return apiClient.post(`/api/tts/qwen3/models/downloads/${encodeURIComponent(key)}/stop`);
+  },
+
+  listDownloadTasks(): Promise<ApiOk<Qwen3TtsDownloadTask[]>> {
+    return apiClient.get("/api/tts/qwen3/models/downloads");
   },
 
   getModelPath(key: string): Promise<ApiOk<{ key: string; path: string }>> {
@@ -83,4 +92,3 @@ export const qwen3TtsService = {
     return apiClient.get(`/api/tts/qwen3/voices/${encodeURIComponent(id)}/clone-status`);
   },
 };
-

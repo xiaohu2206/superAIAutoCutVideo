@@ -9,7 +9,7 @@ import Qwen3VoiceUploadDialog, { type Qwen3VoiceUploadDialogResult } from "./Qwe
 import Qwen3CustomRoleDialog, { type Qwen3CustomRoleDialogResult } from "./Qwen3CustomRoleDialog.tsx";
 import Qwen3VoiceDesignDialog, { type Qwen3VoiceDesignDialogResult } from "./Qwen3VoiceDesignDialog.tsx";
 import Qwen3ModelOptionsList from "./Qwen3ModelOptionsList";
-import type { Qwen3TtsVoice } from "../types";
+import type { Qwen3TtsDownloadProvider, Qwen3TtsVoice } from "../types";
 
 export type Qwen3VoiceSectionProps = {
   configId: string | null;
@@ -38,11 +38,12 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     modelByKey,
     loading: modelsLoading,
     error: modelsError,
-    download: modelsDownload,
+    downloadsByKey,
     refresh: refreshModels,
     validate: validateModel,
     getModelPath,
     downloadModel,
+    stopDownload,
   } = useQwen3Models();
 
   const [createMode, setCreateMode] = useState<CreateMode>("clone");
@@ -51,7 +52,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   const [designOpen, setDesignOpen] = useState<boolean>(false);
   const [editVoice, setEditVoice] = useState<Qwen3TtsVoice | null>(null);
   
-  const [providerByOptionId, setProviderByOptionId] = useState<Record<string, "hf" | "modelscope">>({});
+  const [providerByOptionId, setProviderByOptionId] = useState<Record<string, Qwen3TtsDownloadProvider>>({});
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
 
   // Filter model keys for each mode
@@ -89,24 +90,24 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   const downloadOptions = useMemo(() => {
     if (createMode === "clone") {
       return [
-        { id: "base_all", label: "Qwen3-TTS-12Hz-1.7B/0.6B-Base", keys: ["base_1_7b", "base_0_6b"] },
         { id: "base_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", keys: ["base_1_7b"] },
+        { id: "base_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", keys: ["base_0_6b"] },
       ];
     }
     if (createMode === "custom_role") {
       return [
-        { id: "custom_all", label: "Qwen3-TTS-12Hz-1.7B/0.6B-CustomVoice", keys: ["custom_1_7b", "custom_0_6b"] },
         { id: "custom_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", keys: ["custom_1_7b"] },
+        { id: "custom_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", keys: ["custom_0_6b"] },
       ];
     }
     return [
       { id: "voice_design_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", keys: ["voice_design_1_7b"] },
       { id: "base_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", keys: ["base_1_7b"] },
-      { id: "base_all", label: "Qwen3-TTS-12Hz-1.7B/0.6B-Base", keys: ["base_1_7b", "base_0_6b"] },
+      { id: "base_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", keys: ["base_0_6b"] },
     ];
   }, [createMode]);
 
-  const getProvider = (optionId: string) => providerByOptionId[optionId] || "hf";
+  const getProvider = (optionId: string): Qwen3TtsDownloadProvider => providerByOptionId[optionId] || "modelscope";
 
   const getModelStatus = (keys: string[]) => {
     const items = keys.map((k) => modelByKey.get(k)).filter(Boolean);
@@ -122,11 +123,34 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
      return { className: "bg-orange-50 text-orange-700 border-orange-200", text: "缺文件" };
   };
 
+  const canCreateInMode = useMemo(() => {
+    const isModelUsable = (key: string) => {
+      const m = modelByKey.get(key);
+      return Boolean(m?.exists && m?.valid);
+    };
+    const isAnyModelUsable = (keys: string[]) => keys.some((k) => isModelUsable(k));
+
+    if (createMode === "clone") {
+      return isAnyModelUsable(baseModelKeys);
+    }
+    if (createMode === "custom_role") {
+      return isAnyModelUsable(customModelKeys);
+    }
+
+    const voiceDesignOk = isModelUsable("voice_design_1_7b");
+    const base1_7bOk = isModelUsable("base_1_7b");
+    const baseAllOk = isModelUsable("base_1_7b") && isModelUsable("base_0_6b");
+    return voiceDesignOk && (base1_7bOk || baseAllOk);
+  }, [baseModelKeys, createMode, customModelKeys, modelByKey]);
+
   const handleDownload = async (option: { id: string; keys: string[] }) => {
     const provider = getProvider(option.id);
-    for (const key of option.keys) {
-      await downloadModel(key, provider);
-    }
+    await Promise.all(option.keys.map((key) => downloadModel(key, provider)));
+  };
+
+  const handleStop = async (option: { id: string; keys: string[] }) => {
+    const targets = option.keys.filter((key) => downloadsByKey[key]?.status === "running");
+    await Promise.all(targets.map((key) => stopDownload(key)));
   };
 
   const handleValidate = async (option: { id: string; keys: string[] }) => {
@@ -180,12 +204,13 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   };
 
   const renderCreateButton = () => {
+    const disabled = loading || !canCreateInMode;
     if (createMode === "clone") {
         return (
             <button
               onClick={() => setUploadOpen(true)}
-              disabled={loading}
-              className={`px-3 py-1.5 text-sm rounded-md ${loading ? "bg-gray-300 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+              disabled={disabled}
+              className={`px-3 py-1.5 text-sm rounded-md ${disabled ? "bg-gray-300 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"}`}
             >
               <span className="inline-flex items-center gap-2">
                 <Plus className="h-4 w-4" />
@@ -198,8 +223,8 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         return (
             <button
               onClick={() => setCustomRoleOpen(true)}
-              disabled={loading}
-              className={`px-3 py-1.5 text-sm rounded-md ${loading ? "bg-gray-300 text-gray-500" : "bg-purple-600 text-white hover:bg-purple-700"}`}
+              disabled={disabled}
+              className={`px-3 py-1.5 text-sm rounded-md ${disabled ? "bg-gray-300 text-gray-500" : "bg-purple-600 text-white hover:bg-purple-700"}`}
             >
               <span className="inline-flex items-center gap-2">
                 <Plus className="h-4 w-4" />
@@ -212,8 +237,8 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         return (
             <button
               onClick={() => setDesignOpen(true)}
-              disabled={loading}
-              className={`px-3 py-1.5 text-sm rounded-md ${loading ? "bg-gray-300 text-gray-500" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+              disabled={disabled}
+              className={`px-3 py-1.5 text-sm rounded-md ${disabled ? "bg-gray-300 text-gray-500" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
             >
               <span className="inline-flex items-center gap-2">
                 <Sparkles className="h-4 w-4" />
@@ -224,7 +249,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     }
     return null;
   }
-
+  console.log("downloadsByKey", downloadsByKey)
   return (
     <>
     <div className="space-y-6">
@@ -299,9 +324,9 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
                  </div>
                   <button
                     onClick={() => refreshModels()}
-                    disabled={modelsLoading || Boolean(modelsDownload)}
+                    disabled={modelsLoading}
                     className={`p-1 text-xs rounded-md transition-all flex items-center gap-1 ${
-                      modelsLoading || Boolean(modelsDownload) ? "text-gray-400" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                      modelsLoading ? "text-gray-400" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
                     }`}
                     title="刷新模型状态"
                   >
@@ -313,7 +338,12 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
             <Qwen3ModelOptionsList
               options={downloadOptions}
               modelsLoading={modelsLoading}
-              modelsDownload={modelsDownload ? { key: modelsDownload.key, progress: modelsDownload.progress, message: modelsDownload.message } : null}
+              downloadsByKey={Object.fromEntries(
+                Object.entries(downloadsByKey).map(([key, v]) => [
+                  key,
+                  v ? { key: v.key, progress: v.progress, message: v.message, status: v.status, totalBytes: v.totalBytes, downloadedBytes: v.downloadedBytes } : null,
+                ])
+              )}
               getModelStatus={getModelStatus}
               getBadgeInfo={getBadgeInfo}
               getProvider={getProvider}
@@ -321,6 +351,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
                 setProviderByOptionId((prev) => ({ ...prev, [id]: provider }))
               }
               onDownload={handleDownload}
+              onStop={handleStop}
               onValidate={handleValidate}
               onCopyPath={handleCopyPath}
               copiedOptionId={copiedOptionId}

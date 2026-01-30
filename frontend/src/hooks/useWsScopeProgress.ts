@@ -32,7 +32,13 @@ export function useWsScopeProgress(options: UseWsScopeProgressOptions) {
 
   useEffect(() => {
     const handler = (message: WebSocketMessage) => {
-      if (!message || (message.type !== "progress" && message.type !== "completed" && message.type !== "error")) {
+      if (
+        !message ||
+        (message.type !== "progress" &&
+          message.type !== "completed" &&
+          message.type !== "error" &&
+          message.type !== "cancelled")
+      ) {
         return;
       }
       const msgScope = (message as any).scope as string | undefined;

@@ -2,7 +2,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from modules.app_paths import uploads_dir
 
@@ -48,6 +48,15 @@ QWEN3_TTS_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "size": "1.7B",
         "display_names": ["Qwen3-TTS-12Hz-1.7B-VoiceDesign", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"],
     },
+}
+
+
+QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY: Dict[str, int] = {
+    "custom_0_6b": int(2.5 * 1024 * 1024 * 1024),
+    "voice_design_1_7b": int(4.52 * 1024 * 1024 * 1024),
+    "custom_1_7b": int(4.52 * 1024 * 1024 * 1024),
+    "base_1_7b": int(4.54 * 1024 * 1024 * 1024),
+    "base_0_6b": int(2.52 * 1024 * 1024 * 1024),
 }
 
 
@@ -216,3 +225,78 @@ def download_model_snapshot(key: str, provider: str, target_dir: Path) -> Dict[s
         "path": str(target_dir),
         "snapshot_path": str(downloaded_dir),
     }
+
+
+def _sum_hf_repo_size(repo_id: str) -> Optional[int]:
+    try:
+        from huggingface_hub import HfApi
+    except Exception:
+        return None
+    try:
+        api = HfApi()
+        info = api.model_info(repo_id, files_metadata=True)
+        siblings = getattr(info, "siblings", None) or []
+        total = 0
+        for item in siblings:
+            size = getattr(item, "size", None)
+            if size is None and isinstance(item, dict):
+                lfs = item.get("lfs")
+                if isinstance(lfs, dict):
+                    size = lfs.get("size")
+                if size is None:
+                    size = item.get("size")
+            if size:
+                total += int(size)
+        return total or None
+    except Exception:
+        return None
+
+
+def _sum_modelscope_repo_size(model_id: str) -> Optional[int]:
+    try:
+        from modelscope.hub.api import HubApi
+    except Exception:
+        return None
+    try:
+        api = HubApi()
+        files = None
+        if hasattr(api, "list_model_files"):
+            try:
+                files = api.list_model_files(model_id, recursive=True)
+            except Exception:
+                files = None
+        if not files:
+            try:
+                model = api.get_model(model_id)
+            except Exception:
+                model = None
+            if isinstance(model, dict):
+                files = model.get("model_files")
+            else:
+                files = getattr(model, "model_files", None)
+        total = 0
+        for item in files or []:
+            size = getattr(item, "size", None)
+            if size is None and isinstance(item, dict):
+                size = item.get("size") or item.get("file_size") or item.get("file_size_bytes")
+            if size:
+                total += int(size)
+        return total or None
+    except Exception:
+        return None
+
+
+def get_model_total_bytes(key: str, provider: str) -> Optional[int]:
+    if key not in QWEN3_TTS_MODEL_REGISTRY:
+        return None
+    const_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(key)
+    if const_bytes is not None:
+        return const_bytes
+    provider = (provider or "").strip().lower()
+    if provider == "hf":
+        repo_id = QWEN3_TTS_MODEL_REGISTRY[key]["hf"]
+        return _sum_hf_repo_size(repo_id)
+    if provider == "modelscope":
+        model_id = QWEN3_TTS_MODEL_REGISTRY[key]["ms"]
+        return _sum_modelscope_repo_size(model_id)
+    return None

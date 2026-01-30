@@ -48,7 +48,7 @@ export interface VideoProcessRequest {
 }
 
 export interface WebSocketMessage {
-  type: "progress" | "completed" | "error" | "heartbeat" | "pong";
+  type: "progress" | "completed" | "error" | "cancelled" | "heartbeat" | "pong";
   task_id?: string;
   progress?: number;
   message?: string;

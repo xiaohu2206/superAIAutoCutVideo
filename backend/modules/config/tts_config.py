@@ -267,7 +267,7 @@ class TtsEngineConfigManager:
             },
             {
                 'provider': 'qwen3_tts',
-                'display_name': 'Qwen3-TTS 本地模型',
+                'display_name': 'Qwen3-TTS(本地)',
                 'description': '离线语音合成与快速声音克隆（需先下载模型）',
                 'required_fields': [],
                 'optional_fields': []

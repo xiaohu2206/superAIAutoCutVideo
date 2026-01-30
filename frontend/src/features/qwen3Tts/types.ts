@@ -39,7 +39,20 @@ export type Qwen3TtsVoice = {
   updated_at: string;
 };
 
-export type Qwen3TtsDownloadProvider = "hf" | "modelscope";
+export type Qwen3TtsDownloadProvider = "modelscope" | "hf";
+
+export type Qwen3TtsDownloadTask = {
+  key: string;
+  provider: Qwen3TtsDownloadProvider;
+  progress?: number;
+  message?: string;
+  phase?: string;
+  status?: string;
+  type?: string;
+  downloaded_bytes?: number;
+  total_bytes?: number | null;
+  [key: string]: any;
+};
 
 export type Qwen3TtsUploadVoiceInput = {
   file: File;
@@ -72,4 +85,3 @@ export type Qwen3TtsPatchVoiceInput = Partial<Pick<
   Qwen3TtsVoice,
   "name" | "model_key" | "language" | "ref_text" | "instruct" | "x_vector_only_mode" | "speaker"
 >>;
-
