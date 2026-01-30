@@ -1,25 +1,33 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader, Palette, X } from "lucide-react";
-import type { Qwen3TtsDesignCloneCreateInput } from "../types";
+import { Loader, Palette, X, Save } from "lucide-react";
+import type { Qwen3TtsDesignCloneCreateInput, Qwen3TtsVoice, Qwen3TtsPatchVoiceInput } from "../types";
 import { LANGUAGE_OPTIONS } from "../constants";
 
 export type Qwen3VoiceDesignDialogResult = {
   input: Qwen3TtsDesignCloneCreateInput;
 };
 
+export type Qwen3VoiceDesignDialogEditResult = {
+  edit: true;
+  voiceId: string;
+  patch: Qwen3TtsPatchVoiceInput;
+};
+
 export type Qwen3VoiceDesignDialogProps = {
   isOpen: boolean;
   voiceDesignModelKeys: string[];
   baseModelKeys: string[];
+  voice?: Qwen3TtsVoice | null;
   onClose: () => void;
-  onSubmit: (result: Qwen3VoiceDesignDialogResult) => Promise<void>;
+  onSubmit: (result: Qwen3VoiceDesignDialogResult | Qwen3VoiceDesignDialogEditResult) => Promise<void>;
 };
 
 export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
   isOpen,
   voiceDesignModelKeys,
   baseModelKeys,
+  voice,
   onClose,
   onSubmit,
 }) => {
@@ -40,13 +48,23 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
     if (!isOpen) return;
     setError(null);
     setLoading(false);
-    setName("");
-    setDesignModelKey(defaultDesignModelKey);
-    setBaseModelKey(defaultBaseModelKey);
-    setLanguage("Auto");
-    setText("");
-    setInstruct("");
-  }, [isOpen, defaultDesignModelKey, defaultBaseModelKey]);
+
+    if (voice) {
+      setName(voice.name || "");
+      setDesignModelKey(voice.meta?.voice_design_model_key || defaultDesignModelKey);
+      setBaseModelKey(voice.model_key || defaultBaseModelKey);
+      setLanguage(voice.language || "Auto");
+      setText(voice.ref_text || "");
+      setInstruct(voice.instruct || "");
+    } else {
+      setName("");
+      setDesignModelKey(defaultDesignModelKey);
+      setBaseModelKey(defaultBaseModelKey);
+      setLanguage("Auto");
+      setText("");
+      setInstruct("");
+    }
+  }, [isOpen, voice, defaultDesignModelKey, defaultBaseModelKey]);
 
   const canSubmit = Boolean(name) && Boolean(text) && Boolean(instruct) && !loading;
 
@@ -58,19 +76,36 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
     setLoading(true);
     setError(null);
     try {
-      await onSubmit({
-        input: {
-          name: name.trim(),
-          model_key: baseModelKey, // The final voice uses the Base model for cloning
-          voice_design_model_key: designModelKey, // Used for generating the reference audio
-          language: language.trim() || "Auto",
-          text: text.trim(),
-          instruct: instruct.trim(),
-        },
-      });
+      if (voice) {
+        // Edit submit
+        const patch: Qwen3TtsPatchVoiceInput = {
+          name: name.trim() || undefined,
+          model_key: baseModelKey,
+          language: (language || "Auto").trim() || "Auto",
+          ref_text: text.trim() || undefined,
+          instruct: instruct.trim() || undefined,
+        };
+        await onSubmit({
+          edit: true,
+          voiceId: voice.id,
+          patch,
+        });
+      } else {
+        // Create submit
+        await onSubmit({
+          input: {
+            name: name.trim(),
+            model_key: baseModelKey, // The final voice uses the Base model for cloning
+            voice_design_model_key: designModelKey, // Used for generating the reference audio
+            language: language.trim() || "Auto",
+            text: text.trim(),
+            instruct: instruct.trim(),
+          },
+        });
+      }
       onClose();
     } catch (e: any) {
-      setError(e?.message || "创建失败");
+      setError(e?.message || (voice ? "保存失败" : "创建失败"));
     } finally {
       setLoading(false);
     }
@@ -86,7 +121,7 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
           <div className="flex items-center justify-between p-5 border-b border-gray-200">
             <div className="flex items-center gap-2">
               <Palette className="h-5 w-5 text-indigo-700" />
-              <h3 className="text-lg font-semibold text-gray-900">设计新音色</h3>
+              <h3 className="text-lg font-semibold text-gray-900">{voice ? "编辑设计音色" : "设计新音色"}</h3>
             </div>
             <button
               onClick={onClose}
@@ -117,9 +152,9 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
                 <label className="block text-sm text-gray-700 mb-1">设计模型</label>
                 <select
                   value={designModelKey}
-                  disabled={loading}
+                  disabled={loading || !!voice} // Disable design model selection during edit if we can't update it
                   onChange={(e) => setDesignModelKey(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white disabled:bg-gray-100 disabled:text-gray-500"
                 >
                   {(voiceDesignModelKeys.length ? voiceDesignModelKeys : [defaultDesignModelKey]).map((k) => (
                     <option key={k} value={k}>
@@ -202,8 +237,8 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
               }`}
             >
               <span className="inline-flex items-center gap-2">
-                {loading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                生成并创建
+                {loading ? <Loader className="h-4 w-4 animate-spin" /> : (voice ? <Save className="h-4 w-4" /> : null)}
+                {voice ? "保存" : "生成并创建"}
               </span>
             </button>
           </div>

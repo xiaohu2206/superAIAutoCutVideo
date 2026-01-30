@@ -48,11 +48,7 @@ const statusText = (status: string) => {
 };
 
 const getDefaultPreviewText = (v: Qwen3TtsVoice) => {
-  const lang = String(v.language || "").toLowerCase();
-  const code = (lang.split("-")[0] || "").trim();
-  if (!code || code === "auto" || code === "zh") return "您好大哥，我是智障配音。";
-  if (code === "en") return "Hello, welcome to smart voiceover.";
-  return "Hello, welcome to smart voiceover.";
+  return "";
 };
 
 const KindIcon = ({ kind }: { kind: string }) => {
@@ -149,6 +145,7 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
         provider,
         config_id: configId,
         text: getDefaultPreviewText(voice),
+        language: voice.language,
       });
       if (previewTokenRef.current !== token) return;
       const url = res?.data?.audio_url || res?.data?.sample_wav_url;

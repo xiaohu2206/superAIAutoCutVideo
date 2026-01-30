@@ -3,11 +3,10 @@ import { Plus, RefreshCw, ShieldAlert, Layers, Mic2, Palette, Sparkles } from "l
 import { message } from "@/services/message";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
 import { useQwen3Models } from "../hooks/useQwen3Models";
-import Qwen3VoiceEditDialog from "./Qwen3VoiceEditDialog";
 import Qwen3VoiceList from "./Qwen3VoiceList";
-import Qwen3VoiceUploadDialog, { type Qwen3VoiceUploadDialogResult } from "./Qwen3VoiceUploadDialog";
-import Qwen3CustomRoleDialog, { type Qwen3CustomRoleDialogResult } from "./Qwen3CustomRoleDialog.tsx";
-import Qwen3VoiceDesignDialog, { type Qwen3VoiceDesignDialogResult } from "./Qwen3VoiceDesignDialog.tsx";
+import Qwen3VoiceUploadDialog, { type Qwen3VoiceUploadDialogResult, type Qwen3VoiceUploadDialogEditResult } from "./Qwen3VoiceUploadDialog";
+import Qwen3CustomRoleDialog, { type Qwen3CustomRoleDialogResult, type Qwen3CustomRoleDialogEditResult } from "./Qwen3CustomRoleDialog.tsx";
+import Qwen3VoiceDesignDialog, { type Qwen3VoiceDesignDialogResult, type Qwen3VoiceDesignDialogEditResult } from "./Qwen3VoiceDesignDialog.tsx";
 import Qwen3ModelOptionsList from "./Qwen3ModelOptionsList";
 import type { Qwen3TtsDownloadProvider, Qwen3TtsVoice } from "../types";
 
@@ -54,6 +53,19 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   
   const [providerByOptionId, setProviderByOptionId] = useState<Record<string, Qwen3TtsDownloadProvider>>({});
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
+
+  // Helper to close all dialogs
+  const closeAllDialogs = () => {
+    setUploadOpen(false);
+    setCustomRoleOpen(false);
+    setDesignOpen(false);
+    setEditVoice(null);
+  };
+
+  // Determine which dialog should be open based on edit state or create state
+  const isUploadDialogOpen = uploadOpen || (!!editVoice && (editVoice.kind === "clone" || (editVoice.kind !== "custom_role" && editVoice.kind !== "design_clone")));
+  const isCustomRoleDialogOpen = customRoleOpen || (!!editVoice && editVoice.kind === "custom_role");
+  const isDesignDialogOpen = designOpen || (!!editVoice && editVoice.kind === "design_clone");
 
   // Filter model keys for each mode
   const baseModelKeys = useMemo(() => {
@@ -181,26 +193,47 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   };
 
 
-  const handleUploadSubmit = async (result: Qwen3VoiceUploadDialogResult) => {
-    const created = await upload(result.input);
-    message.success("上传成功");
-    if (result.autoStartClone) {
-      try {
-        await startClone(created.id);
-      } catch (e: any) {
-        message.warning(e?.message || "自动开始克隆失败，可在列表手动点击“克隆”");
-      }
+  const handleUploadSubmit = async (result: Qwen3VoiceUploadDialogResult | Qwen3VoiceUploadDialogEditResult) => {
+    if ('edit' in result && result.edit) {
+        await patch(result.voiceId, result.patch);
+        message.success("已保存");
+    } else {
+        const r = result as Qwen3VoiceUploadDialogResult;
+        const created = await upload(r.input);
+        message.success("上传成功");
+        if (r.autoStartClone) {
+          try {
+            await startClone(created.id);
+          } catch (e: any) {
+            message.warning(e?.message || "自动开始克隆失败，可在列表手动点击“克隆”");
+          }
+        }
     }
+    closeAllDialogs();
   };
 
-  const handleCustomRoleSubmit = async (result: Qwen3CustomRoleDialogResult) => {
-    await createCustomRole(result.input);
-    message.success("创建成功");
+  const handleCustomRoleSubmit = async (result: Qwen3CustomRoleDialogResult | Qwen3CustomRoleDialogEditResult) => {
+    if ('edit' in result && result.edit) {
+        await patch(result.voiceId, result.patch);
+        message.success("已保存");
+    } else {
+        const r = result as Qwen3CustomRoleDialogResult;
+        await createCustomRole(r.input);
+        message.success("创建成功");
+    }
+    closeAllDialogs();
   };
 
-  const handleDesignSubmit = async (result: Qwen3VoiceDesignDialogResult) => {
-    await createDesignClone(result.input);
-    message.success("已创建并开始生成");
+  const handleDesignSubmit = async (result: Qwen3VoiceDesignDialogResult | Qwen3VoiceDesignDialogEditResult) => {
+    if ('edit' in result && result.edit) {
+        await patch(result.voiceId, result.patch);
+        message.success("已保存");
+    } else {
+        const r = result as Qwen3VoiceDesignDialogResult;
+        await createDesignClone(r.input);
+        message.success("已创建并开始生成");
+    }
+    closeAllDialogs();
   };
 
   const renderCreateButton = () => {
@@ -390,36 +423,28 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         />
       </section>
       <Qwen3VoiceUploadDialog
-        isOpen={uploadOpen}
+        isOpen={isUploadDialogOpen}
+        voice={isUploadDialogOpen && editVoice?.kind === "clone" ? editVoice : undefined}
         modelKeys={baseModelKeys}
-        onClose={() => setUploadOpen(false)}
+        onClose={closeAllDialogs}
         onSubmit={handleUploadSubmit}
       />
 
       <Qwen3CustomRoleDialog
-        isOpen={customRoleOpen}
+        isOpen={isCustomRoleDialogOpen}
+        voice={isCustomRoleDialogOpen ? editVoice : undefined}
         modelKeys={customModelKeys}
-        onClose={() => setCustomRoleOpen(false)}
+        onClose={closeAllDialogs}
         onSubmit={handleCustomRoleSubmit}
       />
 
       <Qwen3VoiceDesignDialog
-        isOpen={designOpen}
+        isOpen={isDesignDialogOpen}
+        voice={isDesignDialogOpen ? editVoice : undefined}
         voiceDesignModelKeys={designModelKeys}
         baseModelKeys={baseModelKeys}
-        onClose={() => setDesignOpen(false)}
+        onClose={closeAllDialogs}
         onSubmit={handleDesignSubmit}
-      />
-
-      <Qwen3VoiceEditDialog
-        isOpen={Boolean(editVoice)}
-        voice={editVoice}
-        modelKeys={allModelKeys}
-        onClose={() => setEditVoice(null)}
-        onSubmit={async (voiceId, p) => {
-          await patch(voiceId, p);
-          message.success("已保存");
-        }}
       />
     </>
   );
