@@ -433,6 +433,7 @@ async def test_tts_connection(config_id: str, proxy_url: Optional[str] = Query(N
 
 class VoicePreviewRequest(BaseModel):
     text: Optional[str] = Field(None, description="试听文本")
+    language: Optional[str] = Field(None, description="语言代码（如 chinese, english 或 zh, en）")
     provider: Optional[str] = Field(None, description="提供商标识，默认使用激活配置")
     config_id: Optional[str] = Field(None, description="使用指定配置")
 
@@ -559,7 +560,43 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
                 filename = f"qwen3_{safe_vid}_preview_{ts}.wav"
                 out_path = _get_preview_tmp_dir() / filename
-                text = (req.text or "您好，欢迎使用智能配音。")
+
+                text = v.ref_text or req.text
+                if not text:
+                    # Determine language: explicit req > voice config > auto
+                    lang = (req.language or (v.language if v else None) or "auto").lower().strip()
+                    
+                    # Default text map (supports both full names and codes)
+                    default_texts = {
+                        "auto": "您好，欢迎使用智能配音。",
+                        "chinese": "您好，欢迎使用智能配音。",
+                        "zh": "您好，欢迎使用智能配音。",
+                        "english": "Hello, welcome to smart voiceover.",
+                        "en": "Hello, welcome to smart voiceover.",
+                        "japanese": "こんにちは、スマート音声合成へようこそ。",
+                        "ja": "こんにちは、スマート音声合成へようこそ。",
+                        "korean": "안녕하세요, 스마트 보이스오버에 오신 것을 환영합니다.",
+                        "ko": "안녕하세요, 스마트 보이스오버에 오신 것을 환영합니다.",
+                        "german": "Hallo, willkommen bei der intelligenten Sprachsynthese.",
+                        "de": "Hallo, willkommen bei der intelligenten Sprachsynthese.",
+                        "french": "Bonjour, bienvenue sur la voix off intelligente.",
+                        "fr": "Bonjour, bienvenue sur la voix off intelligente.",
+                        "spanish": "Hola, bienvenido al doblaje inteligente.",
+                        "es": "Hola, bienvenido al doblaje inteligente.",
+                        "italian": "Ciao, benvenuto nel doppiaggio intelligente.",
+                        "it": "Ciao, benvenuto nel doppiaggio intelligente.",
+                        "portuguese": "Olá, bem-vindo à locução inteligente.",
+                        "pt": "Olá, bem-vindo à locução inteligente.",
+                        "russian": "Здравствуйте, добро пожаловать в интеллектуальное озвучивание.",
+                        "ru": "Здравствуйте, добро пожаловать в интеллектуальное озвучивание.",
+                    }
+                    
+                    if lang in default_texts:
+                        text = default_texts[lang]
+                    else:
+                        # Fallback for codes like "zh-CN" -> "zh"
+                        short_lang = lang.split('-')[0]
+                        text = default_texts.get(short_lang, "您好，欢迎使用智能配音。")
 
                 device_s = None
                 if cfg:

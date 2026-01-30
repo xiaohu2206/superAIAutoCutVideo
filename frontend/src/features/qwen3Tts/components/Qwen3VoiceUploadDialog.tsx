@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { Loader, Upload, X, FileAudio, AlertCircle, Check } from "lucide-react";
-import type { Qwen3TtsUploadVoiceInput } from "../types";
+import { Loader, Upload, X, FileAudio, AlertCircle, Check, Save } from "lucide-react";
+import type { Qwen3TtsUploadVoiceInput, Qwen3TtsVoice, Qwen3TtsPatchVoiceInput } from "../types";
 import { createPortal } from "react-dom";
 import { LANGUAGE_OPTIONS } from "../constants";
 
@@ -11,16 +11,23 @@ export type Qwen3VoiceUploadDialogResult = {
   autoStartClone: boolean;
 };
 
+export type Qwen3VoiceUploadDialogEditResult = {
+  edit: true;
+  voiceId: string;
+  patch: Qwen3TtsPatchVoiceInput;
+};
+
 export type Qwen3VoiceUploadDialogProps = {
   isOpen: boolean;
   modelKeys: string[];
+  voice?: Qwen3TtsVoice | null;
   onClose: () => void;
-  onSubmit: (result: Qwen3VoiceUploadDialogResult) => Promise<void>;
+  onSubmit: (result: Qwen3VoiceUploadDialogResult | Qwen3VoiceUploadDialogEditResult) => Promise<void>;
 };
 
 // --- Logic Hook ---
 
-const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, onClose, onSubmit }: Qwen3VoiceUploadDialogProps) => {
+const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }: Qwen3VoiceUploadDialogProps) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -35,21 +42,35 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, onClose, onSubmit }: Qwen3
   const [xVectorOnlyMode, setXVectorOnlyMode] = useState<boolean>(true);
   const [autoStartClone, setAutoStartClone] = useState<boolean>(true);
 
-  // Reset state when dialog opens
+  // Reset state when dialog opens or voice changes
   useEffect(() => {
     if (isOpen) {
       setError(null);
       setLoading(false);
-      setFile(null);
-      setName("");
-      setModelKey(defaultModelKey);
-      setLanguage("Auto");
-      setRefText("");
-      setInstruct("");
-      setXVectorOnlyMode(true);
-      setAutoStartClone(true);
+      
+      if (voice) {
+        // Edit mode
+        setFile(null); // File is optional in edit mode
+        setName(voice.name || "");
+        setModelKey(voice.model_key || defaultModelKey);
+        setLanguage(voice.language || "Auto");
+        setRefText(voice.ref_text || "");
+        setInstruct(voice.instruct || "");
+        setXVectorOnlyMode(voice.x_vector_only_mode);
+        setAutoStartClone(false); // Usually not needed for edit unless we re-upload
+      } else {
+        // Create mode
+        setFile(null);
+        setName("");
+        setModelKey(defaultModelKey);
+        setLanguage("Auto");
+        setRefText("");
+        setInstruct("");
+        setXVectorOnlyMode(true);
+        setAutoStartClone(true);
+      }
     }
-  }, [isOpen, defaultModelKey]);
+  }, [isOpen, voice, defaultModelKey]);
 
   const validateAndSetFile = useCallback((newFile: File) => {
     // Simple check, can be more robust
@@ -61,45 +82,64 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, onClose, onSubmit }: Qwen3
     setError(null);
     
     // Auto-fill name if empty
-    if (!name) {
+    if (!name && !voice) {
       const fileNameWithoutExt = newFile.name.replace(/\.[^/.]+$/, "");
       setName(fileNameWithoutExt);
     }
-  }, [name]);
+  }, [name, voice]);
 
   const handleSubmit = async () => {
-    if (!file) {
+    if (!voice && !file) {
       setError("请选择音频文件");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      await onSubmit({
-        input: {
-          file,
-          name: name.trim() || undefined,
-          model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
-          language: (language || "Auto").trim() || "Auto",
-          ref_text: refText.trim() || undefined,
-          instruct: instruct.trim() || undefined,
-          x_vector_only_mode: Boolean(xVectorOnlyMode),
-        },
-        autoStartClone: Boolean(autoStartClone),
-      });
+      if (voice) {
+        // Edit submit
+        const patch: Qwen3TtsPatchVoiceInput = {
+            name: name.trim() || undefined,
+            model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
+            language: (language || "Auto").trim() || "Auto",
+            ref_text: refText.trim() || undefined,
+            instruct: instruct.trim() || undefined,
+            x_vector_only_mode: Boolean(xVectorOnlyMode),
+        };
+        await onSubmit({
+            edit: true,
+            voiceId: voice.id,
+            patch
+        });
+      } else {
+        // Create submit
+        if (!file) throw new Error("File is required for creation");
+        await onSubmit({
+            input: {
+            file,
+            name: name.trim() || undefined,
+            model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
+            language: (language || "Auto").trim() || "Auto",
+            ref_text: refText.trim() || undefined,
+            instruct: instruct.trim() || undefined,
+            x_vector_only_mode: Boolean(xVectorOnlyMode),
+            },
+            autoStartClone: Boolean(autoStartClone),
+        });
+      }
       onClose();
     } catch (e: any) {
-      setError(e?.message || "上传失败");
+      setError(e?.message || (voice ? "保存失败" : "上传失败"));
     } finally {
       setLoading(false);
     }
   };
 
-  const canSubmit = Boolean(file) && !loading;
+  const canSubmit = (Boolean(voice) || Boolean(file)) && !loading;
 
   return {
     state: {
-      loading, error, file, name, modelKey, language, refText, instruct, xVectorOnlyMode, autoStartClone, canSubmit, defaultModelKey
+      loading, error, file, name, modelKey, language, refText, instruct, xVectorOnlyMode, autoStartClone, canSubmit, defaultModelKey, isEdit: Boolean(voice)
     },
     actions: {
       setFile: validateAndSetFile,
@@ -175,8 +215,8 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
                 <Upload className="h-5 w-5 text-blue-600" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-gray-900">上传参考音频</h3>
-                <p className="text-xs text-gray-500">上传一段音频用于声音克隆</p>
+                <h3 className="text-base font-bold text-gray-900">{state.isEdit ? "编辑克隆音色" : "上传参考音频"}</h3>
+                <p className="text-xs text-gray-500">{state.isEdit ? "修改音色配置" : "上传一段音频用于声音克隆"}</p>
               </div>
             </div>
             <button
@@ -196,71 +236,73 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
               </div>
             )}
 
-            {/* File Upload Area */}
-            <div>
-              <Label required>音频文件</Label>
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => !state.loading && fileInputRef.current?.click()}
-                className={`
-                  relative border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all duration-200 group
-                  ${isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"}
-                  ${state.file ? "bg-blue-50/50 border-blue-200" : ""}
-                `}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".wav,.mp3,.m4a,.flac,.ogg,.aac,audio/*"
-                  disabled={state.loading}
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                
-                {state.file ? (
-                  <div className="flex flex-row items-center justify-between px-2">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
-                        <FileAudio className="h-5 w-5" />
+            {/* File Upload Area - Only show in Create Mode */}
+            {!state.isEdit && (
+              <div>
+                <Label required>音频文件</Label>
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => !state.loading && fileInputRef.current?.click()}
+                  className={`
+                    relative border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all duration-200 group
+                    ${isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"}
+                    ${state.file ? "bg-blue-50/50 border-blue-200" : ""}
+                  `}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".wav,.mp3,.m4a,.flac,.ogg,.aac,audio/*"
+                    disabled={state.loading}
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  
+                  {state.file ? (
+                    <div className="flex flex-row items-center justify-between px-2">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
+                          <FileAudio className="h-5 w-5" />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{state.file.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {(state.file.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{state.file.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {(state.file.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          actions.setFile(null as any); // Force null
+                        }}
+                        className="text-xs text-gray-500 hover:text-red-600 font-medium px-2 py-1 hover:bg-red-50 rounded"
+                      >
+                        更换
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center text-gray-500 py-1">
+                      <div className={`
+                        h-10 w-10 rounded-full flex items-center justify-center mb-2 transition-colors
+                        ${isDragging ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500"}
+                      `}>
+                        <Upload className="h-5 w-5" />
                       </div>
+                      <p className="text-sm font-medium text-gray-700">
+                        点击或拖拽音频文件到此处
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        支持 WAV, MP3, M4A, FLAC, OGG, AAC
+                      </p>
                     </div>
-                    <button 
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        actions.setFile(null as any); // Force null
-                      }}
-                      className="text-xs text-gray-500 hover:text-red-600 font-medium px-2 py-1 hover:bg-red-50 rounded"
-                    >
-                      更换
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center text-gray-500 py-1">
-                    <div className={`
-                      h-10 w-10 rounded-full flex items-center justify-center mb-2 transition-colors
-                      ${isDragging ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500"}
-                    `}>
-                      <Upload className="h-5 w-5" />
-                    </div>
-                    <p className="text-sm font-medium text-gray-700">
-                      点击或拖拽音频文件到此处
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      支持 WAV, MP3, M4A, FLAC, OGG, AAC
-                    </p>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Name */}
@@ -366,22 +408,24 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
               </div>
             </div>
 
-            {/* Footer Options */}
-            <div className="flex items-center gap-2 pt-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${state.autoStartClone ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'}`}>
-                  {state.autoStartClone && <Check className="w-3.5 h-3.5 text-white" />}
-                  <input
-                    type="checkbox"
-                    checked={state.autoStartClone}
-                    disabled={state.loading}
-                    onChange={(e) => actions.setAutoStartClone(e.target.checked)}
-                    className="hidden"
-                  />
-                </div>
-                <span className="text-sm text-gray-700">上传成功后自动开始克隆（预处理）</span>
-              </label>
-            </div>
+            {/* Footer Options - Only in Create Mode */}
+            {!state.isEdit && (
+              <div className="flex items-center gap-2 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${state.autoStartClone ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'}`}>
+                    {state.autoStartClone && <Check className="w-3.5 h-3.5 text-white" />}
+                    <input
+                      type="checkbox"
+                      checked={state.autoStartClone}
+                      disabled={state.loading}
+                      onChange={(e) => actions.setAutoStartClone(e.target.checked)}
+                      className="hidden"
+                    />
+                  </div>
+                  <span className="text-sm text-gray-700">上传成功后自动开始克隆（预处理）</span>
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Footer Actions */}
@@ -407,8 +451,8 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
               `}
             >
               <span className={`flex items-center gap-2 ${state.loading ? 'opacity-0' : 'opacity-100'}`}>
-                <Upload className="h-4 w-4" />
-                开始上传
+                {state.isEdit ? <Save className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                {state.isEdit ? "保存修改" : "开始上传"}
               </span>
               {state.loading && (
                 <div className="absolute inset-0 flex items-center justify-center">
