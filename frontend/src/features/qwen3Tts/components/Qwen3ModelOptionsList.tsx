@@ -1,22 +1,24 @@
 import React from "react";
-import { Box, Download, ShieldAlert, Copy, Check } from "lucide-react";
+import { Box, Download, ShieldAlert, Copy, Check, Square } from "lucide-react";
 import type { Qwen3TtsDownloadProvider } from "../types";
+import { Qwen3DownloadProgress } from "./Qwen3DownloadProgress";
 
 type OptionItem = { id: string; label: string; keys: string[] };
 
 type Status = { existsAll: boolean; validAll: boolean; missing: string[] };
 type BadgeInfo = { className: string; text: string };
-type DownloadInfo = { key: string; progress: number; message?: string } | null;
+type DownloadInfo = { key: string; progress: number; message?: string; status?: string; downloadedBytes?: number; totalBytes?: number | null } | null;
 
 export type Qwen3ModelOptionsListProps = {
   options: OptionItem[];
   modelsLoading: boolean;
-  modelsDownload: DownloadInfo;
+  downloadsByKey: Record<string, DownloadInfo>;
   getModelStatus: (keys: string[]) => Status;
   getBadgeInfo: (status: Status) => BadgeInfo;
   getProvider: (optionId: string) => Qwen3TtsDownloadProvider;
   onChangeProvider: (optionId: string, provider: Qwen3TtsDownloadProvider) => void;
   onDownload: (option: OptionItem) => Promise<void> | void;
+  onStop: (option: OptionItem) => Promise<void> | void;
   onValidate: (option: OptionItem) => Promise<void> | void;
   onCopyPath: (option: OptionItem) => Promise<void> | void;
   copiedOptionId: string | null;
@@ -25,12 +27,13 @@ export type Qwen3ModelOptionsListProps = {
 const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
   options,
   modelsLoading,
-  modelsDownload,
+  downloadsByKey,
   getModelStatus,
   getBadgeInfo,
   getProvider,
   onChangeProvider,
   onDownload,
+  onStop,
   onValidate,
   onCopyPath,
   copiedOptionId,
@@ -40,7 +43,10 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
       {options.map((option) => {
         const status = getModelStatus(option.keys);
         const badge = getBadgeInfo(status);
-        const isDownloading = Boolean(modelsDownload) && option.keys.includes(modelsDownload!.key);
+        const activeDownloads = option.keys.map((k) => downloadsByKey[k]).filter(Boolean) as DownloadInfo[];
+        const isDownloading = activeDownloads.length > 0;
+        const currentDownload = activeDownloads[0];
+        const canStop = currentDownload?.status === "running";
 
         return (
           <div
@@ -66,31 +72,30 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
                       {badge.text}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">包含: {option.keys.join(", ")}</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 self-end sm:self-center">
-                {!status.existsAll && (
+                {!status.validAll && (
                   <select
                     value={getProvider(option.id)}
                     onChange={(e) =>
                       onChangeProvider(option.id, e.target.value as Qwen3TtsDownloadProvider)
                     }
                     className="text-[11px] border rounded px-1.5 py-1 bg-gray-50 text-gray-600 h-7"
-                    disabled={modelsLoading || Boolean(modelsDownload)}
+                    disabled={modelsLoading || isDownloading}
                     title="下载源"
                   >
-                    <option value="hf">HuggingFace</option>
-                    <option value="modelscope">ModelScope</option>
+                    <option value="modelscope">国内（ModelScope）</option>
+                    <option value="hf">国外（HuggingFace）</option>
                   </select>
                 )}
 
                 <div className="flex items-center border rounded-md overflow-hidden bg-white">
-                  {!status.existsAll && (
+                  {!status.validAll && (
                     <button
                       onClick={() => onDownload(option)}
-                      disabled={modelsLoading || Boolean(modelsDownload)}
+                      disabled={modelsLoading || isDownloading}
                       className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-blue-600 font-medium disabled:bg-gray-50 disabled:text-gray-400"
                       title="下载模型"
                     >
@@ -98,9 +103,20 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
                     </button>
                   )}
 
+                  {isDownloading && (
+                    <button
+                      onClick={() => onStop(option)}
+                      disabled={modelsLoading || !canStop}
+                      className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-red-600 font-medium disabled:bg-gray-50 disabled:text-gray-400"
+                      title="停止下载"
+                    >
+                      <Square className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+
                   <button
                     onClick={() => onValidate(option)}
-                    disabled={modelsLoading || Boolean(modelsDownload)}
+                    disabled={modelsLoading || isDownloading}
                     className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
                     title="校验完整性"
                   >
@@ -109,7 +125,7 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
 
                   <button
                     onClick={() => onCopyPath(option)}
-                    disabled={modelsLoading || Boolean(modelsDownload)}
+                    disabled={modelsLoading || isDownloading}
                     className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
                     title="复制路径"
                   >
@@ -123,25 +139,7 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
               </div>
             </div>
 
-            {isDownloading && (
-              <div className="mt-3 pt-2 border-t border-gray-100">
-                <div className="flex items-center justify-between text-[11px] text-gray-600 mb-1">
-                  <span className="truncate">{modelsDownload?.message || "下载中…"}</span>
-                  <span className="tabular-nums">{Math.round(modelsDownload?.progress || 0)}%</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 transition-all duration-300"
-                    style={{
-                      width: `${Math.max(
-                        0,
-                        Math.min(100, modelsDownload?.progress || 0)
-                      )}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )}
+            <Qwen3DownloadProgress download={currentDownload} />
           </div>
         );
       })}

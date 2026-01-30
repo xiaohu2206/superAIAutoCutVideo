@@ -52,9 +52,6 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, onClose, onSubmit }: Qwen3
   }, [isOpen, defaultModelKey]);
 
   const validateAndSetFile = useCallback((newFile: File) => {
-    const validTypes = [
-      "audio/wav", "audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/flac", "audio/ogg", "audio/aac"
-    ];
     // Simple check, can be more robust
     if (!newFile.type.startsWith("audio/") && !newFile.name.match(/\.(wav|mp3|m4a|flac|ogg|aac)$/i)) {
       setError("不支持的文件格式，请上传音频文件");
@@ -126,10 +123,6 @@ const Label: React.FC<{ children: React.ReactNode; required?: boolean }> = ({ ch
     {children}
     {required && <span className="text-red-500 ml-1">*</span>}
   </label>
-);
-
-const InputHelper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="mt-1 text-xs text-gray-500">{children}</p>
 );
 
 // --- Main Component ---
