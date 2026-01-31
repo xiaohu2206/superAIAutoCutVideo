@@ -116,7 +116,7 @@ class ContentModelConfigManager:
                 'id': 'qwen_content_generation',
                 'config': ContentModelConfig(
                     provider='qwen',
-                    api_key='your_qwen_api_key_here',
+                    api_key='',
                     base_url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
                     model_name='qwen3-max',
                     description='通义千问文案生成模型',
@@ -127,7 +127,7 @@ class ContentModelConfigManager:
                 'id': 'doubao_content_generation',
                 'config': ContentModelConfig(
                     provider='doubao',
-                    api_key='your_doubao_api_key_here',
+                    api_key='',
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
                     model_name='doubao-seed-1-6-251015',
                     description='豆包文案生成模型',
@@ -138,7 +138,7 @@ class ContentModelConfigManager:
                 'id': 'deepseek_content_generation',
                 'config': ContentModelConfig(
                     provider='deepseek',
-                    api_key='your_deepseek_api_key_here',
+                    api_key='',
                     base_url='https://api.deepseek.com/chat/completions',
                     model_name='deepseek-chat',
                     description='DeepSeek文案生成模型',
@@ -149,7 +149,7 @@ class ContentModelConfigManager:
                 'id': 'openrouter_content_generation',
                 'config': ContentModelConfig(
                     provider='openrouter',
-                    api_key='your_openrouter_api_key_here',
+                    api_key='',
                     base_url='https://openrouter.ai/api/v1/chat/completions',
                     model_name='openai/gpt-4o-mini',
                     description='OpenRouter文案生成模型（支持结构化输出）',

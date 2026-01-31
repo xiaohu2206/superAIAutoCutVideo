@@ -47,7 +47,7 @@ const statusText = (status: string) => {
   return status || "未知";
 };
 
-const getDefaultPreviewText = (v: Qwen3TtsVoice) => {
+const getDefaultPreviewText = () => {
   return "";
 };
 
@@ -144,7 +144,7 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
       const res = await ttsService.previewVoice(voice.id, {
         provider,
         config_id: configId,
-        text: getDefaultPreviewText(voice),
+        text: getDefaultPreviewText(),
         language: voice.language,
       });
       if (previewTokenRef.current !== token) return;
@@ -389,4 +389,3 @@ export const Qwen3VoiceList: React.FC<Qwen3VoiceListProps> = ({
 };
 
 export default Qwen3VoiceList;
-

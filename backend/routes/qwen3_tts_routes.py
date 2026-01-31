@@ -7,6 +7,8 @@ import time
 import shutil
 import uuid
 import wave
+import platform
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
@@ -486,14 +488,35 @@ async def stop_qwen3_model_download_by_key(key: str) -> Dict[str, Any]:
     return await _stop_download_task(key)
 
 
-@router.get("/models/open-path", summary="返回Qwen3-TTS模型本地路径")
+@router.get("/models/open-path", summary="在系统文件管理器中打开Qwen3-TTS模型目录")
 async def open_qwen3_model_path(key: str = Query(..., description="模型key")) -> Dict[str, Any]:
     try:
         pm = Qwen3TTSPathManager()
-        p = pm.model_path(key)
-        return {"success": True, "data": {"key": key, "path": str(p)}}
+        model_path = pm.model_path(key)
+        base_dir = model_path.parent
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        target_dir = model_path if model_path.exists() else base_dir
+        if not target_dir.exists():
+            raise HTTPException(status_code=404, detail="路径不存在")
+        sysname = platform.system().lower()
+        if "windows" in sysname:
+            subprocess.Popen(["explorer", str(target_dir)])
+        elif "darwin" in sysname:
+            subprocess.Popen(["open", str(target_dir)])
+        else:
+            subprocess.Popen(["xdg-open", str(target_dir)])
+        return {
+            "success": True,
+            "data": {"key": key, "path": str(target_dir)},
+            "message": "已打开文件管理器",
+        }
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown_model_key")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

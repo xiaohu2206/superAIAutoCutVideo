@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader, Mic2, X, ChevronDown, Check, Save } from "lucide-react";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
@@ -30,17 +30,25 @@ export type Qwen3CustomRoleDialogEditResult = {
 export type Qwen3CustomRoleDialogProps = {
   isOpen: boolean;
   modelKeys: string[];
+  isModelAvailable?: (key: string) => boolean;
   voice?: Qwen3TtsVoice | null;
   onClose: () => void;
   onSubmit: (result: Qwen3CustomRoleDialogResult | Qwen3CustomRoleDialogEditResult) => Promise<void>;
 };
 
-export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ isOpen, modelKeys, voice, onClose, onSubmit }) => {
+export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ isOpen, modelKeys, isModelAvailable, voice, onClose, onSubmit }) => {
   const { getCapabilities } = useQwen3Voices();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultModelKey = useMemo(() => modelKeys[0] || "custom_0_6b", [modelKeys]);
+  const defaultModelKey = useMemo(() => {
+    const keys = modelKeys.length ? modelKeys : ["custom_0_6b"];
+    if (isModelAvailable) {
+      const usable = keys.find((k) => isModelAvailable(k));
+      if (usable) return usable;
+    }
+    return keys[0] || "custom_0_6b";
+  }, [modelKeys, isModelAvailable]);
 
   const [name, setName] = useState<string>("");
   const [modelKey, setModelKey] = useState<string>(defaultModelKey);
@@ -60,7 +68,11 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
     
     if (voice) {
         setName(voice.name || "");
-        setModelKey(voice.model_key || defaultModelKey);
+        const initialModelKey =
+          voice.model_key && (!isModelAvailable || isModelAvailable(voice.model_key))
+            ? voice.model_key
+            : defaultModelKey;
+        setModelKey(initialModelKey);
         setLanguage(voice.language || "Auto");
         setSpeaker(voice.speaker || "");
         setInstruct(voice.instruct || "");
@@ -71,7 +83,7 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
         setSpeaker("");
         setInstruct("");
     }
-  }, [isOpen, voice, defaultModelKey]);
+  }, [isOpen, voice, defaultModelKey, isModelAvailable]);
 
   // Fetch capabilities when modelKey changes
   useEffect(() => {
@@ -184,7 +196,7 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
                 >
                   {(modelKeys.length ? modelKeys : [defaultModelKey]).map((k) => (
-                    <option key={k} value={k}>
+                    <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}
@@ -282,7 +294,7 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
                 value={instruct}
                 disabled={loading}
                 onChange={(e) => setInstruct(e.target.value)}
-                placeholder="可选的情感/风格指令"
+                placeholder="输入合成时的默认风格指令，例如：用开心的语气说话"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200 min-h-[72px]"
               />
             </div>

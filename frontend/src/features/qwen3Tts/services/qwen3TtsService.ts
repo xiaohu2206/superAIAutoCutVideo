@@ -32,8 +32,29 @@ export const qwen3TtsService = {
     return apiClient.get("/api/tts/qwen3/models/downloads");
   },
 
-  getModelPath(key: string): Promise<ApiOk<{ key: string; path: string }>> {
-    return apiClient.get(`/api/tts/qwen3/models/open-path?key=${encodeURIComponent(key)}`);
+  async openModelDirInExplorer(key: string): Promise<void> {
+    const base = `${apiClient.getBaseUrl()}/api/tts/qwen3/models/open-path?key=${encodeURIComponent(
+      key
+    )}`;
+    const res = await fetch(base);
+    if (!res.ok) {
+      let msg = `打开文件管理器失败: ${res.statusText}`;
+      try {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json();
+          if (typeof j === "string") msg = j;
+          else if ((j as any)?.detail) msg = (j as any).detail;
+          else if ((j as any)?.message) msg = (j as any).message;
+        } else {
+          const t = await res.text();
+          if (t) msg = t;
+        }
+      } catch (e) {
+        void e;
+      }
+      throw new Error(msg);
+    }
   },
 
   listVoices(): Promise<ApiOk<Qwen3TtsVoice[]>> {

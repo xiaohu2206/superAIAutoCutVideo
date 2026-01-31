@@ -220,7 +220,7 @@ class Qwen3TTSService:
             )
         elif kind == "design_clone":
             return await self.synthesize_voice_clone_to_wav(
-                text=text,
+                text=v.get("ref_text"),
                 out_path=out_path,
                 model_key=model_key,
                 language=language,
@@ -234,7 +234,7 @@ class Qwen3TTSService:
                 text=text,
                 out_path=out_path,
                 model_key=model_key,
-                language=language,
+                language="auto",
                 ref_audio=str(v.get("ref_audio_path") or ""),
                 ref_text=v.get("ref_text"),
                 x_vector_only_mode=bool(v.get("x_vector_only_mode", True)),
