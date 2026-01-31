@@ -85,3 +85,25 @@ export type Qwen3TtsPatchVoiceInput = Partial<Pick<
   Qwen3TtsVoice,
   "name" | "model_key" | "language" | "ref_text" | "instruct" | "x_vector_only_mode" | "speaker"
 >>;
+
+export type Qwen3TtsAccelerationStatus = {
+  acceleration: {
+    supported: boolean;
+    preferred_device: string;
+    backend: string;
+    reasons: string[];
+    gpu?: {
+      index?: number;
+      name?: string | null;
+      total_memory_bytes?: number | null;
+      compute_capability?: { major: number; minor: number };
+    } | null;
+  };
+  runtime: {
+    loaded: boolean;
+    model_key?: string | null;
+    model_path?: string | null;
+    device: string;
+    last_device_error?: string | null;
+  };
+};

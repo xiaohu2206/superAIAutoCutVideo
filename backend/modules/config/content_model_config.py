@@ -129,7 +129,7 @@ class ContentModelConfigManager:
                     provider='doubao',
                     api_key='',
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-                    model_name='doubao-seed-1-6-251015',
+                    model_name='doubao-seed-1-8-251228',
                     description='豆包文案生成模型',
                     enabled=False
                 )

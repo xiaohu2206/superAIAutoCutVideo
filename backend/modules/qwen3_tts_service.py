@@ -13,6 +13,25 @@ class Qwen3TTSService:
         self._model_path: Optional[str] = None
         self._model: Any = None
         self._load_lock = asyncio.Lock()
+        self._runtime_device: str = "cpu"
+        self._last_device_error: Optional[str] = None
+
+    def get_runtime_status(self) -> Dict[str, Any]:
+        return {
+            "loaded": self._model is not None,
+            "model_key": self._model_key,
+            "model_path": self._model_path,
+            "device": self._runtime_device,
+            "last_device_error": self._last_device_error,
+        }
+
+    def _normalize_device(self, device: Optional[str]) -> str:
+        d = (device or "").strip()
+        if not d:
+            return ""
+        if d == "cuda":
+            return "cuda:0"
+        return d
 
     def _ensure_ready(self, model_key: str) -> Tuple[bool, str]:
         pm = Qwen3TTSPathManager()
@@ -34,7 +53,21 @@ class Qwen3TTSService:
                 raise RuntimeError(f"unknown_model_key:{model_key}")
 
             model_path = str(model_dir)
-            if self._model is not None and self._model_key == model_key and self._model_path == model_path:
+            requested_device = self._normalize_device(device)
+            if not requested_device:
+                try:
+                    from modules.qwen3_tts_acceleration import get_qwen3_tts_preferred_device
+
+                    requested_device = self._normalize_device(get_qwen3_tts_preferred_device())
+                except Exception:
+                    requested_device = "cpu"
+
+            if (
+                self._model is not None
+                and self._model_key == model_key
+                and self._model_path == model_path
+                and self._runtime_device == requested_device
+            ):
                 return
 
             ready, err = self._ensure_ready(model_key)
@@ -47,7 +80,7 @@ class Qwen3TTSService:
                 raise RuntimeError(f"qwen_tts_import_failed:{e}")
 
             kwargs: Dict[str, Any] = {}
-            q = device or "cpu"
+            q = requested_device or "cpu"
             try:
                 import torch
 
@@ -60,17 +93,22 @@ class Qwen3TTSService:
                 None, lambda: Qwen3TTSModel.from_pretrained(model_path, **kwargs)
             )
 
+            actual_device = "cpu"
+            self._last_device_error = None
             if q and q != "cpu":
                 try:
                     import torch
 
                     inst.model.to(torch.device(q))
-                except Exception:
-                    pass
+                    actual_device = q
+                except Exception as e:
+                    self._last_device_error = f"model_to_device_failed:{e}"
+                    actual_device = "cpu"
 
             self._model_key = model_key
             self._model_path = model_path
             self._model = inst
+            self._runtime_device = actual_device
 
     async def _write_wav(self, out_path: Path, run_fn) -> Dict[str, Any]:
         wav, sr = await asyncio.get_running_loop().run_in_executor(None, run_fn)

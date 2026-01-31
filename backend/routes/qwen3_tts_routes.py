@@ -27,8 +27,18 @@ from modules.ws_manager import manager
 
 
 from modules.qwen3_tts_service import qwen3_tts_service
+from modules.qwen3_tts_acceleration import get_qwen3_tts_acceleration_status
 
 router = APIRouter(prefix="/api/tts/qwen3", tags=["Qwen3-TTS"])
+
+
+@router.get("/acceleration-status")
+async def get_qwen3_tts_acceleration() -> Dict[str, Any]:
+    data = {
+        "acceleration": get_qwen3_tts_acceleration_status(),
+        "runtime": qwen3_tts_service.get_runtime_status(),
+    }
+    return {"success": True, "data": data, "message": "ok"}
 
 _download_tasks: Dict[str, asyncio.Task] = {}
 _download_states: Dict[str, Dict[str, Any]] = {}
