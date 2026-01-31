@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Plus, RefreshCw, ShieldAlert, Layers, Mic2, Palette, Sparkles } from "lucide-react";
 import { message } from "@/services/message";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
@@ -40,7 +40,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     downloadsByKey,
     refresh: refreshModels,
     validate: validateModel,
-    getModelPath,
+    openModelDirInExplorer,
     downloadModel,
     stopDownload,
   } = useQwen3Models();
@@ -95,10 +95,6 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     return Array.from(new Set(keys));
   }, [localModels]);
 
-  const allModelKeys = useMemo(() => {
-      return Array.from(new Set([...baseModelKeys, ...customModelKeys, ...designModelKeys]));
-  }, [baseModelKeys, customModelKeys, designModelKeys]);
-
   const downloadOptions = useMemo(() => {
     if (createMode === "clone") {
       return [
@@ -135,10 +131,15 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
      return { className: "bg-orange-50 text-orange-700 border-orange-200", text: "缺文件" };
   };
 
+  const isModelAvailable = useCallback((key: string) => {
+    console.log("isModelAvailable", modelByKey, key);
+    const m = modelByKey.get(key);
+    return Boolean(m?.exists && m?.valid);
+  }, [modelByKey]);
+
   const canCreateInMode = useMemo(() => {
     const isModelUsable = (key: string) => {
-      const m = modelByKey.get(key);
-      return Boolean(m?.exists && m?.valid);
+      return isModelAvailable(key);
     };
     const isAnyModelUsable = (keys: string[]) => keys.some((k) => isModelUsable(k));
 
@@ -153,7 +154,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     const base1_7bOk = isModelUsable("base_1_7b");
     const baseAllOk = isModelUsable("base_1_7b") && isModelUsable("base_0_6b");
     return voiceDesignOk && (base1_7bOk || baseAllOk);
-  }, [baseModelKeys, createMode, customModelKeys, modelByKey]);
+  }, [baseModelKeys, createMode, customModelKeys, isModelAvailable]);
 
   const handleDownload = async (option: { id: string; keys: string[] }) => {
     const provider = getProvider(option.id);
@@ -171,24 +172,19 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     }
   };
 
-  const handleCopyPath = async (option: { id: string; keys: string[] }) => {
+  const handleOpenModelDir = async (option: { id: string; keys: string[] }) => {
     try {
-      if (option.keys.length === 1) {
-        const p = await getModelPath(option.keys[0]);
-        await navigator.clipboard.writeText(p);
-      } else {
-        const lines: string[] = [];
-        for (const key of option.keys) {
-          const p = await getModelPath(key);
-          lines.push(`${key}: ${p}`);
-        }
-        await navigator.clipboard.writeText(lines.join("\n"));
+      const key = option.keys[0];
+      if (!key) {
+        message.error("未找到模型key");
+        return;
       }
+      await openModelDirInExplorer(key);
       setCopiedOptionId(option.id);
       setTimeout(() => setCopiedOptionId((prev) => (prev === option.id ? null : prev)), 1200);
-      message.success("已复制模型目录路径");
+      message.success("已打开模型目录");
     } catch (e: any) {
-      message.error(e?.message || "复制失败");
+      message.error(e?.message || "打开失败");
     }
   };
 
@@ -200,7 +196,8 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     } else {
         const r = result as Qwen3VoiceUploadDialogResult;
         const created = await upload(r.input);
-        message.success("上传成功");
+        await onSetActive(created.id);
+        message.success("上传成功，已设为当前音色");
         if (r.autoStartClone) {
           try {
             await startClone(created.id);
@@ -218,8 +215,9 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         message.success("已保存");
     } else {
         const r = result as Qwen3CustomRoleDialogResult;
-        await createCustomRole(r.input);
-        message.success("创建成功");
+        const created = await createCustomRole(r.input);
+        await onSetActive(created.id);
+        message.success("创建成功，已设为当前音色");
     }
     closeAllDialogs();
   };
@@ -230,8 +228,9 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         message.success("已保存");
     } else {
         const r = result as Qwen3VoiceDesignDialogResult;
-        await createDesignClone(r.input);
-        message.success("已创建并开始生成");
+        const created = await createDesignClone(r.input);
+        await onSetActive(created.voice_id);
+        message.success("已创建并开始生成，已设为当前音色");
     }
     closeAllDialogs();
   };
@@ -386,7 +385,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
               onDownload={handleDownload}
               onStop={handleStop}
               onValidate={handleValidate}
-              onCopyPath={handleCopyPath}
+              onOpenDir={handleOpenModelDir}
               copiedOptionId={copiedOptionId}
             />
           </div>
@@ -426,6 +425,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         isOpen={isUploadDialogOpen}
         voice={isUploadDialogOpen && editVoice?.kind === "clone" ? editVoice : undefined}
         modelKeys={baseModelKeys}
+        isModelAvailable={isModelAvailable}
         onClose={closeAllDialogs}
         onSubmit={handleUploadSubmit}
       />
@@ -434,6 +434,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         isOpen={isCustomRoleDialogOpen}
         voice={isCustomRoleDialogOpen ? editVoice : undefined}
         modelKeys={customModelKeys}
+        isModelAvailable={isModelAvailable}
         onClose={closeAllDialogs}
         onSubmit={handleCustomRoleSubmit}
       />
@@ -443,6 +444,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         voice={isDesignDialogOpen ? editVoice : undefined}
         voiceDesignModelKeys={designModelKeys}
         baseModelKeys={baseModelKeys}
+        isModelAvailable={isModelAvailable}
         onClose={closeAllDialogs}
         onSubmit={handleDesignSubmit}
       />

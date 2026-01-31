@@ -20,6 +20,7 @@ export type Qwen3VoiceUploadDialogEditResult = {
 export type Qwen3VoiceUploadDialogProps = {
   isOpen: boolean;
   modelKeys: string[];
+  isModelAvailable?: (key: string) => boolean;
   voice?: Qwen3TtsVoice | null;
   onClose: () => void;
   onSubmit: (result: Qwen3VoiceUploadDialogResult | Qwen3VoiceUploadDialogEditResult) => Promise<void>;
@@ -27,11 +28,18 @@ export type Qwen3VoiceUploadDialogProps = {
 
 // --- Logic Hook ---
 
-const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }: Qwen3VoiceUploadDialogProps) => {
+const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit, isModelAvailable }: Qwen3VoiceUploadDialogProps) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const defaultModelKey = useMemo(() => modelKeys[0] || "base_0_6b", [modelKeys]);
+  const defaultModelKey = useMemo(() => {
+    const keys = modelKeys.length ? modelKeys : ["base_0_6b"];
+    if (isModelAvailable) {
+      const usable = keys.find((k) => isModelAvailable(k));
+      if (usable) return usable;
+    }
+    return keys[0] || "base_0_6b";
+  }, [modelKeys, isModelAvailable]);
 
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState<string>("");
@@ -52,11 +60,15 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
         // Edit mode
         setFile(null); // File is optional in edit mode
         setName(voice.name || "");
-        setModelKey(voice.model_key || defaultModelKey);
+        const initialModelKey =
+          voice.model_key && (!isModelAvailable || isModelAvailable(voice.model_key))
+            ? voice.model_key
+            : defaultModelKey;
+        setModelKey(initialModelKey);
         setLanguage(voice.language || "Auto");
         setRefText(voice.ref_text || "");
         setInstruct(voice.instruct || "");
-        setXVectorOnlyMode(voice.x_vector_only_mode);
+        setXVectorOnlyMode(voice.x_vector_only_mode ?? true);
         setAutoStartClone(false); // Usually not needed for edit unless we re-upload
       } else {
         // Create mode
@@ -70,7 +82,7 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
         setAutoStartClone(true);
       }
     }
-  }, [isOpen, voice, defaultModelKey]);
+  }, [isOpen, voice, defaultModelKey, isModelAvailable]);
 
   const validateAndSetFile = useCallback((newFile: File) => {
     // Simple check, can be more robust
@@ -88,9 +100,16 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
     }
   }, [name, voice]);
 
+  const trimmedRefText = refText.trim();
+  const requiresRefText = !xVectorOnlyMode;
+  const refTextMissing = requiresRefText && !trimmedRefText;
   const handleSubmit = async () => {
     if (!voice && !file) {
       setError("请选择音频文件");
+      return;
+    }
+    if (refTextMissing) {
+      setError("关闭 x-vector 模式时必须填写参考文本");
       return;
     }
     setLoading(true);
@@ -102,7 +121,7 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
             name: name.trim() || undefined,
             model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
             language: (language || "Auto").trim() || "Auto",
-            ref_text: refText.trim() || undefined,
+            ref_text: trimmedRefText || undefined,
             instruct: instruct.trim() || undefined,
             x_vector_only_mode: Boolean(xVectorOnlyMode),
         };
@@ -120,7 +139,7 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
             name: name.trim() || undefined,
             model_key: (modelKey || defaultModelKey).trim() || defaultModelKey,
             language: (language || "Auto").trim() || "Auto",
-            ref_text: refText.trim() || undefined,
+            ref_text: trimmedRefText || undefined,
             instruct: instruct.trim() || undefined,
             x_vector_only_mode: Boolean(xVectorOnlyMode),
             },
@@ -135,11 +154,11 @@ const useQwen3VoiceUploadForm = ({ isOpen, modelKeys, voice, onClose, onSubmit }
     }
   };
 
-  const canSubmit = (Boolean(voice) || Boolean(file)) && !loading;
+  const canSubmit = (Boolean(voice) || Boolean(file)) && !loading && !refTextMissing;
 
   return {
     state: {
-      loading, error, file, name, modelKey, language, refText, instruct, xVectorOnlyMode, autoStartClone, canSubmit, defaultModelKey, isEdit: Boolean(voice)
+      loading, error, file, name, modelKey, language, refText, instruct, xVectorOnlyMode, autoStartClone, canSubmit, defaultModelKey, isEdit: Boolean(voice), refTextMissing
     },
     actions: {
       setFile: validateAndSetFile,
@@ -168,7 +187,7 @@ const Label: React.FC<{ children: React.ReactNode; required?: boolean }> = ({ ch
 // --- Main Component ---
 
 export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (props) => {
-  const { isOpen, modelKeys, onClose } = props;
+  const { isOpen, modelKeys, onClose, isModelAvailable } = props;
   const { state, actions } = useQwen3VoiceUploadForm(props);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -329,7 +348,7 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
                   >
                     {(modelKeys.length ? modelKeys : [state.defaultModelKey]).map((k) => (
-                      <option key={k} value={k}>
+                      <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                         {k}
                       </option>
                     ))}
@@ -384,15 +403,18 @@ export const Qwen3VoiceUploadDialog: React.FC<Qwen3VoiceUploadDialogProps> = (pr
 
             <div className="space-y-3">
               {/* Ref Text */}
-              <div>
+      <div>
                 <Label>参考文本 (可选)</Label>
                 <textarea
                   value={state.refText}
                   disabled={state.loading}
                   onChange={(e) => actions.setRefText(e.target.value)}
-                  placeholder="如果音频包含清晰的语音，输入对应的文本可以提高克隆效果"
+                  placeholder="参考音频片段的对应转录文本，效果会更好"
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[60px] resize-y"
                 />
+                {state.refTextMissing && (
+                  <div className="mt-1 text-xs text-red-500">关闭 x-vector 模式时必须填写参考文本</div>
+                )}
               </div>
 
               {/* Instruct */}

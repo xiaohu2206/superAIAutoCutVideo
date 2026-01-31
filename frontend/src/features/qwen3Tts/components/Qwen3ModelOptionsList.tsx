@@ -20,7 +20,7 @@ export type Qwen3ModelOptionsListProps = {
   onDownload: (option: OptionItem) => Promise<void> | void;
   onStop: (option: OptionItem) => Promise<void> | void;
   onValidate: (option: OptionItem) => Promise<void> | void;
-  onCopyPath: (option: OptionItem) => Promise<void> | void;
+  onOpenDir: (option: OptionItem) => Promise<void> | void;
   copiedOptionId: string | null;
 };
 
@@ -35,7 +35,7 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
   onDownload,
   onStop,
   onValidate,
-  onCopyPath,
+  onOpenDir,
   copiedOptionId,
 }) => {
   return (
@@ -124,10 +124,10 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
                   </button>
 
                   <button
-                    onClick={() => onCopyPath(option)}
+                    onClick={() => onOpenDir(option)}
                     disabled={modelsLoading || isDownloading}
                     className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
-                    title="复制路径"
+                    title="打开模型目录"
                   >
                     {copiedOptionId === option.id ? (
                       <Check className="h-3.5 w-3.5 text-green-600" />

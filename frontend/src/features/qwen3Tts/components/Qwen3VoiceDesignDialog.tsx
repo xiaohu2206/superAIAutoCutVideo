@@ -18,6 +18,7 @@ export type Qwen3VoiceDesignDialogProps = {
   isOpen: boolean;
   voiceDesignModelKeys: string[];
   baseModelKeys: string[];
+  isModelAvailable?: (key: string) => boolean;
   voice?: Qwen3TtsVoice | null;
   onClose: () => void;
   onSubmit: (result: Qwen3VoiceDesignDialogResult | Qwen3VoiceDesignDialogEditResult) => Promise<void>;
@@ -27,6 +28,7 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
   isOpen,
   voiceDesignModelKeys,
   baseModelKeys,
+  isModelAvailable,
   voice,
   onClose,
   onSubmit,
@@ -34,8 +36,23 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultDesignModelKey = useMemo(() => voiceDesignModelKeys[0] || "voice_design_1_7b", [voiceDesignModelKeys]);
-  const defaultBaseModelKey = useMemo(() => baseModelKeys[0] || "base_0_6b", [baseModelKeys]);
+  const defaultDesignModelKey = useMemo(() => {
+    const keys = voiceDesignModelKeys.length ? voiceDesignModelKeys : ["voice_design_1_7b"];
+    if (isModelAvailable) {
+      const usable = keys.find((k) => isModelAvailable(k));
+      if (usable) return usable;
+    }
+    return keys[0] || "voice_design_1_7b";
+  }, [voiceDesignModelKeys, isModelAvailable]);
+
+  const defaultBaseModelKey = useMemo(() => {
+    const keys = baseModelKeys.length ? baseModelKeys : ["base_0_6b"];
+    if (isModelAvailable) {
+      const usable = keys.find((k) => isModelAvailable(k));
+      if (usable) return usable;
+    }
+    return keys[0] || "base_0_6b";
+  }, [baseModelKeys, isModelAvailable]);
 
   const [name, setName] = useState<string>("");
   const [designModelKey, setDesignModelKey] = useState<string>(defaultDesignModelKey);
@@ -51,8 +68,18 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
 
     if (voice) {
       setName(voice.name || "");
-      setDesignModelKey(voice.meta?.voice_design_model_key || defaultDesignModelKey);
-      setBaseModelKey(voice.model_key || defaultBaseModelKey);
+      const designKey = voice.meta?.voice_design_model_key;
+      const initialDesignKey =
+        designKey && (!isModelAvailable || isModelAvailable(designKey))
+          ? designKey
+          : defaultDesignModelKey;
+      const baseKey = voice.model_key;
+      const initialBaseKey =
+        baseKey && (!isModelAvailable || isModelAvailable(baseKey))
+          ? baseKey
+          : defaultBaseModelKey;
+      setDesignModelKey(initialDesignKey);
+      setBaseModelKey(initialBaseKey);
       setLanguage(voice.language || "Auto");
       setText(voice.ref_text || "");
       setInstruct(voice.instruct || "");
@@ -64,7 +91,7 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
       setText("");
       setInstruct("");
     }
-  }, [isOpen, voice, defaultDesignModelKey, defaultBaseModelKey]);
+  }, [isOpen, voice, defaultDesignModelKey, defaultBaseModelKey, isModelAvailable]);
 
   const canSubmit = Boolean(name) && Boolean(text) && Boolean(instruct) && !loading;
 
@@ -157,7 +184,7 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white disabled:bg-gray-100 disabled:text-gray-500"
                 >
                   {(voiceDesignModelKeys.length ? voiceDesignModelKeys : [defaultDesignModelKey]).map((k) => (
-                    <option key={k} value={k}>
+                    <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}
@@ -172,7 +199,7 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
                 >
                   {(baseModelKeys.length ? baseModelKeys : [defaultBaseModelKey]).map((k) => (
-                    <option key={k} value={k}>
+                    <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}

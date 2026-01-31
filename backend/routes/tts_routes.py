@@ -561,7 +561,7 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 filename = f"qwen3_{safe_vid}_preview_{ts}.wav"
                 out_path = _get_preview_tmp_dir() / filename
 
-                text = v.ref_text or req.text
+                text = req.text
                 if not text:
                     # Determine language: explicit req > voice config > auto
                     lang = (req.language or (v.language if v else None) or "auto").lower().strip()

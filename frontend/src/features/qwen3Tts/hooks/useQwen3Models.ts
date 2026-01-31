@@ -62,12 +62,8 @@ export function useQwen3Models() {
     }
   }, [refresh]);
 
-  const getModelPath = useCallback(async (key: string): Promise<string> => {
-    const res = await qwen3TtsService.getModelPath(key);
-    if (!res?.success || !res.data?.path) {
-      throw new Error(res?.message || "获取路径失败");
-    }
-    return res.data.path;
+  const openModelDirInExplorer = useCallback(async (key: string): Promise<void> => {
+    await qwen3TtsService.openModelDirInExplorer(key);
   }, []);
 
   const downloadModel = useCallback(async (key: string, provider: Qwen3TtsDownloadProvider) => {
@@ -256,7 +252,7 @@ export function useQwen3Models() {
     downloadsByKey,
     refresh,
     validate,
-    getModelPath,
+    openModelDirInExplorer,
     downloadModel,
     stopDownload,
   };

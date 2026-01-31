@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from modules.config.tts_config import tts_engine_config_manager
+from modules.audio_speed_processor import apply_audio_speed
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,24 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
 
 
 class TencentTtsService:
+    async def _postprocess_qwen_audio(self, res: Dict[str, Any], out: Path, cfg) -> Dict[str, Any]:
+        speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
+        if speed_ratio is None:
+            return res
+        try:
+            sr = float(speed_ratio)
+        except Exception:
+            return res
+        if abs(sr - 1.0) < 0.0001:
+            return res
+        sp = await apply_audio_speed(str(out), sr)
+        if not sp.get("success"):
+            return {"success": False, "error": sp.get("error") or "speed_process_failed"}
+        dur = await _ffprobe_duration(str(out))
+        if dur:
+            res["duration"] = dur
+        return res
+
     async def synthesize(self, text: str, out_path: str, voice_id: Optional[str] = None) -> Dict[str, Any]:
         cfg = tts_engine_config_manager.get_active_config()
         provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
@@ -107,12 +126,15 @@ class TencentTtsService:
                     vv = qwen3_tts_voice_store.get(vid)
                     if vv:
                         try:
-                            return await qwen3_tts_service.synthesize_by_voice_asset(
+                            res = await qwen3_tts_service.synthesize_by_voice_asset(
                                 text=text,
                                 out_path=out,
                                 voice_asset=vv,
                                 device=device_s,
                             )
+                            if res and res.get("success"):
+                                return await self._postprocess_qwen_audio(res, out, cfg)
+                            return res
                         except Exception as e:
                             return {"success": False, "error": str(e)}
                 except Exception:
@@ -136,7 +158,7 @@ class TencentTtsService:
                     if not speaker:
                         return {"success": False, "error": "speaker_required_for_custom_voice"}
 
-                    return await qwen3_tts_service.synthesize_custom_voice_to_wav(
+                    res = await qwen3_tts_service.synthesize_custom_voice_to_wav(
                         text=text,
                         out_path=out,
                         model_key=model_key,
@@ -145,6 +167,9 @@ class TencentTtsService:
                         instruct=instruct,
                         device=device_s,
                     )
+                    if res and res.get("success"):
+                        return await self._postprocess_qwen_audio(res, out, cfg)
+                    return res
                 else:
                     ref_audio = str(ep.get("RefAudio") or "").strip() or None
                     ref_text = str(ep.get("RefText") or "").strip() or None
@@ -154,7 +179,7 @@ class TencentTtsService:
                     if not ref_audio:
                         return {"success": False, "error": "ref_audio_required_for_voice_clone"}
 
-                    return await qwen3_tts_service.synthesize_voice_clone_to_wav(
+                    res = await qwen3_tts_service.synthesize_voice_clone_to_wav(
                         text=text,
                         out_path=out,
                         model_key=model_key,
@@ -164,6 +189,9 @@ class TencentTtsService:
                         x_vector_only_mode=x_vector_only_mode,
                         device=device_s,
                     )
+                    if res and res.get("success"):
+                        return await self._postprocess_qwen_audio(res, out, cfg)
+                    return res
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
