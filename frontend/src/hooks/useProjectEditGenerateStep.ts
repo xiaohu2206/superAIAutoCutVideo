@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WebSocketMessage } from "../services/clients";
 import { projectService } from "../services/projectService";
-import type { GenerateScriptRequest, Project, VideoScript } from "../types/project";
+import type { GenerateScriptRequest, Project, ProjectLatestTasks, ProjectRunningTasks, TaskProgressState, VideoScript } from "../types/project";
 import { useWsTaskProgress, type WsProgressLog } from "./useWsTaskProgress";
 
 export interface UseProjectEditGenerateStepOptions {
@@ -46,6 +46,7 @@ export function useProjectEditGenerateStep(
 
   const [editedScript, setEditedScript] = useState<string>("");
   const [hasInitializedScript, setHasInitializedScript] = useState(false);
+  const [scriptDirty, setScriptDirty] = useState(false);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
@@ -60,16 +61,46 @@ export function useProjectEditGenerateStep(
   const [draftGenProgress, setDraftGenProgress] = useState<number>(0);
   const [draftGenLogs, setDraftGenLogs] = useState<WsProgressLog[]>([]);
 
+  const isTaskActive = useCallback((task?: TaskProgressState | null) => {
+    if (!task) return false;
+    const status = String(task.status || "").toLowerCase();
+    const type = String(task.type || "").toLowerCase();
+    if (type === "progress") return true;
+    return status === "running" || status === "processing" || status === "pending";
+  }, []);
+
+  const applyRunningTask = useCallback((task: TaskProgressState | null | undefined, apply: (t: TaskProgressState) => void) => {
+    if (!task) return;
+    if (!isTaskActive(task)) return;
+    apply(task);
+  }, [isTaskActive]);
+
+  const isTaskFinished = useCallback((task: TaskProgressState | null | undefined) => {
+    if (!task) return false;
+    const status = String(task.status || "").toLowerCase();
+    const type = String(task.type || "").toLowerCase();
+    return type === "completed" || status === "completed" || status === "failed" || type === "error" || status === "cancelled" || type === "cancelled";
+  }, []);
+
   const setEditedScriptSafe = useCallback((script: string) => {
     setEditedScript(script);
     setHasInitializedScript(true);
+    setScriptDirty(false);
+  }, []);
+
+  const setEditedScriptUser = useCallback((script: string) => {
+    setEditedScript(script);
+    setHasInitializedScript(true);
+    setScriptDirty(true);
   }, []);
 
   useEffect(() => {
-    if (project?.script && !hasInitializedScript) {
-      setEditedScriptSafe(JSON.stringify(project.script, null, 2));
+    if (!project?.script) return;
+    const next = JSON.stringify(project.script, null, 2);
+    if (!hasInitializedScript || (!scriptDirty && next !== editedScript)) {
+      setEditedScriptSafe(next);
     }
-  }, [hasInitializedScript, project?.script, setEditedScriptSafe]);
+  }, [editedScript, hasInitializedScript, project?.script, scriptDirty, setEditedScriptSafe]);
 
   const subtitleReady = Boolean(project?.subtitle_path) &&
     (project?.subtitle_status ? project.subtitle_status === "ready" : true);
@@ -82,6 +113,87 @@ export function useProjectEditGenerateStep(
   }, [options.extractingSubtitle, project?.subtitle_status, project?.video_path, subtitleReady]);
 
   const generateScriptDisabled = Boolean(generateScriptDisabledReason);
+
+  useEffect(() => {
+    if (!project?.id) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res: ProjectRunningTasks | null = await projectService.getProjectRunningTasks(project.id);
+        if (cancelled || !res) return;
+        applyRunningTask(res.generate_script, (task) => {
+          setIsGeneratingScript(true);
+          setScriptGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          if (task.message) {
+            setScriptGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
+          }
+        });
+        applyRunningTask(res.generate_video, (task) => {
+          setIsGeneratingVideo(true);
+          setVideoGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          if (task.message) {
+            setVideoGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
+          }
+        });
+        applyRunningTask(res.generate_jianying_draft, (task) => {
+          setIsGeneratingDraft(true);
+          setDraftGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          setDraftTaskId(task.task_id || null);
+          if (task.message) {
+            setDraftGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
+          }
+        });
+      } catch {
+        return;
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRunningTask, project?.id]);
+
+  useEffect(() => {
+    if (!project?.id) return;
+    if (!isGeneratingScript && !isGeneratingDraft) return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const latest: ProjectLatestTasks | null = await projectService.getProjectLatestTasks(project.id);
+        if (stopped || !latest) return;
+
+        if (isGeneratingScript) {
+          const t = latest.generate_script;
+          if (isTaskFinished(t)) {
+            setIsGeneratingScript(false);
+            setScriptGenProgress(100);
+            void options.refreshProject();
+          }
+        }
+
+        if (isGeneratingDraft) {
+          const t = latest.generate_jianying_draft;
+          if (t?.task_id && !draftTaskId) {
+            setDraftTaskId(t.task_id || null);
+          }
+          if (isTaskFinished(t)) {
+            setIsGeneratingDraft(false);
+            setDraftGenProgress(100);
+            void options.refreshProject();
+          }
+        }
+      } catch {
+        return;
+      }
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [draftTaskId, isGeneratingDraft, isGeneratingScript, isTaskFinished, options, project?.id]);
 
   const handleGenerateScript = useCallback(async () => {
     if (!project) return;
@@ -138,6 +250,7 @@ export function useProjectEditGenerateStep(
       const scriptData: VideoScript = JSON.parse(editedScript);
       setIsSaving(true);
       await options.saveScript(scriptData);
+      setScriptDirty(false);
       options.showSuccess("脚本保存成功！");
     } catch (err) {
       if (err instanceof SyntaxError) {
@@ -205,8 +318,17 @@ export function useProjectEditGenerateStep(
     projectId: project?.id,
     onProgress: setScriptGenProgress,
     onLog: (log) => setScriptGenLogs((prev) => [...prev, log]),
-    onCompleted: () => options.showSuccess("解说脚本生成成功！"),
-    onError: (m: WebSocketMessage) => options.showErrorText(m.message || "生成脚本失败"),
+    onCompleted: () => {
+      setIsGeneratingScript(false);
+      setScriptGenProgress(100);
+      options.showSuccess("解说脚本生成成功！");
+      void options.refreshProject();
+    },
+    onError: (m: WebSocketMessage) => {
+      setIsGeneratingScript(false);
+      setScriptGenProgress(0);
+      options.showErrorText(m.message || "生成脚本失败");
+    },
   });
 
   useWsTaskProgress({
@@ -214,8 +336,17 @@ export function useProjectEditGenerateStep(
     projectId: project?.id,
     onProgress: setVideoGenProgress,
     onLog: (log) => setVideoGenLogs((prev) => [...prev, log]),
-    onCompleted: () => options.showSuccess("视频生成成功！"),
-    onError: (m: WebSocketMessage) => options.showErrorText(m.message || "生成视频失败"),
+    onCompleted: () => {
+      setIsGeneratingVideo(false);
+      setVideoGenProgress(100);
+      options.showSuccess("视频生成成功！");
+      void options.refreshProject();
+    },
+    onError: (m: WebSocketMessage) => {
+      setIsGeneratingVideo(false);
+      setVideoGenProgress(0);
+      options.showErrorText(m.message || "生成视频失败");
+    },
   });
 
   useWsTaskProgress({
@@ -253,7 +384,7 @@ export function useProjectEditGenerateStep(
     showMergedPreview,
     setShowMergedPreview,
     editedScript,
-    setEditedScript: setEditedScriptSafe,
+    setEditedScript: setEditedScriptUser,
     isSaving,
     handleSaveScript,
   };

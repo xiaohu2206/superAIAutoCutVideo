@@ -12,13 +12,15 @@ interface DropdownProps {
   items: DropdownItem[];
   className?: string;
   menuClassName?: string;
+  disabled?: boolean;
 }
 
 export const Dropdown: React.FC<DropdownProps> = ({ 
   trigger, 
   items, 
   className = '',
-  menuClassName = '' 
+  menuClassName = '',
+  disabled = false
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -33,9 +35,22 @@ export const Dropdown: React.FC<DropdownProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (disabled && isOpen) {
+      setIsOpen(false);
+    }
+  }, [disabled, isOpen]);
+
   return (
     <div className={`relative inline-block text-left ${className}`} ref={ref}>
-      <div onClick={() => setIsOpen(!isOpen)}>
+      <div
+        onClick={() => {
+          if (!disabled) {
+            setIsOpen(!isOpen);
+          }
+        }}
+        className={disabled ? 'opacity-50 cursor-not-allowed' : ''}
+      >
         {trigger}
       </div>
       {isOpen && (

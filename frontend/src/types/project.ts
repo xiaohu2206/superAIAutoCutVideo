@@ -115,6 +115,30 @@ export interface Project {
   updated_at: string; // 更新时间
 }
 
+export interface TaskProgressState {
+  scope?: string;
+  project_id?: string;
+  task_id?: string | null;
+  status?: string;
+  progress?: number;
+  message?: string;
+  phase?: string;
+  type?: string;
+  timestamp?: string;
+}
+
+export interface ProjectRunningTasks {
+  generate_script?: TaskProgressState | null;
+  generate_video?: TaskProgressState | null;
+  generate_jianying_draft?: TaskProgressState | null;
+}
+
+export interface ProjectLatestTasks {
+  generate_script?: TaskProgressState | null;
+  generate_video?: TaskProgressState | null;
+  generate_jianying_draft?: TaskProgressState | null;
+}
+
 /**
  * 创建项目请求接口
  */

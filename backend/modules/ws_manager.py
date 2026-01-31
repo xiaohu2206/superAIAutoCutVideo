@@ -35,15 +35,24 @@ class ConnectionManager:
     async def broadcast(self, message: str):
         try:
             from modules.runtime_log_store import runtime_log_store
+            from modules.task_progress_store import task_progress_store
 
             try:
                 obj = json.loads(message)
                 if isinstance(obj, dict) and (obj.get("_stored") or (obj.get("id") is not None and obj.get("channel"))):
                     message = json.dumps(obj, ensure_ascii=False)
                 elif isinstance(obj, dict) and not obj.get("_stored"):
+                    try:
+                        task_progress_store.update_from_payload(obj)
+                    except Exception:
+                        pass
                     stored = runtime_log_store.append({**obj, "_stored": True}, project_id=obj.get("project_id"))
                     message = json.dumps(stored, ensure_ascii=False)
                 elif isinstance(obj, dict):
+                    try:
+                        task_progress_store.update_from_payload(obj)
+                    except Exception:
+                        pass
                     pass
                 else:
                     runtime_log_store.append(

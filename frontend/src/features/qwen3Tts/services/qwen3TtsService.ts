@@ -8,10 +8,15 @@ import type {
   Qwen3TtsCustomRoleCreateInput,
   Qwen3TtsDesignCloneCreateInput,
   Qwen3TtsDownloadTask,
+  Qwen3TtsAccelerationStatus,
   Qwen3TtsVoice,
 } from "../types";
 
 export const qwen3TtsService = {
+  getAccelerationStatus(): Promise<ApiOk<Qwen3TtsAccelerationStatus>> {
+    return apiClient.get("/api/tts/qwen3/acceleration-status");
+  },
+
   listModels(): Promise<ApiOk<Qwen3TtsModelStatus[]>> {
     return apiClient.get("/api/tts/qwen3/models");
   },

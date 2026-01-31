@@ -41,6 +41,7 @@ from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
 from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
+from modules.task_progress_store import task_progress_store
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -1235,6 +1236,47 @@ async def generate_video(project_id: str):
         raise HTTPException(status_code=500, detail=f"生成视频失败: {str(e)}")
 
 
+@router.get("/{project_id}/tasks/running")
+async def get_project_running_tasks(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    data = {
+        "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
+        "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
+        "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
+    }
+    return {
+        "message": "获取任务进度",
+        "data": data,
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/tasks/latest")
+async def get_project_latest_tasks(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        return {
+            "message": "项目不存在",
+            "data": {
+                "generate_script": None,
+                "generate_video": None,
+                "generate_jianying_draft": None,
+            },
+            "timestamp": now_ts(),
+        }
+    return {
+        "message": "获取任务进度",
+        "data": {
+            "generate_script": task_progress_store.get_state("generate_script", project_id),
+            "generate_video": task_progress_store.get_state("generate_video", project_id),
+            "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
+        },
+        "timestamp": now_ts(),
+    }
+
+
 @router.get("/{project_id}/output-video")
 async def download_output_video(project_id: str):
     p = projects_store.get_project(project_id)
@@ -1337,6 +1379,17 @@ async def generate_jianying_draft(project_id: str):
 
     task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     DRAFT_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
+    task_progress_store.set_state(
+        scope=JianyingDraftManager.SCOPE,
+        project_id=project_id,
+        task_id=task_id,
+        status="pending",
+        progress=0.0,
+        message="准备生成",
+        phase="start",
+        msg_type="progress",
+        timestamp=now_ts(),
+    )
 
     async def _run():
         try:

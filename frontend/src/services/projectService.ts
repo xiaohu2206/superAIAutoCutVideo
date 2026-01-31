@@ -2,6 +2,8 @@ import type {
   CreateProjectRequest,
   FileUploadResponse,
   GenerateScriptRequest,
+  ProjectLatestTasks,
+  ProjectRunningTasks,
   Project,
   SubtitleResult,
   SubtitleSegment,
@@ -34,6 +36,20 @@ export class ProjectService {
       `/api/projects/${projectId}`
     );
     return response.data;
+  }
+
+  async getProjectRunningTasks(projectId: string): Promise<ProjectRunningTasks | null> {
+    const response = await apiClient.get<{ data: ProjectRunningTasks }>(
+      `/api/projects/${projectId}/tasks/running`
+    );
+    return response?.data ?? null;
+  }
+
+  async getProjectLatestTasks(projectId: string): Promise<ProjectLatestTasks | null> {
+    const response = await apiClient.get<{ data: ProjectLatestTasks }>(
+      `/api/projects/${projectId}/tasks/latest`
+    );
+    return response?.data ?? null;
   }
 
   /**

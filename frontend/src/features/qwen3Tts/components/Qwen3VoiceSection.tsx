@@ -1,14 +1,15 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, ShieldAlert, Layers, Mic2, Palette, Sparkles } from "lucide-react";
 import { message } from "@/services/message";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
 import { useQwen3Models } from "../hooks/useQwen3Models";
+import { qwen3TtsService } from "../services/qwen3TtsService";
 import Qwen3VoiceList from "./Qwen3VoiceList";
 import Qwen3VoiceUploadDialog, { type Qwen3VoiceUploadDialogResult, type Qwen3VoiceUploadDialogEditResult } from "./Qwen3VoiceUploadDialog";
 import Qwen3CustomRoleDialog, { type Qwen3CustomRoleDialogResult, type Qwen3CustomRoleDialogEditResult } from "./Qwen3CustomRoleDialog.tsx";
 import Qwen3VoiceDesignDialog, { type Qwen3VoiceDesignDialogResult, type Qwen3VoiceDesignDialogEditResult } from "./Qwen3VoiceDesignDialog.tsx";
 import Qwen3ModelOptionsList from "./Qwen3ModelOptionsList";
-import type { Qwen3TtsDownloadProvider, Qwen3TtsVoice } from "../types";
+import type { Qwen3TtsAccelerationStatus, Qwen3TtsDownloadProvider, Qwen3TtsVoice } from "../types";
 
 export type Qwen3VoiceSectionProps = {
   configId: string | null;
@@ -50,9 +51,34 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   const [customRoleOpen, setCustomRoleOpen] = useState<boolean>(false);
   const [designOpen, setDesignOpen] = useState<boolean>(false);
   const [editVoice, setEditVoice] = useState<Qwen3TtsVoice | null>(null);
+
+  const [accelerationStatus, setAccelerationStatus] = useState<Qwen3TtsAccelerationStatus | null>(null);
+  const [accelerationLoading, setAccelerationLoading] = useState<boolean>(false);
+  const [accelerationError, setAccelerationError] = useState<string | null>(null);
   
   const [providerByOptionId, setProviderByOptionId] = useState<Record<string, Qwen3TtsDownloadProvider>>({});
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
+
+  const refreshAcceleration = useCallback(async () => {
+    setAccelerationLoading(true);
+    setAccelerationError(null);
+    try {
+      const res = await qwen3TtsService.getAccelerationStatus();
+      if (res?.success) {
+        setAccelerationStatus((res as any).data || null);
+      } else {
+        setAccelerationError(res?.message || "加载加速状态失败");
+      }
+    } catch (e: any) {
+      setAccelerationError(e?.message || "加载加速状态失败");
+    } finally {
+      setAccelerationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAcceleration();
+  }, [refreshAcceleration]);
 
   // Helper to close all dialogs
   const closeAllDialogs = () => {
@@ -116,6 +142,39 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   }, [createMode]);
 
   const getProvider = (optionId: string): Qwen3TtsDownloadProvider => providerByOptionId[optionId] || "modelscope";
+
+  const accelerationView = useMemo(() => {
+    if (accelerationLoading) {
+      return {
+        className: "bg-gray-100 text-gray-600 border-gray-200",
+        text: "加速检测中…",
+        title: "正在检测当前设备是否支持 Qwen3-TTS GPU 加速",
+      };
+    }
+
+    if (accelerationError) {
+      return {
+        className: "bg-red-50 text-red-700 border-red-200",
+        text: "加速状态异常",
+        title: accelerationError,
+      };
+    }
+
+    const acc = accelerationStatus?.acceleration;
+    const runtime = accelerationStatus?.runtime;
+    const device = String(runtime?.device || acc?.preferred_device || "cpu");
+    const isGpu = device.toLowerCase().startsWith("cuda");
+    const labelPrefix = runtime?.loaded ? "当前推理" : "推理设备";
+    const gpuName = acc?.gpu?.name ? ` (${acc.gpu.name})` : "";
+    const title = acc?.supported
+      ? `支持 GPU 加速，默认设备: ${acc.preferred_device}${gpuName}`
+      : `不支持 GPU 加速，原因: ${(acc?.reasons || []).join(",") || "unknown"}`;
+    return {
+      className: isGpu ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200",
+      text: `${labelPrefix}: ${isGpu ? "GPU" : "CPU"}`,
+      title,
+    };
+  }, [accelerationError, accelerationLoading, accelerationStatus]);
 
   const getModelStatus = (keys: string[]) => {
     const items = keys.map((k) => modelByKey.get(k)).filter(Boolean);
@@ -290,6 +349,22 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
           <div>
             <h4 className="text-md font-semibold text-gray-900">Qwen3-TTS 音色库</h4>
             {error ? <div className="text-xs text-red-600 mt-1">{error}</div> : null}
+            <div className="mt-2 flex items-center gap-2">
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
+                title={accelerationView.title}
+              >
+                {accelerationView.text}
+              </span>
+              <button
+                onClick={() => refreshAcceleration()}
+                disabled={accelerationLoading}
+                className={`p-1 rounded-md transition-all ${accelerationLoading ? "text-gray-300" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"}`}
+                title="刷新加速状态"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${accelerationLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
           
           <div className="flex bg-gray-100/80 p-1 rounded-lg">

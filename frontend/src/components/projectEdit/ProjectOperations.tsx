@@ -49,6 +49,15 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const [opening, setOpening] = useState(false);
 
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
+  const isGeneratingAny = isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
+  const scriptButtonDisabled = generateScriptDisabled || isGeneratingVideo || isGeneratingDraft || isGeneratingScript;
+  const scriptButtonTitle = generateScriptDisabled
+    ? (generateScriptDisabledReason || "暂不可生成脚本")
+    : isGeneratingVideo
+    ? "视频生成中，暂不可生成脚本"
+    : isGeneratingDraft
+    ? "草稿生成中，暂不可生成脚本"
+    : undefined;
 
   useEffect(() => {
     if (!isGeneratingVideo && project.output_video_path) {
@@ -109,8 +118,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
       <button
         onClick={handleGenerateScript}
-        disabled={generateScriptDisabled || isGeneratingScript}
-        title={generateScriptDisabled ? (generateScriptDisabledReason || "暂不可生成脚本") : undefined}
+        disabled={scriptButtonDisabled}
+        title={scriptButtonTitle}
         className="mt-2 flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGeneratingScript ? (
@@ -127,6 +136,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
 
        {project.script && project.video_path && 
        <Dropdown
+        disabled={isGeneratingAny}
         trigger={
           <button className="flex mt-2 items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
             视频操作
@@ -142,7 +152,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               </>
             ),
             onClick: handleGenerateDraft,
-            disabled: !project.script || !project.video_path || isGeneratingDraft,
+            disabled: !project.script || !project.video_path || isGeneratingAny,
           },
           {
             label: (
@@ -152,7 +162,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               </>
             ),
             onClick: handleGenerateVideo,
-            disabled: !project.script || !project.video_path || isGeneratingVideo,
+            disabled: !project.script || !project.video_path || isGeneratingAny,
           },
         ]}
       />
