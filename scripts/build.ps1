@@ -76,24 +76,57 @@ foreach ($variant in $variants) {
 
     if ($FullBackend -and (Test-Path requirements.txt)) {
       Step "Install full dependencies (requirements.txt)"
-      pip install -r requirements.txt
+      $tmpFull = Join-Path $env:TEMP "requirements.full.filtered.txt"
+      (Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpFull
+      pip install -r $tmpFull
+      Remove-Item $tmpFull -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.runtime.txt) {
       Step "Install runtime dependencies (requirements.runtime.txt)"
-      pip install -r requirements.runtime.txt
+      $tmpRuntime = Join-Path $env:TEMP "requirements.runtime.filtered.txt"
+      (Get-Content requirements.runtime.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpRuntime
+      pip install -r $tmpRuntime
+      Remove-Item $tmpRuntime -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.txt) {
       Step "Fallback to requirements.txt (runtime file missing)"
-      pip install -r requirements.txt
+      $tmpFullFallback = Join-Path $env:TEMP "requirements.full.filtered.txt"
+      (Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpFullFallback
+      pip install -r $tmpFullFallback
+      Remove-Item $tmpFullFallback -Force -ErrorAction SilentlyContinue
     }
     else { Fail "No backend requirements file found" }
 
+    pip uninstall -y torchaudio | Out-Null
     pip uninstall -y torch torchvision | Out-Null
-    if ($variant -eq "cpu") {
-      pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    } else {
-      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu121" }
+    $wheelDir = $env:TORCH_WHEEL_DIR
+    $usedLocal = $false
+    if ($wheelDir -and (Test-Path $wheelDir)) {
+      $torchWhl = Join-Path $wheelDir "torch-2.5.1+${suffix}-cp311-cp311-win_amd64.whl"
+      $visionWhl = Join-Path $wheelDir "torchvision-0.20.1+${suffix}-cp311-cp311-win_amd64.whl"
+      if ((Test-Path $torchWhl) -and (Test-Path $visionWhl)) {
+        Step "Install PyTorch from local wheels ($suffix)"
+        pip install --no-index --find-links "$wheelDir" "$torchWhl" "$visionWhl"
+        $usedLocal = $true
+      } else {
+        Info "Local wheels not found for variant=$suffix; fallback to official index"
+      }
     }
+    if (-not $usedLocal) {
+      if ($variant -eq "cpu") {
+        pip install torch==2.5.1+cpu torchvision==0.20.1+cpu --index-url https://download.pytorch.org/whl/cpu
+      } else {
+        pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+      }
+    }
+    if ($variant -eq "cpu") {
+      pip install torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
+    } else {
+      pip install torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+    }
+    Step "Install qwen-tts (no-deps)"
+    pip install qwen-tts --no-deps
 
     pyinstaller --clean --distpath dist backend.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
@@ -103,7 +136,31 @@ foreach ($variant in $variants) {
 
   Step "Copy backend executable to Tauri resources ($variant)"
   New-Item -ItemType Directory -Force src-tauri\\resources | Out-Null
-  Copy-Item -Force backend\\dist\\superAutoCutVideoBackend.exe src-tauri\\resources\\
+  Microsoft.PowerShell.Management\Copy-Item -Force backend\\dist\\superAutoCutVideoBackend.exe src-tauri\\resources\\
+  try {
+    $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $ffmpegExe) {
+      $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+      if ($cmd) { $ffmpegExe = Get-Item $cmd.Path }
+    }
+    if (-not $ffprobeExe) {
+      $cmd = Get-Command ffprobe -ErrorAction SilentlyContinue
+      if ($cmd) { $ffprobeExe = Get-Item $cmd.Path }
+    }
+    if (-not $ffmpegExe -or -not $ffprobeExe) {
+      if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Step "Install FFmpeg via Chocolatey"
+        choco install ffmpeg -y --no-progress | Out-Null
+        $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+      } else {
+        Info "FFmpeg not found and Chocolatey unavailable; please ensure ffmpeg.exe and ffprobe.exe are in PATH"
+      }
+    }
+    if ($ffmpegExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName "src-tauri\\resources\\ffmpeg.exe" }
+    if ($ffprobeExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeExe.FullName "src-tauri\\resources\\ffprobe.exe" }
+  } catch { Info "Skip FFmpeg copy: $($_.Exception.Message)" }
 
   if (Test-Path 'src-tauri\\target\\release') {
     try { Remove-Item 'src-tauri\\target\\release' -Recurse -Force -ErrorAction Stop }
@@ -124,11 +181,18 @@ foreach ($variant in $variants) {
   $portableTemp = Join-Path $releaseDir 'portable_temp'
   if (Test-Path $portableTemp) { Remove-Item $portableTemp -Recurse -Force }
   New-Item -ItemType Directory -Force $portableTemp | Out-Null
-  Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
+  Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
   New-Item -ItemType Directory -Force (Join-Path $portableTemp 'resources') | Out-Null
-  Copy-Item -Force (Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.exe') (Join-Path $portableTemp 'resources\\')
+  Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.exe') (Join-Path $portableTemp 'resources\\')
+  $relRes = Join-Path $releaseDir 'resources'
+  $ffmpegRelease = Join-Path $relRes 'ffmpeg.exe'
+  $ffprobeRelease = Join-Path $relRes 'ffprobe.exe'
+  $ffmpegPortable = Join-Path $portableTemp 'resources\\ffmpeg.exe'
+  $ffprobePortable = Join-Path $portableTemp 'resources\\ffprobe.exe'
+  if (Test-Path $ffmpegRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegRelease $ffmpegPortable }
+  if (Test-Path $ffprobeRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeRelease $ffprobePortable }
   foreach ($doc in @('README.md','USAGE.md','LICENSE')) {
-    if (Test-Path $doc) { Copy-Item -Force $doc $portableTemp }
+    if (Test-Path $doc) { Microsoft.PowerShell.Management\Copy-Item -Force $doc $portableTemp }
   }
   $safeProduct = ($productName -replace '[^A-Za-z0-9_.-]', '_')
   $zipName = "${safeProduct}_v${version}_${variant}_portable.zip"
@@ -164,7 +228,7 @@ foreach ($variant in $variants) {
         $base = $_.BaseName
         $ext = $_.Extension
         $dst = Join-Path $installersOut ("${base}_${variant}${ext}")
-        Copy-Item -Force $_.FullName $dst
+        Microsoft.PowerShell.Management\Copy-Item -Force $_.FullName $dst
       }
     }
   }

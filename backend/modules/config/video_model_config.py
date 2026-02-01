@@ -116,7 +116,7 @@ class VideoModelConfigManager:
                 'id': 'qwen_video_analysis',
                 'config': VideoModelConfig(
                     provider='qwen',
-                    api_key='',
+                    api_key='xxx',
                     base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
                     model_name='qwen-vl-plus',
                     description='通义千问视频分析模型',
@@ -127,7 +127,7 @@ class VideoModelConfigManager:
                 'id': 'doubao_video_analysis',
                 'config': VideoModelConfig(
                     provider='doubao',
-                    api_key='',
+                    api_key='xxx',
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
                     model_name='doubao-seed-1-6-vision-250815',
                     description='豆包视频分析模型',

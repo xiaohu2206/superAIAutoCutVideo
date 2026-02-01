@@ -1,13 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import sys
+import os
 from PyInstaller.utils.hooks import collect_all
 
 # 基础数据文件：将 serviceData 目录打包进 exe
 datas = [
     ('serviceData', 'serviceData'),
-    ('../.trae/cache/Qwen3-TTS', '.trae/cache/Qwen3-TTS'),
 ]
+cache_dir = '../.trae/cache/Qwen3-TTS'
+if os.path.isdir(cache_dir):
+    datas.append((cache_dir, '.trae/cache/Qwen3-TTS'))
 binaries = []
 # 基础隐式导入
 hiddenimports = [
