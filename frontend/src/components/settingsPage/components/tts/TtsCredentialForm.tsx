@@ -31,9 +31,8 @@ export const TtsCredentialForm: React.FC<Props> = ({
   const [proxyInput, setProxyInput] = useState<string>("");
 
   useEffect(() => {
-    // 初始不展示敏感值，仅提示设置状态
-    setSecretIdInput("");
-    setSecretKeyInput("");
+    setSecretIdInput(config?.secret_id === "***" ? "****" : "");
+    setSecretKeyInput(config?.secret_key === "***" ? "****" : "");
     const ep = config?.extra_params || {};
     const pv = typeof ep?.ProxyUrl === "string" ? ep.ProxyUrl : "";
     setProxyInput(pv);
@@ -41,16 +40,24 @@ export const TtsCredentialForm: React.FC<Props> = ({
 
   const handleBlurSecretId = async () => {
     const trimmed = secretIdInput.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      if (config?.secret_id === "***") setSecretIdInput("****");
+      return;
+    }
+    if (trimmed === "****") return;
     await onUpdate({ secret_id: trimmed });
-    setSecretIdInput("");
+    setSecretIdInput("****");
   };
 
   const handleBlurSecretKey = async () => {
     const trimmed = secretKeyInput.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      if (config?.secret_key === "***") setSecretKeyInput("****");
+      return;
+    }
+    if (trimmed === "****") return;
     await onUpdate({ secret_key: trimmed });
-    setSecretKeyInput("");
+    setSecretKeyInput("****");
   };
 
   const handleBlurProxy = async () => {

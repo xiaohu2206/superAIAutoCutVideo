@@ -252,13 +252,6 @@ class TtsEngineConfigManager:
         """返回可用引擎元信息列表"""
         return [
             {
-                'provider': 'tencent_tts',
-                'display_name': '腾讯云 TTS',
-                'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',
-                'required_fields': ['secret_id', 'secret_key'],
-                'optional_fields': ['region']
-            },
-            {
                 'provider': 'edge_tts',
                 'display_name': 'Edge TTS',
                 'description': '微软 Edge 在线语音，免凭据，适合中文合成测试与预览',
@@ -271,6 +264,13 @@ class TtsEngineConfigManager:
                 'description': '离线语音合成与快速声音克隆（需先下载模型）',
                 'required_fields': [],
                 'optional_fields': []
+            },
+            {
+                'provider': 'tencent_tts',
+                'display_name': '腾讯云 TTS',
+                'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',
+                'required_fields': ['secret_id', 'secret_key'],
+                'optional_fields': ['region']
             }
         ]
 
