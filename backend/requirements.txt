@@ -8,7 +8,7 @@ ffmpeg-python>=0.2.0
 torch>=2.1.0
 torchvision>=0.16.0
 numpy>=1.24.0
-transformers>=4.46.0
+transformers>=4.57.3
 qwen-tts
 huggingface_hub>=0.22.0
 soundfile>=0.12.0

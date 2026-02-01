@@ -9,6 +9,7 @@ import uuid
 import wave
 import platform
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
@@ -666,7 +667,64 @@ async def get_qwen3_model_capabilities(model_key: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+def _find_ffmpeg() -> Optional[str]:
+    name = "ffmpeg.exe" if "windows" in platform.system().lower() else "ffmpeg"
+    env_path = os.environ.get("FFMPEG_PATH")
+    if env_path:
+        try:
+            p = Path(env_path)
+            if p.exists():
+                return str(p)
+        except Exception:
+            pass
+    env_dir = os.environ.get("FFMPEG_DIR") or os.environ.get("FFMPEG_HOME")
+    if env_dir:
+        try:
+            p = Path(env_dir) / name
+            if p.exists():
+                return str(p)
+        except Exception:
+            pass
+    hit = shutil.which("ffmpeg")
+    if hit:
+        return hit
+    candidates: List[Path] = []
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "resources" / name)
+        candidates.append(exe_dir / name)
+    except Exception:
+        pass
+    try:
+        root = Path(__file__).resolve().parents[2]
+        candidates.append(root / "src-tauri" / "resources" / name)
+        candidates.append(root / "src-tauri" / "target" / "debug" / "resources" / name)
+        candidates.append(root / "src-tauri" / "target" / "release" / "resources" / name)
+    except Exception:
+        pass
+    install_dir = os.environ.get("SACV_INSTALL_DIR")
+    if install_dir:
+        try:
+            candidates.append(Path(install_dir) / "resources" / name)
+        except Exception:
+            pass
+    try:
+        here = Path(__file__).resolve()
+        candidates.append(here.parent.parent / "resources" / name)
+    except Exception:
+        pass
+    try:
+        candidates.append(Path.cwd() / "resources" / name)
+    except Exception:
+        pass
+    for c in candidates:
+        try:
+            if c.exists():
+                return str(c)
+        except Exception:
+            continue
+    return None
+ 
 async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
@@ -675,12 +733,13 @@ async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
 
 
 async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, Any]:
-    if shutil.which("ffmpeg") is None:
+    ffmpeg_bin = _find_ffmpeg()
+    if not ffmpeg_bin:
         raise RuntimeError("Missing dependency 'ffmpeg'. Please install it on server.")
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -908,7 +967,7 @@ async def _run_voice_design_clone_job(voice_id: str, job_id: str) -> None:
 async def start_qwen3_voice_clone(voice_id: str) -> Dict[str, Any]:
     try:
         # 预先检查依赖
-        if shutil.which("ffmpeg") is None:
+        if _find_ffmpeg() is None:
             qwen3_tts_voice_store.delete(voice_id, remove_files=True)
             raise HTTPException(status_code=500, detail="Missing dependency 'ffmpeg'. Please install it on server.")
 

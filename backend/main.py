@@ -221,6 +221,8 @@ def _inject_ffmpeg_into_path() -> None:
             os.environ["PATH"] = sep.join(prepend + [orig]) if orig else sep.join(prepend)
     except Exception:
         pass
+
+
 # 创建FastAPI应用
 app = FastAPI(
     title="AI智能视频剪辑后端",

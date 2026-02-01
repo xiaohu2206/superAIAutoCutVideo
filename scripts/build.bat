@@ -126,15 +126,19 @@ echo [3/4] 打包后端 (%VARIANT%)...
 cd backend
 echo 安装后端依赖...
 if exist "requirements.runtime.txt" (
-    echo 使用精简运行时依赖 requirements.runtime.txt
-    pip install -r requirements.runtime.txt
+    echo 使用精简运行时依赖 requirements.runtime.txt（排除 qwen-tts 以避免解析冲突）
+    powershell -NoProfile -Command "(Get-Content 'requirements.runtime.txt') | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content 'requirements.runtime.filtered.txt'"
+    pip install -r requirements.runtime.filtered.txt
+    del /f /q requirements.runtime.filtered.txt 2>nul
     if errorlevel 1 (
         echo 错误: 后端依赖安装失败
         pause
         exit /b 1
     )
 ) else (
-    pip install -r requirements.txt
+    powershell -NoProfile -Command "(Get-Content 'requirements.txt') | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content 'requirements.full.filtered.txt'"
+    pip install -r requirements.full.filtered.txt
+    del /f /q requirements.full.filtered.txt 2>nul
     if errorlevel 1 (
         echo 错误: 后端依赖安装失败
         pause
@@ -161,12 +165,28 @@ if errorlevel 1 (
         exit /b 1
     )
 )
+pip uninstall -y torchaudio
 pip uninstall -y torch torchvision
-if /I "%VARIANT%"=="cpu" (
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+if /I "%VARIANT%"=="cpu" (set "SUFFIX=cpu") else (set "SUFFIX=cu121")
+set "TORCH_WHL=%TORCH_WHEEL_DIR%\torch-2.5.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
+set "VISION_WHL=%TORCH_WHEEL_DIR%\torchvision-0.20.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
+if defined TORCH_WHEEL_DIR if exist "%TORCH_WHL%" if exist "%VISION_WHL%" (
+    echo 使用本地轮子安装 PyTorch (%SUFFIX%)
+    pip install --no-index --find-links "%TORCH_WHEEL_DIR%" "%TORCH_WHL%" "%VISION_WHL%"
 ) else (
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    if /I "%VARIANT%"=="cpu" (
+        pip install torch==2.5.1+cpu torchvision==0.20.1+cpu --index-url https://download.pytorch.org/whl/cpu
+    ) else (
+        pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+    )
 )
+if /I "%VARIANT%"=="cpu" (
+    pip install torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
+) else (
+    pip install torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+)
+echo 安装 qwen-tts（不解析依赖）
+pip install qwen-tts --no-deps
 if exist "dist" rmdir /s /q "dist"
 pyinstaller backend.spec
 if errorlevel 1 (
@@ -182,6 +202,21 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+rem 复制 FFmpeg 到资源目录（优先 Chocolatey，其次 PATH）
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFMPEG_EXE=%%I"
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFPROBE_EXE=%%I"
+if not defined FFMPEG_EXE for /f "delims=" %%I in ('where ffmpeg 2^>nul') do set "FFMPEG_EXE=%%I"
+if not defined FFPROBE_EXE for /f "delims=" %%I in ('where ffprobe 2^>nul') do set "FFPROBE_EXE=%%I"
+if not defined FFMPEG_EXE if exist "%ProgramData%\chocolatey\bin\choco.exe" (
+    echo 尝试通过 Chocolatey 安装 FFmpeg...
+    choco install ffmpeg -y --no-progress
+    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFMPEG_EXE=%%I"
+    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFPROBE_EXE=%%I"
+)
+if defined FFMPEG_EXE copy /y "%FFMPEG_EXE%" "..\src-tauri\resources\ffmpeg.exe"
+if defined FFPROBE_EXE copy /y "%FFPROBE_EXE%" "..\src-tauri\resources\ffprobe.exe"
+if not defined FFMPEG_EXE echo 提示: 未发现 ffmpeg.exe，应用可能无法使用部分音视频功能
+if not defined FFPROBE_EXE echo 提示: 未发现 ffprobe.exe，应用可能无法使用部分音视频功能
 cd ..
 if exist "src-tauri\target\release" rmdir /s /q "src-tauri\target\release"
 echo [4/4] 构建 Tauri 应用 (%VARIANT%)...
