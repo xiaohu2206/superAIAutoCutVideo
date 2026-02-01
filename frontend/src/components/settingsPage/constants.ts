@@ -24,9 +24,9 @@ export const defaultSettings: AppSettings = {
 export const sections: SettingsSection[] = [
   // { id: "videoModel", label: "视频生成模型", icon: Cpu },
   { id: "contentModel", label: "文案生成模型", icon: FileText },
+  { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
   { id: "storage", label: "存储设置", icon: HardDrive },
-  { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "monitor", label: "状态监控", icon: Activity },
   { id: "about", label: "关于", icon: Info },
 ];
