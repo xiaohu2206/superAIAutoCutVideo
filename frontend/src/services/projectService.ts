@@ -292,6 +292,32 @@ export class ProjectService {
     return response.data;
   }
 
+  async startTrimVideo(
+    projectId: string,
+    payload: {
+      file_path: string;
+      mode: "keep" | "delete";
+      ranges: { start_ms: number; end_ms: number }[];
+    }
+  ): Promise<{ task_id: string }> {
+    const response = await apiClient.post<{ data: { task_id: string } }>(
+      `/api/projects/${projectId}/trim/video`,
+      payload,
+      10000
+    );
+    return response.data;
+  }
+
+  async getTrimVideoStatus(
+    projectId: string,
+    taskId: string
+  ): Promise<{ task_id: string; status: string; progress: number; message: string; file_path?: string; output_version?: string }> {
+    const response = await apiClient.get<{ data: any }>(
+      `/api/projects/${projectId}/trim/video/status/${taskId}`
+    );
+    return response.data;
+  }
+
   /**
    * 更新视频排序（按照用户提供的顺序）
    */
@@ -431,6 +457,14 @@ export class ProjectService {
     return cacheBust !== undefined && cacheBust !== null
       ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
       : base;
+  }
+
+  async prepareVideoPreview(projectId: string, filePath: string): Promise<{ file_path: string; prepared?: boolean } | null> {
+    const response = await apiClient.post<ApiResponse<{ file_path: string; prepared?: boolean }>>(
+      `/api/projects/${projectId}/video/prepare`,
+      { file_path: filePath }
+    );
+    return response.data ?? null;
   }
 
   /**
