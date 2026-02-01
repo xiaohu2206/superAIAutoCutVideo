@@ -1,8 +1,9 @@
-import { Upload } from "lucide-react";
+import { Scissors, Upload } from "lucide-react";
 import React from "react";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
 import type { Project } from "../../types/project";
+import { TrimVideoModal } from "./TrimVideoModal";
 
 interface VideoSourcesManagerProps {
   project: Project;
@@ -48,6 +49,9 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
   onItemDrop,
   onDeleteVideoItem,
 }) => {
+  const [trimOpen, setTrimOpen] = React.useState(false);
+  const [trimPath, setTrimPath] = React.useState<string | null>(null);
+
   const handleOpenMergedVideoInExplorer = async () => {
     if (!project.merged_video_path) {
       message.error("尚未生成合并后的视频");
@@ -134,13 +138,29 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                       <span className="truncate max-w-xs text-gray-800" title={vp}>{project.video_names?.[vp] || vp.split("/").pop()}</span>
                       <span className="text-xs text-gray-400">#{idx+1}</span>
                     </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDeleteVideoItem(vp); }}
-                      className="px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
-                      title="删除"
-                    >
-                      删除
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTrimPath(vp);
+                          setTrimOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-violet-100 text-violet-800 border border-violet-200 rounded hover:bg-violet-200"
+                        title="裁剪"
+                      >
+                        <Scissors className="h-3.5 w-3.5" />
+                        裁剪
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onDeleteVideoItem(vp); }}
+                        className="px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                        title="删除"
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -211,9 +231,21 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
           </div>
         </div>
       )}
+
+      {trimPath && (
+        <TrimVideoModal
+          isOpen={trimOpen}
+          projectId={project.id}
+          videoPath={trimPath}
+          videoLabel={project.video_names?.[trimPath]}
+          onClose={() => {
+            setTrimOpen(false);
+            setTrimPath(null);
+          }}
+        />
+      )}
     </>
   );
 };
 
 export default VideoSourcesManager;
-

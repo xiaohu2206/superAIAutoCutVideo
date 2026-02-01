@@ -124,20 +124,62 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   const downloadOptions = useMemo(() => {
     if (createMode === "clone") {
       return [
-        { id: "base_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", keys: ["base_1_7b"] },
-        { id: "base_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", keys: ["base_0_6b"] },
+        { 
+          id: "base_1_7b_hf", 
+          label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", 
+          keys: ["base_1_7b"],
+          size: "4.6GB",
+          description: "效果更好，建议显存 8G+ 使用"
+        },
+        { 
+          id: "base_0_6b_hf", 
+          label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", 
+          keys: ["base_0_6b"],
+          size: "2.6GB",
+          description: "速度快，适合显存 4G+ 使用"
+        },
       ];
     }
     if (createMode === "custom_role") {
       return [
-        { id: "custom_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", keys: ["custom_1_7b"] },
-        { id: "custom_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", keys: ["custom_0_6b"] },
+        { 
+          id: "custom_1_7b_hf", 
+          label: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", 
+          keys: ["custom_1_7b"],
+          size: "4.6GB",
+          description: "效果更好，建议显存 8G+ 使用"
+        },
+        { 
+          id: "custom_0_6b_hf", 
+          label: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", 
+          keys: ["custom_0_6b"],
+          size: "2.5GB",
+          description: "速度快，适合显存 4G+ 使用"
+        },
       ];
     }
     return [
-      { id: "voice_design_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", keys: ["voice_design_1_7b"] },
-      { id: "base_1_7b_hf", label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", keys: ["base_1_7b"] },
-      { id: "base_0_6b_hf", label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", keys: ["base_0_6b"] },
+      { 
+        id: "voice_design_1_7b_hf", 
+        label: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", 
+        keys: ["voice_design_1_7b"],
+        size: "4.6GB",
+        description: "效果更好，建议显存 8G+ 使用"
+      },
+      { 
+        id: "base_1_7b_hf", 
+        label: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", 
+        keys: ["base_1_7b"],
+        size: "4.6GB",
+        description: "效果更好，建议显存 8G+ 使用"
+      },
+      { 
+        id: "base_0_6b_hf", 
+        label: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", 
+        keys: ["base_0_6b"],
+        size: "2.6GB",
+        description: "速度快，适合显存 4G+ 使用"
+      },
     ];
   }, [createMode]);
 
