@@ -109,14 +109,13 @@ export const JianyingDraftPathSection: React.FC = () => {
           />
           <button
             className={`inline-flex items-center px-3 py-2 rounded-md text-sm ${
-              browsing ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+              browsing ? "cursor-not-allowed" : ""
             }`}
             onClick={handleBrowse}
             disabled={browsing}
             title="浏览选择目录"
           >
             {browsing ? <Loader className="h-4 w-4 mr-1 animate-spin" /> : <FolderOpen className="h-4 w-4 mr-1" />}
-            浏览
           </button>
         </div>
         <div className="flex items-center text-sm">

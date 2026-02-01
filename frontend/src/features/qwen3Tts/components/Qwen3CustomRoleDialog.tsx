@@ -230,20 +230,31 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
                   onClick={() => setIsSpeakerOpen(!isSpeakerOpen)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-purple-200"
                 >
-                  <span className={!speaker ? "text-gray-500" : "text-gray-900"}>
-                    {speaker ? (
-                      <span className="flex items-center gap-2">
-                        <span>{SPEAKER_METADATA[speaker] ? SPEAKER_METADATA[speaker].name : speaker}</span>
-                        {SPEAKER_METADATA[speaker] && (
-                          <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
-                            {SPEAKER_METADATA[speaker].lang}
+                  {capabilitiesLoading ? (
+                    <span className="flex items-center text-gray-400">
+                      <Loader className="animate-spin h-4 w-4 mr-2" />
+                      加载中...
+                    </span>
+                  ) : (
+                    <span className={!speaker ? "text-gray-500" : "text-gray-900"}>
+                      {speaker ? (
+                        <span className="flex items-center gap-2">
+                          <span>
+                            {SPEAKER_METADATA[speaker]
+                              ? SPEAKER_METADATA[speaker].name
+                              : speaker}
                           </span>
-                        )}
-                      </span>
-                    ) : (
-                      "请选择"
-                    )}
-                  </span>
+                          {SPEAKER_METADATA[speaker] && (
+                            <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                              {SPEAKER_METADATA[speaker].lang}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        "请选择"
+                      )}
+                    </span>
+                  )}
                   <ChevronDown className="h-4 w-4 text-gray-400" />
                 </button>
 
