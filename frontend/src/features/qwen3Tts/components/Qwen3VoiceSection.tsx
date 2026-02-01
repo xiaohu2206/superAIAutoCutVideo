@@ -162,7 +162,8 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
 
     const acc = accelerationStatus?.acceleration;
     const runtime = accelerationStatus?.runtime;
-    const device = String(runtime?.device || acc?.preferred_device || "cpu");
+    const runtimeDevice = runtime?.loaded ? runtime?.device : null;
+    const device = String(runtimeDevice || acc?.preferred_device || "cpu");
     const isGpu = device.toLowerCase().startsWith("cuda");
     const labelPrefix = runtime?.loaded ? "当前推理" : "推理设备";
     const gpuName = acc?.gpu?.name ? ` (${acc.gpu.name})` : "";

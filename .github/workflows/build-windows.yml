@@ -74,117 +74,99 @@ jobs:
       working-directory: frontend
       run: npm run build
 
-    - name: Install Python dependencies
-      working-directory: backend
+    - name: Build CPU and GPU variants
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        if (Test-Path "requirements.runtime.txt") {
-          pip install -r requirements.runtime.txt
+        if (Test-Path "backend\requirements.runtime.txt") {
+          pip install -r backend\requirements.runtime.txt
         } else {
-          pip install -r requirements.txt
+          pip install -r backend\requirements.txt
         }
         pip install pyinstaller
 
-    - name: Build Python backend
-      working-directory: backend
-      run: |
-        pyinstaller --clean --distpath dist backend.spec
-
-    - name: Create resources directory
-      run: |
-        New-Item -ItemType Directory -Path "src-tauri\resources" -Force
-    - name: Copy FFmpeg binaries to resources
-      run: |
         $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
         $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $ffmpegExe) { throw "ffmpeg.exe not found under Chocolatey lib path" }
         if (-not $ffprobeExe) { throw "ffprobe.exe not found under Chocolatey lib path" }
-        Copy-Item $ffmpegExe.FullName "src-tauri\resources\ffmpeg.exe" -Force
-        Copy-Item $ffprobeExe.FullName "src-tauri\resources\ffprobe.exe" -Force
 
-    - name: Copy backend to resources
-      run: |
-        Copy-Item "backend\dist\superAutoCutVideoBackend.exe" "src-tauri\resources\" -Force
+        $cfg = Get-Content -Raw 'src-tauri\tauri.conf.json' | ConvertFrom-Json
+        $productName = $cfg.productName
+        $version = $cfg.version
+        $artifactBase = 'src-tauri\target\release\dist'
+        New-Item -ItemType Directory -Force $artifactBase | Out-Null
+        $safeProduct = ($productName -replace '[^A-Za-z0-9_.-]', '_')
 
-    - name: Verify setup
-      run: |
-        Write-Host "=== Verification ==="
-        Write-Host "Frontend build:"
-        Test-Path "frontend\dist" | Out-Host
-        Write-Host "`nBackend in resources:"
-        Test-Path "src-tauri\resources\superAutoCutVideoBackend.exe" | Out-Host
-        Write-Host "`nFFmpeg in resources:"
-        Test-Path "src-tauri\resources\ffmpeg.exe" | Out-Host
-        Test-Path "src-tauri\resources\ffprobe.exe" | Out-Host
-        Write-Host "`nFFmpeg:"
-        ffmpeg -version | Select-Object -First 1
+        foreach ($variant in @("cpu","gpu")) {
+          Write-Host "=== Build variant: $variant ==="
+          Push-Location backend
+          try {
+            pip uninstall -y torch torchvision | Out-Null
+            if ($variant -eq "cpu") {
+              pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+            } else {
+              pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+            }
+            pyinstaller --clean --distpath dist backend.spec
+            if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
+          } finally { Pop-Location }
 
-    - name: Verify Tauri config file
-      run: |
-        Write-Host "=== Verify tauri.conf.json ==="
-        if (Test-Path "src-tauri\tauri.conf.json") {
-          $item = Get-Item "src-tauri\tauri.conf.json"
-          Write-Host "Path: $($item.FullName)"
-          Write-Host "Size: $($item.Length) bytes"
-          if ($item.Length -eq 0) { throw "tauri.conf.json is empty" }
-          Get-Content "src-tauri\tauri.conf.json" -Head 20 | ForEach-Object { Write-Host $_ }
-        } else {
-          throw "src-tauri\\tauri.conf.json not found"
+          New-Item -ItemType Directory -Force "src-tauri\resources" | Out-Null
+          Copy-Item "backend\dist\superAutoCutVideoBackend.exe" "src-tauri\resources\" -Force
+          Copy-Item $ffmpegExe.FullName "src-tauri\resources\ffmpeg.exe" -Force
+          Copy-Item $ffprobeExe.FullName "src-tauri\resources\ffprobe.exe" -Force
+
+          if (Test-Path "src-tauri\target\release") {
+            Remove-Item "src-tauri\target\release" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          Push-Location src-tauri
+          try {
+            cargo tauri build --config tauri.conf.json --bundles nsis,msi
+            if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build exited with code $LASTEXITCODE" }
+          } finally { Pop-Location }
+
+          $variantOut = Join-Path $artifactBase $variant
+          $installersOut = Join-Path $variantOut "installers"
+          New-Item -ItemType Directory -Force $installersOut | Out-Null
+          foreach ($pair in @(
+            @{ dir = 'src-tauri\target\release\bundle\nsis'; filter = '*.exe'; bundle = 'nsis' },
+            @{ dir = 'src-tauri\target\release\bundle\msi';  filter = '*.msi'; bundle = 'msi' }
+          )) {
+            if (Test-Path $pair.dir) {
+              Get-ChildItem -Path $pair.dir -Filter $pair.filter -ErrorAction SilentlyContinue | ForEach-Object {
+                $ext = $_.Extension
+                $dst = Join-Path $installersOut ("${safeProduct}_v${version}_${variant}_${($pair.bundle)}${ext}")
+                Copy-Item -Force $_.FullName $dst
+              }
+            }
+          }
         }
-
-    - name: Show Tauri config header bytes
-      run: |
-        Write-Host "=== Hex dump (first 16 bytes) ==="
-        Format-Hex "src-tauri\tauri.conf.json" | Select-Object -First 3
-
-    - name: Clean previous Windows bundles
-      run: |
-        Write-Host "=== Clean previous bundles ==="
-        $nsisDir = "src-tauri\target\release\bundle\nsis"
-        $msiDir  = "src-tauri\target\release\bundle\msi"
-        if (Test-Path $nsisDir) {
-          Write-Host "Removing NSIS bundle directory: $nsisDir"
-          Remove-Item $nsisDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        if (Test-Path $msiDir) {
-          Write-Host "Removing MSI bundle directory: $msiDir"
-          Remove-Item $msiDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-    - name: Build Tauri app
-      working-directory: src-tauri
-      run: |
-        cargo tauri build --config tauri.conf.json
 
     - name: List artifacts
       if: always()
       run: |
         Write-Host "=== Build Artifacts ==="
-        $bundleDir = "src-tauri\target\release\bundle\nsis"
-        if (Test-Path $bundleDir) {
-          Get-ChildItem $bundleDir -Recurse -Include *.exe | ForEach-Object {
+        $dist = "src-tauri\target\release\dist"
+        if (Test-Path $dist) {
+          Get-ChildItem $dist -Recurse -Include *.exe,*.msi | ForEach-Object {
             Write-Host "$($_.FullName) - $([math]::Round($_.Length/1MB,2)) MB"
           }
         } else {
-          Write-Host "NSIS bundle directory not found. Build may have failed."
-          if (Test-Path "src-tauri\target\release") {
-            Write-Host "Release directory contents:"
-            Get-ChildItem "src-tauri\target\release" -File | Select-Object Name, Length
-          }
+          Write-Host "dist directory not found."
         }
 
-    - name: Upload NSIS
+    - name: Upload installers
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: superAIAutoCutVideo-1.0.2
-        path: src-tauri/target/release/bundle/nsis/*-setup.exe
+        name: ${{ github.event.repository.name }}-windows
+        path: src-tauri/target/release/dist/**/installers/*
 
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          src-tauri/target/release/bundle/nsis/*-setup.exe
+          src-tauri/target/release/dist/**/installers/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

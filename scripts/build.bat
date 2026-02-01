@@ -92,8 +92,37 @@ if errorlevel 1 (
 )
 cd ..
 
-:: 打包后端
-echo [3/4] 打包后端...
+set VARIANTS=cpu gpu
+for %%V in (%VARIANTS%) do (
+    call :buildVariant %%V
+)
+
+echo.
+echo ========================================
+echo   构建完成！
+echo ========================================
+echo.
+echo 输出文件位置:
+echo   CPU 安装包: src-tauri\target\release\dist\cpu\installers\
+echo   GPU 安装包: src-tauri\target\release\dist\gpu\installers\
+echo.
+echo 后端可执行文件: backend\dist\superAutoCutVideoBackend.exe
+echo.
+
+:: 显示文件大小
+if exist "src-tauri\target\release\SuperAIAutoCutVideo.exe" (
+    echo 应用大小:
+    dir "src-tauri\target\release\SuperAIAutoCutVideo.exe" | findstr "SuperAIAutoCutVideo.exe"
+)
+
+echo.
+echo 构建完成！
+pause
+exit /b 0
+
+:buildVariant
+set VARIANT=%1
+echo [3/4] 打包后端 (%VARIANT%)...
 cd backend
 echo 安装后端依赖...
 if exist "requirements.runtime.txt" (
@@ -112,7 +141,6 @@ if exist "requirements.runtime.txt" (
         exit /b 1
     )
 )
-:: 确保打包包含 OpenCV
 pip show opencv-python >nul 2>&1
 if errorlevel 1 (
     echo 安装 OpenCV 依赖...
@@ -123,7 +151,6 @@ if errorlevel 1 (
         exit /b 1
     )
 )
-:: 确保表单上传支持
 pip show python-multipart >nul 2>&1
 if errorlevel 1 (
     echo 安装 python-multipart 依赖...
@@ -134,26 +161,30 @@ if errorlevel 1 (
         exit /b 1
     )
 )
+pip uninstall -y torch torchvision
+if /I "%VARIANT%"=="cpu" (
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+) else (
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+)
+if exist "dist" rmdir /s /q "dist"
 pyinstaller backend.spec
 if errorlevel 1 (
     echo 错误: 后端打包失败
     pause
     exit /b 1
 )
-
-:: 复制后端可执行文件到 Tauri 资源目录
 echo 复制后端可执行文件...
 if not exist "..\src-tauri\resources" mkdir "..\src-tauri\resources"
-copy "dist\superAutoCutVideoBackend.exe" "..\src-tauri\resources\"
+copy /y "dist\superAutoCutVideoBackend.exe" "..\src-tauri\resources\"
 if errorlevel 1 (
     echo 错误: 复制后端可执行文件失败
     pause
     exit /b 1
 )
 cd ..
-
-:: 构建 Tauri 应用
-echo [4/4] 构建 Tauri 应用...
+if exist "src-tauri\target\release" rmdir /s /q "src-tauri\target\release"
+echo [4/4] 构建 Tauri 应用 (%VARIANT%)...
 cd src-tauri
 cargo tauri build
 if errorlevel 1 (
@@ -162,26 +193,18 @@ if errorlevel 1 (
     exit /b 1
 )
 cd ..
+call :collectArtifacts %VARIANT%
+exit /b 0
 
-echo.
-echo ========================================
-echo   构建完成！
-echo ========================================
-echo.
-echo 输出文件位置:
-echo   Windows 安装包: src-tauri\target\release\bundle\msi\
-echo   Windows 便携版: src-tauri\target\release\bundle\nsis\
-echo   可执行文件: src-tauri\target\release\
-echo.
-echo 后端可执行文件: backend\dist\superAutoCutVideoBackend.exe
-echo.
-
-:: 显示文件大小
-if exist "src-tauri\target\release\SuperAIAutoCutVideo.exe" (
-    echo 应用大小:
-    dir "src-tauri\target\release\SuperAIAutoCutVideo.exe" | findstr "SuperAIAutoCutVideo.exe"
+:collectArtifacts
+set VARIANT=%1
+set DIST_DIR=src-tauri\target\release\dist\%VARIANT%
+if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
+if not exist "%DIST_DIR%\installers" mkdir "%DIST_DIR%\installers"
+for %%F in (src-tauri\target\release\bundle\nsis\*.exe) do (
+    copy /y "%%F" "%DIST_DIR%\installers\%%~nF_%VARIANT%%%~xF"
 )
-
-echo.
-echo 构建完成！
-pause
+for %%F in (src-tauri\target\release\bundle\msi\*.msi) do (
+    copy /y "%%F" "%DIST_DIR%\installers\%%~nF_%VARIANT%%%~xF"
+)
+exit /b 0
