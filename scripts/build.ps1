@@ -9,6 +9,23 @@ function Step($msg) { Write-Host "[+] $msg" -ForegroundColor Cyan }
 function Info($msg) { Write-Host "    $msg" }
 function Fail($msg) { Write-Host "[x] $msg" -ForegroundColor Red ; exit 1 }
 
+function Invoke-CompressArchiveWithRetry([string]$sourcePath, [string]$destinationPath, [int]$retries = 5, [int]$delayMs = 800) {
+  for ($i = 1; $i -le $retries; $i++) {
+    try {
+      Compress-Archive -Path $sourcePath -DestinationPath $destinationPath -Force
+      return
+    } catch {
+      Info "Compress-Archive retry $i/${retries}: $($_.Exception.Message)"
+      try {
+        Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
+      } catch { }
+      Start-Sleep -Milliseconds $delayMs
+    }
+  }
+  Fail "Portable ZIP creation failed (file locked)"
+}
+
 Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
@@ -161,11 +178,7 @@ foreach ($variant in $variants) {
     if ($ffmpegExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName "src-tauri\\resources\\ffmpeg.exe" }
     if ($ffprobeExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeExe.FullName "src-tauri\\resources\\ffprobe.exe" }
   } catch { Info "Skip FFmpeg copy: $($_.Exception.Message)" }
-
-  if (Test-Path 'src-tauri\\target\\release') {
-    try { Remove-Item 'src-tauri\\target\\release' -Recurse -Force -ErrorAction Stop }
-    catch { Info "Skip cleaning release dir (locked or in use): src-tauri\\target\\release" }
-  }
+ 
 
   Step "Build Tauri app (Release) ($variant)"
   Push-Location src-tauri
@@ -181,6 +194,11 @@ foreach ($variant in $variants) {
   $portableTemp = Join-Path $releaseDir 'portable_temp'
   if (Test-Path $portableTemp) { Remove-Item $portableTemp -Recurse -Force }
   New-Item -ItemType Directory -Force $portableTemp | Out-Null
+  Step "Ensure no running instances before zip ($variant)"
+  try {
+    Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
+  } catch { }
   Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
   New-Item -ItemType Directory -Force (Join-Path $portableTemp 'resources') | Out-Null
   Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.exe') (Join-Path $portableTemp 'resources\\')
@@ -199,7 +217,7 @@ foreach ($variant in $variants) {
   $variantOut = Join-Path $artifactBase $variant
   New-Item -ItemType Directory -Force $variantOut | Out-Null
   $zipPath = Join-Path $variantOut $zipName
-  Compress-Archive -Path (Join-Path $portableTemp '*') -DestinationPath $zipPath -Force
+  Invoke-CompressArchiveWithRetry (Join-Path $portableTemp '*') $zipPath
   Remove-Item $portableTemp -Recurse -Force
 
   Push-Location src-tauri
