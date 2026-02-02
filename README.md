@@ -67,7 +67,7 @@
 
 
 ## 快速开始
-前置要求：`Node.js ≥ 18`、`Python ≥ 3.11`、`Rust`、`FFmpeg`
+前置要求：`Node.js ≥ 18`、`Python ≥ 3.11`、`Rust`、`FFmpeg`、`torch`
 
 
 ### Windows（PowerShell）
