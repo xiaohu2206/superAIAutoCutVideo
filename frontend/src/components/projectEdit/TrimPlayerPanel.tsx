@@ -26,6 +26,8 @@ export type TrimPlayerPanelProps = {
   onTimeUpdate: () => void;
   onPlay: () => void;
   onPause: () => void;
+  onSeeking: () => void;
+  onSeeked: () => void;
   onSeek: (ms: number) => void;
   onTogglePlay: () => void;
   onRangesChange: (next: TrimRange[]) => void;
@@ -56,6 +58,8 @@ export const TrimPlayerPanel: React.FC<TrimPlayerPanelProps> = ({
   onTimeUpdate,
   onPlay,
   onPause,
+  onSeeking,
+  onSeeked,
   onSeek,
   onTogglePlay,
   onRangesChange,
@@ -87,6 +91,8 @@ export const TrimPlayerPanel: React.FC<TrimPlayerPanelProps> = ({
           onTimeUpdate={onTimeUpdate}
           onPlay={onPlay}
           onPause={onPause}
+          onSeeking={onSeeking}
+          onSeeked={onSeeked}
         />
         {isVideoLoading && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">

@@ -55,6 +55,12 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
   const lastVideoPathRef = useRef<string | null>(null);
   const lastOpenRef = useRef(false);
   const preparedPathsRef = useRef<Set<string>>(new Set());
+  const seekSeqRef = useRef(0);
+  const seekStuckTimerRef = useRef<number | null>(null);
+  const seekCleanupRef = useRef<(() => void) | null>(null);
+  const rvfcIdRef = useRef<number | null>(null);
+  const hardResetTimerRef = useRef<number | null>(null);
+  const pendingResetSeekMsRef = useRef<number | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number>(0);
@@ -122,9 +128,109 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     (ms: number) => {
       const v = getVideoEl();
       if (!v) return;
+      if (seekCleanupRef.current) {
+        seekCleanupRef.current();
+        seekCleanupRef.current = null;
+      }
       const nextMs = clamp(ms, 0, durationMs);
-      v.currentTime = nextMs / 1000;
       setCurrentMs(nextMs);
+      setIsVideoLoading(true);
+      try {
+        v.pause();
+      } catch {
+        void 0;
+      }
+      let finished = false;
+      const seq = ++seekSeqRef.current;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (seekSeqRef.current === seq) {
+          setIsVideoLoading(false);
+        }
+        if (seekStuckTimerRef.current != null) {
+          window.clearTimeout(seekStuckTimerRef.current);
+          seekStuckTimerRef.current = null;
+        }
+        if (rvfcIdRef.current != null) {
+          const cancel = (v as any)?.cancelVideoFrameCallback;
+          if (typeof cancel === "function") {
+            try {
+              cancel(rvfcIdRef.current);
+            } catch {
+              void 0;
+            }
+          }
+          rvfcIdRef.current = null;
+        }
+        if (hardResetTimerRef.current != null) {
+          window.clearTimeout(hardResetTimerRef.current);
+          hardResetTimerRef.current = null;
+        }
+      };
+      const onSeekedOnce = () => {
+        v.removeEventListener("seeked", onSeekedOnce);
+        finish();
+      };
+      v.addEventListener("seeked", onSeekedOnce);
+      seekCleanupRef.current = () => {
+        try {
+          v.removeEventListener("seeked", onSeekedOnce);
+        } catch {
+          void 0;
+        }
+        if (seekStuckTimerRef.current != null) {
+          window.clearTimeout(seekStuckTimerRef.current);
+          seekStuckTimerRef.current = null;
+        }
+        if (rvfcIdRef.current != null) {
+          const cancel = (v as any)?.cancelVideoFrameCallback;
+          if (typeof cancel === "function") {
+            try {
+              cancel(rvfcIdRef.current);
+            } catch {
+              void 0;
+            }
+          }
+          rvfcIdRef.current = null;
+        }
+        if (hardResetTimerRef.current != null) {
+          window.clearTimeout(hardResetTimerRef.current);
+          hardResetTimerRef.current = null;
+        }
+      };
+      try {
+        v.currentTime = nextMs / 1000;
+      } catch {
+        void 0;
+      }
+      const rvfc = (v as any)?.requestVideoFrameCallback;
+      if (typeof rvfc === "function") {
+        try {
+          rvfcIdRef.current = rvfc(() => finish());
+        } catch {
+          void 0;
+        }
+      }
+      seekStuckTimerRef.current = window.setTimeout(() => {
+        if (finished) return;
+        try {
+          v.currentTime = Math.min(durationMs, nextMs + 1) / 1000;
+        } catch {
+          void 0;
+        }
+      }, 800);
+      hardResetTimerRef.current = window.setTimeout(() => {
+        if (finished) return;
+        pendingResetSeekMsRef.current = nextMs;
+        try {
+          v.pause();
+        } catch {
+          void 0;
+        }
+        setIsVideoLoading(true);
+        setCacheBust(String(Date.now()));
+      }, 2500);
     },
     [durationMs, getVideoEl]
   );
@@ -182,8 +288,32 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
   const onPlay = useCallback(() => setIsPlaying(true), []);
   const onEnded = useCallback(() => setIsPlaying(false), []);
   const onLoadStart = useCallback(() => setIsVideoLoading(true), []);
-  const onLoadedData = useCallback(() => setIsVideoLoading(false), []);
-  const onCanPlay = useCallback(() => setIsVideoLoading(false), []);
+  const onLoadedData = useCallback(() => {
+    const v = getVideoEl();
+    if (v && pendingResetSeekMsRef.current != null) {
+      try {
+        v.currentTime = pendingResetSeekMsRef.current / 1000;
+      } catch {
+        void 0;
+      } finally {
+        pendingResetSeekMsRef.current = null;
+      }
+    }
+    setIsVideoLoading(false);
+  }, [getVideoEl]);
+  const onCanPlay = useCallback(() => {
+    const v = getVideoEl();
+    if (v && pendingResetSeekMsRef.current != null) {
+      try {
+        v.currentTime = pendingResetSeekMsRef.current / 1000;
+      } catch {
+        void 0;
+      } finally {
+        pendingResetSeekMsRef.current = null;
+      }
+    }
+    setIsVideoLoading(false);
+  }, [getVideoEl]);
   const onWaiting = useCallback(() => setIsVideoLoading(true), []);
   const onStalled = useCallback(() => setIsVideoLoading(true), []);
   const onPlaying = useCallback(() => {
@@ -194,6 +324,8 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     setIsVideoLoading(false);
     setIsPlaying(false);
   }, []);
+  const onSeeking = useCallback(() => setIsVideoLoading(true), []);
+  const onSeeked = useCallback(() => setIsVideoLoading(false), []);
 
   const canSubmit = useMemo(() => {
     if (submitting) return false;
@@ -381,6 +513,8 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     onStalled,
     onPlaying,
     onError,
+    onSeeking,
+    onSeeked,
     canSubmit,
     confirm,
     close,

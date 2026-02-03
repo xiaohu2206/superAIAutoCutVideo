@@ -253,8 +253,8 @@ export const TrimTimeline: React.FC<TrimTimelineProps> = ({
     const isHitPlayhead = Math.abs(x - playheadX) <= playheadHitSlopPx;
 
     const startMsAtPointer = msFromClientXInTrack(e.clientX);
-    const startMs = isHitPlayhead ? clamp(currentMs, 0, Math.max(0, durationMs)) : startMsAtPointer;
     const mode: DragState["type"] = isHitPlayhead ? "playhead" : e.shiftKey ? "create" : "scrub";
+    const startMs = startMsAtPointer;
 
     if (mode === "create") {
       const tempId = `r_${Date.now()}_${Math.random().toString(16).slice(2)}`;

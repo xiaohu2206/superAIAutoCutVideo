@@ -56,11 +56,54 @@ class VideoProcessor:
             stdout, stderr = await process.communicate()
 
             if process.returncode == 0:
-                logger.info(f"视频剪切成功: {output_path}")
-                return True
+                try:
+                    dur = await self._ffprobe_video_duration(output_path)
+                except Exception:
+                    dur = None
+                if dur is not None and dur > 0.01:
+                    logger.info(f"视频剪切成功: {output_path}")
+                    return True
+                logger.warning("剪切结果时长异常，进入重编码回退")
             else:
                 err = stderr.decode(errors="ignore")
-                logger.error(f"视频剪切失败: {err}")
+                logger.error(f"视频剪切失败，进入重编码回退: {err}")
+
+            try:
+                enc_name, vcodec_args = await self._pick_fast_encoder()
+            except Exception:
+                enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            reencode_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-i", input_path,
+                "-ss", str(start_time),
+                "-t", str(duration),
+                *vcodec_args,
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+                "-movflags", "+faststart",
+                "-y",
+                output_path
+            ]
+            p2 = await asyncio.create_subprocess_exec(
+                *reencode_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            _, e2 = await p2.communicate()
+            if p2.returncode == 0:
+                try:
+                    dur2 = await self._ffprobe_video_duration(output_path)
+                except Exception:
+                    dur2 = None
+                if dur2 is not None and dur2 > 0.01:
+                    logger.info(f"视频剪切成功(重编码): {output_path}")
+                    return True
+                logger.error("重编码剪切后时长仍为0")
+                return False
+            else:
+                logger.error(f"视频剪切失败(重编码): {e2.decode(errors='ignore')}")
                 return False
 
         except Exception as e:
