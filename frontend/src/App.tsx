@@ -1,8 +1,9 @@
 import { RefreshCw } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import Navigation from "./components/Navigation";
-import MessageHost from "./components/ui/MessageHost";
 import SettingsPage from "./components/settingsPage";
+import MessageHost from "./components/ui/MessageHost";
+import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
 import {
   TauriCommands,
@@ -13,7 +14,6 @@ import {
   handshakeVerifyBackend,
   wsClient,
 } from "./services/clients";
-import ProjectEditPage from "./pages/ProjectEditPage";
 
 
 interface BackendStatus {
@@ -215,6 +215,7 @@ const App: React.FC = () => {
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">SuperAI</p>
+          <p className="text-sm text-gray-500">请不要相信本项目改造的相关付费版本</p>
         </div>
       </div>
     );
