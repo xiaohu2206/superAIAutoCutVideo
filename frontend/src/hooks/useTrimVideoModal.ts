@@ -229,6 +229,33 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
       const taskId = start.task_id;
 
       await new Promise<void>((resolve, reject) => {
+        let finished = false;
+        let timeoutId: number | null = null;
+
+        const cleanup = () => {
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        };
+
+        const handleSuccess = (outputVersion?: string | number) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          if (outputVersion !== undefined && outputVersion !== null) {
+            setCacheBust(String(outputVersion));
+          }
+          resolve();
+        };
+
+        const handleError = (msg: string) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          reject(new Error(msg || "裁剪失败"));
+        };
+
         const handler = (msg: WebSocketMessage & { [key: string]: any }) => {
           if (!msg) return;
           if ((msg.type !== "progress" && msg.type !== "completed" && msg.type !== "error") || msg.scope !== "trim_video") return;
@@ -241,18 +268,55 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
             setStatusText(msg.message);
           }
           if (msg.type === "completed") {
-            const outputVersion = String(msg.output_version || Date.now());
-            setCacheBust(outputVersion);
             wsClient.off("*", handler);
-            resolve();
+            handleSuccess(msg.output_version ?? Date.now());
           }
           if (msg.type === "error") {
-            const m = String(msg.message || "裁剪失败");
             wsClient.off("*", handler);
-            reject(new Error(m));
+            const m = String(msg.message || "裁剪失败");
+            handleError(m);
           }
         };
+
         wsClient.on("*", handler);
+
+        const pollStatus = async () => {
+          while (!finished) {
+            await new Promise((r) => setTimeout(r, 2000));
+            if (finished) return;
+            try {
+              const status = await projectService.getTrimVideoStatus(projectId, taskId);
+              if (!status) continue;
+              if (typeof status.progress === "number") {
+                setProgress(Math.max(0, Math.min(100, Math.round(status.progress))));
+              }
+              if (typeof status.message === "string") {
+                setStatusText(status.message);
+              }
+              const st = String(status.status || "").toLowerCase();
+              if (st === "completed") {
+                wsClient.off("*", handler);
+                handleSuccess(status.output_version ?? Date.now());
+                return;
+              }
+              if (st === "failed") {
+                wsClient.off("*", handler);
+                const m = String(status.message || "裁剪失败");
+                handleError(m);
+                return;
+              }
+            } catch (err) {
+              void err;
+            }
+          }
+        };
+
+        void pollStatus();
+
+        timeoutId = window.setTimeout(() => {
+          wsClient.off("*", handler);
+          handleError("裁剪超时，请稍后重试");
+        }, 5 * 60 * 1000);
       });
 
       message.success("裁剪完成，已替换原视频");

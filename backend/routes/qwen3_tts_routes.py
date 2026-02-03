@@ -717,6 +717,14 @@ def _find_ffmpeg() -> Optional[str]:
         candidates.append(Path.cwd() / "resources" / name)
     except Exception:
         pass
+    try:
+        if os.name == "nt":
+            candidates.append(Path("C:/Program Files/ffmpeg/bin") / "ffmpeg.exe")
+            candidates.append(Path("C:/ffmpeg/bin") / "ffmpeg.exe")
+            candidates.append(Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / "ffmpeg.exe")
+            candidates.append(Path("C:/ProgramData/chocolatey/bin") / "ffmpeg.exe")
+    except Exception:
+        pass
     for c in candidates:
         try:
             if c.exists():

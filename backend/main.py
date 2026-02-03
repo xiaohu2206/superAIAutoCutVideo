@@ -16,6 +16,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+import tempfile
+import zipfile
+import shutil
+import urllib.request
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
@@ -191,13 +195,64 @@ try:
 except Exception:
     pass
 
+def _ensure_ffmpeg_in_resources() -> None:
+    try:
+        root = Path(__file__).resolve().parents[1]
+        res = root / "src-tauri" / "resources"
+        res.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            f1 = res / "ffmpeg.exe"
+            f2 = res / "ffprobe.exe"
+        else:
+            f1 = res / "ffmpeg"
+            f2 = res / "ffprobe"
+        if f1.exists() and f2.exists():
+            return
+        if os.name == "nt":
+            urls = [
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-essentials.zip",
+            ]
+            tmpdir = Path(tempfile.mkdtemp())
+            try:
+                for u in urls:
+                    try:
+                        zip_path = tmpdir / "ffmpeg.zip"
+                        urllib.request.urlretrieve(u, str(zip_path))
+                        with zipfile.ZipFile(str(zip_path), "r") as zf:
+                            zf.extractall(str(tmpdir))
+                        ff = None
+                        fp = None
+                        for p in tmpdir.rglob("ffmpeg.exe"):
+                            ff = p
+                            break
+                        for p in tmpdir.rglob("ffprobe.exe"):
+                            fp = p
+                            break
+                        if ff and fp:
+                            shutil.copy2(str(ff), str(f1))
+                            shutil.copy2(str(fp), str(f2))
+                            break
+                    except Exception:
+                        continue
+            finally:
+                try:
+                    shutil.rmtree(str(tmpdir))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def _inject_ffmpeg_into_path() -> None:
     try:
         root = Path(__file__).resolve().parents[1]
+        exe_dir = Path(sys.executable).resolve().parent
         candidates = [
             root / "src-tauri" / "resources",
             root / "src-tauri" / "target" / "debug" / "resources",
             root / "src-tauri" / "target" / "release" / "resources",
+            exe_dir / "resources",
+            exe_dir,
         ]
         sep = ";" if os.name == "nt" else ":"
         orig = os.environ.get("PATH", "")
@@ -219,6 +274,14 @@ def _inject_ffmpeg_into_path() -> None:
                 pass
         if prepend:
             os.environ["PATH"] = sep.join(prepend + [orig]) if orig else sep.join(prepend)
+    except Exception:
+        pass
+
+async def _async_setup_ffmpeg() -> None:
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _ensure_ffmpeg_in_resources)
+        _inject_ffmpeg_into_path()
     except Exception:
         pass
 
@@ -699,6 +762,13 @@ async def startup_event():
         jianying_config_manager.ensure_default_draft_path()
     except Exception as e:
         logger.warning(f"默认查找剪映草稿路径失败: {e}")
+    try:
+        scope = _get_runtime_scope()
+        auto = str(os.environ.get("SACV_FFMPEG_AUTO_DOWNLOAD") or "").strip().lower() in {"1", "true", "yes"}
+        if scope == "dev" and auto:
+            asyncio.create_task(_async_setup_ffmpeg())
+    except Exception:
+        pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
