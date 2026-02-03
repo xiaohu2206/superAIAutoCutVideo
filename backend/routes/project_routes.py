@@ -31,6 +31,7 @@ import uuid
 import subprocess
 import platform
 from threading import RLock
+import subprocess
 
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor
@@ -806,6 +807,7 @@ FASTSTART_EXTS = {".mp4", ".mov"}
 
 async def remux_faststart(path: Path) -> bool:
     try:
+        WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
         if path.suffix.lower() not in FASTSTART_EXTS:
             return False
         tmp_path = path.with_name(f".{path.stem}.faststart{path.suffix}")
@@ -824,10 +826,12 @@ async def remux_faststart(path: Path) -> bool:
             "-y",
             str(tmp_path),
         ]
+        kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
         )
         await process.communicate()
         if process.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
@@ -1867,14 +1871,14 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
             sysname = platform.system().lower()
             if abs_path.is_file():
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", "/select,", str(abs_path)])
+                    subprocess.Popen(["explorer", "/select,", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", "-R", str(abs_path)])
                 else:
                     subprocess.Popen(["xdg-open", str(abs_path.parent)])
             else:
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", str(abs_path)])
+                    subprocess.Popen(["explorer", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", str(abs_path)])
                 else:

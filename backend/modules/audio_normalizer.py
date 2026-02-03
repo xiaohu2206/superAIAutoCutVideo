@@ -4,8 +4,10 @@ import logging
 import os
 import re
 from typing import Optional, Dict
+import subprocess
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
 
 class AudioNormalizer:
     def __init__(self, target_lufs: float = -20.0, max_peak: float = -1.0):
@@ -23,6 +25,7 @@ class AudioNormalizer:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {})
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -101,6 +104,7 @@ class AudioNormalizer:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {})
         )
         _, stderr = await proc.communicate()
         if proc.returncode == 0:
@@ -152,6 +156,7 @@ class AudioNormalizer:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {})
         )
         _, stderr = await proc.communicate()
         if proc.returncode == 0:

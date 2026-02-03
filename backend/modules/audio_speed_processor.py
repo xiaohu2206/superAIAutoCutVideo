@@ -3,8 +3,10 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import subprocess
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
 
 
 def _build_atempo_filters(speed_ratio: float) -> Optional[str]:
@@ -56,10 +58,12 @@ async def apply_audio_speed(input_path: str, speed_ratio: float) -> Dict[str, An
         *codec_args,
         str(tmp_path),
     ]
+    kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **kwargs
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:

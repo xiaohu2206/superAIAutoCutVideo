@@ -96,6 +96,7 @@ def _s_to_us(v: float) -> int:
 
 def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
     try:
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         result = subprocess.check_output(
             [
                 "ffprobe",
@@ -110,6 +111,7 @@ def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
                 str(video_path),
             ],
             stderr=subprocess.STDOUT,
+            **kwargs
         )
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
@@ -128,6 +130,7 @@ def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
 
 def _probe_audio_duration(audio_path: Path) -> float:
     try:
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         result = subprocess.check_output(
             [
                 "ffprobe",
@@ -140,6 +143,7 @@ def _probe_audio_duration(audio_path: Path) -> float:
                 str(audio_path),
             ],
             stderr=subprocess.STDOUT,
+            **kwargs
         )
         try:
             return float(result.decode().strip())
@@ -168,7 +172,8 @@ def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path:
             "-movflags", "+faststart",
             "-y", str(output_path),
         ]
-        subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL, **kwargs)
         return output_path.exists()
     except Exception:
         return False

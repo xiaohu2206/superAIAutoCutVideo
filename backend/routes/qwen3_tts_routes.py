@@ -514,7 +514,7 @@ async def open_qwen3_model_path(key: str = Query(..., description="模型key")) 
             raise HTTPException(status_code=404, detail="路径不存在")
         sysname = platform.system().lower()
         if "windows" in sysname:
-            subprocess.Popen(["explorer", str(target_dir)])
+            subprocess.Popen(["explorer", str(target_dir)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         elif "darwin" in sysname:
             subprocess.Popen(["open", str(target_dir)])
         else:
@@ -766,6 +766,7 @@ async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, A
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:

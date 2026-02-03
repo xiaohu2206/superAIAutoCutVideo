@@ -5,11 +5,13 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
+import subprocess
 
 from modules.config.tts_config import tts_engine_config_manager
 from modules.audio_speed_processor import apply_audio_speed
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
 
 
 async def _ensure_dir(path: Path) -> None:
@@ -26,7 +28,12 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **({"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {})
+        )
         out, _ = await proc.communicate()
         if proc.returncode == 0:
             try:
@@ -40,7 +47,12 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc2 = await asyncio.create_subprocess_exec(*cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        proc2 = await asyncio.create_subprocess_exec(
+            *cmd2,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **({"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {})
+        )
         out2, _ = await proc2.communicate()
         if proc2.returncode == 0:
             try:

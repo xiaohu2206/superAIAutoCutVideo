@@ -6,6 +6,7 @@ import os
 import platform
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ async def _ensure_parent_dir(path: Path) -> None:
 
 async def _ffprobe_duration(path: str) -> Optional[float]:
     try:
+        WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
         cmd = [
             "ffprobe",
             "-v", "error",
@@ -30,7 +32,13 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
+        )
         out, _ = await proc.communicate()
         if proc.returncode == 0:
             try:
@@ -44,7 +52,12 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc2 = await asyncio.create_subprocess_exec(*cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        proc2 = await asyncio.create_subprocess_exec(
+            *cmd2,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
+        )
         out2, _ = await proc2.communicate()
         if proc2.returncode == 0:
             try:

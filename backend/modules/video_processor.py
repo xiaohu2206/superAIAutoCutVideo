@@ -18,6 +18,7 @@ import numpy as np
 from .audio_normalizer import AudioNormalizer
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 class VideoProcessor:
     """视频处理器类"""
@@ -50,7 +51,8 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
 
             stdout, stderr = await process.communicate()
@@ -89,7 +91,8 @@ class VideoProcessor:
             p2 = await asyncio.create_subprocess_exec(
                 *reencode_cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             _, e2 = await p2.communicate()
             if p2.returncode == 0:
@@ -224,7 +227,12 @@ class VideoProcessor:
                             "-f", "mpegts",
                             "-y", str(ts_path)
                         ]
-                        procs.append(asyncio.create_subprocess_exec(*cmd_ts, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE))
+                        procs.append(asyncio.create_subprocess_exec(
+                            *cmd_ts,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            creationflags=WIN_NO_WINDOW
+                        ))
                     created = await asyncio.gather(*procs, return_exceptions=True)
                     waits = []
                     for pr in created:
@@ -261,7 +269,8 @@ class VideoProcessor:
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
                             stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
+                            stderr=asyncio.subprocess.PIPE,
+                            creationflags=WIN_NO_WINDOW
                         )
                         total_duration = sum(durations)
                         if on_progress:
@@ -331,7 +340,8 @@ class VideoProcessor:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
                 total_duration = sum(durations)
                 if on_progress:
@@ -434,7 +444,8 @@ class VideoProcessor:
                 process = await asyncio.create_subprocess_exec(
                     *cmd_try,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
 
                 total_duration = sum(durations)
@@ -507,7 +518,10 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -576,7 +590,8 @@ class VideoProcessor:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-encoders",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             text = out.decode(errors="ignore")
@@ -595,7 +610,8 @@ class VideoProcessor:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-hwaccels",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -631,7 +647,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -653,7 +669,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -680,7 +696,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -703,7 +719,10 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -723,7 +742,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc_a = await asyncio.create_subprocess_exec(*cmd_a, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc_a = await asyncio.create_subprocess_exec(
+                    *cmd_a,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out_a, _ = await proc_a.communicate()
                 if proc_a.returncode == 0:
                     try:
@@ -736,7 +760,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc_f = await asyncio.create_subprocess_exec(*cmd_f, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc_f = await asyncio.create_subprocess_exec(
+                    *cmd_f,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out_f, _ = await proc_f.communicate()
                 if proc_f.returncode == 0:
                     try:
@@ -751,7 +780,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out, _ = await proc.communicate()
                 if proc.returncode == 0:
                     try:
@@ -790,7 +824,8 @@ class VideoProcessor:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
                 stdout, stderr = await process.communicate()
                 if process.returncode == 0:
@@ -811,7 +846,8 @@ class VideoProcessor:
                     p2 = await asyncio.create_subprocess_exec(
                         *cmd_fb_direct,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
                     )
                     _, e2 = await p2.communicate()
                     if p2.returncode == 0:
@@ -858,7 +894,8 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             stdout, stderr = await process.communicate()
             if process.returncode == 0:
@@ -880,7 +917,8 @@ class VideoProcessor:
                 p2 = await asyncio.create_subprocess_exec(
                     *cmd_fb,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
                 _, e2 = await p2.communicate()
                 if p2.returncode == 0:
@@ -906,7 +944,8 @@ class VideoProcessor:
                     p2 = await asyncio.create_subprocess_exec(
                         *cmd_fb,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
                     )
                     _, e2 = await p2.communicate()
                     if p2.returncode == 0:
@@ -937,7 +976,8 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             stdout, stderr = await process.communicate()
             if process.returncode == 0:
