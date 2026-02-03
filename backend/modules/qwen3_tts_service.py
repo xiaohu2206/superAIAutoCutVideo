@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, cast
 
 import numpy as np
+import logging
 
 from modules.qwen3_tts_model_manager import Qwen3TTSPathManager, validate_model_dir
 
@@ -79,19 +80,47 @@ class Qwen3TTSService:
             except Exception as e:
                 raise RuntimeError(f"qwen_tts_import_failed:{e}")
 
-            kwargs: Dict[str, Any] = {}
             q = requested_device or "cpu"
+            inst = None
+            chosen_dtype = None
+            chosen_attn = None
             try:
                 import torch
-
                 if q.startswith("cuda") and torch.cuda.is_available():
-                    kwargs["torch_dtype"] = torch.float16
-            except Exception:
-                pass
-
-            inst = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: Qwen3TTSModel.from_pretrained(model_path, **kwargs)
-            )
+                    def _load_flash():
+                        return Qwen3TTSModel.from_pretrained(
+                            model_path,
+                            device_map=q,
+                            dtype=torch.bfloat16,
+                            attn_implementation="flash_attention_2",
+                        )
+                    try:
+                        inst = await asyncio.get_running_loop().run_in_executor(None, _load_flash)
+                        chosen_dtype = torch.bfloat16
+                        chosen_attn = "flash_attention_2"
+                    except Exception:
+                        def _load_sdpa():
+                            return Qwen3TTSModel.from_pretrained(
+                                model_path,
+                                device_map=q,
+                                dtype=torch.float16,
+                                attn_implementation="sdpa",
+                            )
+                        inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa)
+                        chosen_dtype = torch.float16
+                        chosen_attn = "sdpa"
+                else:
+                    def _load_cpu():
+                        return Qwen3TTSModel.from_pretrained(
+                            model_path,
+                            device_map="cpu",
+                            dtype=torch.float32,
+                        )
+                    inst = await asyncio.get_running_loop().run_in_executor(None, _load_cpu)
+                    chosen_dtype = getattr(__import__("torch"), "float32")
+                    chosen_attn = None
+            except Exception as e:
+                raise RuntimeError(f"qwen_tts_model_load_failed:{e}")
 
             actual_device = "cpu"
             self._last_device_error = None
@@ -103,12 +132,29 @@ class Qwen3TTSService:
                     actual_device = q
                 except Exception as e:
                     self._last_device_error = f"model_to_device_failed:{e}"
+                    if q.startswith("cuda"):
+                        raise RuntimeError(self._last_device_error)
                     actual_device = "cpu"
+            if actual_device == "cpu":
+                try:
+                    import torch
+                    inst.model.to(dtype=torch.float32)
+                except Exception:
+                    try:
+                        inst.model.float()
+                    except Exception:
+                        pass
 
             self._model_key = model_key
             self._model_path = model_path
             self._model = inst
             self._runtime_device = actual_device
+            try:
+                logging.getLogger("modules.qwen3_tts_service").info(
+                    f"Qwen3-TTS loaded: key={model_key} path={model_path} device={actual_device} dtype={str(chosen_dtype)} attn={str(chosen_attn or '')}"
+                )
+            except Exception:
+                pass
 
     async def _write_wav(self, out_path: Path, run_fn) -> Dict[str, Any]:
         wav, sr = await asyncio.get_running_loop().run_in_executor(None, run_fn)
@@ -245,6 +291,12 @@ class Qwen3TTSService:
         kind = v.get("kind", "clone")
         model_key = v.get("model_key", "base_0_6b")
         language = v.get("language", "Auto")
+        try:
+            logging.getLogger("modules.qwen3_tts_service").info(
+                f"Qwen3-TTS synthesize request: kind={kind} key={model_key} language={language} device={str(device or '').strip() or 'auto'}"
+            )
+        except Exception:
+            pass
 
         if kind == "custom_role":
             return await self.synthesize_custom_voice_to_wav(

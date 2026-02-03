@@ -29,6 +29,7 @@ hiddenimports = [
     'starlette',
     'multipart',
     'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
+    'qwen_tts',  # 动态导入的第三方包，确保打包后可用
 ]
 
 # 自动收集关键库的所有依赖（数据、二进制、隐式导入）
