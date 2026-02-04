@@ -43,6 +43,28 @@ for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic', 'transformers'
     except Exception as e:
         print(f"Warning: Failed to collect {package}: {e}")
 
+for package in [
+    'torch',
+    'torchvision',
+    'torchaudio',
+    'nvidia.cublas',
+    'nvidia.cudnn',
+    'nvidia.cuda_nvrtc',
+    'nvidia.cuda_runtime',
+    'nvidia.cufft',
+    'nvidia.curand',
+    'nvidia.cusolver',
+    'nvidia.cusparse',
+    'nvidia.nvtx',
+]:
+    try:
+        tmp_ret = collect_all(package)
+        datas += tmp_ret[0]
+        binaries += tmp_ret[1]
+        hiddenimports += tmp_ret[2]
+    except Exception as e:
+        print(f"Warning: Failed to collect {package}: {e}")
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -69,7 +91,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False, # 关闭控制台窗口，避免弹黑框

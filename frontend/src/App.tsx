@@ -215,7 +215,7 @@ const App: React.FC = () => {
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">SuperAI</p>
-          <p className="text-sm text-gray-500">请不要相信本项目改造的相关付费版本</p>
+          <p className="text-sm text-gray-500">请不要相信,基于本项目改造的付费版本</p>
         </div>
       </div>
     );

@@ -1,5 +1,8 @@
 param(
-  [switch]$FullBackend
+  [switch]$FullBackend,
+  [ValidateSet('cpu','gpu','all')]
+  [string]$Variant = 'all',
+  [switch]$RecreateBackendVenv
 )
 
 Set-StrictMode -Version Latest
@@ -33,6 +36,30 @@ Step "Check toolchain"
 foreach ($cmd in @('node','python','pip','cargo')) {
   if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Command not found: $cmd" }
 }
+$pythonCmd = "python"
+$pythonArgsPrefix = @()
+if (Get-Command py -ErrorAction SilentlyContinue) {
+  try {
+    $out = & py -3.11 "-c" "import sys; print('%d.%d' % (sys.version_info.major, sys.version_info.minor))" 2>$null
+    $outNorm = ($out | Out-String).Trim().Trim([char]0xFEFF)
+    if ($outNorm.StartsWith("3.11")) {
+      $pythonCmd = "py"
+      $pythonArgsPrefix = @("-3.11")
+      Step "Using Python 3.11 via 'py -3.11'"
+    }
+  } catch { }
+}
+# Verify Python version >= 3.11
+try {
+  $ver = & $pythonCmd $pythonArgsPrefix "-c" "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+  if (-not $ver) { Fail "Failed to detect Python version" }
+  $parts = $ver.Trim() -split '\.'
+  if ([int]$parts[0] -lt 3 -or ([int]$parts[0] -eq 3 -and [int]$parts[1] -lt 11)) {
+    Fail "Python >= 3.11 is required (detected $ver). Please install Python 3.11 and ensure 'py -3.11' or 'python' points to it."
+  }
+} catch {
+  Fail "Python version check failed: $($_.Exception.Message)"
+}
 $npmCmd = "npm"
 if (Get-Command cnpm -ErrorAction SilentlyContinue) {
     $npmCmd = "cnpm"
@@ -41,15 +68,17 @@ if (Get-Command cnpm -ErrorAction SilentlyContinue) {
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Fail "Command not found: npm" }
     Step "Using npm as package manager"
 }
-try { pip show pyinstaller | Out-Null } catch { }
-if (-not $?) { Step "Install PyInstaller" ; pip install pyinstaller | Out-Null }
+try { & $pythonCmd $pythonArgsPrefix "-m" "pip" "show" "pyinstaller" | Out-Null } catch { }
+if (-not $?) { Step "Install PyInstaller" ; & $pythonCmd $pythonArgsPrefix "-m" "pip" "install" "pyinstaller" | Out-Null }
 
 Step "Clean old artifacts"
 @(
   'backend\\dist',
   'backend\\build',
   'src-tauri\\target\\release',
-  'src-tauri\\target\\release\\dist'
+  'src-tauri\\target\\release\\dist',
+  'src-tauri\\target\\tauri_cpu',
+  'src-tauri\\target\\tauri_gpu'
 ) | ForEach-Object {
   if (Test-Path $_) {
     try { Remove-Item $_ -Recurse -Force -ErrorAction Stop }
@@ -74,7 +103,8 @@ try {
 catch { Pop-Location ; Fail "Frontend build failed: $($_.Exception.Message)" }
 Pop-Location
 
-$variants = @("cpu", "gpu")
+$rootDir = (Get-Location).Path
+$variants = if ($Variant -eq 'all') { @('cpu','gpu') } else { @($Variant) }
 $cfg = Get-Content -Raw 'src-tauri\\tauri.conf.json' | ConvertFrom-Json
 $productName = $cfg.productName
 $version = $cfg.version
@@ -85,37 +115,58 @@ foreach ($variant in $variants) {
   Step "Package backend ($variant)"
   Push-Location backend
   try {
-    Step "Sanity-check Python packages (fix backports namespace)"
-    try { pip show backports | Out-Null } catch { }
-    if ($?) { Step "Uninstall problematic 'backports' package" ; pip uninstall -y backports | Out-Null }
-    Step "Ensure backports.tarfile present"
-    pip install -U backports.tarfile | Out-Null
+    $venvDir = Join-Path (Get-Location).Path (".venv_pack_{0}" -f $variant)
+    if ($RecreateBackendVenv -and (Test-Path $venvDir)) {
+      Step "Recreate backend venv ($variant)"
+      Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path $venvDir)) {
+      Step "Create backend venv ($variant)"
+      & $pythonCmd $pythonArgsPrefix "-m" "venv" $venvDir
+      if ($LASTEXITCODE -ne 0) { throw "venv creation failed (code $LASTEXITCODE)" }
+    }
+    $venvPy = Join-Path $venvDir 'Scripts\\python.exe'
+    if (-not (Test-Path $venvPy)) { throw "venv python not found: $venvPy" }
+
+    Step "Upgrade pip tooling ($variant)"
+    & $venvPy "-m" "pip" "install" "-U" "pip" "setuptools" "wheel" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
+
+    Step "Ensure build deps (PyInstaller) ($variant)"
+    & $venvPy "-m" "pip" "install" "-U" "pyinstaller" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "pyinstaller install failed (code $LASTEXITCODE)" }
+
+    Step "Sanity-check Python packages (fix backports namespace) ($variant)"
+    try { & $venvPy "-m" "pip" "show" "backports" | Out-Null } catch { }
+    if ($?) { Step "Uninstall problematic 'backports' package ($variant)" ; & $venvPy "-m" "pip" "uninstall" "-y" "backports" | Out-Null }
+    Step "Ensure backports.tarfile present ($variant)"
+    & $venvPy "-m" "pip" "install" "-U" "backports.tarfile" | Out-Null
 
     if ($FullBackend -and (Test-Path requirements.txt)) {
       Step "Install full dependencies (requirements.txt)"
       $tmpFull = Join-Path $env:TEMP "requirements.full.filtered.txt"
       (Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpFull
-      pip install -r $tmpFull
+      & $venvPy "-m" "pip" "install" "-r" $tmpFull
       Remove-Item $tmpFull -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.runtime.txt) {
       Step "Install runtime dependencies (requirements.runtime.txt)"
       $tmpRuntime = Join-Path $env:TEMP "requirements.runtime.filtered.txt"
       (Get-Content requirements.runtime.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpRuntime
-      pip install -r $tmpRuntime
+      & $venvPy "-m" "pip" "install" "-r" $tmpRuntime
       Remove-Item $tmpRuntime -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.txt) {
       Step "Fallback to requirements.txt (runtime file missing)"
       $tmpFullFallback = Join-Path $env:TEMP "requirements.full.filtered.txt"
       (Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Set-Content $tmpFullFallback
-      pip install -r $tmpFullFallback
+      & $venvPy "-m" "pip" "install" "-r" $tmpFullFallback
       Remove-Item $tmpFullFallback -Force -ErrorAction SilentlyContinue
     }
     else { Fail "No backend requirements file found" }
 
-    pip uninstall -y torchaudio | Out-Null
-    pip uninstall -y torch torchvision | Out-Null
+    & $venvPy "-m" "pip" "uninstall" "-y" "torchaudio" | Out-Null
+    & $venvPy "-m" "pip" "uninstall" "-y" "torch" "torchvision" | Out-Null
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu121" }
     $wheelDir = $env:TORCH_WHEEL_DIR
     $usedLocal = $false
@@ -124,7 +175,7 @@ foreach ($variant in $variants) {
       $visionWhl = Join-Path $wheelDir "torchvision-0.20.1+${suffix}-cp311-cp311-win_amd64.whl"
       if ((Test-Path $torchWhl) -and (Test-Path $visionWhl)) {
         Step "Install PyTorch from local wheels ($suffix)"
-        pip install --no-index --find-links "$wheelDir" "$torchWhl" "$visionWhl"
+        & $venvPy "-m" "pip" "install" "--no-index" "--find-links" "$wheelDir" "$torchWhl" "$visionWhl"
         $usedLocal = $true
       } else {
         Info "Local wheels not found for variant=$suffix; fallback to official index"
@@ -132,23 +183,30 @@ foreach ($variant in $variants) {
     }
     if (-not $usedLocal) {
       if ($variant -eq "cpu") {
-        pip install torch==2.5.1+cpu torchvision==0.20.1+cpu --index-url https://download.pytorch.org/whl/cpu
+        & $venvPy "-m" "pip" "install" "torch==2.5.1+cpu" "torchvision==0.20.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
       } else {
-        pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+        & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
       }
     }
     if ($variant -eq "cpu") {
-      pip install torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
+      & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
     } else {
-      pip install torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+      & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
     }
     Step "Install qwen-tts (no-deps)"
-    pip install qwen-tts --no-deps
+    & $venvPy "-m" "pip" "install" "qwen-tts" "--no-deps"
 
-    pyinstaller --clean --distpath dist backend.spec
+    & $venvPy "-m" "PyInstaller" "--clean" "--distpath" "dist" "backend.spec"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
   }
-  catch { Pop-Location ; Fail "Backend packaging failed: $($_.Exception.Message)" }
+  catch {
+    $pos = $_.InvocationInfo.PositionMessage
+    if ($pos) {
+      Fail ("Backend packaging failed: {0}`n{1}" -f $_.Exception.Message, $pos)
+    } else {
+      Fail "Backend packaging failed: $($_.Exception.Message)"
+    }
+  }
   finally { Pop-Location }
 
   Step "Copy backend executable to Tauri resources ($variant)"
@@ -180,17 +238,32 @@ foreach ($variant in $variants) {
   } catch { Info "Skip FFmpeg copy: $($_.Exception.Message)" }
  
 
-  Step "Build Tauri app (Release) ($variant)"
+  Step "Ensure no running instances before Tauri build ($variant)"
+  try {
+    Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
+  } catch { }
+
+  Step "Build Tauri app (Release + installers) ($variant)"
+  $variantTargetDir = Join-Path $rootDir ("src-tauri\\target\\tauri_{0}" -f $variant)
   Push-Location src-tauri
   try {
-    cargo tauri build
-    if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build exited with code $LASTEXITCODE" }
+    $oldCargoTargetDir = $env:CARGO_TARGET_DIR
+    $env:CARGO_TARGET_DIR = $variantTargetDir
+    Step "Build installers (NSIS + MSI) ($variant)"
+    cargo tauri build --bundles nsis,msi
+    if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
   }
-  catch { Pop-Location ; Fail "Tauri build failed: $($_.Exception.Message)" }
-  finally { Pop-Location }
+  catch {
+    Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
+    try { cargo tauri build --bundles nsis }
+    catch { Fail "Installer build failed: $($_.Exception.Message)" }
+    if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
+  }
+  finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
   Step "Create portable ZIP and installers ($variant)"
-  $releaseDir = 'src-tauri\\target\\release'
+  $releaseDir = Join-Path $variantTargetDir 'release'
   $portableTemp = Join-Path $releaseDir 'portable_temp'
   if (Test-Path $portableTemp) { Remove-Item $portableTemp -Recurse -Force }
   New-Item -ItemType Directory -Force $portableTemp | Out-Null
@@ -220,25 +293,11 @@ foreach ($variant in $variants) {
   Invoke-CompressArchiveWithRetry (Join-Path $portableTemp '*') $zipPath
   Remove-Item $portableTemp -Recurse -Force
 
-  Push-Location src-tauri
-  try {
-    Step "Build installers (NSIS + MSI) ($variant)"
-    cargo tauri build --bundles nsis,msi
-    if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
-  }
-  catch {
-    Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-    try { cargo tauri build --bundles nsis }
-    catch { Pop-Location ; Fail "Installer build failed: $($_.Exception.Message)" }
-    if ($LASTEXITCODE -ne 0) { Pop-Location ; Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
-  }
-  finally { Pop-Location }
-
   $installersOut = Join-Path $variantOut 'installers'
   New-Item -ItemType Directory -Force $installersOut | Out-Null
   foreach ($pair in @(
-    @{ dir = 'src-tauri\\target\\release\\bundle\\nsis'; filter = '*.exe' },
-    @{ dir = 'src-tauri\\target\\release\\bundle\\msi';  filter = '*.msi' }
+    @{ dir = (Join-Path $releaseDir 'bundle\\nsis'); filter = '*.exe' },
+    @{ dir = (Join-Path $releaseDir 'bundle\\msi');  filter = '*.msi' }
   )) {
     $d = $pair.dir; $f = $pair.filter
     if (Test-Path $d) {
@@ -252,8 +311,8 @@ foreach ($variant in $variants) {
   }
 
   Step "Build completed ($variant)"
-  Info "App: src-tauri\\target\\release\\super-auto-cut-video.exe"
-  Info "Backend: src-tauri\\target\\release\\resources\\superAutoCutVideoBackend.exe"
+  Info "App: $(Join-Path $releaseDir 'super-auto-cut-video.exe')"
+  Info "Backend: $(Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.exe')"
   Info "Portable ZIP: $zipPath"
   Info "Installers dir: $installersOut"
 }

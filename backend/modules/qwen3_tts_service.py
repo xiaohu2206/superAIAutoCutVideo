@@ -1,11 +1,61 @@
 import asyncio
+import os
 from pathlib import Path
+import sys
 from typing import Any, Dict, Optional, Tuple, cast
 
 import numpy as np
 import logging
 
 from modules.qwen3_tts_model_manager import Qwen3TTSPathManager, validate_model_dir
+
+
+def _prepare_windows_dll_search_paths() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    except Exception:
+        pass
+    try:
+        os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+    except Exception:
+        pass
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass or not isinstance(meipass, str):
+        return
+
+    candidates = [
+        Path(meipass),
+        Path(meipass) / "torch" / "lib",
+        Path(meipass) / "Library" / "bin",
+    ]
+    try:
+        for p in Path(meipass).glob("nvidia/**/bin"):
+            candidates.append(p)
+    except Exception:
+        pass
+
+    for p in candidates:
+        try:
+            if not p.exists():
+                continue
+        except Exception:
+            continue
+
+        try:
+            os.add_dll_directory(str(p))
+        except Exception:
+            pass
+
+        try:
+            old = os.environ.get("PATH", "")
+            if str(p) not in old:
+                os.environ["PATH"] = str(p) + os.pathsep + old
+        except Exception:
+            pass
 
 
 class Qwen3TTSService:
@@ -47,6 +97,7 @@ class Qwen3TTSService:
 
     async def _load_model(self, model_key: str, device: Optional[str] = None) -> None:
         async with self._load_lock:
+            _prepare_windows_dll_search_paths()
             pm = Qwen3TTSPathManager()
             try:
                 model_dir = pm.model_path(model_key)

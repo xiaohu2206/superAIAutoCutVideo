@@ -264,6 +264,18 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
     if ffmpeg_path.exists() && ffprobe_path.exists() {
         return Ok(());
     }
+    if let (Ok(ff_in_path), Ok(fp_in_path)) = (which::which("ffmpeg.exe"), which::which("ffprobe.exe")) {
+        if let Err(e) = std::fs::create_dir_all(&resource_dir) {
+            return Err(format!("创建资源目录失败: {}", e));
+        }
+        if let Err(e) = std::fs::copy(&ff_in_path, &ffmpeg_path) {
+            return Err(format!("复制ffmpeg失败 {:?} -> {:?}: {}", ff_in_path, ffmpeg_path, e));
+        }
+        if let Err(e) = std::fs::copy(&fp_in_path, &ffprobe_path) {
+            return Err(format!("复制ffprobe失败 {:?} -> {:?}: {}", fp_in_path, ffprobe_path, e));
+        }
+        return Ok(());
+    }
     let url = std::env::var("FFMPEG_WIN_ZIP_URL").ok().unwrap_or_else(|| {
         "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string()
     });
@@ -434,9 +446,12 @@ async fn start_backend(
     }
 
     let host = "127.0.0.1";
-    let is_dev_mode =
-        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
-    if is_dev_mode {
+    let is_dev_mode = std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let forced_port_opt = std::env::var("SACV_FORCE_PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .filter(|p| *p > 0);
+    if is_dev_mode && forced_port_opt.is_none() {
         if let Some((p, boot_token)) = discover_existing_backend(host, false).await {
             *state.backend_port.lock().unwrap() = p;
             *state.backend_boot_token.lock().unwrap() = boot_token.clone();
@@ -450,7 +465,7 @@ async fn start_backend(
         }
     }
     // 生产环境也尝试发现已运行的后端，避免重复启动
-    if !is_dev_mode {
+    if !is_dev_mode && forced_port_opt.is_none() {
         if let Some((p, boot_token)) = discover_existing_backend_quick(host, true).await {
             *state.backend_port.lock().unwrap() = p;
             *state.backend_boot_token.lock().unwrap() = boot_token.clone();
@@ -637,7 +652,11 @@ async fn start_backend(
     }
 
     // 设置环境变量
-    let port: u16 = choose_backend_port(is_dev_mode);
+    let port_env = std::env::var("SACV_FORCE_PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .filter(|p| *p > 0);
+    let port: u16 = port_env.unwrap_or_else(|| choose_backend_port(is_dev_mode));
     let boot_token = generate_boot_token();
     let orig_path = std::env::var("PATH").unwrap_or_default();
     let sep = if cfg!(target_os = "windows") {
@@ -934,8 +953,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             .build()?;
     }
 
-    let is_dev_mode =
-        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let is_dev_mode = std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
