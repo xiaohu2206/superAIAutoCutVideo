@@ -552,9 +552,22 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
             try:
                 from modules.qwen3_tts_service import qwen3_tts_service
                 from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+                from modules.qwen3_tts_model_manager import Qwen3TTSPathManager, validate_model_dir
 
                 vid = str(voice_id).strip()
                 v = qwen3_tts_voice_store.get(vid)
+                if not v:
+                    raise HTTPException(status_code=404, detail="voice_not_found")
+
+                model_key = (getattr(v, "model_key", None) or "base_0_6b").strip() or "base_0_6b"
+                try:
+                    pm = Qwen3TTSPathManager()
+                    model_dir = pm.model_path(model_key)
+                except KeyError:
+                    raise RuntimeError(f"unknown_model_key:{model_key}")
+                ok, missing = validate_model_dir(model_key, model_dir)
+                if not ok:
+                    raise RuntimeError(f"model_invalid:{model_key}:{','.join(missing)}|path={model_dir}")
 
                 ts = int(time.time() * 1000)
                 safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
@@ -605,15 +618,12 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     device_s = str(device).strip() if isinstance(device, str) else None
 
                 try:
-                    if v:
-                        res = await qwen3_tts_service.synthesize_by_voice_asset(
-                            text=text,
-                            out_path=out_path,
-                            voice_asset=v,
-                            device=device_s
-                        )
-                    else:
-                        raise HTTPException(status_code=404, detail="voice_not_found")
+                    res = await qwen3_tts_service.synthesize_by_voice_asset(
+                        text=text,
+                        out_path=out_path,
+                        voice_asset=v,
+                        device=device_s
+                    )
 
                     if not res.get("success"):
                         raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
