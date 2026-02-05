@@ -8,6 +8,7 @@ AI智能视频剪辑桌面应用 - FastAPI后端服务
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import socket
 import sys
@@ -777,6 +778,7 @@ async def shutdown_event():
     release_single_instance_lock()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     # 获取端口配置
     initial_port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "127.0.0.1")

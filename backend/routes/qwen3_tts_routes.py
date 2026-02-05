@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from modules.qwen3_tts_model_manager import (
     Qwen3TTSPathManager,
     QWEN3_TTS_MODEL_REGISTRY,
+    QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY,
     download_model_snapshot,
     validate_model_dir,
     get_model_total_bytes,
@@ -71,7 +72,7 @@ async def _remove_download_task(key: str) -> None:
 
 
 def _download_worker(key: str, provider: str, target_dir: str, result_queue: multiprocessing.Queue) -> None:
-    total_bytes = get_model_total_bytes(key, provider)
+    total_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(key)
     stop_event = threading.Event()
     target_path = Path(target_dir)
     cache_path = target_path / ".modelscope_cache"
@@ -424,7 +425,15 @@ async def download_qwen3_model(req: Qwen3TTSDownloadRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail="provider_must_be_hf_or_modelscope")
 
         target_dir = pm.model_path(req.key)
-        total_bytes = get_model_total_bytes(req.key, provider)
+        total_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(req.key)
+        if total_bytes is None:
+            try:
+                total_bytes = await asyncio.wait_for(
+                    asyncio.to_thread(get_model_total_bytes, req.key, provider),
+                    timeout=2.0,
+                )
+            except Exception:
+                total_bytes = None
         async with _download_lock:
             existing = _download_tasks.get(req.key)
             if existing and not existing.done():

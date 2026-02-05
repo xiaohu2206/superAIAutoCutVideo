@@ -14,3 +14,6 @@ numpy<=2.3.5
 huggingface_hub==0.34.0
 soundfile==0.12.1
 modelscope==1.14.0
+librosa==0.10.2.post1
+onnxruntime==1.18.1
+tbb
