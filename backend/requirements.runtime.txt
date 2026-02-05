@@ -15,3 +15,6 @@ huggingface_hub==0.34.0
 soundfile==0.12.1
 modelscope==1.14.0
 funasr==0.7.5
+librosa==0.10.2.post1
+onnxruntime==1.18.1
+tbb

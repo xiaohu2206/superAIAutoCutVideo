@@ -2,7 +2,8 @@ param(
   [switch]$FullBackend,
   [ValidateSet('cpu','gpu','all')]
   [string]$Variant = 'all',
-  [switch]$RecreateBackendVenv
+  [switch]$RecreateBackendVenv,
+  [switch]$TauriDebug
 )
 
 Set-StrictMode -Version Latest
@@ -77,8 +78,12 @@ Step "Clean old artifacts"
   'backend\\build',
   'src-tauri\\target\\release',
   'src-tauri\\target\\release\\dist',
+  'src-tauri\\target\\debug',
+  'src-tauri\\target\\debug\\dist',
   'src-tauri\\target\\tauri_cpu',
-  'src-tauri\\target\\tauri_gpu'
+  'src-tauri\\target\\tauri_cpu_debug',
+  'src-tauri\\target\\tauri_gpu',
+  'src-tauri\\target\\tauri_gpu_debug'
 ) | ForEach-Object {
   if (Test-Path $_) {
     try { Remove-Item $_ -Recurse -Force -ErrorAction Stop }
@@ -108,7 +113,7 @@ $variants = if ($Variant -eq 'all') { @('cpu','gpu') } else { @($Variant) }
 $cfg = Get-Content -Raw 'src-tauri\\tauri.conf.json' | ConvertFrom-Json
 $productName = $cfg.productName
 $version = $cfg.version
-$artifactBase = 'src-tauri\\target\\release\\dist'
+$artifactBase = if ($TauriDebug) { 'src-tauri\\target\\debug\\dist' } else { 'src-tauri\\target\\release\\dist' }
 New-Item -ItemType Directory -Force $artifactBase | Out-Null
 
 foreach ($variant in $variants) {
@@ -127,6 +132,16 @@ foreach ($variant in $variants) {
     }
     $venvPy = Join-Path $venvDir 'Scripts\\python.exe'
     if (-not (Test-Path $venvPy)) { throw "venv python not found: $venvPy" }
+
+    Step "Ensure pip available in venv ($variant)"
+    $pipOk = $true
+    try { & $venvPy "-m" "pip" "--version" | Out-Null } catch { $pipOk = $false }
+    if ($LASTEXITCODE -ne 0) { $pipOk = $false }
+    if (-not $pipOk) {
+      Step "Bootstrap pip via ensurepip ($variant)"
+      & $venvPy "-m" "ensurepip" "--upgrade" | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "ensurepip failed (code $LASTEXITCODE)" }
+    }
 
     Step "Upgrade pip tooling ($variant)"
     & $venvPy "-m" "pip" "install" "-U" "pip" "setuptools" "wheel" | Out-Null
@@ -176,6 +191,7 @@ foreach ($variant in $variants) {
       if ((Test-Path $torchWhl) -and (Test-Path $visionWhl)) {
         Step "Install PyTorch from local wheels ($suffix)"
         & $venvPy "-m" "pip" "install" "--no-index" "--find-links" "$wheelDir" "$torchWhl" "$visionWhl"
+        if ($LASTEXITCODE -ne 0) { throw "PyTorch wheel install failed (code $LASTEXITCODE)" }
         $usedLocal = $true
       } else {
         Info "Local wheels not found for variant=$suffix; fallback to official index"
@@ -187,14 +203,25 @@ foreach ($variant in $variants) {
       } else {
         & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
       }
+      if ($LASTEXITCODE -ne 0) { throw "PyTorch install failed (code $LASTEXITCODE)" }
     }
     if ($variant -eq "cpu") {
       & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
     } else {
       & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
     }
+    if ($LASTEXITCODE -ne 0) { throw "Torchaudio install failed (code $LASTEXITCODE)" }
+
+    Step "Sanity-check PyTorch imports ($variant)"
+    & $venvPy "-c" "import torch, torchvision, torchaudio; print('torch_ok', torch.__version__)"
+    if ($LASTEXITCODE -ne 0) { throw "PyTorch import check failed (code $LASTEXITCODE)" }
+
     Step "Install qwen-tts (no-deps)"
     & $venvPy "-m" "pip" "install" "qwen-tts" "--no-deps"
+    if ($LASTEXITCODE -ne 0) { throw "qwen-tts install failed (code $LASTEXITCODE)" }
+    Step "Sanity-check Qwen3-TTS imports ($variant)"
+    & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
+    if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
     & $venvPy "-m" "PyInstaller" "--clean" "--distpath" "dist" "backend.spec"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
@@ -244,26 +271,40 @@ foreach ($variant in $variants) {
     Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
   } catch { }
 
-  Step "Build Tauri app (Release + installers) ($variant)"
-  $variantTargetDir = Join-Path $rootDir ("src-tauri\\target\\tauri_{0}" -f $variant)
+  $profileName = if ($TauriDebug) { "debug" } else { "release" }
+  Step "Build Tauri app ($profileName) ($variant)"
+  $variantTargetDir = if ($TauriDebug) {
+    Join-Path $rootDir ("src-tauri\\target\\tauri_{0}_debug" -f $variant)
+  } else {
+    Join-Path $rootDir ("src-tauri\\target\\tauri_{0}" -f $variant)
+  }
   Push-Location src-tauri
   try {
     $oldCargoTargetDir = $env:CARGO_TARGET_DIR
     $env:CARGO_TARGET_DIR = $variantTargetDir
-    Step "Build installers (NSIS + MSI) ($variant)"
-    cargo tauri build --bundles nsis,msi
-    if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
+    if ($TauriDebug) {
+      cargo tauri build --debug
+      if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
+    } else {
+      Step "Build installers (NSIS + MSI) ($variant)"
+      cargo tauri build --bundles nsis,msi
+      if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
+    }
   }
   catch {
-    Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-    try { cargo tauri build --bundles nsis }
-    catch { Fail "Installer build failed: $($_.Exception.Message)" }
-    if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
+    if (-not $TauriDebug) {
+      Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
+      try { cargo tauri build --bundles nsis }
+      catch { Fail "Installer build failed: $($_.Exception.Message)" }
+      if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
+    } else {
+      Fail "Tauri debug build failed: $($_.Exception.Message)"
+    }
   }
   finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
   Step "Create portable ZIP and installers ($variant)"
-  $releaseDir = Join-Path $variantTargetDir 'release'
+  $releaseDir = Join-Path $variantTargetDir $profileName
   $portableTemp = Join-Path $releaseDir 'portable_temp'
   if (Test-Path $portableTemp) { Remove-Item $portableTemp -Recurse -Force }
   New-Item -ItemType Directory -Force $portableTemp | Out-Null
@@ -286,8 +327,9 @@ foreach ($variant in $variants) {
     if (Test-Path $doc) { Microsoft.PowerShell.Management\Copy-Item -Force $doc $portableTemp }
   }
   $safeProduct = ($productName -replace '[^A-Za-z0-9_.-]', '_')
-  $zipName = "${safeProduct}_v${version}_${variant}_portable.zip"
-  $variantOut = Join-Path $artifactBase $variant
+  $zipVariantSuffix = if ($TauriDebug) { "${variant}_debug" } else { $variant }
+  $zipName = "${safeProduct}_v${version}_${zipVariantSuffix}_portable.zip"
+  $variantOut = Join-Path $artifactBase $zipVariantSuffix
   New-Item -ItemType Directory -Force $variantOut | Out-Null
   $zipPath = Join-Path $variantOut $zipName
   Invoke-CompressArchiveWithRetry (Join-Path $portableTemp '*') $zipPath

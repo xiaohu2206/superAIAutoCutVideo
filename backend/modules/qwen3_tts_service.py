@@ -141,7 +141,6 @@ class Qwen3TTSService:
                     def _load_flash():
                         return Qwen3TTSModel.from_pretrained(
                             model_path,
-                            device_map=q,
                             dtype=torch.bfloat16,
                             attn_implementation="flash_attention_2",
                         )
@@ -153,7 +152,6 @@ class Qwen3TTSService:
                         def _load_sdpa():
                             return Qwen3TTSModel.from_pretrained(
                                 model_path,
-                                device_map=q,
                                 dtype=torch.float16,
                                 attn_implementation="sdpa",
                             )
@@ -164,7 +162,6 @@ class Qwen3TTSService:
                     def _load_cpu():
                         return Qwen3TTSModel.from_pretrained(
                             model_path,
-                            device_map="cpu",
                             dtype=torch.float32,
                         )
                     inst = await asyncio.get_running_loop().run_in_executor(None, _load_cpu)
