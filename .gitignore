@@ -131,8 +131,7 @@ target/
 # Cargo.lock
 
 # Tauri resources（打包的后端程序）
-src-tauri/resources/*.exe
-src-tauri/resources/*.dll
+src-tauri/resources/*
 
 # ========================================
 # 应用特定文件

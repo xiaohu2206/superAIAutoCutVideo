@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { projectService } from "../services/projectService";
+import type { TrimRange } from "../components/projectEdit/TrimTimeline";
 import { wsClient, type WebSocketMessage } from "../services/clients";
 import { message } from "../services/message";
-import type { TrimRange } from "../components/projectEdit/TrimTimeline";
+import { projectService } from "../services/projectService";
 
 export type TrimMode = "keep" | "delete";
 
@@ -52,6 +52,7 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
   const [isPlaying, setIsPlaying] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [cacheBust, setCacheBust] = useState<string>(String(Date.now()));
+  const [resolvedVideoWebPath, setResolvedVideoWebPath] = useState<string>(videoPath);
   const lastVideoPathRef = useRef<string | null>(null);
   const lastOpenRef = useRef(false);
   const preparedPathsRef = useRef<Set<string>>(new Set());
@@ -90,6 +91,7 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     setErrorText("");
     if (isNewOpen || isNewVideo) {
       setCacheBust(String(Date.now()));
+      setResolvedVideoWebPath(videoPath);
     }
   }, [isOpen, videoPath]);
 
@@ -101,8 +103,11 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     let cancelled = false;
     const run = async () => {
       try {
-        await projectService.prepareVideoPreview(projectId, videoPath);
+        const prepared = await projectService.prepareVideoPreview(projectId, videoPath);
         if (cancelled) return;
+        if (prepared?.file_path) {
+          setResolvedVideoWebPath(prepared.file_path);
+        }
         setCacheBust(String(Date.now()));
       } catch {
         if (cancelled) return;
@@ -114,7 +119,17 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     };
   }, [isOpen, projectId, videoPath]);
 
-  const srcUrl = useMemo(() => projectService.getWebFileUrl(videoPath, cacheBust), [videoPath, cacheBust]);
+  const srcUrl = useMemo(() => {
+    const p = (resolvedVideoWebPath || videoPath || "").trim();
+    if (!p) return "";
+    if (/^https?:\/\//i.test(p)) {
+      if (cacheBust === undefined || cacheBust === null) return p;
+      const sep = p.includes("?") ? "&" : "?";
+      return `${p}${sep}v=${encodeURIComponent(String(cacheBust))}`;
+    }
+    if (p.startsWith("/")) return projectService.getWebFileUrl(p, cacheBust);
+    return "";
+  }, [resolvedVideoWebPath, videoPath, cacheBust]);
   const normRanges = useMemo(() => normalizeRanges(ranges, durationMs), [ranges, durationMs]);
   const activeRange = useMemo(() => normRanges.find((r) => r.id === activeRangeId) || null, [normRanges, activeRangeId]);
 
