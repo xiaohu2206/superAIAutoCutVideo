@@ -96,10 +96,14 @@ export class ApiClient {
           configureBackend(s.port, DEFAULT_HOST);
           return;
         }
-      } catch {}
+      } catch {
+        void 0;
+      }
       try {
         await autoConfigureBackend(DEFAULT_HOST, DEFAULT_START_PORT);
-      } catch {}
+      } catch {
+        void 0;
+      }
     };
 
     const doFetch = async (baseUrl: string, withConnectTimeout: boolean, opts: RequestInit): Promise<Response> => {

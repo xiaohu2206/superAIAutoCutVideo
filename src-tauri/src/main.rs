@@ -21,8 +21,6 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 use std::io::{Read, Write};
-#[cfg(target_os = "windows")]
-use std::process::Stdio as _;
 use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
@@ -349,6 +347,53 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn ensure_backend_executable_available(
+    app_handle: &AppHandle,
+    resource_dir: &PathBuf,
+) -> Result<PathBuf, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    let extracted_backend_dir = app_data_dir.join("superAutoCutVideoBackend");
+    let extracted_backend_exe = extracted_backend_dir.join("superAutoCutVideoBackend.exe");
+    if extracted_backend_exe.exists() {
+        return Ok(extracted_backend_exe);
+    }
+
+    let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
+    if !zip_path.exists() {
+        return Ok(extracted_backend_exe);
+    }
+
+    let _ = std::fs::create_dir_all(&app_data_dir);
+    if extracted_backend_dir.exists() {
+        let _ = std::fs::remove_dir_all(&extracted_backend_dir);
+    }
+
+    let file =
+        std::fs::File::open(&zip_path).map_err(|e| format!("无法打开后端ZIP包: {}", e))?;
+    let mut zip =
+        ZipArchive::new(file).map_err(|e| format!("解析后端ZIP包失败: {}", e))?;
+    zip.extract(&app_data_dir)
+        .map_err(|e| format!("解压后端ZIP包失败: {}", e))?;
+
+    if extracted_backend_exe.exists() {
+        return Ok(extracted_backend_exe);
+    }
+    let flat_exe = app_data_dir.join("superAutoCutVideoBackend.exe");
+    if flat_exe.exists() {
+        let _ = std::fs::create_dir_all(&extracted_backend_dir);
+        let moved = extracted_backend_exe.clone();
+        std::fs::rename(&flat_exe, &moved)
+            .map_err(|e| format!("移动解压后的后端文件失败: {}", e))?;
+        return Ok(moved);
+    }
+
+    Err("解压后未找到 superAutoCutVideoBackend.exe".to_string())
+}
+
 fn append_log_line(path: PathBuf, line: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
@@ -484,6 +529,10 @@ async fn start_backend(
         .path()
         .resource_dir()
         .map_err(|e| format!("无法获取资源目录: {}", e))?;
+    let resource_root = {
+        let sub = resource_dir.join("resources");
+        if sub.exists() { sub } else { resource_dir.clone() }
+    };
     let exe_dir_fallback = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -495,28 +544,85 @@ async fn start_backend(
         std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
     let prefer_python_backend = is_dev_mode && !force_packaged_backend;
 
+    append_log_line(
+        early_log_path.clone(),
+        &format!(
+            "[meta] is_dev_mode={} prefer_python_backend={} resource_dir={} resource_root={}",
+            is_dev_mode,
+            prefer_python_backend,
+            resource_dir.to_string_lossy(),
+            resource_root.to_string_lossy()
+        ),
+    );
+
+    #[cfg(target_os = "windows")]
+    let extracted_backend_exe = if !prefer_python_backend {
+        let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
+        if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
+            append_log_line(
+                early_log_path.clone(),
+                &format!("[meta] app_data_dir={}", app_data_dir.to_string_lossy()),
+            );
+        }
+        append_log_line(
+            early_log_path.clone(),
+            &format!(
+                "[meta] backend_zip_exists={} backend_zip_path={}",
+                zip_path.exists(),
+                zip_path.to_string_lossy()
+            ),
+        );
+        Some(ensure_backend_executable_available(&app_handle, &resource_root)?)
+    } else {
+        None
+    };
+
     #[cfg(target_os = "windows")]
     {
         if is_dev_mode {
-            if let Err(e) = ensure_ffmpeg_binaries(&resource_dir).await {
+            if let Err(e) = ensure_ffmpeg_binaries(&resource_root).await {
                 eprintln!("开发模式自动准备FFmpeg失败: {}", e);
             }
         }
     }
 
     // 尝试定位打包的后端可执行文件
-    let primary_path = if cfg!(target_os = "windows") {
-        resource_dir.join("superAutoCutVideoBackend.exe")
+    let primary_path_dir = if cfg!(target_os = "windows") {
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend.exe")
     } else {
-        resource_dir.join("superAutoCutVideoBackend")
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+    };
+    let primary_path_file = if cfg!(target_os = "windows") {
+        resource_root.join("superAutoCutVideoBackend.exe")
+    } else {
+        resource_root.join("superAutoCutVideoBackend")
     };
     let mut candidates: Vec<PathBuf> = Vec::new();
-    candidates.push(primary_path.clone());
+    #[cfg(target_os = "windows")]
+    if let Some(p) = extracted_backend_exe.clone() {
+        candidates.push(p);
+    }
+    candidates.push(primary_path_dir.clone());
+    candidates.push(primary_path_file.clone());
     if let Some(dir) = &exe_dir_fallback {
         if cfg!(target_os = "windows") {
             candidates.push(dir.join("resources").join("superAutoCutVideoBackend.exe"));
+            candidates.push(
+                dir.join("resources")
+                    .join("superAutoCutVideoBackend")
+                    .join("superAutoCutVideoBackend.exe"),
+            );
         } else {
             candidates.push(dir.join("resources").join("superAutoCutVideoBackend"));
+            candidates.push(
+                dir.join("resources")
+                    .join("superAutoCutVideoBackend")
+                    .join("superAutoCutVideoBackend"),
+            );
         }
         for anc in dir.ancestors().take(8) {
             if cfg!(target_os = "windows") {
@@ -526,6 +632,17 @@ async fn start_backend(
                         .join("superAutoCutVideoBackend.exe"),
                 );
                 candidates.push(anc.join("resources").join("superAutoCutVideoBackend.exe"));
+                candidates.push(
+                    anc.join("src-tauri")
+                        .join("resources")
+                        .join("superAutoCutVideoBackend")
+                        .join("superAutoCutVideoBackend.exe"),
+                );
+                candidates.push(
+                    anc.join("resources")
+                        .join("superAutoCutVideoBackend")
+                        .join("superAutoCutVideoBackend.exe"),
+                );
             } else {
                 candidates.push(
                     anc.join("src-tauri")
@@ -533,18 +650,29 @@ async fn start_backend(
                         .join("superAutoCutVideoBackend"),
                 );
                 candidates.push(anc.join("resources").join("superAutoCutVideoBackend"));
+                candidates.push(
+                    anc.join("src-tauri")
+                        .join("resources")
+                        .join("superAutoCutVideoBackend")
+                        .join("superAutoCutVideoBackend"),
+                );
+                candidates.push(
+                    anc.join("resources")
+                        .join("superAutoCutVideoBackend")
+                        .join("superAutoCutVideoBackend"),
+                );
             }
         }
     }
     let backend_executable = candidates
         .into_iter()
         .find(|p| p.exists())
-        .unwrap_or(primary_path.clone());
+        .unwrap_or(primary_path_dir.clone());
 
     #[cfg(target_os = "windows")]
     {
         if !backend_executable.exists() && !is_dev_mode {
-            let _ = ensure_ffmpeg_binaries(&resource_dir).await.map_err(|e| {
+            let _ = ensure_ffmpeg_binaries(&resource_root).await.map_err(|e| {
                 eprintln!("自动准备FFmpeg失败: {}", &e);
                 e
             });
@@ -554,7 +682,13 @@ async fn start_backend(
     let mut cmd = if !prefer_python_backend && backend_executable.exists() {
         // 使用打包的可执行文件
         println!("使用打包的后端可执行文件: {:?}", backend_executable);
-        apply_windows_no_window(Command::new(backend_executable))
+        let backend_working_dir = backend_executable
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| resource_root.clone());
+        let mut c = apply_windows_no_window(Command::new(&backend_executable));
+        c.current_dir(backend_working_dir);
+        c
     } else {
         // 未发现打包的后端
         // 生产环境严格要求存在打包后端；开发环境允许回退到 Python
@@ -664,12 +798,31 @@ async fn start_backend(
     } else {
         ":"
     };
-    let new_path = format!("{}{}{}", resource_dir.to_string_lossy(), sep, orig_path);
+    let backend_dir = backend_executable
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| resource_root.to_string_lossy().to_string());
+    let resource_dir_s = resource_root.to_string_lossy().to_string();
+    let new_path = if backend_dir != resource_dir_s {
+        format!("{}{}{}{}{}", backend_dir, sep, resource_dir_s, sep, orig_path)
+    } else {
+        format!("{}{}{}", resource_dir_s, sep, orig_path)
+    };
+    let backend_tmp_dir = std::env::var("SACV_BACKEND_TMPDIR")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| app_handle.path().app_cache_dir().ok())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("super_auto_cut_backend_tmp");
+    let _ = std::fs::create_dir_all(&backend_tmp_dir);
+    let backend_tmp_dir_s = backend_tmp_dir.to_string_lossy().to_string();
     *state.backend_port.lock().unwrap() = port;
     *state.backend_boot_token.lock().unwrap() = Some(boot_token.clone());
     cmd.env("HOST", host)
         .env("PORT", port.to_string())
         .env("PATH", new_path)
+        .env("TEMP", backend_tmp_dir_s.clone())
+        .env("TMP", backend_tmp_dir_s)
         .env("SACV_BOOT_TOKEN", boot_token.clone())
         .env("SACV_RUNTIME", "tauri")
         .env(
@@ -953,7 +1106,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             .build()?;
     }
 
-    let is_dev_mode = std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
