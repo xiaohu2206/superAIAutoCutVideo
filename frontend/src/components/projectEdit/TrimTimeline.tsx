@@ -57,6 +57,9 @@ export const TrimTimeline: React.FC<TrimTimelineProps> = ({
   const seekRafRef = useRef<number | null>(null);
   const pendingSeekMsRef = useRef<number | null>(null);
   const onSeekRef = useRef(onSeek);
+  const viewportStartMsRef = useRef(0);
+  const viewportMsRef = useRef(0);
+  const durationMsRef = useRef(0);
 
   const [viewportStartMs, setViewportStartMs] = useState(0);
   const [viewportMs, setViewportMs] = useState(() => Math.max(1, durationMs));
@@ -72,14 +75,48 @@ export const TrimTimeline: React.FC<TrimTimelineProps> = ({
     onSeekRef.current = onSeek;
   }, [onSeek]);
 
+  useEffect(() => {
+    viewportStartMsRef.current = viewportStartMs;
+    viewportMsRef.current = viewportMs;
+    durationMsRef.current = durationMs;
+  }, [viewportStartMs, viewportMs, durationMs]);
+
+  const isSeekDebugEnabled = () => {
+    if (typeof window === "undefined") return false;
+    try {
+      return (window as any).__SAC_DEBUG_SEEK === true || window.localStorage?.getItem("SAC_DEBUG_SEEK") === "1";
+    } catch {
+      return (window as any).__SAC_DEBUG_SEEK === true;
+    }
+  };
+
+  const timelineDebugLog = (...args: any[]) => {
+    if (!isSeekDebugEnabled()) return;
+    try {
+      console.log("[SAC][timeline]", ...args);
+    } catch {
+      void 0;
+    }
+  };
+
   const scheduleSeek = useCallback((ms: number) => {
+    timelineDebugLog("scheduleSeek", {
+      ms,
+      viewportStartMs: viewportStartMsRef.current,
+      viewportMs: viewportMsRef.current,
+      durationMs: durationMsRef.current,
+    });
     pendingSeekMsRef.current = ms;
-    if (seekRafRef.current != null) return;
+    if (seekRafRef.current != null) {
+      timelineDebugLog("scheduleSeek/coalesce", { ms });
+      return;
+    }
     seekRafRef.current = window.requestAnimationFrame(() => {
       seekRafRef.current = null;
       const v = pendingSeekMsRef.current;
       pendingSeekMsRef.current = null;
       if (v == null) return;
+      timelineDebugLog("scheduleSeek/flush", { ms: v });
       onSeekRef.current(v);
     });
   }, []);
@@ -253,8 +290,24 @@ export const TrimTimeline: React.FC<TrimTimelineProps> = ({
     const isHitPlayhead = Math.abs(x - playheadX) <= playheadHitSlopPx;
 
     const startMsAtPointer = msFromClientXInTrack(e.clientX);
+    const startMsAtPointerByRect =
+      rect.width > 0 ? clamp(Math.round(viewportStartMs + (x / rect.width) * viewportMs), 0, Math.max(0, durationMs)) : 0;
     const mode: DragState["type"] = isHitPlayhead ? "playhead" : e.shiftKey ? "create" : "scrub";
     const startMs = startMsAtPointer;
+
+    timelineDebugLog("pointerDown", {
+      clientX: e.clientX,
+      rectLeft: rect.left,
+      rectWidth: rect.width,
+      x,
+      mode,
+      isHitPlayhead,
+      viewportStartMs,
+      viewportMs,
+      durationMs,
+      startMsAtPointer,
+      startMsAtPointerByRect,
+    });
 
     if (mode === "create") {
       const tempId = `r_${Date.now()}_${Math.random().toString(16).slice(2)}`;
