@@ -1413,7 +1413,66 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
             if not ok or not out_tmp.exists():
                 raise RuntimeError("拼接失败")
 
-            os.replace(str(out_tmp), str(abs_in))
+            out_web_path = file_path
+            replaced = False
+            last_err: Optional[Exception] = None
+            for i in range(20):
+                try:
+                    os.replace(str(out_tmp), str(abs_in))
+                    replaced = True
+                    break
+                except PermissionError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+                except OSError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+
+            if not replaced:
+                try:
+                    fallback_out = abs_in.parent / f"{abs_in.stem}.trimmed_{task_id}{abs_in.suffix}"
+                    if fallback_out.exists():
+                        try:
+                            fallback_out.unlink()
+                        except Exception:
+                            pass
+                    os.replace(str(out_tmp), str(fallback_out))
+                    out_web_path = to_web_path(fallback_out)
+                    try:
+                        cur_paths = list(p.video_paths or [])
+                        cur_names = dict(p.video_names or {})
+                        if file_path in cur_paths:
+                            cur_paths = [out_web_path if x == file_path else x for x in cur_paths]
+                        else:
+                            cur_paths.append(out_web_path)
+                        if out_web_path != file_path:
+                            cur_names[out_web_path] = cur_names.get(file_path) or Path(out_web_path).name
+                            if file_path in cur_names:
+                                try:
+                                    del cur_names[file_path]
+                                except Exception:
+                                    pass
+                        projects_store.update_project(
+                            project_id,
+                            {
+                                "video_paths": cur_paths,
+                                "video_names": cur_names,
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    if last_err:
+                        raise last_err
+                    raise
 
             for sp in seg_paths:
                 try:
@@ -1422,22 +1481,23 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 except Exception:
                     pass
 
-            try:
-                projects_store.update_project(
-                    project_id,
-                    {
-                        "video_paths": list(p.video_paths or []),
-                        "video_names": dict(p.video_names or {}),
-                    },
-                )
-            except Exception:
-                pass
+            if out_web_path == file_path:
+                try:
+                    projects_store.update_project(
+                        project_id,
+                        {
+                            "video_paths": list(p.video_paths or []),
+                            "video_names": dict(p.video_names or {}),
+                        },
+                    )
+                except Exception:
+                    pass
 
             out_ver = datetime.now().strftime("%Y%m%d%H%M%S%f")
             TRIM_TASKS[task_id].status = "completed"
             TRIM_TASKS[task_id].progress = 100.0
             TRIM_TASKS[task_id].message = "裁剪完成"
-            TRIM_TASKS[task_id].file_path = file_path
+            TRIM_TASKS[task_id].file_path = out_web_path
             TRIM_TASKS[task_id].output_version = out_ver
             await _broadcast(
                 {
@@ -1447,7 +1507,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     "task_id": task_id,
                     "message": "裁剪完成",
                     "progress": 100,
-                    "file_path": file_path,
+                    "file_path": out_web_path,
                     "output_version": out_ver,
                     "timestamp": now_ts(),
                 }
