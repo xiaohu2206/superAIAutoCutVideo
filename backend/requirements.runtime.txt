@@ -14,3 +14,4 @@ numpy<=2.3.5
 huggingface_hub==0.34.0
 soundfile==0.12.1
 modelscope==1.14.0
+funasr==0.7.5

@@ -24,7 +24,18 @@ export interface UseProjectEditUploadStepOptions {
   uploadVideos: UploadVideosFn;
   uploadSubtitle: UploadSubtitleFn;
   deleteSubtitle: () => Promise<void>;
-  extractSubtitle: (force?: boolean) => Promise<void>;
+  extractSubtitle: (
+    options?:
+      | boolean
+      | {
+          force?: boolean;
+          asr_provider?: "bcut" | "fun_asr";
+          asr_model_key?: string | null;
+          asr_language?: string | null;
+          itn?: boolean;
+          hotwords?: string[];
+        }
+  ) => Promise<void>;
   fetchSubtitle: () => Promise<any>;
   saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
   deleteVideoItem: (path: string) => Promise<void>;
@@ -66,6 +77,8 @@ export interface UseProjectEditUploadStepReturn {
   subtitleExtractProgress: number;
   subtitleExtractLogs: WsProgressLog[];
   onExtractSubtitle: () => void;
+  subtitleAsr: { provider: "bcut" | "fun_asr"; modelKey: string; language: string };
+  onSubtitleAsrChange: (next: { provider: "bcut" | "fun_asr"; modelKey: string; language: string }) => void;
   subtitleDraft: SubtitleSegment[];
   subtitleSaving: boolean;
   onReloadSubtitle: () => void;
@@ -91,10 +104,30 @@ export function useProjectEditUploadStep(
   const [subtitleExtractLogs, setSubtitleExtractLogs] = useState<WsProgressLog[]>([]);
   const [subtitleDraft, setSubtitleDraft] = useState<SubtitleSegment[]>([]);
   const [subtitleSaving, setSubtitleSaving] = useState(false);
+  const [subtitleAsr, setSubtitleAsr] = useState<{ provider: "bcut" | "fun_asr"; modelKey: string; language: string }>({
+    provider: "bcut",
+    modelKey: "fun_asr_nano_2512",
+    language: "中文",
+  });
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const uploadingVideoRef = useRef(false);
   const subtitleSegmentsSerializedRef = useRef<string | null>(null);
+  const lastAsrSnapshotRef = useRef<string>("");
+
+  useEffect(() => {
+    const p = options.project;
+    if (!p) return;
+    const snap = `${p.id}|${String((p as any).asr_provider || "")}|${String((p as any).asr_model_key || "")}|${String((p as any).asr_language || "")}`;
+    if (snap === lastAsrSnapshotRef.current) return;
+    lastAsrSnapshotRef.current = snap;
+    const provider = (String((p as any).asr_provider || "bcut").trim().toLowerCase() === "fun_asr" ? "fun_asr" : "bcut") as
+      | "bcut"
+      | "fun_asr";
+    const modelKey = String((p as any).asr_model_key || "fun_asr_nano_2512").trim() || "fun_asr_nano_2512";
+    const language = String((p as any).asr_language || "中文").trim() || "中文";
+    setSubtitleAsr({ provider, modelKey, language });
+  }, [options.project?.id, (options.project as any)?.asr_provider, (options.project as any)?.asr_model_key, (options.project as any)?.asr_language]);
 
   useEffect(() => {
     uploadingVideoRef.current = uploadingVideo;
@@ -352,13 +385,19 @@ export function useProjectEditUploadStep(
     setSubtitleExtractProgress(0);
     setSubtitleExtractLogs([]);
     try {
-      await options.extractSubtitle(force);
+      const isFun = subtitleAsr.provider === "fun_asr";
+      await options.extractSubtitle({
+        force,
+        asr_provider: subtitleAsr.provider,
+        asr_model_key: isFun ? subtitleAsr.modelKey : null,
+        asr_language: isFun ? subtitleAsr.language : "中文",
+      });
       options.showSuccess("字幕提取成功！");
     } catch (err) {
       options.showError(err, "提取字幕失败");
       setExtractingSubtitle(false);
     }
-  }, [options]);
+  }, [options, subtitleAsr]);
 
   useWsTaskProgress({
     scope: "extract_subtitle",
@@ -449,6 +488,8 @@ export function useProjectEditUploadStep(
     subtitleExtractProgress,
     subtitleExtractLogs,
     onExtractSubtitle,
+    subtitleAsr,
+    onSubtitleAsrChange: setSubtitleAsr,
     subtitleDraft,
     subtitleSaving,
     onReloadSubtitle,

@@ -105,6 +105,9 @@ export interface Project {
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;
+  asr_provider?: "bcut" | "fun_asr";
+  asr_model_key?: string | null;
+  asr_language?: string | null;
   output_video_path?: string; // 输出视频文件路径
   // 剪映草稿相关
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径

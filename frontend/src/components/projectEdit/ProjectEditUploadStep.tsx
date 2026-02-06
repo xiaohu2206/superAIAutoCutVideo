@@ -4,6 +4,7 @@ import type { Project, SubtitleMeta, SubtitleSegment } from "../../types/project
 import AdvancedConfigSection from "./AdvancedConfigSection";
 import SubtitleEditor from "./SubtitleEditor";
 import VideoSourcesManager from "./VideoSourcesManager";
+import SubtitleAsrSelector from "./SubtitleAsrSelector";
 
 interface ProjectEditUploadStepProps {
   projectId: string;
@@ -44,6 +45,8 @@ interface ProjectEditUploadStepProps {
   subtitleExtractProgress: number;
   subtitleExtractLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
   onExtractSubtitle: () => void;
+  subtitleAsr: { provider: "bcut" | "fun_asr"; modelKey: string; language: string };
+  onSubtitleAsrChange: (next: { provider: "bcut" | "fun_asr"; modelKey: string; language: string }) => void;
 
   subtitleDraft: SubtitleSegment[];
   subtitleMeta: SubtitleMeta | null;
@@ -88,6 +91,8 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   subtitleExtractProgress,
   subtitleExtractLogs,
   onExtractSubtitle,
+  subtitleAsr,
+  onSubtitleAsrChange,
   subtitleDraft,
   subtitleMeta,
   subtitleSaving,
@@ -106,7 +111,9 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">项目配置</h2>
-          <p className="text-xs text-gray-500 mb-2">自动解析字幕只支持中文语言</p>
+          <p className="text-xs text-gray-500 mb-2">
+            {subtitleAsr.provider === "bcut" ? "内置 API 识别字幕仅支持中文" : "FunASR 可选择语言（需先下载模型）"}
+          </p>
         </div>
 
         <VideoSourcesManager
@@ -197,6 +204,12 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             )}
           </button>
         </div>
+
+        <SubtitleAsrSelector
+          value={subtitleAsr}
+          disabled={subtitleLoading || extractingSubtitle}
+          onChange={onSubtitleAsrChange}
+        />
 
         {(extractingSubtitle ||
           (subtitleExtractProgress > 0 && subtitleExtractProgress < 100)) && (

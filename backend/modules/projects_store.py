@@ -42,6 +42,9 @@ class Project(BaseModel):
     subtitle_updated_by_user: bool = Field(default=False)
     subtitle_updated_at: Optional[str] = None
     subtitle_format: Optional[str] = None
+    asr_provider: str = Field(default="bcut")
+    asr_model_key: Optional[str] = None
+    asr_language: Optional[str] = None
     audio_path: Optional[str] = None
     plot_analysis_path: Optional[str] = None
     output_video_path: Optional[str] = None
@@ -105,6 +108,12 @@ class ProjectsStore:
                                 p["subtitle_updated_at"] = p.get("updated_at") or None
                             if "subtitle_format" not in p:
                                 p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
+                            if "asr_provider" not in p:
+                                p["asr_provider"] = "bcut"
+                            if "asr_model_key" not in p:
+                                p["asr_model_key"] = None
+                            if "asr_language" not in p:
+                                p["asr_language"] = None
                             if "original_ratio" not in p:
                                 p["original_ratio"] = 70
                             if "script_language" not in p:
@@ -166,6 +175,9 @@ class ProjectsStore:
             subtitle_updated_by_user=False,
             subtitle_updated_at=None,
             subtitle_format=None,
+            asr_provider="bcut",
+            asr_model_key=None,
+            asr_language=None,
             audio_path=None,
             plot_analysis_path=None,
             output_video_path=None,
@@ -204,6 +216,9 @@ class ProjectsStore:
                 "subtitle_updated_by_user",
                 "subtitle_updated_at",
                 "subtitle_format",
+                "asr_provider",
+                "asr_model_key",
+                "asr_language",
                 "audio_path",
                 "plot_analysis_path",
                 "output_video_path",

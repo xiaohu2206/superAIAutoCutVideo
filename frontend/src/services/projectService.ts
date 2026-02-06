@@ -343,10 +343,37 @@ export class ProjectService {
     return response.data?.script as VideoScript;
   }
 
-  async extractSubtitle(projectId: string, force?: boolean): Promise<SubtitleResult> {
+  async extractSubtitle(
+    projectId: string,
+    options?:
+      | boolean
+      | {
+          force?: boolean;
+          asr_provider?: "bcut" | "fun_asr";
+          asr_model_key?: string | null;
+          asr_language?: string | null;
+          itn?: boolean;
+          hotwords?: string[];
+        }
+  ): Promise<SubtitleResult> {
+    const payload =
+      typeof options === "boolean"
+        ? options
+          ? { force: true }
+          : undefined
+        : options
+          ? {
+              force: Boolean(options.force),
+              asr_provider: options.asr_provider,
+              asr_model_key: options.asr_model_key ?? undefined,
+              asr_language: options.asr_language ?? undefined,
+              itn: typeof options.itn === "boolean" ? options.itn : undefined,
+              hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
+            }
+          : undefined;
     const response = await apiClient.post<ApiResponse<SubtitleResult>>(
       `/api/projects/${projectId}/extract-subtitle`,
-      force ? { force: true } : undefined
+      payload
     );
     if (!response.data) {
       throw new Error("字幕提取失败：响应为空");

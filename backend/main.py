@@ -53,6 +53,7 @@ from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
 from routes.qwen3_tts_routes import router as qwen3_tts_router
+from routes.fun_asr_routes import router as fun_asr_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
 from routes.storage_routes import router as settings_router
@@ -311,6 +312,7 @@ app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
 app.include_router(qwen3_tts_router)
+app.include_router(fun_asr_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
 app.include_router(settings_router)

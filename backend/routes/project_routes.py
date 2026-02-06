@@ -298,6 +298,11 @@ class GenerateScriptRequest(BaseModel):
 
 class ExtractSubtitleRequest(BaseModel):
     force: bool = False
+    asr_provider: Optional[str] = None
+    asr_model_key: Optional[str] = None
+    asr_language: Optional[str] = None
+    itn: bool = True
+    hotwords: Optional[List[str]] = None
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -552,7 +557,15 @@ async def generate_script(req: GenerateScriptRequest):
 @router.post("/{project_id}/extract-subtitle")
 async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
     try:
-        data = await extract_subtitle_service.extract_subtitle(project_id=project_id, force=bool(req.force))
+        data = await extract_subtitle_service.extract_subtitle(
+            project_id=project_id,
+            force=bool(req.force),
+            asr_provider=req.asr_provider,
+            asr_model_key=req.asr_model_key,
+            asr_language=req.asr_language,
+            itn=bool(getattr(req, "itn", True)),
+            hotwords=req.hotwords,
+        )
         return {
             "message": "字幕提取成功",
             "data": data,
