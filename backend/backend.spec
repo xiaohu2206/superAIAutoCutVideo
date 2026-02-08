@@ -61,9 +61,6 @@ for package in ['librosa']:
 
 for package in ['torch', 'torchvision', 'torchaudio']:
     try:
-        datas += collect_data_files(package, include_py_files=True)
-        binaries += collect_dynamic_libs(package)
-        hiddenimports += collect_submodules(package)
         tmp_ret = collect_all(package)
         datas += tmp_ret[0]
         binaries += tmp_ret[1]

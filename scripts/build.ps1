@@ -248,12 +248,27 @@ foreach ($variant in $variants) {
     }
     else { Fail "No backend requirements file found" }
 
-    & $venvPy "-m" "pip" "uninstall" "-y" "torchaudio" | Out-Null
-    & $venvPy "-m" "pip" "uninstall" "-y" "torch" "torchvision" | Out-Null
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu121" }
+    $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu121" }
+    $torchAlreadyOk = $false
+    try {
+      $vers = & $venvPy "-c" "import torch, torchvision, torchaudio; print(torch.__version__); print(torchvision.__version__); print(torchaudio.__version__)" 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        $versText = ($vers | Out-String)
+        if ($versText -match [regex]::Escape($desiredTag)) {
+          $torchAlreadyOk = $true
+        }
+      }
+    } catch { }
+    if ($torchAlreadyOk) {
+      Step "PyTorch already installed ($desiredTag) ($variant) - skip reinstall"
+    } else {
+      & $venvPy "-m" "pip" "uninstall" "-y" "torchaudio" | Out-Null
+      & $venvPy "-m" "pip" "uninstall" "-y" "torch" "torchvision" | Out-Null
+    }
     $wheelDir = $env:TORCH_WHEEL_DIR
     $usedLocal = $false
-    if ($wheelDir -and (Test-Path $wheelDir)) {
+    if (-not $torchAlreadyOk -and $wheelDir -and (Test-Path $wheelDir)) {
       $torchWhl = Join-Path $wheelDir "torch-2.5.1+${suffix}-cp311-cp311-win_amd64.whl"
       $visionWhl = Join-Path $wheelDir "torchvision-0.20.1+${suffix}-cp311-cp311-win_amd64.whl"
       if ((Test-Path $torchWhl) -and (Test-Path $visionWhl)) {
@@ -265,20 +280,30 @@ foreach ($variant in $variants) {
         Info "Local wheels not found for variant=$suffix; fallback to official index"
       }
     }
-    if (-not $usedLocal) {
+    if (-not $torchAlreadyOk -and -not $usedLocal) {
       if ($variant -eq "cpu") {
         & $venvPy "-m" "pip" "install" "torch==2.5.1+cpu" "torchvision==0.20.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
       } else {
         & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
+        if ($LASTEXITCODE -ne 0) {
+          Info "Official PyTorch index failed; fallback to Aliyun wheels (-f)"
+          & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu121/"
+        }
       }
       if ($LASTEXITCODE -ne 0) { throw "PyTorch install failed (code $LASTEXITCODE)" }
     }
-    if ($variant -eq "cpu") {
-      & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
-    } else {
-      & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
+    if (-not $torchAlreadyOk) {
+      if ($variant -eq "cpu") {
+        & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
+      } else {
+        & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
+        if ($LASTEXITCODE -ne 0) {
+          Info "Official PyTorch index failed; fallback to Aliyun wheels (-f)"
+          & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu121/"
+        }
+      }
+      if ($LASTEXITCODE -ne 0) { throw "Torchaudio install failed (code $LASTEXITCODE)" }
     }
-    if ($LASTEXITCODE -ne 0) { throw "Torchaudio install failed (code $LASTEXITCODE)" }
 
     Step "Sanity-check PyTorch imports ($variant)"
     & $venvPy "-c" "import torch, torchvision, torchaudio; print('torch_ok', torch.__version__)"

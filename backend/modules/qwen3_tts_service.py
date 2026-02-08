@@ -10,6 +10,213 @@ import logging
 from modules.qwen3_tts_model_manager import Qwen3TTSPathManager, validate_model_dir
 
 
+_TORCH_PAD_PATCHED = False
+_TORCH_DEVICE_MIX_PATCHED = False
+_TORCH_MULTINOMIAL_PATCHED = False
+
+
+def _ensure_torch_cpu_half_replication_pad_patch() -> None:
+    global _TORCH_PAD_PATCHED
+    if _TORCH_PAD_PATCHED:
+        return
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return
+
+    orig_pad = getattr(F, "pad", None)
+    if not callable(orig_pad):
+        return
+    if getattr(orig_pad, "__sacv_cpu_half_replication_pad_patch__", False):
+        _TORCH_PAD_PATCHED = True
+        return
+
+    def _pad_patched(input, pad, mode="constant", value=None):
+        try:
+            if (
+                isinstance(input, torch.Tensor)
+                and input.device.type == "cpu"
+                and input.dtype in (torch.float16, torch.bfloat16)
+                and mode in ("replicate", "replication")
+            ):
+                out = orig_pad(input.float(), pad, mode, value)
+                return out.to(dtype=input.dtype)
+        except Exception:
+            pass
+        return orig_pad(input, pad, mode, value)
+
+    setattr(_pad_patched, "__sacv_cpu_half_replication_pad_patch__", True)
+    F.pad = _pad_patched
+
+    try:
+        orig_c_pad = getattr(getattr(torch, "_C", None), "_nn", None)
+        orig_c_pad = getattr(orig_c_pad, "pad", None)
+    except Exception:
+        orig_c_pad = None
+
+    if callable(orig_c_pad) and not getattr(orig_c_pad, "__sacv_cpu_half_replication_pad_patch__", False):
+        def _c_pad_patched(*args, **kwargs):
+            try:
+                input = args[0] if len(args) >= 1 else kwargs.get("input")
+                pad = args[1] if len(args) >= 2 else kwargs.get("pad")
+                mode = args[2] if len(args) >= 3 else kwargs.get("mode", "constant")
+                value = args[3] if len(args) >= 4 else kwargs.get("value", None)
+                if (
+                    isinstance(input, torch.Tensor)
+                    and input.device.type == "cpu"
+                    and input.dtype in (torch.float16, torch.bfloat16)
+                    and mode in ("replicate", "replication")
+                ):
+                    out = orig_c_pad(input.float(), pad, mode, value)
+                    return out.to(dtype=input.dtype)
+            except Exception:
+                pass
+            return orig_c_pad(*args, **kwargs)
+
+        setattr(_c_pad_patched, "__sacv_cpu_half_replication_pad_patch__", True)
+        try:
+            torch._C._nn.pad = _c_pad_patched
+        except Exception:
+            pass
+
+    _TORCH_PAD_PATCHED = True
+
+
+def _ensure_torch_cuda_device_mix_patch() -> None:
+    global _TORCH_DEVICE_MIX_PATCHED
+    if _TORCH_DEVICE_MIX_PATCHED:
+        return
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return
+
+    try:
+        orig_embedding = getattr(F, "embedding", None)
+        if callable(orig_embedding) and not getattr(orig_embedding, "__sacv_cuda_device_mix_patch__", False):
+            def _embedding_patched(input, weight, *args, **kwargs):
+                try:
+                    if isinstance(input, torch.Tensor) and isinstance(weight, torch.Tensor):
+                        if weight.device.type == "cuda" and input.device.type == "cpu":
+                            input = input.to(weight.device)
+                except Exception:
+                    pass
+                return orig_embedding(input, weight, *args, **kwargs)
+
+            setattr(_embedding_patched, "__sacv_cuda_device_mix_patch__", True)
+            F.embedding = _embedding_patched
+    except Exception:
+        pass
+
+    try:
+        orig_index_select = getattr(torch, "index_select", None)
+        if callable(orig_index_select) and not getattr(orig_index_select, "__sacv_cuda_device_mix_patch__", False):
+            def _index_select_patched(input, dim, index, *args, **kwargs):
+                try:
+                    if isinstance(input, torch.Tensor) and input.device.type == "cuda":
+                        if isinstance(index, torch.Tensor) and index.device.type == "cpu":
+                            index = index.to(input.device)
+                except Exception:
+                    pass
+                return orig_index_select(input, dim, index, *args, **kwargs)
+
+            setattr(_index_select_patched, "__sacv_cuda_device_mix_patch__", True)
+            torch.index_select = _index_select_patched
+    except Exception:
+        pass
+
+    try:
+        orig_tensor_index_select = getattr(torch.Tensor, "index_select", None)
+        if callable(orig_tensor_index_select) and not getattr(orig_tensor_index_select, "__sacv_cuda_device_mix_patch__", False):
+            def _tensor_index_select_patched(self, dim, index):
+                try:
+                    if isinstance(self, torch.Tensor) and self.device.type == "cuda":
+                        if isinstance(index, torch.Tensor) and index.device.type == "cpu":
+                            index = index.to(self.device)
+                except Exception:
+                    pass
+                return orig_tensor_index_select(self, dim, index)
+
+            setattr(_tensor_index_select_patched, "__sacv_cuda_device_mix_patch__", True)
+            try:
+                torch.Tensor.index_select = _tensor_index_select_patched
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    _TORCH_DEVICE_MIX_PATCHED = True
+
+
+def _ensure_torch_cuda_multinomial_stability_patch() -> None:
+    global _TORCH_MULTINOMIAL_PATCHED
+    if _TORCH_MULTINOMIAL_PATCHED:
+        return
+    try:
+        import torch
+    except Exception:
+        return
+
+    orig_multinomial = getattr(torch, "multinomial", None)
+    if not callable(orig_multinomial):
+        return
+    if getattr(orig_multinomial, "__sacv_cuda_multinomial_patch__", False):
+        _TORCH_MULTINOMIAL_PATCHED = True
+        return
+
+    def _multinomial_patched(input, num_samples, replacement=False, generator=None, out=None):
+        try:
+            if not isinstance(input, torch.Tensor) or input.device.type != "cuda":
+                return orig_multinomial(input, num_samples, replacement=replacement, generator=generator, out=out)
+
+            probs = input
+            if probs.dtype in (torch.float16, torch.bfloat16):
+                probs = probs.float()
+            else:
+                probs = probs.clone() if probs.requires_grad else probs
+
+            probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+            probs = torch.clamp(probs, min=0.0)
+
+            if probs.dim() == 1:
+                s = probs.sum()
+                if not torch.isfinite(s) or float(s.item()) <= 0.0:
+                    idx = int(torch.argmax(probs).item()) if probs.numel() > 0 else 0
+                    r = torch.tensor([idx] * int(num_samples), device=probs.device, dtype=torch.int64)
+                    return r
+                probs = probs / s
+            elif probs.dim() == 2:
+                s = probs.sum(dim=1, keepdim=True)
+                bad = (~torch.isfinite(s)) | (s <= 0)
+                if bool(bad.any().item()):
+                    best = torch.argmax(probs, dim=1, keepdim=True).to(dtype=torch.int64)
+                    if int(num_samples) == 1:
+                        return best
+                    return best.repeat(1, int(num_samples))
+                probs = probs / s
+            return orig_multinomial(probs, num_samples, replacement=replacement, generator=generator, out=out)
+        except Exception:
+            try:
+                if isinstance(input, torch.Tensor) and input.device.type == "cuda":
+                    if input.dim() == 1:
+                        idx = int(torch.argmax(torch.nan_to_num(input.float(), nan=0.0, posinf=0.0, neginf=0.0)).item()) if input.numel() > 0 else 0
+                        return torch.tensor([idx] * int(num_samples), device=input.device, dtype=torch.int64)
+                    if input.dim() == 2:
+                        best = torch.argmax(torch.nan_to_num(input.float(), nan=0.0, posinf=0.0, neginf=0.0), dim=1, keepdim=True).to(dtype=torch.int64)
+                        if int(num_samples) == 1:
+                            return best
+                        return best.repeat(1, int(num_samples))
+            except Exception:
+                pass
+            return orig_multinomial(input, num_samples, replacement=replacement, generator=generator, out=out)
+
+    setattr(_multinomial_patched, "__sacv_cuda_multinomial_patch__", True)
+    torch.multinomial = _multinomial_patched
+    _TORCH_MULTINOMIAL_PATCHED = True
+
+
 def _prepare_windows_dll_search_paths() -> None:
     if sys.platform != "win32":
         return
@@ -145,6 +352,9 @@ class Qwen3TTSService:
             chosen_attn = None
             try:
                 import torch
+                _ensure_torch_cpu_half_replication_pad_patch()
+                _ensure_torch_cuda_device_mix_patch()
+                _ensure_torch_cuda_multinomial_stability_patch()
                 if q.startswith("cuda") and torch.cuda.is_available():
                     def _load_flash():
                         return Qwen3TTSModel.from_pretrained(
@@ -157,15 +367,37 @@ class Qwen3TTSService:
                         chosen_dtype = torch.bfloat16
                         chosen_attn = "flash_attention_2"
                     except Exception:
-                        def _load_sdpa():
-                            return Qwen3TTSModel.from_pretrained(
-                                model_path,
-                                dtype=torch.float16,
-                                attn_implementation="sdpa",
-                            )
-                        inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa)
-                        chosen_dtype = torch.float16
-                        chosen_attn = "sdpa"
+                        if getattr(getattr(torch, "cuda", None), "is_bf16_supported", None) and torch.cuda.is_bf16_supported():
+                            def _load_sdpa_bf16():
+                                return Qwen3TTSModel.from_pretrained(
+                                    model_path,
+                                    dtype=torch.bfloat16,
+                                    attn_implementation="sdpa",
+                                )
+                            try:
+                                inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_bf16)
+                                chosen_dtype = torch.bfloat16
+                                chosen_attn = "sdpa"
+                            except Exception:
+                                def _load_sdpa_fp16():
+                                    return Qwen3TTSModel.from_pretrained(
+                                        model_path,
+                                        dtype=torch.float16,
+                                        attn_implementation="sdpa",
+                                    )
+                                inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp16)
+                                chosen_dtype = torch.float16
+                                chosen_attn = "sdpa"
+                        else:
+                            def _load_sdpa_fp16():
+                                return Qwen3TTSModel.from_pretrained(
+                                    model_path,
+                                    dtype=torch.float16,
+                                    attn_implementation="sdpa",
+                                )
+                            inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp16)
+                            chosen_dtype = torch.float16
+                            chosen_attn = "sdpa"
                 else:
                     def _load_cpu():
                         return Qwen3TTSModel.from_pretrained(
@@ -213,7 +445,35 @@ class Qwen3TTSService:
                 pass
 
     async def _write_wav(self, out_path: Path, run_fn) -> Dict[str, Any]:
-        wav, sr = await asyncio.get_running_loop().run_in_executor(None, run_fn)
+        runtime_device = self._runtime_device
+
+        def _run_with_torch_defaults() -> Tuple[np.ndarray, int]:
+            try:
+                import torch
+                _ensure_torch_cpu_half_replication_pad_patch()
+                _ensure_torch_cuda_device_mix_patch()
+                _ensure_torch_cuda_multinomial_stability_patch()
+            except Exception:
+                return run_fn()
+
+            prev_device = None
+            try:
+                if hasattr(torch, "get_default_device"):
+                    prev_device = torch.get_default_device()
+                if runtime_device and runtime_device.startswith("cuda") and torch.cuda.is_available():
+                    try:
+                        torch.set_default_device(runtime_device)
+                    except Exception:
+                        pass
+                return run_fn()
+            finally:
+                if prev_device is not None:
+                    try:
+                        torch.set_default_device(prev_device)
+                    except Exception:
+                        pass
+
+        wav, sr = await asyncio.get_running_loop().run_in_executor(None, _run_with_torch_defaults)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             import soundfile as sf
