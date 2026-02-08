@@ -17,6 +17,7 @@ type DownloadState = {
   status?: string;
   downloadedBytes?: number;
   totalBytes?: number | null;
+  ownerOptionId?: string;
 };
 
 export function useFunAsrModels() {
@@ -71,7 +72,7 @@ export function useFunAsrModels() {
   }, []);
 
   const downloadModel = useCallback(
-    async (key: string, provider: FunAsrDownloadProvider) => {
+    async (key: string, provider: FunAsrDownloadProvider, ownerOptionId?: string) => {
       if (downloadsByKey[key]?.status === "running") return;
       setDownloadsByKey((prev) => ({
         ...prev,
@@ -84,6 +85,7 @@ export function useFunAsrModels() {
           status: "running",
           downloadedBytes: 0,
           totalBytes: null,
+          ownerOptionId,
         },
       }));
       try {
@@ -246,6 +248,7 @@ export function useFunAsrModels() {
             status: resolvedStatus,
             downloadedBytes,
             totalBytes,
+            ownerOptionId: existing?.ownerOptionId,
           },
         };
       });

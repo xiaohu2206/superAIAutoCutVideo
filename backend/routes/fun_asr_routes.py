@@ -6,6 +6,7 @@ import platform
 import subprocess
 import threading
 import time
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +23,9 @@ from modules.fun_asr_model_manager import (
 )
 from modules.fun_asr_service import fun_asr_service
 from modules.ws_manager import manager
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/asr/funasr", tags=["FunASR"])
@@ -518,14 +522,21 @@ async def fun_asr_test(req: FunASRTestRequest) -> Dict[str, Any]:
             itn=bool(req.itn),
         )
         return {"success": True, "data": ok, "message": "ok"}
-    except ValueError as e:
-        if str(e) == "unknown_model_key":
-            raise HTTPException(status_code=404, detail="unknown_model_key")
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FunASR test failed: {e}")
         msg = str(e)
-        if "missing_dependency:" in msg or "model_invalid_or_missing:" in msg:
+        if (
+            "missing_dependency:" in msg
+            or "model_invalid_or_missing:" in msg
+            or "funasr_model_load_failed:" in msg
+            or "test_audio_not_found:" in msg
+            or "unknown_model_key" in msg
+        ):
+            if "model_invalid_or_missing:" in msg:
+                msg = f"{msg}。请先在‘模型管理’下载该模型，或检查本地文件完整性。"
+            if "unknown_model_key" in msg:
+                raise HTTPException(status_code=404, detail="unknown_model_key")
             raise HTTPException(status_code=503, detail=msg)
         raise HTTPException(status_code=500, detail=msg)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

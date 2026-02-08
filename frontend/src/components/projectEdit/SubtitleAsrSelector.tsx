@@ -67,36 +67,40 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
           </select>
         </div>
 
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">模型</label>
-          <select
-            value={modelKey}
-            disabled={disabled || !isFun}
-            onChange={(e) => setModelKey(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
-            title={isFun ? "选择 FunASR 模型" : "内置 API 不需要选择模型"}
-          >
-            <option value="fun_asr_nano_2512">Fun-ASR-Nano-2512</option>
-            <option value="fun_asr_mlt_nano_2512">Fun-ASR-MLT-Nano-2512</option>
-          </select>
-        </div>
+        {isFun && (
+          <>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">模型</label>
+              <select
+                value={modelKey}
+                disabled={disabled}
+                onChange={(e) => setModelKey(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                title="选择 FunASR 模型"
+              >
+                <option value="fun_asr_nano_2512">Fun-ASR-Nano-2512</option>
+                <option value="fun_asr_mlt_nano_2512">Fun-ASR-MLT-Nano-2512</option>
+              </select>
+            </div>
 
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">语言</label>
-          <select
-            value={normalizedLanguage}
-            disabled={disabled || !isFun}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
-            title={isFun ? "选择识别语言" : "内置 API 仅支持中文"}
-          >
-            {languageOptions.map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </select>
-        </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">语言</label>
+              <select
+                value={normalizedLanguage}
+                disabled={disabled}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                title="选择识别语言"
+              >
+                {languageOptions.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="mt-2 text-[11px] text-gray-600">

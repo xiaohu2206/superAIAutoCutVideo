@@ -392,10 +392,16 @@ export function useProjectEditUploadStep(
         asr_model_key: isFun ? subtitleAsr.modelKey : null,
         asr_language: isFun ? subtitleAsr.language : "中文",
       });
+      // HTTP 请求成功，确保状态更新
+      setSubtitleExtractProgress(100);
+      setExtractingSubtitle(false);
       options.showSuccess("字幕提取成功！");
+      void options.refreshProject();
+      void options.fetchSubtitle().catch(() => void 0);
     } catch (err) {
       options.showError(err, "提取字幕失败");
       setExtractingSubtitle(false);
+      setSubtitleExtractProgress(0);
     }
   }, [options, subtitleAsr]);
 
@@ -405,6 +411,7 @@ export function useProjectEditUploadStep(
     onProgress: setSubtitleExtractProgress,
     onLog: (log) => setSubtitleExtractLogs((prev) => [...prev, log]),
     onCompleted: () => {
+      setSubtitleExtractProgress(100);
       setExtractingSubtitle(false);
       options.showSuccess("字幕提取成功！");
       void options.refreshProject();
@@ -412,6 +419,7 @@ export function useProjectEditUploadStep(
     },
     onError: (m) => {
       setExtractingSubtitle(false);
+      setSubtitleExtractProgress(0);
       options.showErrorText(m.message || "字幕提取失败");
     },
   });

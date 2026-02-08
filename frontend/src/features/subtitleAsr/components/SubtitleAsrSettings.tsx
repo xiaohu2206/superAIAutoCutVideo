@@ -36,7 +36,7 @@ export const SubtitleAsrSettings: React.FC = () => {
     const provider = providerByOptionId[opt.id] || "modelscope";
     for (const k of opt.keys) {
       const prov = k === "fsmn_vad" ? "modelscope" : provider;
-      await downloadModel(k, prov);
+      await downloadModel(k, prov, opt.id);
     }
   };
 
@@ -81,6 +81,7 @@ export const SubtitleAsrSettings: React.FC = () => {
         status: st.status,
         downloadedBytes: st.downloadedBytes,
         totalBytes: st.totalBytes,
+        ownerOptionId: st.ownerOptionId,
       };
     });
     return map;
@@ -144,6 +145,22 @@ export const SubtitleAsrSettings: React.FC = () => {
     }
   };
 
+  const accelerationView = useMemo(() => {
+    if (!acc?.acceleration) return null;
+    const a = acc.acceleration;
+    const isGpu = a.supported;
+    const gpuName = a.gpu ? ` (${a.gpu})` : "";
+
+    return {
+      isGpu,
+      text: isGpu ? "GPU" : "CPU",
+      title: isGpu
+        ? `支持 GPU 加速，默认设备: ${a.preferred_device}${gpuName}`
+        : `不支持 GPU 加速，原因: ${(a.reasons || []).join(", ") || "unknown"}`,
+      className: isGpu ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-600 border-gray-200",
+    };
+  }, [acc]);
+
   return (
     <div className="space-y-6">
       <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
@@ -160,8 +177,19 @@ export const SubtitleAsrSettings: React.FC = () => {
             {accLoading ? "刷新中…" : "刷新"}
           </button>
         </div>
-        <div className="text-xs text-gray-700 bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words">
-          {acc ? JSON.stringify(acc.acceleration || {}, null, 2) : "暂无数据"}
+        <div
+          className={`text-xs border rounded-lg p-3 whitespace-pre-wrap break-words ${
+            accelerationView?.className || "text-gray-700 bg-gray-50 border-gray-200"
+          }`}
+        >
+          {accelerationView ? (
+            <>
+              <div className="font-semibold mb-1">当前运行设备: {accelerationView.text}</div>
+              <div className="opacity-80 leading-relaxed">{accelerationView.title}</div>
+            </>
+          ) : (
+            "暂无数据"
+          )}
         </div>
       </section>
 

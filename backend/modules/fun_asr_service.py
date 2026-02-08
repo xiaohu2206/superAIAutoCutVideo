@@ -94,9 +94,27 @@ def _find_ffprobe() -> Optional[str]:
 def _ensure_dependency_ready() -> Tuple[bool, str]:
     try:
         import funasr  # type: ignore
+        from funasr.register import tables  # type: ignore
     except Exception as e:
         return False, f"missing_dependency:funasr:{e}"
-    _ = funasr
+
+    # Patch for FunASRNano if missing (often missing in funasr < 1.4)
+    # We load our patched version which fixes broken imports in the site-packages version
+    if "FunASRNano" not in tables.model_classes:
+        try:
+            # Import patched version to register it
+            from .patched_fun_asr_nano import FunASRNano  # type: ignore
+            logger.info("Registered patched FunASRNano class")
+        except Exception as e:
+            logger.warning(f"Failed to register patched FunASRNano: {e}")
+            # Fallback to SenseVoiceSmall if patch fails (though likely incompatible config)
+            if "SenseVoiceSmall" in tables.model_classes:
+                try:
+                    tables.model_classes["FunASRNano"] = tables.model_classes["SenseVoiceSmall"]
+                    logger.info("Fallback: Patched FunASRNano -> SenseVoiceSmall")
+                except Exception:
+                    pass
+
     return True, ""
 
 
@@ -127,6 +145,31 @@ def _ffprobe_duration_ms(path: Path) -> Optional[int]:
         if not s:
             return None
         return int(float(s) * 1000)
+    except Exception:
+        return None
+
+def _ffprobe_sample_rate(path: Path) -> Optional[int]:
+    ffprobe = _find_ffprobe()
+    if not ffprobe:
+        return None
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=sample_rate",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        s = out.decode("utf-8", errors="ignore").strip()
+        if not s:
+            return None
+        return int(float(s))
     except Exception:
         return None
 
@@ -185,6 +228,95 @@ def _make_default_test_wav(out_path: Path) -> Dict[str, Any]:
             frames.extend(int(v).to_bytes(2, "little", signed=True))
         wf.writeframes(bytes(frames))
     return {"sample_rate": sr, "duration": dur}
+
+
+def _normalize_test_language(language: Optional[str]) -> str:
+    l = (language or "").strip().lower()
+    if not l:
+        return "zh"
+    l2 = l.replace("_", "-")
+    if any(x in l2 for x in ["粤语", "yue", "cantonese", "zh-hk", "zh-hant-hk"]):
+        return "yue"
+    if any(x in l2 for x in ["中文", "汉语", "普通话", "zh", "chinese", "zh-cn", "zh-hans"]):
+        return "zh"
+    if any(x in l2 for x in ["英文", "英语", "en", "english"]):
+        return "en"
+    if any(x in l2 for x in ["日文", "日语", "ja", "japanese"]):
+        return "ja"
+    if any(x in l2 for x in ["韩文", "韩语", "ko", "korean"]):
+        return "ko"
+    if any(x in l2 for x in ["法文", "法语", "fr", "french"]):
+        return "fr"
+    if any(x in l2 for x in ["德文", "德语", "de", "german"]):
+        return "de"
+    if any(x in l2 for x in ["西班牙", "西语", "es", "spanish"]):
+        return "es"
+    return l2
+
+
+def _default_test_text(lang_key: str) -> str:
+    texts = {
+        "zh": "你好，这是一段中文测试语音。",
+        "yue": "你好，呢段係粤语测试语音。",
+        "en": "Hello, this is an English test speech.",
+        "ja": "こんにちは、これは日本語のテスト音声です。",
+        "ko": "안녕하세요, 이것은 한국어 테스트 음성입니다.",
+        "fr": "Bonjour, ceci est un message de test en français.",
+        "de": "Hallo, dies ist eine deutsche Testaufnahme.",
+        "es": "Hola, este es un mensaje de prueba en español.",
+    }
+    return texts.get(lang_key, texts["zh"])
+
+
+def _default_test_voice(lang_key: str) -> str:
+    voices = {
+        "zh": "zh-CN-XiaoxiaoNeural",
+        "yue": "zh-HK-HiuGaaiNeural",
+        "en": "en-US-JennyNeural",
+        "ja": "ja-JP-NanamiNeural",
+        "ko": "ko-KR-SunHiNeural",
+        "fr": "fr-FR-DeniseNeural",
+        "de": "de-DE-KatjaNeural",
+        "es": "es-ES-ElviraNeural",
+    }
+    return voices.get(lang_key, voices["zh"])
+
+
+async def _ensure_default_test_audio(language: str) -> Tuple[Path, Dict[str, Any]]:
+    lang_key = _normalize_test_language(language)
+    out_dir = _tmp_dir() / "default_test"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mp3_path = out_dir / f"asr_test_{lang_key}.mp3"
+    try:
+        if mp3_path.exists() and mp3_path.stat().st_size > 0:
+            return mp3_path, {"format": "MP3"}
+    except Exception:
+        pass
+    try:
+        from modules.edge_tts_service import edge_tts_service
+
+        text = _default_test_text(lang_key)
+        voice_id = _default_test_voice(lang_key)
+        res = await edge_tts_service.synthesize(
+            text=text,
+            voice_id=voice_id,
+            speed_ratio=None,
+            out_path=mp3_path,
+        )
+        if res.get("success"):
+            meta: Dict[str, Any] = {"format": "MP3"}
+            if res.get("duration") is not None:
+                meta["duration"] = res.get("duration")
+            return mp3_path, meta
+    except Exception as e:
+        try:
+            logger.warning(f"default_test_audio_edge_tts_failed: {e}")
+        except Exception:
+            pass
+    wav_path = out_dir / f"asr_test_{lang_key}.wav"
+    meta2 = _make_default_test_wav(wav_path)
+    meta2["format"] = "WAV"
+    return wav_path, meta2
 
 
 def _parse_vad_intervals(res: Any) -> List[Tuple[int, int]]:
@@ -442,27 +574,24 @@ class FunASRService:
     ) -> Dict[str, Any]:
         if model_key not in FUN_ASR_MODEL_REGISTRY:
             raise ValueError("unknown_model_key")
-        tmp = _tmp_dir()
-        fname = f"funasr_test_{uuid.uuid4().hex[:8]}.wav"
-        wav_path = tmp / fname
-        meta = _make_default_test_wav(wav_path)
-        try:
-            utterances = await self.transcribe_to_utterances(
-                audio_path=wav_path,
-                model_key=model_key,
-                device=device,
-                language=language,
-                itn=itn,
-                hotwords=[],
-            )
-            text = " ".join((u.get("text") or "").strip() for u in utterances if (u.get("text") or "").strip()).strip()
-            return {"success": True, "text": text, "utterances": utterances, "audio_path": str(wav_path), "audio_meta": meta}
-        finally:
-            try:
-                if wav_path.exists():
-                    wav_path.unlink()
-            except Exception:
-                pass
+        audio_path, meta_seed = await _ensure_default_test_audio(language)
+        sr = meta_seed.get("sample_rate") or _ffprobe_sample_rate(audio_path)
+        duration = meta_seed.get("duration")
+        if duration is None:
+            dur_ms = _ffprobe_duration_ms(audio_path)
+            duration = (float(dur_ms) / 1000.0) if dur_ms is not None else None
+        fmt = str(meta_seed.get("format") or audio_path.suffix.lstrip(".").upper() or "AUDIO")
+        meta: Dict[str, Any] = {"sample_rate": sr, "duration": duration, "format": fmt}
+        utterances = await self.transcribe_to_utterances(
+            audio_path=audio_path,
+            model_key=model_key,
+            device=device,
+            language=language,
+            itn=itn,
+            hotwords=[],
+        )
+        text = " ".join((u.get("text") or "").strip() for u in utterances if (u.get("text") or "").strip()).strip()
+        return {"success": True, "text": text, "utterances": utterances, "audio_path": str(audio_path), "audio_meta": meta}
 
 
 fun_asr_service = FunASRService()

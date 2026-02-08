@@ -164,8 +164,9 @@ async def _ws(project_id: str, type_: str, phase: str, message: str, progress: O
         payload["progress"] = progress
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"WS broadcast failed: {e}")
+
 
 
 def _subtitle_meta(p: Project) -> Dict[str, Any]:

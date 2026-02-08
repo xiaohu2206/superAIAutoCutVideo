@@ -8,7 +8,15 @@ type OptionItem = { id: string; label: string; keys: string[]; description?: str
 type Status = { existsAll: boolean; validAll: boolean; missing: string[] };
 type BadgeInfo = { className: string; text: string };
 type DownloadInfo =
-  | { key: string; progress: number; message?: string; status?: string; downloadedBytes?: number; totalBytes?: number | null }
+  | {
+      key: string;
+      progress: number;
+      message?: string;
+      status?: string;
+      downloadedBytes?: number;
+      totalBytes?: number | null;
+      ownerOptionId?: string;
+    }
   | null;
 
 export type FunAsrModelOptionsListProps = {
@@ -41,6 +49,18 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
   copiedOptionId,
 }) => {
   console.log("options222: ", options)
+  const keyUsage = React.useMemo(() => {
+    const usage: Record<string, string[]> = {};
+    options.forEach((option) => {
+      option.keys.forEach((key) => {
+        if (!usage[key]) usage[key] = [];
+        if (!usage[key].includes(option.id)) {
+          usage[key].push(option.id);
+        }
+      });
+    });
+    return usage;
+  }, [options]);
   return (
     <div className="space-y-4">
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2">
@@ -58,7 +78,18 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
         {options.map((option) => {
           const status = getModelStatus(option.keys);
           const badge = getBadgeInfo(status);
-          const activeDownloads = option.keys.map((k) => downloadsByKey[k]).filter(Boolean) as DownloadInfo[];
+          const activeDownloads = option.keys
+            .map((key) => {
+              const download = downloadsByKey[key];
+              if (!download) return null;
+              const owners = keyUsage[key] || [];
+              if (download.ownerOptionId) {
+                return download.ownerOptionId === option.id ? download : null;
+              }
+              if (owners.length <= 1) return download;
+              return owners[0] === option.id ? download : null;
+            })
+            .filter(Boolean) as DownloadInfo[];
           const isDownloading = activeDownloads.length > 0;
           const currentDownload = activeDownloads[0];
           const canStop = currentDownload?.status === "running";
@@ -152,4 +183,3 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
 };
 
 export default FunAsrModelOptionsList;
-
