@@ -30,6 +30,59 @@ function Invoke-CompressArchiveWithRetry([string]$sourcePath, [string]$destinati
   Fail "Portable ZIP creation failed (file locked)"
 }
 
+function Patch-GpuNsisInstaller([string]$installerNsiPath) {
+  if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
+  $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
+  if ($content -match [regex]::Escape("superAutoCutVideoBackend_gpu.zip")) { return }
+
+  $insertAfter = 'File /a "/oname=resources\\ffprobe.exe"'
+  if ($content -notmatch [regex]::Escape($insertAfter)) {
+    Fail "Failed to patch NSIS script (marker not found): $insertAfter"
+  }
+
+  $snippet = @"
+
+    SetOverwrite on
+    StrCpy `$R0 "`$EXEDIR\superAutoCutVideoBackend_gpu.zip"
+    `${If} `${FileExists} "`$R0"
+      CopyFiles /SILENT "`$R0" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+    `${Else}
+      StrCpy `$R0 "`$EXEDIR\superAutoCutVideoBackend.zip"
+      `${If} `${FileExists} "`$R0"
+        CopyFiles /SILENT "`$R0" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+      `${Else}
+        `${If} `${Silent}
+          Abort
+        `${Else}
+          MessageBox MB_ICONSTOP|MB_OK "GPU backend zip not found. Place superAutoCutVideoBackend_gpu.zip next to the installer and retry."
+          Abort
+        `${EndIf}
+      `${EndIf}
+    `${EndIf}
+"@
+
+  $content = $content -replace [regex]::Escape($insertAfter), ($insertAfter + $snippet)
+
+  $uninstallMarker = 'Delete "$INSTDIR\resources\ffprobe.exe"'
+  if ($content -match [regex]::Escape($uninstallMarker)) {
+    $content = $content -replace [regex]::Escape($uninstallMarker), ($uninstallMarker + "`r`n    Delete `"`$INSTDIR\resources\superAutoCutVideoBackend.zip`"")
+  }
+
+  Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
+}
+
+function Get-TauriMakensisPath() {
+  $p = Join-Path $env:LOCALAPPDATA "tauri\\NSIS\\Bin\\makensis.exe"
+  if (Test-Path $p) { return $p }
+  $p = Join-Path $env:LOCALAPPDATA "tauri\\NSIS\\makensis.exe"
+  if (Test-Path $p) { return $p }
+  $p = Join-Path $env:LOCALAPPDATA "tauri\\NSIS\\makensisw.exe"
+  if (Test-Path $p) { return $p }
+  $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Path }
+  Fail "NSIS makensis not found"
+}
+
 Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
@@ -238,7 +291,9 @@ foreach ($variant in $variants) {
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
-    & $venvPy "-m" "PyInstaller" "--clean" "--distpath" "dist" "backend.spec"
+    Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+    & $venvPy "-m" "PyInstaller" "--clean" "--noconfirm" "--distpath" "dist" "backend.spec"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
   }
   catch {
@@ -259,6 +314,7 @@ foreach ($variant in $variants) {
   if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.zip') {
     Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.zip' -Force -ErrorAction SilentlyContinue
   }
+  Microsoft.PowerShell.Management\Copy-Item -Recurse -Force 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend'
   Invoke-CompressArchiveWithRetry 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
   try {
     $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -307,9 +363,15 @@ foreach ($variant in $variants) {
       cargo tauri build --debug
       if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
     } else {
-      Step "Build installers (NSIS + MSI) ($variant)"
-      cargo tauri build --bundles nsis,msi
-      if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
+      if ($variant -eq 'gpu') {
+        Step "Build installer (NSIS) ($variant)"
+        cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+        if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
+      } else {
+        Step "Build installers (NSIS + MSI) ($variant)"
+        cargo tauri build --bundles nsis,msi
+        if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
+      }
     }
   }
   catch {
@@ -324,6 +386,15 @@ foreach ($variant in $variants) {
   }
   finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
+  if (-not $TauriDebug -and $variant -eq 'gpu') {
+    Step "Patch NSIS installer (GPU offline zip copy)"
+    $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
+    Patch-GpuNsisInstaller $installerNsi
+    $makensis = Get-TauriMakensisPath
+    & $makensis $installerNsi | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
+  }
+
   Step "Create portable ZIP and installers ($variant)"
   $releaseDir = Join-Path $variantTargetDir $profileName
   $portableTemp = Join-Path $releaseDir 'portable_temp'
@@ -336,7 +407,9 @@ foreach ($variant in $variants) {
   } catch { }
   Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
   New-Item -ItemType Directory -Force (Join-Path $portableTemp 'resources') | Out-Null
-  Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.zip') (Join-Path $portableTemp 'resources\\superAutoCutVideoBackend.zip')
+  $backendZipInRelease = Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.zip'
+  $backendZipForPortable = if (Test-Path $backendZipInRelease) { $backendZipInRelease } else { Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip' }
+  Microsoft.PowerShell.Management\Copy-Item -Force $backendZipForPortable (Join-Path $portableTemp 'resources\\superAutoCutVideoBackend.zip')
   $relRes = Join-Path $releaseDir 'resources'
   $ffmpegRelease = Join-Path $relRes 'ffmpeg.exe'
   $ffprobeRelease = Join-Path $relRes 'ffprobe.exe'
@@ -370,6 +443,13 @@ foreach ($variant in $variants) {
         $dst = Join-Path $installersOut ("${base}_${variant}${ext}")
         Microsoft.PowerShell.Management\Copy-Item -Force $_.FullName $dst
       }
+    }
+  }
+
+  if (-not $TauriDebug -and $variant -eq 'gpu') {
+    $srcZip = Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
+    if (Test-Path $srcZip) {
+      Microsoft.PowerShell.Management\Copy-Item -Force $srcZip (Join-Path $installersOut 'superAutoCutVideoBackend_gpu.zip')
     }
   }
 

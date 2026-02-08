@@ -69,6 +69,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+try:
+    _log_file = Path(tempfile.gettempdir()) / "super_auto_cut_backend_py.log"
+    _fh = logging.FileHandler(_log_file, encoding="utf-8")
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(_fh)
+except Exception:
+    pass
 
 _single_instance_lock_handle = None
 
@@ -920,13 +929,17 @@ if __name__ == "__main__":
         logger.info(f"启动FastAPI服务器: {host}:{port}")
         
         # 启动服务器：直接传递 app 对象，避免 PyInstaller 环境下字符串导入失败（ModuleNotFoundError: 'main'）
-        uvicorn.run(
-            app,
-            host=host,
-            port=port,
-            reload=False,  # 生产环境不使用reload
-            log_level="info"
-        )
+        try:
+            uvicorn.run(
+                app,
+                host=host,
+                port=port,
+                reload=False,
+                log_level="info"
+            )
+        except Exception as e:
+            logger.exception(f"uvicorn.run 失败: {e}")
+            raise
     except RuntimeError as e:
         logger.error(f"启动失败: {e}")
         sys.exit(1)

@@ -351,6 +351,9 @@ class VideoGenerationService:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
                 except Exception:
                     pass
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接视频失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接视频失败")
 
             try:

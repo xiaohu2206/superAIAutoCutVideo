@@ -1,6 +1,6 @@
+import { Check, Loader, Scissors, X } from "lucide-react";
 import React, { useRef } from "react";
 import { createPortal } from "react-dom";
-import { Check, Loader, Scissors, X } from "lucide-react";
 import { useTrimVideoModal } from "../../hooks/useTrimVideoModal";
 import { TrimPlayerPanel } from "./TrimPlayerPanel";
 import { TrimRangesPanel } from "./TrimRangesPanel";
@@ -11,9 +11,10 @@ export type TrimVideoModalProps = {
   videoPath: string;
   videoLabel?: string;
   onClose: () => void;
+  onTrimCompleted?: (result: { originalFilePath: string; filePath: string; outputVersion: string }) => void | Promise<void>;
 };
 
-export const TrimVideoModal: React.FC<TrimVideoModalProps> = ({ isOpen, projectId, videoPath, videoLabel, onClose }) => {
+export const TrimVideoModal: React.FC<TrimVideoModalProps> = ({ isOpen, projectId, videoPath, videoLabel, onClose, onTrimCompleted }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const vm = useTrimVideoModal({
     isOpen,
@@ -21,6 +22,7 @@ export const TrimVideoModal: React.FC<TrimVideoModalProps> = ({ isOpen, projectI
     videoPath,
     onClose,
     getVideoEl: () => videoRef.current,
+    onTrimCompleted,
   });
 
   if (!isOpen) return null;

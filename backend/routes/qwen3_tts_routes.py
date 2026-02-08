@@ -48,6 +48,31 @@ _download_lock = asyncio.Lock()
 _download_processes: Dict[str, multiprocessing.Process] = {}
 _download_result_queues: Dict[str, multiprocessing.Queue] = {}
 
+def _modelscope_cache_base() -> Path:
+    env = os.environ.get("MODELSCOPE_CACHE")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".cache" / "modelscope"
+
+def _clear_modelscope_cache() -> None:
+    base = _modelscope_cache_base()
+    try:
+        target = base / "ast_indexer"
+        if target.exists():
+            shutil.rmtree(target)
+    except Exception:
+        pass
+
+def _is_modelscope_cache_error(err: Exception) -> bool:
+    if isinstance(err, json.JSONDecodeError):
+        return True
+    msg = str(err)
+    if "missing_dependency:modelscope" in msg and "Expecting value" in msg:
+        return True
+    if "ast_indexer" in msg and "Expecting value" in msg:
+        return True
+    return False
+
 
 async def _broadcast_download_event(payload: Dict[str, Any]) -> None:
     try:
@@ -111,7 +136,15 @@ def _download_worker(key: str, provider: str, target_dir: str, result_queue: mul
     reporter = threading.Thread(target=report_progress, daemon=True)
     reporter.start()
     try:
-        ret = download_model_snapshot(key, provider, Path(target_dir))
+        ret = None
+        try:
+            ret = download_model_snapshot(key, provider, Path(target_dir))
+        except Exception as e:
+            if provider == "modelscope" and _is_modelscope_cache_error(e):
+                _clear_modelscope_cache()
+                ret = download_model_snapshot(key, provider, Path(target_dir))
+            else:
+                raise
         result_queue.put({"type": "result", "ok": True, "data": ret})
     except Exception as e:
         result_queue.put({"type": "result", "ok": False, "error": str(e)})

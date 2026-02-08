@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import json
@@ -26,6 +27,8 @@ class VideoProcessor:
     def __init__(self):
         self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
         self.audio_normalizer = AudioNormalizer()
+        self.last_concat_error: Optional[str] = None
+        self.last_concat_cmd: Optional[List[str]] = None
     
     async def cut_video_segment(self, input_path: str, output_path: str,
                               start_time: float, duration: float) -> bool:
@@ -117,11 +120,41 @@ class VideoProcessor:
         """
         """
         try:
+            self.last_concat_error = None
+            self.last_concat_cmd = None
             if not inputs:
                 logger.error("拼接视频失败: 输入列表为空")
                 return False
 
             n = len(inputs)
+            if n == 1:
+                src = str(inputs[0])
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-i", src,
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    "-y", output_path,
+                ]
+                self.last_concat_cmd = cmd
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
+                _, stderr = await process.communicate()
+                if process.returncode == 0:
+                    if on_progress:
+                        try:
+                            await on_progress(100.0)
+                        except Exception:
+                            pass
+                    return True
+                err = stderr.decode(errors="ignore")
+                self.last_concat_error = err.strip() or "单段重封装失败"
+                logger.error(f"视频拼接失败: {err}")
+                return False
 
             durations: List[float] = []
             has_audio: List[bool] = []
@@ -190,8 +223,9 @@ class VideoProcessor:
                         ):
                             copy_possible = False
                             break
+            token = uuid.uuid4().hex[:10]
             can_concat_demuxer = False
-            list_path = Path(output_path).with_suffix(".concat.txt")
+            list_path = Path(output_path).with_suffix(f".{token}.concat.txt")
             if copy_possible:
                 try:
                     lines = []
@@ -217,7 +251,7 @@ class VideoProcessor:
                     ts_files: List[Path] = []
                     procs = []
                     for idx, p in enumerate(inputs):
-                        ts_path = tmp_dir / f".concat_{idx}.ts"
+                        ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
                         ts_files.append(ts_path)
                         cmd_ts = [
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -257,7 +291,10 @@ class VideoProcessor:
                                 await on_progress(5.0)
                         except Exception:
                             pass
-                        concat_uri = "concat:" + "|".join(str(f) for f in ts_files)
+                        concat_uri = "concat:" + "|".join(
+                            (f.resolve().as_posix() if hasattr(f, "resolve") else f.as_posix())
+                            for f in ts_files
+                        )
                         cmd = [
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
                             "-i", concat_uri,
@@ -266,6 +303,7 @@ class VideoProcessor:
                         if acodec0 == "aac":
                             cmd.extend(["-bsf:a", "aac_adtstoasc"])
                         cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        self.last_concat_cmd = cmd
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
                             stdout=asyncio.subprocess.PIPE,
@@ -322,6 +360,7 @@ class VideoProcessor:
                             return True
                         else:
                             err = stderr.decode(errors="ignore")
+                            self.last_concat_error = err.strip() or "concat(ts) 失败"
                             logger.error(f"视频拼接失败: {err}")
                             return False
                 except Exception:
@@ -337,6 +376,7 @@ class VideoProcessor:
                     "-progress", "pipe:1",
                     "-y", output_path,
                 ]
+                self.last_concat_cmd = cmd
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -392,6 +432,7 @@ class VideoProcessor:
                     return True
                 else:
                     err = stderr.decode(errors="ignore")
+                    self.last_concat_error = err.strip() or "concat(demuxer) 失败"
                     logger.error(f"视频拼接失败: {err}")
                     return False
 
@@ -440,6 +481,7 @@ class VideoProcessor:
                     "-progress", "pipe:1",
                     "-y", output_path
                 ])
+                self.last_concat_cmd = cmd_try
 
                 process = await asyncio.create_subprocess_exec(
                     *cmd_try,
@@ -483,6 +525,11 @@ class VideoProcessor:
                         pass
 
                 stdout, stderr = await process.communicate()
+                try:
+                    if list_path.exists():
+                        list_path.unlink()
+                except Exception:
+                    pass
                 if process.returncode == 0:
                     if on_progress:
                         try:
@@ -493,6 +540,7 @@ class VideoProcessor:
                     return True
                 else:
                     err = stderr.decode(errors="ignore")
+                    self.last_concat_error = err.strip() or "filter_complex 拼接失败"
                     last_err = err
                     logger.error(f"视频拼接失败: {err}")
                     try:
@@ -503,10 +551,12 @@ class VideoProcessor:
 
             if last_err:
                 logger.error(f"视频拼接失败: {last_err}")
+                self.last_concat_error = str(last_err).strip() or self.last_concat_error
             return False
 
         except Exception as e:
             logger.error(f"拼接视频时出错: {e}")
+            self.last_concat_error = str(e) or self.last_concat_error
             return False
 
     async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:

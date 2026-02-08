@@ -1137,14 +1137,15 @@ async def merge_videos(project_id: str):
             ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
             if not ok:
                 MERGE_TASKS[task_id].status = "failed"
-                MERGE_TASKS[task_id].message = "合并失败"
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                MERGE_TASKS[task_id].message = ("合并失败: " + str(err).strip()[:400]) if err else "合并失败"
                 try:
                     await manager.broadcast(json.dumps({
                         "type": "error",
                         "scope": "merge_videos",
                         "project_id": project_id,
                         "task_id": task_id,
-                        "message": "合并失败",
+                        "message": MERGE_TASKS[task_id].message,
                         "progress": MERGE_TASKS[task_id].progress,
                         "timestamp": now_ts(),
                     }))
@@ -1382,7 +1383,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     }
                 )
 
-            out_tmp = abs_in.parent / f".{abs_in.stem}.trim_{task_id}.tmp{abs_in.suffix}"
+            out_tmp = abs_in.parent / f".trim_{task_id}.tmp{abs_in.suffix}"
             if out_tmp.exists():
                 try:
                     out_tmp.unlink()
@@ -1411,6 +1412,9 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
 
             ok = await video_processor.concat_videos([str(x) for x in seg_paths], str(out_tmp), _on_concat_progress)
             if not ok or not out_tmp.exists():
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接失败")
 
             out_web_path = file_path
@@ -1438,7 +1442,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
 
             if not replaced:
                 try:
-                    fallback_out = abs_in.parent / f"{abs_in.stem}.trimmed_{task_id}{abs_in.suffix}"
+                    fallback_out = abs_in.parent / f"{project_id}_trimmed_{task_id}{abs_in.suffix}"
                     if fallback_out.exists():
                         try:
                             fallback_out.unlink()

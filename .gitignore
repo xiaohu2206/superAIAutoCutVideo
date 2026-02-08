@@ -182,11 +182,12 @@ test_data/
 **/test_*.html
 **/*_test.py
 **/*_test.html
-
+.venv_pack_cpu
+backend/.venv_pack_gpu
 # 文档生成
 docs/_build/
 docs/build/
-
+.build_tmp/
 # ========================================
 # 开发工具
 # ========================================

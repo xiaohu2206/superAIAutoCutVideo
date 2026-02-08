@@ -27,6 +27,7 @@ interface VideoSourcesManagerProps {
   ) => void;
   onItemDrop: (e: React.DragEvent<HTMLDivElement>) => void;
   onDeleteVideoItem: (path: string) => void;
+  onRefreshProject: () => void | Promise<void>;
 }
 
 const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
@@ -48,6 +49,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
   onItemDragOver,
   onItemDrop,
   onDeleteVideoItem,
+  onRefreshProject,
 }) => {
   const [trimOpen, setTrimOpen] = React.useState(false);
   const [trimPath, setTrimPath] = React.useState<string | null>(null);
@@ -241,6 +243,13 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
           onClose={() => {
             setTrimOpen(false);
             setTrimPath(null);
+          }}
+          onTrimCompleted={async () => {
+            try {
+              await onRefreshProject();
+            } catch {
+              void 0;
+            }
           }}
         />
       )}
