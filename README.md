@@ -5,12 +5,13 @@
 
 
 ## 软件版本
-- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.2/superAIAutoCutVideo-1.0.2.zip">SuperAI-v1.0.2</a>
+- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.4/SuperAIAutoCutVideo_1.0.4_x64-setup-cpu.zip>SuperAI-v1.0.4</a>
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
 <img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
 ## 亮点特性
+- 2026-02-09: Qwen-tts配音、添加手动剪辑片头片尾
 - 2026-01-14: 打包成 Windows 版本
 - 2026-01-07：支持导出为剪映草稿
 - 2025-12-14：添加电影解说控制输出篇幅（短篇、中篇、长偏 - 高级配置）
@@ -28,6 +29,19 @@
 1. 2026-01-22：edge-tts支持英文、错误日志
 2. 2026-01-22：可配置（生成脚本条数、解说和原片的占比、生成脚本语言
 
+
+## 联系方式
+<img src="docs/image/weixinqun.png" alt="微信码" width="300" />
+- 微信群
+
+<img src="docs/image/douyin.png" alt="抖音码" width="160" />
+- 抖音号：`xiaohu_111`
+
+- 微信号：`interest_dog`
+
+
+
+
 ### 解决问题
 1. 对uploads的垃圾数据进行清理
 2. 缓存目录uploads更新无效的问题
@@ -41,7 +55,6 @@
 
 
 ## 更新计划（持续更新优化中....
-- 添加手动剪辑片头片尾
 - 本地ASR识别字幕、多类型脚本风格
 - 添加index tts
 - 添加影视解说功能
@@ -51,17 +64,6 @@
 
 ## 文档与支持
 - 打包说明：`docs/打包说明.md`
-
-
-## 联系方式
-<img src="docs/image/weixinqun.png" alt="微信码" width="300" />
-- 微信群
-
-<img src="docs/image/douyin.png" alt="抖音码" width="160" />
-- 抖音号：`xiaohu_111`
-
-- 微信号：`interest_dog`
-
 
 
 ## 快速开始
