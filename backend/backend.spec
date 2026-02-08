@@ -41,12 +41,23 @@ hiddenimports = [
 
 # 自动收集关键库的所有依赖（数据、二进制、隐式导入）
 # 这样比手动写 hiddenimports 更稳健
-for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic', 'transformers', 'huggingface_hub', 'soundfile', 'modelscope', 'onnxruntime']:
+for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic', 'transformers', 'huggingface_hub', 'onnxruntime']:
     try:
         tmp_ret = collect_all(package)
         datas += tmp_ret[0]
         binaries += tmp_ret[1]
         hiddenimports += tmp_ret[2]
+    except Exception as e:
+        print(f"Warning: Failed to collect {package}: {e}")
+
+# Separate collection for problematic packages
+for package in ['soundfile', 'modelscope']:
+    try:
+        # Use simple import check or minimal collection
+        hiddenimports.append(package)
+        # Try to collect binaries only for soundfile
+        if package == 'soundfile':
+             binaries += collect_dynamic_libs(package)
     except Exception as e:
         print(f"Warning: Failed to collect {package}: {e}")
 
