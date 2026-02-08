@@ -187,6 +187,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
         <ProjectEditUploadStep
           projectId={projectId}
           project={project}
+          refreshProject={refreshProject}
           merging={merging}
           mergeProgress={mergeProgress}
           subtitleLoading={subtitleLoading}

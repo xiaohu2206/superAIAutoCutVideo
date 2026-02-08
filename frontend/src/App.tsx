@@ -80,6 +80,7 @@ const App: React.FC = () => {
 
     let attempts = 0;
     let ready = false;
+    const maxAttempts = 30;
     do {
       try {
         const status = await checkBackendStatus();
@@ -102,7 +103,10 @@ const App: React.FC = () => {
       }
       attempts += 1;
       await sleep(Math.min(800 + attempts * 200, 3000));
-    } while (!ready);
+    } while (!ready && attempts < maxAttempts);
+    if (!ready) {
+      setIsLoading(false);
+    }
   };
 
   const refreshConnections = async () => {
@@ -133,14 +137,14 @@ const App: React.FC = () => {
     try {
       let status: BackendStatus;
       const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
-      const requireBootToken = isTauri && import.meta.env.PROD;
 
       const ensureHandshake = async (s: BackendStatus) => {
         if (!s?.port) return;
         configureBackend(s.port);
+        const requireBootTokenNow = isTauri && import.meta.env.PROD && !!(s.boot_token && String(s.boot_token).trim());
         await handshakeVerifyBackend(apiClient.getBaseUrl(), {
           expectedBootToken: s.boot_token ?? null,
-          requireBootToken,
+          requireBootToken: requireBootTokenNow,
           timeoutMs: 1200,
         });
       };

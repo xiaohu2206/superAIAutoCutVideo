@@ -40,9 +40,10 @@ export type UseTrimVideoModalOptions = {
   videoPath: string;
   onClose: () => void;
   getVideoEl: () => HTMLVideoElement | null;
+  onTrimCompleted?: (result: { originalFilePath: string; filePath: string; outputVersion: string }) => void | Promise<void>;
 };
 
-export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVideoEl }: UseTrimVideoModalOptions) {
+export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVideoEl, onTrimCompleted }: UseTrimVideoModalOptions) {
   const [durationMs, setDurationMs] = useState(0);
   const [currentMs, setCurrentMs] = useState(0);
   const [mode, setMode] = useState<TrimMode>("keep");
@@ -570,6 +571,9 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
       });
       const taskId = start.task_id;
 
+      let completedFilePath: string | null = null;
+      let completedOutputVersion: string | number | null = null;
+
       await new Promise<void>((resolve, reject) => {
         let finished = false;
         let timeoutId: number | null = null;
@@ -585,6 +589,8 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
           if (finished) return;
           finished = true;
           cleanup();
+          completedOutputVersion = outputVersion ?? null;
+          completedFilePath = typeof nextFilePath === "string" ? nextFilePath : null;
           if (typeof nextFilePath === "string" && nextFilePath.trim()) {
             setResolvedVideoWebPath(nextFilePath.trim());
           }
@@ -664,7 +670,21 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
         }, 5 * 60 * 1000);
       });
 
-      message.success("裁剪完成，已替换原视频");
+      const finalFilePath = (completedFilePath || videoPath || "").trim();
+      const finalOutputVersion = String(completedOutputVersion ?? Date.now());
+      if (finalFilePath && finalFilePath !== videoPath && typeof onTrimCompleted === "function") {
+        try {
+          await onTrimCompleted({ originalFilePath: videoPath, filePath: finalFilePath, outputVersion: finalOutputVersion });
+        } catch {
+          void 0;
+        }
+      }
+
+      if (finalFilePath && finalFilePath !== videoPath) {
+        message.success("裁剪完成，已生成新视频文件");
+      } else {
+        message.success("裁剪完成，已替换原视频");
+      }
       setSubmitting(false);
       onClose();
     } catch (e: any) {
@@ -673,7 +693,7 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
       setErrorText(msg);
       message.error(msg);
     }
-  }, [canSubmit, mode, normRanges, projectId, videoPath, onClose, getVideoEl]);
+  }, [canSubmit, mode, normRanges, projectId, videoPath, onClose, getVideoEl, onTrimCompleted]);
 
   const clearRanges = useCallback(() => {
     setRanges([]);

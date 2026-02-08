@@ -231,25 +231,53 @@ async fn discover_existing_backend_quick(
 fn parse_backend_port_from_log() -> Option<u16> {
     let log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
     let content = std::fs::read_to_string(&log_path).ok()?;
-    // 搜索类似：Uvicorn running on http://127.0.0.1:8000
-    let needle = "Uvicorn running on http://127.0.0.1:";
-    // 取最后一次出现，避免旧记录干扰
-    if let Some(pos) = content.rfind(needle) {
-        let start = pos + needle.len();
-        let bytes = content.as_bytes();
-        let mut i = start;
-        let mut num: u16 = 0;
-        while i < bytes.len() {
-            let c = bytes[i];
-            if c.is_ascii_digit() {
-                num = num.saturating_mul(10).saturating_add((c - b'0') as u16);
-                i += 1;
-            } else {
-                break;
+    let needles = [
+        "Uvicorn running on http://127.0.0.1:",
+        "[stdout] Uvicorn running on http://127.0.0.1:",
+        "[stderr] Uvicorn running on http://127.0.0.1:",
+    ];
+    for needle in &needles {
+        if let Some(pos) = content.rfind(needle) {
+            let start = pos + needle.len();
+            let bytes = content.as_bytes();
+            let mut i = start;
+            let mut num: u16 = 0;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_digit() {
+                    num = num.saturating_mul(10).saturating_add((c - b'0') as u16);
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if num > 0 {
+                return Some(num);
             }
         }
-        if num > 0 {
-            return Some(num);
+    }
+    if let Some(pos) = content.rfind("http://127.0.0.1:") {
+        let line_start = content[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = content[pos..].find('\n').map(|i| pos + i).unwrap_or(content.len());
+        let line = &content[line_start..line_end];
+        let lower = line.to_lowercase();
+        if lower.contains("running on") || lower.contains("listening on") || lower.contains("serving on") {
+            let start = pos + "http://127.0.0.1:".len();
+            let bytes = content.as_bytes();
+            let mut i = start;
+            let mut num: u16 = 0;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_digit() {
+                    num = num.saturating_mul(10).saturating_add((c - b'0') as u16);
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if num > 0 {
+                return Some(num);
+            }
         }
     }
     None
@@ -349,46 +377,94 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn ensure_backend_executable_available(
-    app_handle: &AppHandle,
+    _app_handle: &AppHandle,
     resource_dir: &PathBuf,
 ) -> Result<PathBuf, String> {
-    let app_data_dir = app_handle
+    let app_data_dir = _app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
     let extracted_backend_dir = app_data_dir.join("superAutoCutVideoBackend");
-    let extracted_backend_exe = extracted_backend_dir.join("superAutoCutVideoBackend.exe");
-    if extracted_backend_exe.exists() {
-        return Ok(extracted_backend_exe);
+    let nested_backend_dir = extracted_backend_dir.join("superAutoCutVideoBackend");
+    let is_valid_backend_root = |root: &std::path::Path| -> Option<PathBuf> {
+        let exe = root.join("superAutoCutVideoBackend.exe");
+        if !exe.exists() {
+            return None;
+        }
+        let internal_dll = root.join("_internal").join("python311.dll");
+        if internal_dll.exists() {
+            Some(exe)
+        } else {
+            None
+        }
+    };
+    if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
+        return Ok(exe);
+    }
+    if let Some(exe) = is_valid_backend_root(&nested_backend_dir) {
+        return Ok(exe);
+    }
+    if extracted_backend_dir.exists() {
+        let _ = std::fs::remove_dir_all(&extracted_backend_dir);
     }
 
     let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
     if !zip_path.exists() {
-        return Ok(extracted_backend_exe);
+        return Ok(extracted_backend_dir.join("superAutoCutVideoBackend.exe"));
     }
 
     let _ = std::fs::create_dir_all(&app_data_dir);
     if extracted_backend_dir.exists() {
         let _ = std::fs::remove_dir_all(&extracted_backend_dir);
     }
+    let _ = std::fs::create_dir_all(&extracted_backend_dir);
 
-    let file =
-        std::fs::File::open(&zip_path).map_err(|e| format!("无法打开后端ZIP包: {}", e))?;
-    let mut zip =
-        ZipArchive::new(file).map_err(|e| format!("解析后端ZIP包失败: {}", e))?;
-    zip.extract(&app_data_dir)
-        .map_err(|e| format!("解压后端ZIP包失败: {}", e))?;
-
-    if extracted_backend_exe.exists() {
-        return Ok(extracted_backend_exe);
+    let mut zip_extract_ok = false;
+    if let Ok(file) = std::fs::File::open(&zip_path) {
+        if let Ok(mut zip) = ZipArchive::new(file) {
+            if zip.extract(&extracted_backend_dir).is_ok() {
+                zip_extract_ok = true;
+            }
+        }
     }
-    let flat_exe = app_data_dir.join("superAutoCutVideoBackend.exe");
-    if flat_exe.exists() {
-        let _ = std::fs::create_dir_all(&extracted_backend_dir);
-        let moved = extracted_backend_exe.clone();
-        std::fs::rename(&flat_exe, &moved)
-            .map_err(|e| format!("移动解压后的后端文件失败: {}", e))?;
-        return Ok(moved);
+    if !zip_extract_ok {
+        let zip_s = zip_path.to_string_lossy().to_string();
+        let out_dir_s = extracted_backend_dir.to_string_lossy().to_string();
+        let zip_q = zip_s.replace('\'', "''");
+        let out_q = out_dir_s.replace('\'', "''");
+        let cmd = format!(
+            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+            zip_q, out_q
+        );
+        let status = Command::new("powershell")
+            .creation_flags(0x08000000)
+            .arg("-NoLogo")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-WindowStyle")
+            .arg("Hidden")
+            .arg("-Command")
+            .arg(cmd)
+            .status()
+            .map_err(|e| format!("调用 PowerShell 解压失败: {}", e))?;
+        if !status.success() {
+            return Err(format!(
+                "解压后端ZIP包失败: zip={} out={} code={:?}",
+                zip_path.to_string_lossy(),
+                extracted_backend_dir.to_string_lossy(),
+                status.code()
+            ));
+        }
+    }
+
+    if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
+        return Ok(exe);
+    }
+    if let Some(exe) = is_valid_backend_root(&nested_backend_dir) {
+        return Ok(exe);
+    }
+    if extracted_backend_dir.exists() {
+        let _ = std::fs::remove_dir_all(&extracted_backend_dir);
     }
 
     Err("解压后未找到 superAutoCutVideoBackend.exe".to_string())
@@ -525,10 +601,19 @@ async fn start_backend(
     }
 
     // 获取资源目录路径（并准备后备路径：与应用同级 resources 目录）
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("无法获取资源目录: {}", e))?;
+    let resource_dir = match app_handle.path().resource_dir() {
+        Ok(p) => p,
+        Err(_e) => {
+            let exe_dir_fallback = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            if let Some(dir) = exe_dir_fallback {
+                dir.join("resources")
+            } else {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("resources")
+            }
+        }
+    };
     let resource_root = {
         let sub = resource_dir.join("resources");
         if sub.exists() { sub } else { resource_dir.clone() }
@@ -542,21 +627,29 @@ async fn start_backend(
 
     let force_packaged_backend =
         std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
-    let prefer_python_backend = is_dev_mode && !force_packaged_backend;
+    let backend_zip_path = resource_root.join("superAutoCutVideoBackend.zip");
+    let backend_zip_exists = backend_zip_path.exists();
+    let backend_folder_exe = resource_root
+        .join("superAutoCutVideoBackend")
+        .join("superAutoCutVideoBackend.exe");
+    let backend_folder_exists = backend_folder_exe.exists();
+    let prefer_python_backend =
+        is_dev_mode && !force_packaged_backend && !backend_zip_exists && !backend_folder_exists;
 
     append_log_line(
         early_log_path.clone(),
         &format!(
-            "[meta] is_dev_mode={} prefer_python_backend={} resource_dir={} resource_root={}",
+            "[meta] is_dev_mode={} prefer_python_backend={} resource_dir={} resource_root={} backend_zip_exists={}",
             is_dev_mode,
             prefer_python_backend,
             resource_dir.to_string_lossy(),
-            resource_root.to_string_lossy()
+            resource_root.to_string_lossy(),
+            backend_zip_exists
         ),
     );
 
     #[cfg(target_os = "windows")]
-    let extracted_backend_exe = if !prefer_python_backend {
+    let extracted_backend_exe = if !prefer_python_backend && backend_zip_exists && !backend_folder_exists {
         let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
         if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
             append_log_line(
@@ -572,7 +665,27 @@ async fn start_backend(
                 zip_path.to_string_lossy()
             ),
         );
-        Some(ensure_backend_executable_available(&app_handle, &resource_root)?)
+        append_log_line(early_log_path.clone(), "[meta] ensure_backend_executable_available_begin");
+        match ensure_backend_executable_available(&app_handle, &resource_root) {
+            Ok(p) => {
+                append_log_line(
+                    early_log_path.clone(),
+                    &format!(
+                        "[meta] ensure_backend_executable_available_ok={} exists={}",
+                        p.to_string_lossy(),
+                        p.exists()
+                    ),
+                );
+                Some(p)
+            }
+            Err(e) => {
+                append_log_line(
+                    early_log_path.clone(),
+                    &format!("[meta] ensure_backend_executable_available_error={}", e),
+                );
+                return Err(e);
+            }
+        }
     } else {
         None
     };
@@ -668,6 +781,14 @@ async fn start_backend(
         .into_iter()
         .find(|p| p.exists())
         .unwrap_or(primary_path_dir.clone());
+    append_log_line(
+        early_log_path.clone(),
+        &format!(
+            "[meta] backend_executable_candidate={} exists={}",
+            backend_executable.to_string_lossy(),
+            backend_executable.exists()
+        ),
+    );
 
     #[cfg(target_os = "windows")]
     {
@@ -681,6 +802,7 @@ async fn start_backend(
 
     let mut cmd = if !prefer_python_backend && backend_executable.exists() {
         // 使用打包的可执行文件
+        append_log_line(early_log_path.clone(), "[meta] use_packaged_backend_exe=1");
         println!("使用打包的后端可执行文件: {:?}", backend_executable);
         let backend_working_dir = backend_executable
             .parent()
@@ -689,81 +811,76 @@ async fn start_backend(
         let mut c = apply_windows_no_window(Command::new(&backend_executable));
         c.current_dir(backend_working_dir);
         c
-    } else {
-        // 未发现打包的后端
-        // 生产环境严格要求存在打包后端；开发环境允许回退到 Python
-        if is_dev_mode {
-            let mut backend_script: Option<PathBuf> = None;
-            let mut search_roots: Vec<PathBuf> = vec![resource_dir.clone()];
-            if let Ok(exe) = std::env::current_exe() {
-                search_roots.push(exe);
-            }
-            if let Ok(cwd) = std::env::current_dir() {
-                search_roots.push(cwd);
-            }
-
-            for root in search_roots {
-                for anc in root.ancestors().take(8) {
-                    let cand = anc.join("backend").join("main.py");
-                    if cand.exists() {
-                        backend_script = Some(cand);
-                        break;
-                    }
-                }
-                if backend_script.is_some() {
+    } else if is_dev_mode {
+        let mut backend_script: Option<PathBuf> = None;
+        let mut search_roots: Vec<PathBuf> = vec![resource_dir.clone()];
+        if let Ok(exe) = std::env::current_exe() {
+            search_roots.push(exe);
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            search_roots.push(cwd);
+        }
+        for root in search_roots {
+            for anc in root.ancestors().take(8) {
+                let cand = anc.join("backend").join("main.py");
+                if cand.exists() {
+                    backend_script = Some(cand);
                     break;
                 }
             }
-
-            let backend_script =
-                backend_script.ok_or_else(|| "后端脚本不存在: backend/main.py".to_string())?;
-
-            if !backend_script.exists() {
-                return Err(format!("后端脚本不存在: {:?}", backend_script));
+            if backend_script.is_some() {
+                break;
             }
-
-            println!("开发模式：使用Python运行后端脚本: {:?}", backend_script);
-
-            // 优先选择 workspace backend/.venv 下的解释器；其次尝试 python3；最后回退到 python
-            let backend_dir = backend_script.parent().unwrap().to_path_buf();
-            let venv_py_unix = backend_dir.join(".venv").join("bin").join("python3");
-            let venv_py_unix_alt = backend_dir.join(".venv").join("bin").join("python");
-            let venv_py_win = backend_dir.join(".venv").join("Scripts").join("python.exe");
-
-            // 允许通过环境变量强制指定解释器
-            let env_override = std::env::var("BACKEND_PYTHON").ok();
-
-            let python_cmd: String = if let Some(p) = env_override {
-                p
-            } else if venv_py_unix.exists() {
-                venv_py_unix.to_string_lossy().to_string()
-            } else if venv_py_unix_alt.exists() {
-                venv_py_unix_alt.to_string_lossy().to_string()
-            } else if venv_py_win.exists() {
-                venv_py_win.to_string_lossy().to_string()
-            } else if which::which("python3").is_ok() {
-                "python3".to_string()
-            } else {
-                "python".to_string()
-            };
-
-            println!("选择的 Python 解释器: {}", python_cmd);
-
-            let mut c = Command::new(python_cmd);
-            c.arg(backend_script);
-            #[cfg(target_os = "windows")]
-            {
-                c.creation_flags(CREATE_NO_WINDOW);
-            }
-            c.current_dir(backend_dir);
-
-            c
-        } else {
-            let err = "未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string();
-            let path = std::env::temp_dir().join("super_auto_cut_backend.log");
-            append_log_line(path, &format!("[error] {}", err));
-            return Err(err);
         }
+        let backend_script =
+            backend_script.ok_or_else(|| "后端脚本不存在: backend/main.py".to_string())?;
+        if !backend_script.exists() {
+            return Err(format!("后端脚本不存在: {:?}", backend_script));
+        }
+        append_log_line(
+            early_log_path.clone(),
+            &format!(
+                "[meta] use_python_backend_script={} ",
+                backend_script.to_string_lossy()
+            ),
+        );
+        println!("使用Python运行后端脚本: {:?}", backend_script);
+        let backend_dir = backend_script.parent().unwrap().to_path_buf();
+        let venv_py_unix = backend_dir.join(".venv").join("bin").join("python3");
+        let venv_py_unix_alt = backend_dir.join(".venv").join("bin").join("python");
+        let venv_py_win = backend_dir.join(".venv").join("Scripts").join("python.exe");
+        let env_override = std::env::var("BACKEND_PYTHON").ok();
+        let python_cmd: String = if let Some(p) = env_override {
+            p
+        } else if venv_py_unix.exists() {
+            venv_py_unix.to_string_lossy().to_string()
+        } else if venv_py_unix_alt.exists() {
+            venv_py_unix_alt.to_string_lossy().to_string()
+        } else if venv_py_win.exists() {
+            venv_py_win.to_string_lossy().to_string()
+        } else if which::which("python3").is_ok() {
+            "python3".to_string()
+        } else {
+            "python".to_string()
+        };
+        append_log_line(
+            early_log_path.clone(),
+            &format!("[meta] python_cmd={}", python_cmd),
+        );
+        println!("选择的 Python 解释器: {}", python_cmd);
+        let mut c = Command::new(python_cmd);
+        c.arg(backend_script);
+        #[cfg(target_os = "windows")]
+        {
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c.current_dir(backend_dir);
+        c
+    } else {
+        let err = "未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string();
+        let path = std::env::temp_dir().join("super_auto_cut_backend.log");
+        append_log_line(path, &format!("[error] {}", err));
+        return Err(err);
     };
 
     // 并发启动防护：若已有启动流程进行中，则不再重复启动
@@ -803,10 +920,26 @@ async fn start_backend(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| resource_root.to_string_lossy().to_string());
     let resource_dir_s = resource_root.to_string_lossy().to_string();
-    let new_path = if backend_dir != resource_dir_s {
-        format!("{}{}{}{}{}", backend_dir, sep, resource_dir_s, sep, orig_path)
-    } else {
-        format!("{}{}{}", resource_dir_s, sep, orig_path)
+    let internal_dir_s = backend_executable
+        .parent()
+        .map(|p| p.join("_internal"))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().to_string());
+    let new_path = match internal_dir_s {
+        Some(internal) => {
+            if backend_dir != resource_dir_s {
+                format!("{}{}{}{}{}{}{}", backend_dir, sep, resource_dir_s, sep, internal, sep, orig_path)
+            } else {
+                format!("{}{}{}{}{}", resource_dir_s, sep, internal, sep, orig_path)
+            }
+        }
+        None => {
+            if backend_dir != resource_dir_s {
+                format!("{}{}{}{}{}", backend_dir, sep, resource_dir_s, sep, orig_path)
+            } else {
+                format!("{}{}{}", resource_dir_s, sep, orig_path)
+            }
+        }
     };
     let backend_tmp_dir = std::env::var("SACV_BACKEND_TMPDIR")
         .ok()
@@ -849,8 +982,7 @@ async fn start_backend(
             let log_path = std::env::temp_dir().join("super_auto_cut_backend.log");
             let _ = std::fs::OpenOptions::new()
                 .create(true)
-                .truncate(true)
-                .write(true)
+                .append(true)
                 .open(&log_path);
             if let Some(stdout) = child.stdout.take() {
                 let path_clone = log_path.clone();
@@ -938,6 +1070,11 @@ async fn start_backend(
             state.backend_starting.store(false, Ordering::SeqCst);
             *state.backend_port.lock().unwrap() = 0;
             *state.backend_boot_token.lock().unwrap() = None;
+            let path = std::env::temp_dir().join("super_auto_cut_backend.log");
+            append_log_line(
+                path,
+                &format!("[error] spawn_failed: {}", e),
+            );
             Err(format!("启动后端失败: {}", e))
         }
     }

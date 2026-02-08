@@ -84,6 +84,14 @@ class Qwen3TTSService:
             return "cuda:0"
         return d
 
+    def _normalize_model_path(self, p: str) -> str:
+        s = (p or "").strip()
+        if s.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + s[8:]
+        if s.startswith("\\\\?\\"):
+            return s[4:]
+        return s
+
     def _ensure_ready(self, model_key: str) -> Tuple[bool, str]:
         pm = Qwen3TTSPathManager()
         try:
@@ -104,7 +112,7 @@ class Qwen3TTSService:
             except KeyError:
                 raise RuntimeError(f"unknown_model_key:{model_key}")
 
-            model_path = str(model_dir)
+            model_path = self._normalize_model_path(str(model_dir))
             requested_device = self._normalize_device(device)
             if not requested_device:
                 try:
