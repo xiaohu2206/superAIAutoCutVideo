@@ -15,7 +15,7 @@
 Thumbs.db
 desktop.ini
 .vscode/
-
+.venv_pack_cpu
 # ========================================
 # Node.js / Frontend
 # ========================================
@@ -131,8 +131,7 @@ target/
 # Cargo.lock
 
 # Tauri resources（打包的后端程序）
-src-tauri/resources/*.exe
-src-tauri/resources/*.dll
+src-tauri/resources/*
 
 # ========================================
 # 应用特定文件
@@ -183,11 +182,12 @@ test_data/
 **/test_*.html
 **/*_test.py
 **/*_test.html
-
+.venv_pack_cpu
+backend/.venv_pack_gpu
 # 文档生成
 docs/_build/
 docs/build/
-
+.build_tmp/
 # ========================================
 # 开发工具
 # ========================================

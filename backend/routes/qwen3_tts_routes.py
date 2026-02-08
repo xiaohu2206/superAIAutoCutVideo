@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from modules.qwen3_tts_model_manager import (
     Qwen3TTSPathManager,
     QWEN3_TTS_MODEL_REGISTRY,
+    QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY,
     download_model_snapshot,
     validate_model_dir,
     get_model_total_bytes,
@@ -47,6 +48,31 @@ _download_lock = asyncio.Lock()
 _download_processes: Dict[str, multiprocessing.Process] = {}
 _download_result_queues: Dict[str, multiprocessing.Queue] = {}
 
+def _modelscope_cache_base() -> Path:
+    env = os.environ.get("MODELSCOPE_CACHE")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".cache" / "modelscope"
+
+def _clear_modelscope_cache() -> None:
+    base = _modelscope_cache_base()
+    try:
+        target = base / "ast_indexer"
+        if target.exists():
+            shutil.rmtree(target)
+    except Exception:
+        pass
+
+def _is_modelscope_cache_error(err: Exception) -> bool:
+    if isinstance(err, json.JSONDecodeError):
+        return True
+    msg = str(err)
+    if "missing_dependency:modelscope" in msg and "Expecting value" in msg:
+        return True
+    if "ast_indexer" in msg and "Expecting value" in msg:
+        return True
+    return False
+
 
 async def _broadcast_download_event(payload: Dict[str, Any]) -> None:
     try:
@@ -71,7 +97,7 @@ async def _remove_download_task(key: str) -> None:
 
 
 def _download_worker(key: str, provider: str, target_dir: str, result_queue: multiprocessing.Queue) -> None:
-    total_bytes = get_model_total_bytes(key, provider)
+    total_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(key)
     stop_event = threading.Event()
     target_path = Path(target_dir)
     cache_path = target_path / ".modelscope_cache"
@@ -110,7 +136,15 @@ def _download_worker(key: str, provider: str, target_dir: str, result_queue: mul
     reporter = threading.Thread(target=report_progress, daemon=True)
     reporter.start()
     try:
-        ret = download_model_snapshot(key, provider, Path(target_dir))
+        ret = None
+        try:
+            ret = download_model_snapshot(key, provider, Path(target_dir))
+        except Exception as e:
+            if provider == "modelscope" and _is_modelscope_cache_error(e):
+                _clear_modelscope_cache()
+                ret = download_model_snapshot(key, provider, Path(target_dir))
+            else:
+                raise
         result_queue.put({"type": "result", "ok": True, "data": ret})
     except Exception as e:
         result_queue.put({"type": "result", "ok": False, "error": str(e)})
@@ -424,7 +458,15 @@ async def download_qwen3_model(req: Qwen3TTSDownloadRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail="provider_must_be_hf_or_modelscope")
 
         target_dir = pm.model_path(req.key)
-        total_bytes = get_model_total_bytes(req.key, provider)
+        total_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(req.key)
+        if total_bytes is None:
+            try:
+                total_bytes = await asyncio.wait_for(
+                    asyncio.to_thread(get_model_total_bytes, req.key, provider),
+                    timeout=2.0,
+                )
+            except Exception:
+                total_bytes = None
         async with _download_lock:
             existing = _download_tasks.get(req.key)
             if existing and not existing.done():
@@ -514,7 +556,7 @@ async def open_qwen3_model_path(key: str = Query(..., description="模型key")) 
             raise HTTPException(status_code=404, detail="路径不存在")
         sysname = platform.system().lower()
         if "windows" in sysname:
-            subprocess.Popen(["explorer", str(target_dir)])
+            subprocess.Popen(["explorer", str(target_dir)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         elif "darwin" in sysname:
             subprocess.Popen(["open", str(target_dir)])
         else:
@@ -766,6 +808,7 @@ async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, A
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:

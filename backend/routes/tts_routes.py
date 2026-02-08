@@ -146,7 +146,7 @@ async def _preview_cache_put(content: bytes, filename: str, meta: Optional[Dict[
         "meta": meta or {},
     }
     async with _preview_cache_lock:
-        await _preview_cache_cleanup(entry["created_at"])
+        await _preview_cache_cleanup(float(entry["created_at"]))
         _preview_cache[preview_id] = entry
         _schedule_preview_eviction(preview_id, _preview_cache_ttl_sec)
     return preview_id
@@ -357,9 +357,9 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
                 except Exception:
                     vt_val = None
             if vt_val is None:
-                aid = update_data.get('active_voice_id') if update_data.get('active_voice_id') is not None else current.active_voice_id
-                if aid is not None:
-                    aid_s = str(aid)
+                aid_val = update_data.get('active_voice_id') if update_data.get('active_voice_id') is not None else current.active_voice_id
+                if aid_val is not None:
+                    aid_s = str(aid_val)
                     if aid_s.isdigit():
                         vt_val = int(aid_s)
                     else:
@@ -389,6 +389,8 @@ async def patch_tts_config(config_id: str, req: TtsConfigUpdateRequest):
             return {"success": False, "message": "更新失败"}
 
         updated = tts_engine_config_manager.get_config(config_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="配置不存在")
         return {
             "success": True,
             "data": safe_tts_config_dict_hide_secret(updated),
@@ -450,7 +452,7 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
         if cfg_by_id:
             provider = cfg_by_id.provider
         else:
-            provider = (req.provider or (active_cfg or TtsEngineConfig(provider='tencent_tts')).provider)
+            provider = (req.provider or (active_cfg.provider if active_cfg else "tencent_tts"))
 
         cfg = (
             cfg_by_id
@@ -552,9 +554,22 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
             try:
                 from modules.qwen3_tts_service import qwen3_tts_service
                 from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+                from modules.qwen3_tts_model_manager import Qwen3TTSPathManager, validate_model_dir
 
                 vid = str(voice_id).strip()
                 v = qwen3_tts_voice_store.get(vid)
+                if not v:
+                    raise HTTPException(status_code=404, detail="voice_not_found")
+
+                model_key = (getattr(v, "model_key", None) or "base_0_6b").strip() or "base_0_6b"
+                try:
+                    pm = Qwen3TTSPathManager()
+                    model_dir = pm.model_path(model_key)
+                except KeyError:
+                    raise RuntimeError(f"unknown_model_key:{model_key}")
+                ok, missing = validate_model_dir(model_key, model_dir)
+                if not ok:
+                    raise RuntimeError(f"model_invalid:{model_key}:{','.join(missing)}|path={model_dir}")
 
                 ts = int(time.time() * 1000)
                 safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
@@ -605,15 +620,12 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     device_s = str(device).strip() if isinstance(device, str) else None
 
                 try:
-                    if v:
-                        res = await qwen3_tts_service.synthesize_by_voice_asset(
-                            text=text,
-                            out_path=out_path,
-                            voice_asset=v,
-                            device=device_s
-                        )
-                    else:
-                        raise HTTPException(status_code=404, detail="voice_not_found")
+                    res = await qwen3_tts_service.synthesize_by_voice_asset(
+                        text=text,
+                        out_path=out_path,
+                        voice_asset=v,
+                        device=device_s
+                    )
 
                     if not res.get("success"):
                         raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")

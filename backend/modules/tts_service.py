@@ -5,11 +5,13 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
+import subprocess
 
 from modules.config.tts_config import tts_engine_config_manager
 from modules.audio_speed_processor import apply_audio_speed
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 async def _ensure_dir(path: Path) -> None:
@@ -26,7 +28,19 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        if os.name == "nt":
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         out, _ = await proc.communicate()
         if proc.returncode == 0:
             try:
@@ -40,7 +54,19 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc2 = await asyncio.create_subprocess_exec(*cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        if os.name == "nt":
+            proc2 = await asyncio.create_subprocess_exec(
+                *cmd2,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc2 = await asyncio.create_subprocess_exec(
+                *cmd2,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         out2, _ = await proc2.communicate()
         if proc2.returncode == 0:
             try:
@@ -117,13 +143,13 @@ class TencentTtsService:
             device = ep.get("Device")
             device_s = str(device).strip() if isinstance(device, str) else None
 
-            vid = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+            qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
 
-            if vid:
+            if qwen_voice_id:
                 try:
                     from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 
-                    vv = qwen3_tts_voice_store.get(vid)
+                    vv = qwen3_tts_voice_store.get(qwen_voice_id)
                     if vv:
                         try:
                             res = await qwen3_tts_service.synthesize_by_voice_asset(
@@ -147,7 +173,7 @@ class TencentTtsService:
 
             try:
                 if model_key.startswith("custom_"):
-                    speaker = str(ep.get("Speaker") or (vid or "")).strip() or None
+                    speaker = str(ep.get("Speaker") or (qwen_voice_id or "")).strip() or None
                     if not speaker:
                         try:
                             supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
@@ -222,7 +248,7 @@ class TencentTtsService:
             req = models.TextToVoiceRequest()
             import json
             import uuid
-            vid = voice_id or (cfg.active_voice_id if cfg else None)
+            tencent_voice_id = voice_id or (cfg.active_voice_id if cfg else None)
             params: Dict[str, Any] = {
                 "Text": text,
                 "SessionId": f"{uuid.uuid4()}",
@@ -248,13 +274,13 @@ class TencentTtsService:
 
             vt_from_vid = None
             try:
-                if isinstance(vid, int) or (isinstance(vid, str) and str(vid).isdigit()):
-                    vt_from_vid = int(vid)
+                if isinstance(tencent_voice_id, int) or (isinstance(tencent_voice_id, str) and str(tencent_voice_id).isdigit()):
+                    vt_from_vid = int(tencent_voice_id)
                 else:
                     try:
                         provider2 = (cfg.provider if cfg else "tencent_tts")
                         voices = tts_engine_config_manager.get_voices(provider2)
-                        sid = str(vid) if vid is not None else ""
+                        sid = str(tencent_voice_id) if tencent_voice_id is not None else ""
                         m = next((v for v in voices if v.id == sid or v.name == sid), None)
                         if m and isinstance(m.voice_type, int):
                             vt_from_vid = int(m.voice_type)
@@ -273,7 +299,7 @@ class TencentTtsService:
 
             final_vt = vt_from_vid if vt_from_vid is not None else vt_from_extra
             if vt_from_vid is not None and vt_from_extra is not None and vt_from_vid != vt_from_extra:
-                logger.info(f"VoiceType mismatch resolved: voice_id={vid} extra={vt_from_extra} use={final_vt}")
+                logger.info(f"VoiceType mismatch resolved: voice_id={tencent_voice_id} extra={vt_from_extra} use={final_vt}")
             if final_vt is not None:
                 params["VoiceType"] = final_vt
 

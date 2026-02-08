@@ -31,6 +31,7 @@ import uuid
 import subprocess
 import platform
 from threading import RLock
+import subprocess
 
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor
@@ -806,6 +807,7 @@ FASTSTART_EXTS = {".mp4", ".mov"}
 
 async def remux_faststart(path: Path) -> bool:
     try:
+        WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
         if path.suffix.lower() not in FASTSTART_EXTS:
             return False
         tmp_path = path.with_name(f".{path.stem}.faststart{path.suffix}")
@@ -824,10 +826,12 @@ async def remux_faststart(path: Path) -> bool:
             "-y",
             str(tmp_path),
         ]
+        kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
         )
         await process.communicate()
         if process.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
@@ -1133,14 +1137,15 @@ async def merge_videos(project_id: str):
             ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
             if not ok:
                 MERGE_TASKS[task_id].status = "failed"
-                MERGE_TASKS[task_id].message = "合并失败"
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                MERGE_TASKS[task_id].message = ("合并失败: " + str(err).strip()[:400]) if err else "合并失败"
                 try:
                     await manager.broadcast(json.dumps({
                         "type": "error",
                         "scope": "merge_videos",
                         "project_id": project_id,
                         "task_id": task_id,
-                        "message": "合并失败",
+                        "message": MERGE_TASKS[task_id].message,
                         "progress": MERGE_TASKS[task_id].progress,
                         "timestamp": now_ts(),
                     }))
@@ -1378,7 +1383,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     }
                 )
 
-            out_tmp = abs_in.parent / f".{abs_in.stem}.trim_{task_id}.tmp{abs_in.suffix}"
+            out_tmp = abs_in.parent / f".trim_{task_id}.tmp{abs_in.suffix}"
             if out_tmp.exists():
                 try:
                     out_tmp.unlink()
@@ -1407,9 +1412,71 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
 
             ok = await video_processor.concat_videos([str(x) for x in seg_paths], str(out_tmp), _on_concat_progress)
             if not ok or not out_tmp.exists():
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接失败")
 
-            os.replace(str(out_tmp), str(abs_in))
+            out_web_path = file_path
+            replaced = False
+            last_err: Optional[Exception] = None
+            for i in range(20):
+                try:
+                    os.replace(str(out_tmp), str(abs_in))
+                    replaced = True
+                    break
+                except PermissionError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+                except OSError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+
+            if not replaced:
+                try:
+                    fallback_out = abs_in.parent / f"{project_id}_trimmed_{task_id}{abs_in.suffix}"
+                    if fallback_out.exists():
+                        try:
+                            fallback_out.unlink()
+                        except Exception:
+                            pass
+                    os.replace(str(out_tmp), str(fallback_out))
+                    out_web_path = to_web_path(fallback_out)
+                    try:
+                        cur_paths = list(p.video_paths or [])
+                        cur_names = dict(p.video_names or {})
+                        if file_path in cur_paths:
+                            cur_paths = [out_web_path if x == file_path else x for x in cur_paths]
+                        else:
+                            cur_paths.append(out_web_path)
+                        if out_web_path != file_path:
+                            cur_names[out_web_path] = cur_names.get(file_path) or Path(out_web_path).name
+                            if file_path in cur_names:
+                                try:
+                                    del cur_names[file_path]
+                                except Exception:
+                                    pass
+                        projects_store.update_project(
+                            project_id,
+                            {
+                                "video_paths": cur_paths,
+                                "video_names": cur_names,
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    if last_err:
+                        raise last_err
+                    raise
 
             for sp in seg_paths:
                 try:
@@ -1418,22 +1485,23 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 except Exception:
                     pass
 
-            try:
-                projects_store.update_project(
-                    project_id,
-                    {
-                        "video_paths": list(p.video_paths or []),
-                        "video_names": dict(p.video_names or {}),
-                    },
-                )
-            except Exception:
-                pass
+            if out_web_path == file_path:
+                try:
+                    projects_store.update_project(
+                        project_id,
+                        {
+                            "video_paths": list(p.video_paths or []),
+                            "video_names": dict(p.video_names or {}),
+                        },
+                    )
+                except Exception:
+                    pass
 
             out_ver = datetime.now().strftime("%Y%m%d%H%M%S%f")
             TRIM_TASKS[task_id].status = "completed"
             TRIM_TASKS[task_id].progress = 100.0
             TRIM_TASKS[task_id].message = "裁剪完成"
-            TRIM_TASKS[task_id].file_path = file_path
+            TRIM_TASKS[task_id].file_path = out_web_path
             TRIM_TASKS[task_id].output_version = out_ver
             await _broadcast(
                 {
@@ -1443,7 +1511,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     "task_id": task_id,
                     "message": "裁剪完成",
                     "progress": 100,
-                    "file_path": file_path,
+                    "file_path": out_web_path,
                     "output_version": out_ver,
                     "timestamp": now_ts(),
                 }
@@ -1867,14 +1935,14 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
             sysname = platform.system().lower()
             if abs_path.is_file():
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", "/select,", str(abs_path)])
+                    subprocess.Popen(["explorer", "/select,", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", "-R", str(abs_path)])
                 else:
                     subprocess.Popen(["xdg-open", str(abs_path.parent)])
             else:
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", str(abs_path)])
+                    subprocess.Popen(["explorer", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", str(abs_path)])
                 else:

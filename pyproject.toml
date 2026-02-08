@@ -156,6 +156,7 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+exclude = '(\.venv|\.venv_pack_cpu)'
 
 [[tool.mypy.overrides]]
 module = [

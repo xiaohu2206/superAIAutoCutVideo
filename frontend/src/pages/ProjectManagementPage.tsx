@@ -1,12 +1,13 @@
 // 项目管理页面（一级页面）
 
 import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw, X } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
 import ProjectList from "../components/projectManagement/ProjectList";
 import { useProjects } from "../hooks/useProjects";
 import type { CreateProjectRequest, Project } from "../types/project";
+import { message } from "../services/message";
 
 interface ProjectManagementPageProps {
   onEditProject: (projectId: string) => void;
@@ -37,6 +38,8 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
   // 用于显示来自 hook 的全局错误，并允许手动关闭
   const [visibleGlobalError, setVisibleGlobalError] = useState<string | null>(null);
+  const actionErrorRef = useRef<HTMLDivElement | null>(null);
+  const globalErrorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setVisibleGlobalError(error);
@@ -70,7 +73,24 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
     const msg = getErrorMessage(err, fallback);
     setActionErrorMessage(msg);
     setSuccessMessage(null);
+    message.error(msg, 3);
   };
+
+  useEffect(() => {
+    if (actionErrorMessage && actionErrorRef.current) {
+      requestAnimationFrame(() => {
+        actionErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }, [actionErrorMessage]);
+
+  useEffect(() => {
+    if (visibleGlobalError && globalErrorRef.current) {
+      requestAnimationFrame(() => {
+        globalErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }, [visibleGlobalError]);
 
   /**
    * 处理创建项目
@@ -242,7 +262,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
         </div>
       )}
       {actionErrorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+        <div ref={actionErrorRef} className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <div className="flex items-center">
             <AlertCircle className="h-5 w-5 mr-2" />
             {actionErrorMessage}
@@ -256,7 +276,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
         </div>
       )}
       {visibleGlobalError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+        <div ref={globalErrorRef} className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <div className="flex items-center">
             <AlertCircle className="h-5 w-5 mr-2" />
             {visibleGlobalError}

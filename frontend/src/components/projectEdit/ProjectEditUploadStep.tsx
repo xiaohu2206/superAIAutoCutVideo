@@ -8,6 +8,7 @@ import VideoSourcesManager from "./VideoSourcesManager";
 interface ProjectEditUploadStepProps {
   projectId: string;
   project: Project;
+  refreshProject: () => Promise<void>;
 
   showAdvancedConfig: boolean;
   setShowAdvancedConfig: React.Dispatch<React.SetStateAction<boolean>>;
@@ -56,6 +57,7 @@ interface ProjectEditUploadStepProps {
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   project,
+  refreshProject,
   showAdvancedConfig,
   setShowAdvancedConfig,
   uploadingSubtitle,
@@ -128,6 +130,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           onItemDragOver={onItemDragOver}
           onItemDrop={onItemDrop}
           onDeleteVideoItem={onDeleteVideoItem}
+          onRefreshProject={refreshProject}
         />
       </div>
 

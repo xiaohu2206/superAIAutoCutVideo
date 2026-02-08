@@ -8,11 +8,13 @@ AI智能视频剪辑桌面应用 - FastAPI后端服务
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import socket
 import sys
 import time
 import re
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -25,7 +27,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response, FileResponse
 from pydantic import BaseModel
 
 # 解决 PyInstaller 打包后 uvicorn 日志报错 "AttributeError: 'NoneType' object has no attribute 'isatty'"
@@ -67,6 +69,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+try:
+    _log_file = Path(tempfile.gettempdir()) / "super_auto_cut_backend_py.log"
+    _fh = logging.FileHandler(_log_file, encoding="utf-8")
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(_fh)
+except Exception:
+    pass
 
 _single_instance_lock_handle = None
 
@@ -470,6 +481,125 @@ if not service_data_dir.exists():
 
 uploads_dir.mkdir(parents=True, exist_ok=True)
 
+def _safe_join_uploads(rel_path: str) -> Path:
+    base = uploads_dir.resolve()
+    target = (uploads_dir / rel_path).resolve()
+    try:
+        target.relative_to(base)
+    except Exception:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return target
+
+
+def _parse_range_header(range_header: str, size: int) -> Optional[tuple[int, int]]:
+    if not range_header:
+        return None
+    h = range_header.strip().lower()
+    if not h.startswith("bytes="):
+        return None
+    spec = h[len("bytes="):].strip()
+    if "," in spec:
+        spec = spec.split(",", 1)[0].strip()
+    if "-" not in spec:
+        return None
+    start_s, end_s = spec.split("-", 1)
+    start_s = start_s.strip()
+    end_s = end_s.strip()
+    if size <= 0:
+        return None
+    if start_s == "":
+        try:
+            suffix = int(end_s)
+        except Exception:
+            return None
+        if suffix <= 0:
+            return None
+        start = max(0, size - suffix)
+        end = size - 1
+        return (start, end)
+    try:
+        start = int(start_s)
+    except Exception:
+        return None
+    if start < 0:
+        return None
+    if end_s == "":
+        end = size - 1
+        return (start, end) if start <= end else None
+    try:
+        end = int(end_s)
+    except Exception:
+        return None
+    if end < start:
+        return None
+    end = min(end, size - 1)
+    return (start, end) if start <= end else None
+
+
+@app.api_route("/uploads/{rel_path:path}", methods=["GET", "HEAD"])
+async def uploads_with_range(request: Request, rel_path: str):
+    abs_path = _safe_join_uploads(rel_path)
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        size = abs_path.stat().st_size
+    except Exception:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    media_type = mimetypes.guess_type(str(abs_path))[0] or "application/octet-stream"
+    range_header = request.headers.get("range") or request.headers.get("Range") or ""
+    rng = _parse_range_header(range_header, size)
+
+    headers = {
+        "Accept-Ranges": "bytes",
+    }
+
+    if rng is None:
+        if request.method.upper() == "HEAD":
+            headers.update(
+                {
+                    "Content-Type": media_type,
+                    "Content-Length": str(size),
+                }
+            )
+            return Response(status_code=200, headers=headers)
+        return FileResponse(path=str(abs_path), media_type=media_type, headers=headers)
+
+    start, end = rng
+    if start >= size:
+        return Response(
+            status_code=416,
+            headers={
+                "Content-Range": f"bytes */{size}",
+                "Accept-Ranges": "bytes",
+            },
+        )
+    length = end - start + 1
+    headers.update(
+        {
+            "Content-Type": media_type,
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(length),
+        }
+    )
+    if request.method.upper() == "HEAD":
+        return Response(status_code=206, headers=headers)
+
+    def iter_file():
+        with open(abs_path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            chunk_size = 1024 * 1024
+            while remaining > 0:
+                chunk = f.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=media_type)
+
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 # 注意：挂载路径 url 保持不变
 app.mount("/backend/serviceData", StaticFiles(directory=str(service_data_dir)), name="serviceData")
@@ -777,6 +907,7 @@ async def shutdown_event():
     release_single_instance_lock()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     # 获取端口配置
     initial_port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "127.0.0.1")
@@ -798,13 +929,17 @@ if __name__ == "__main__":
         logger.info(f"启动FastAPI服务器: {host}:{port}")
         
         # 启动服务器：直接传递 app 对象，避免 PyInstaller 环境下字符串导入失败（ModuleNotFoundError: 'main'）
-        uvicorn.run(
-            app,
-            host=host,
-            port=port,
-            reload=False,  # 生产环境不使用reload
-            log_level="info"
-        )
+        try:
+            uvicorn.run(
+                app,
+                host=host,
+                port=port,
+                reload=False,
+                log_level="info"
+            )
+        except Exception as e:
+            logger.exception(f"uvicorn.run 失败: {e}")
+            raise
     except RuntimeError as e:
         logger.error(f"启动失败: {e}")
         sys.exit(1)

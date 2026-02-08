@@ -284,7 +284,8 @@ class VideoGenerationService:
                         p3 = await asyncio.create_subprocess_exec(
                             *cmd_fb,
                             stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
+                            stderr=asyncio.subprocess.PIPE,
+                            **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
                         )
                         _, e3 = await p3.communicate()
                         if p3.returncode != 0:
@@ -350,6 +351,9 @@ class VideoGenerationService:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
                 except Exception:
                     pass
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接视频失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接视频失败")
 
             try:

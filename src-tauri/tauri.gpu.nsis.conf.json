@@ -29,8 +29,7 @@
     "resources": [
       "resources/ffmpeg.exe",
       "resources/ffprobe.exe",
-      "resources/NOTICE-FFmpeg.txt",
-      "resources/superAutoCutVideoBackend.zip"
+      "resources/NOTICE-FFmpeg.txt"
     ]
   },
   "app": {

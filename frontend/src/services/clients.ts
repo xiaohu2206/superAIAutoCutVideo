@@ -77,7 +77,54 @@ export class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    const isTauri = typeof (window as any)?.__TAURI_IPC__ === "function";
+    const method = (options.method || "GET").toUpperCase();
+
+    const tryPreconfigureBackend = async (): Promise<void> => {
+      if (!isTauri) return;
+      if (!endpoint.startsWith("/api/")) return;
+      try {
+        const current = new URL(this.baseUrl);
+        if (current.hostname !== DEFAULT_HOST) return;
+        if (Number(current.port || DEFAULT_PORT) !== DEFAULT_PORT) return;
+      } catch {
+        return;
+      }
+      try {
+        const s = await TauriCommands.getBackendStatus();
+        if (s?.running && s.port) {
+          configureBackend(s.port, DEFAULT_HOST);
+          return;
+        }
+      } catch {
+        void 0;
+      }
+      try {
+        await autoConfigureBackend(DEFAULT_HOST, DEFAULT_START_PORT);
+      } catch {
+        void 0;
+      }
+    };
+
+    const doFetch = async (baseUrl: string, withConnectTimeout: boolean, opts: RequestInit): Promise<Response> => {
+      let controller: AbortController | null = null;
+      let timeoutId: any = null;
+      if (withConnectTimeout && !opts.signal) {
+        controller = new AbortController();
+        timeoutId = setTimeout(() => controller?.abort(), 2500);
+      }
+      try {
+        const url = `${baseUrl}${endpoint}`;
+        return await fetch(url, { ...opts, signal: controller?.signal || opts.signal });
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    await tryPreconfigureBackend();
+
+    const isFormDataBody =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
 
     const isFormDataBody =
       typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -95,7 +142,26 @@ export class ApiClient {
     };
 
     try {
-      const response = await fetch(url, defaultOptions);
+      let response: Response;
+      try {
+        response = await doFetch(this.baseUrl, isTauri && method === "GET", defaultOptions);
+      } catch (e) {
+        if (isTauri && endpoint !== "/api/server/info") {
+          try {
+            const s = await TauriCommands.getBackendStatus();
+            if (s?.running && s.port) {
+              configureBackend(s.port, DEFAULT_HOST);
+            } else {
+              await autoConfigureBackend(DEFAULT_HOST, DEFAULT_START_PORT);
+            }
+            response = await doFetch(this.baseUrl, false, defaultOptions);
+          } catch {
+            throw e;
+          }
+        } else {
+          throw e;
+        }
+      }
 
       if (!response.ok) {
         // 尝试从后端错误响应中提取更明确的提示信息（detail 或 message）

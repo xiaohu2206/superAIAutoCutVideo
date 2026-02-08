@@ -94,23 +94,41 @@ def _s_to_us(v: float) -> int:
         return 0
 
 
+def _try_parse_float(v: Any) -> float:
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except Exception:
+            return 0.0
+    return 0.0
+
+
 def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
     try:
-        result = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height,r_frame_rate,duration",
-                "-of",
-                "json",
-                str(video_path),
-            ],
-            stderr=subprocess.STDOUT,
-        )
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate,duration",
+            "-of",
+            "json",
+            str(video_path),
+        ]
+        if os.name == "nt":
+            result = subprocess.check_output(
+                cmd,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
     data = json.loads(result)
@@ -128,23 +146,53 @@ def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
 
 def _probe_audio_duration(audio_path: Path) -> float:
     try:
-        result = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=nk=1:nw=1",
-                str(audio_path),
-            ],
-            stderr=subprocess.STDOUT,
-        )
-        try:
-            return float(result.decode().strip())
-        except Exception:
+        if not audio_path.exists():
             return 0.0
+        cmd_a = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            str(audio_path),
+        ]
+        if os.name == "nt":
+            out_a = subprocess.check_output(
+                cmd_a,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            out_a = subprocess.check_output(cmd_a, stderr=subprocess.STDOUT)
+        d_a = _try_parse_float(out_a.decode(errors="ignore"))
+        if d_a > 0.0:
+            return d_a
+
+        cmd_f = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            str(audio_path),
+        ]
+        if os.name == "nt":
+            out_f = subprocess.check_output(
+                cmd_f,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            out_f = subprocess.check_output(cmd_f, stderr=subprocess.STDOUT)
+        return _try_parse_float(out_f.decode(errors="ignore"))
+    except FileNotFoundError as exc:
+        raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
     except Exception:
         return 0.0
 
@@ -168,7 +216,15 @@ def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path:
             "-movflags", "+faststart",
             "-y", str(output_path),
         ]
-        subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
+        if os.name == "nt":
+            subprocess.check_call(
+                cmd,
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
         return output_path.exists()
     except Exception:
         return False
@@ -529,9 +585,12 @@ class JianyingDraftManager:
             {"attribute": 0, "flag": 0, "id": track_video_id, "is_default_name": False, "name": "video_main", "segments": segments, "type": "video"},
             {"attribute": 0, "flag": 0, "id": uuid.uuid4().hex, "is_default_name": False, "name": "overlay_main", "segments": overlay_track_segments, "type": "video"},
         ]
-        mats = draft.get("materials", {})
-        mats["audio_track_indexes"] = []
-        draft["materials"] = mats
+        mats = draft.get("materials")
+        if isinstance(mats, dict):
+            mats["audio_track_indexes"] = []
+            draft["materials"] = mats
+        else:
+            draft["materials"] = {"audio_track_indexes": []}
         try:
             cfg = draft.get("config", {})
             cfg["record_audio_last_index"] = 1
@@ -809,11 +868,6 @@ class JianyingDraftManager:
                     res = await tts_service.synthesize(text, str(tts_out), None)
                     if not res.get("success"):
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
-                    adur = float(res.get("duration") or 0.0)
-                    if adur <= 0.0:
-                        adur = _probe_audio_duration(tts_out) or 0.0
-                    if adur <= 0.0:
-                        raise RuntimeError(f"无法获取配音时长: {idx}")
                     norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
                     ok_norm = await audio_norm.normalize_audio_loudness(str(tts_out), str(norm_out))
                     narr_used = norm_out if ok_norm else tts_out
@@ -821,6 +875,13 @@ class JianyingDraftManager:
                     ok_ov = _gen_blank_video_with_audio(int(meta.get("width") or 1920), int(meta.get("height") or 1080), float(meta.get("fps") or 30.0), narr_used, ov_out)
                     if not ok_ov:
                         raise RuntimeError(f"生成叠加视频失败: {idx}")
+                    adur = _try_parse_float(res.get("duration"))
+                    if adur <= 0.0:
+                        adur = _probe_audio_duration(narr_used) or 0.0
+                    if adur <= 0.0:
+                        adur = float((_probe_video_meta(ov_out).get("duration") or 0.0))
+                    if adur <= 0.0:
+                        raise RuntimeError(f"无法获取配音时长: {idx}")
                     # 对齐视频片段时长到配音
                     if adur > dur:
                         ext = adur - dur

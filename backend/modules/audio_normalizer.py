@@ -4,8 +4,10 @@ import logging
 import os
 import re
 from typing import Optional, Dict
+import subprocess
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 class AudioNormalizer:
     def __init__(self, target_lufs: float = -20.0, max_peak: float = -1.0):
@@ -19,11 +21,19 @@ class AudioNormalizer:
             "-af", f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7:print_format=json",
             "-f", "null", "-",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        if os.name == "nt":
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             return None
@@ -97,11 +107,19 @@ class AudioNormalizer:
                 *codec_args,
                 output_path,
             ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        if os.name == "nt":
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         _, stderr = await proc.communicate()
         if proc.returncode == 0:
             logger.info(f"音频标准化处理完成: {input_path} -> {output_path}")
@@ -148,11 +166,19 @@ class AudioNormalizer:
                 "-c:a", "aac", "-b:a", "192k",
                 output_path,
             ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        if os.name == "nt":
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         _, stderr = await proc.communicate()
         if proc.returncode == 0:
             logger.info(f"音频标准化处理完成: {input_path} -> {output_path}")
