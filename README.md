@@ -6,6 +6,8 @@
 
 ## 软件版本
 - <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/tag/v1.0.4">SuperAI-v1.0.4</a>
+- <a href="https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc?from=from_copylink">GPU版下载</a>
+
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
 <img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
