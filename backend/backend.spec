@@ -37,6 +37,8 @@ hiddenimports = [
     'multipart',
     'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
     'qwen_tts',  # 动态导入的第三方包，确保打包后可用
+    'torch.distributed',
+    'torch.distributed.rpc',
 ]
 
 # 轻量收集：避免对 transformers/torch 等超大库做 collect_all() 触发超长扫描
@@ -105,11 +107,6 @@ a = Analysis(
         'mamba_ssm',
         'pandas',
         'sklearn',
-        'torch.distributed',
-        'torch.distributed._shard.checkpoint',
-        'torch.distributed._sharded_tensor',
-        'torch.distributed._sharding_spec',
-        'torch.testing',
         'torch.utils.tensorboard',
     ],
     noarchive=False,
