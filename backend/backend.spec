@@ -39,64 +39,38 @@ hiddenimports = [
     'qwen_tts',  # 动态导入的第三方包，确保打包后可用
 ]
 
-# 自动收集关键库的所有依赖（数据、二进制、隐式导入）
-# 这样比手动写 hiddenimports 更稳健
-for package in ['cv2', 'numpy', 'uvicorn', 'fastapi', 'pydantic', 'transformers', 'huggingface_hub', 'onnxruntime']:
-    try:
-        tmp_ret = collect_all(package)
-        datas += tmp_ret[0]
-        binaries += tmp_ret[1]
-        hiddenimports += tmp_ret[2]
-    except Exception as e:
-        print(f"Warning: Failed to collect {package}: {e}")
+# 轻量收集：避免对 transformers/torch 等超大库做 collect_all() 触发超长扫描
+# 这里优先保证可运行与打包速度；如后续出现“动态导入缺失”，再按报错补充 hiddenimports/datas/binaries。
+_maybe_packages = [
+    'cv2',
+    'numpy',
+    'uvicorn',
+    'fastapi',
+    'pydantic',
+    'onnxruntime',
+    'librosa',
+    'soundfile',
+    'modelscope',
+    'transformers',
+    'huggingface_hub',
+    'torch',
+    'torchvision',
+    'torchaudio',
+]
+for package in _maybe_packages:
+    hiddenimports.append(package)
 
-# Separate collection for problematic packages
-for package in ['soundfile', 'modelscope']:
+for package in ['onnxruntime', 'librosa', 'transformers', 'modelscope', 'torch', 'torchvision', 'torchaudio']:
     try:
-        # Use simple import check or minimal collection
-        hiddenimports.append(package)
-        # Try to collect binaries only for soundfile
-        if package == 'soundfile':
-             binaries += collect_dynamic_libs(package)
+        datas += collect_data_files(package)
     except Exception as e:
-        print(f"Warning: Failed to collect {package}: {e}")
+        print(f"Warning: Failed to collect data files for {package}: {e}")
 
-for package in ['librosa']:
+for package in ['onnxruntime', 'torch', 'torchvision', 'torchaudio', 'soundfile']:
     try:
-        tmp_ret = collect_all(package)
-        datas += tmp_ret[0]
-        binaries += tmp_ret[1]
-        hiddenimports += tmp_ret[2]
+        binaries += collect_dynamic_libs(package)
     except Exception as e:
-        print(f"Warning: Failed to collect {package}: {e}")
-
-for package in ['torch', 'torchvision', 'torchaudio']:
-    try:
-        tmp_ret = collect_all(package)
-        datas += tmp_ret[0]
-        binaries += tmp_ret[1]
-        hiddenimports += tmp_ret[2]
-    except Exception as e:
-        raise RuntimeError(f"Failed to collect required package {package}: {e}")
-
-for package in [
-    'nvidia.cublas',
-    'nvidia.cudnn',
-    'nvidia.cuda_nvrtc',
-    'nvidia.cuda_runtime',
-    'nvidia.cufft',
-    'nvidia.curand',
-    'nvidia.cusolver',
-    'nvidia.cusparse',
-    'nvidia.nvtx',
-]:
-    try:
-        tmp_ret = collect_all(package)
-        datas += tmp_ret[0]
-        binaries += tmp_ret[1]
-        hiddenimports += tmp_ret[2]
-    except Exception as e:
-        print(f"Warning: Failed to collect {package}: {e}")
+        print(f"Warning: Failed to collect dynamic libs for {package}: {e}")
 
 def _is_importable(mod_name: str) -> bool:
     try:
@@ -129,9 +103,14 @@ a = Analysis(
     excludes=[
         'transformers.kernels.falcon_mamba',
         'mamba_ssm',
+        'pandas',
+        'sklearn',
+        'torch.distributed',
         'torch.distributed._shard.checkpoint',
         'torch.distributed._sharded_tensor',
         'torch.distributed._sharding_spec',
+        'torch.testing',
+        'torch.utils.tensorboard',
     ],
     noarchive=False,
     optimize=0,
