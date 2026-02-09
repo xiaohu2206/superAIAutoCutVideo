@@ -1,12 +1,99 @@
 import platform
+import os
+from pathlib import Path
+import sys
 from typing import Any, Dict, Optional, Tuple
 
 
 _MIN_CUDA_COMPUTE_CAPABILITY: Tuple[int, int] = (6, 0)
 
 
+def _prepare_windows_dll_search_paths() -> None:
+    if platform.system().lower() != "windows":
+        return
+
+    try:
+        os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+    except Exception:
+        pass
+
+    candidates = []
+    try:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if isinstance(meipass, str) and meipass:
+            candidates.append(Path(meipass))
+    except Exception:
+        pass
+
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir)
+        candidates.append(exe_dir / "_internal")
+    except Exception:
+        pass
+
+    try:
+        here = Path(__file__).resolve()
+        for p in [here.parent, *here.parents]:
+            try:
+                if (p / "torch" / "lib").exists() or (p / "_internal" / "torch" / "lib").exists():
+                    candidates.append(p)
+                    break
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    expanded = []
+    for root in candidates:
+        try:
+            expanded.append(root)
+            expanded.append(root / "torch" / "lib")
+            expanded.append(root / "_internal" / "torch" / "lib")
+            expanded.append(root / "Library" / "bin")
+            expanded.append(root / "_internal" / "Library" / "bin")
+            try:
+                for p in root.glob("nvidia/**/bin"):
+                    expanded.append(p)
+            except Exception:
+                pass
+            try:
+                for p in (root / "_internal").glob("nvidia/**/bin"):
+                    expanded.append(p)
+            except Exception:
+                pass
+        except Exception:
+            continue
+
+    seen = set()
+    for p in expanded:
+        try:
+            if not p.exists():
+                continue
+        except Exception:
+            continue
+        try:
+            sp = str(p)
+            if sp in seen:
+                continue
+            seen.add(sp)
+        except Exception:
+            continue
+        try:
+            os.add_dll_directory(str(p))
+        except Exception:
+            pass
+        try:
+            old = os.environ.get("PATH", "")
+            if str(p) not in old:
+                os.environ["PATH"] = str(p) + os.pathsep + old
+        except Exception:
+            pass
+
+
 def _safe_import_torch() -> Tuple[Optional[Any], Optional[str]]:
     try:
+        _prepare_windows_dll_search_paths()
         import torch  # type: ignore
 
         return torch, None

@@ -15,6 +15,14 @@ _TORCH_DEVICE_MIX_PATCHED = False
 _TORCH_MULTINOMIAL_PATCHED = False
 
 
+def _is_replication_pad_half_not_implemented(err: Exception) -> bool:
+    try:
+        msg = str(err)
+    except Exception:
+        return False
+    return ("replication_pad" in msg) and ("not implemented for 'Half'" in msg or 'not implemented for "Half"' in msg)
+
+
 def _ensure_torch_cpu_half_replication_pad_patch() -> None:
     global _TORCH_PAD_PATCHED
     if _TORCH_PAD_PATCHED:
@@ -79,6 +87,157 @@ def _ensure_torch_cpu_half_replication_pad_patch() -> None:
             torch._C._nn.pad = _c_pad_patched
         except Exception:
             pass
+
+    try:
+        c_nn = getattr(getattr(torch, "_C", None), "_nn", None)
+        if c_nn is not None:
+            def _should_fallback_pad_cast(err: Exception) -> bool:
+                msg = str(err)
+                return (
+                    "not implemented for 'Half'" in msg
+                    or "not implemented for 'BFloat16'" in msg
+                    or "replication_pad" in msg
+                )
+
+            for _name in ("replication_pad1d", "replication_pad2d", "replication_pad3d"):
+                _orig = getattr(c_nn, _name, None)
+                if not callable(_orig) or getattr(_orig, "__sacv_cpu_half_replication_pad_patch__", False):
+                    continue
+
+                def _make_replication_pad_patched(orig_fn):
+                    def _replication_pad_patched(*args, **kwargs):
+                        try:
+                            return orig_fn(*args, **kwargs)
+                        except Exception as e:
+                            try:
+                                input = args[0] if len(args) >= 1 else kwargs.get("input")
+                                if (
+                                    isinstance(input, torch.Tensor)
+                                    and input.dtype in (torch.float16, torch.bfloat16)
+                                    and _should_fallback_pad_cast(e)
+                                ):
+                                    args2 = list(args)
+                                    kwargs2 = dict(kwargs)
+                                    if len(args2) >= 1:
+                                        args2[0] = input.float()
+                                    else:
+                                        kwargs2["input"] = input.float()
+                                    out = orig_fn(*args2, **kwargs2)
+                                    if isinstance(out, torch.Tensor):
+                                        return out.to(dtype=input.dtype)
+                                    return out
+                            except Exception:
+                                pass
+                            raise
+
+                    setattr(_replication_pad_patched, "__sacv_cpu_half_replication_pad_patch__", True)
+                    return _replication_pad_patched
+
+                try:
+                    setattr(c_nn, _name, _make_replication_pad_patched(_orig))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        import torch.nn.modules.padding as _padding_mod
+    except Exception:
+        _padding_mod = None
+
+    def _patch_replication_pad_forward(cls) -> None:
+        try:
+            if cls is None:
+                return
+            orig_forward = getattr(cls, "forward", None)
+            if not callable(orig_forward) or getattr(orig_forward, "__sacv_cpu_half_replication_pad_patch__", False):
+                return
+
+            def _make_forward_patched(ofn):
+                def _forward_patched(self, input):
+                    try:
+                        if (
+                            isinstance(input, torch.Tensor)
+                            and input.device.type == "cpu"
+                            and input.dtype in (torch.float16, torch.bfloat16)
+                        ):
+                            out = ofn(self, input.float())
+                            if isinstance(out, torch.Tensor):
+                                return out.to(dtype=input.dtype)
+                            return out
+                    except Exception:
+                        pass
+                    return ofn(self, input)
+
+                setattr(_forward_patched, "__sacv_cpu_half_replication_pad_patch__", True)
+                return _forward_patched
+
+            try:
+                setattr(cls, "forward", _make_forward_patched(orig_forward))
+            except Exception:
+                pass
+        except Exception:
+            return
+
+    try:
+        if _padding_mod is not None:
+            _patch_replication_pad_forward(getattr(_padding_mod, "_ReplicationPadNd", None))
+            _patch_replication_pad_forward(getattr(_padding_mod, "ReplicationPad1d", None))
+            _patch_replication_pad_forward(getattr(_padding_mod, "ReplicationPad2d", None))
+            _patch_replication_pad_forward(getattr(_padding_mod, "ReplicationPad3d", None))
+    except Exception:
+        pass
+
+    try:
+        aten = getattr(getattr(torch, "ops", None), "aten", None)
+        if aten is not None:
+            def _patch_aten_replication_pad(name: str) -> None:
+                try:
+                    pkt = getattr(aten, name, None)
+                    if pkt is None:
+                        return
+                    fn = getattr(pkt, "default", None)
+                    if not callable(fn) or getattr(fn, "__sacv_cpu_half_replication_pad_patch__", False):
+                        return
+
+                    def _aten_replication_pad_patched(*args, **kwargs):
+                        try:
+                            return fn(*args, **kwargs)
+                        except Exception as e:
+                            try:
+                                input = args[0] if len(args) >= 1 else kwargs.get("input")
+                                if (
+                                    isinstance(input, torch.Tensor)
+                                    and input.device.type == "cpu"
+                                    and input.dtype in (torch.float16, torch.bfloat16)
+                                    and _should_fallback_pad_cast(e)
+                                ):
+                                    args2 = list(args)
+                                    kwargs2 = dict(kwargs)
+                                    if len(args2) >= 1:
+                                        args2[0] = input.float()
+                                    else:
+                                        kwargs2["input"] = input.float()
+                                    out = fn(*args2, **kwargs2)
+                                    if isinstance(out, torch.Tensor):
+                                        return out.to(dtype=input.dtype)
+                                    return out
+                            except Exception:
+                                pass
+                            raise
+
+                    setattr(_aten_replication_pad_patched, "__sacv_cpu_half_replication_pad_patch__", True)
+                    try:
+                        setattr(pkt, "default", _aten_replication_pad_patched)
+                    except Exception:
+                        pass
+                except Exception:
+                    return
+
+            for _name in ("replication_pad1d", "replication_pad2d", "replication_pad3d"):
+                _patch_aten_replication_pad(_name)
+    except Exception:
+        pass
 
     _TORCH_PAD_PATCHED = True
 
@@ -230,22 +389,71 @@ def _prepare_windows_dll_search_paths() -> None:
     except Exception:
         pass
 
-    meipass = getattr(sys, "_MEIPASS", None)
-    if not meipass or not isinstance(meipass, str):
-        return
+    candidates = []
 
-    candidates = [
-        Path(meipass),
-        Path(meipass) / "torch" / "lib",
-        Path(meipass) / "Library" / "bin",
-    ]
     try:
-        for p in Path(meipass).glob("nvidia/**/bin"):
-            candidates.append(p)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if isinstance(meipass, str) and meipass:
+            candidates.append(Path(meipass))
+    except Exception:
+        meipass = None
+
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir)
+        candidates.append(exe_dir / "_internal")
+    except Exception:
+        exe_dir = None
+
+    try:
+        here = Path(__file__).resolve()
+        for p in [here.parent, *here.parents]:
+            if len(candidates) >= 12:
+                break
+            try:
+                if (p / "torch" / "lib").exists() or (p / "_internal" / "torch" / "lib").exists():
+                    candidates.append(p)
+            except Exception:
+                continue
     except Exception:
         pass
 
-    for p in candidates:
+    expanded = []
+    for root in candidates:
+        try:
+            if not isinstance(root, Path):
+                continue
+            expanded.append(root)
+            expanded.append(root / "torch" / "lib")
+            expanded.append(root / "_internal" / "torch" / "lib")
+            expanded.append(root / "Library" / "bin")
+            expanded.append(root / "_internal" / "Library" / "bin")
+            try:
+                for p in root.glob("nvidia/**/bin"):
+                    expanded.append(p)
+            except Exception:
+                pass
+            try:
+                for p in (root / "_internal").glob("nvidia/**/bin"):
+                    expanded.append(p)
+            except Exception:
+                pass
+        except Exception:
+            continue
+
+    seen = set()
+    candidates2 = []
+    for p in expanded:
+        try:
+            sp = str(p)
+            if not sp or sp in seen:
+                continue
+            seen.add(sp)
+            candidates2.append(p)
+        except Exception:
+            continue
+
+    for p in candidates2:
         try:
             if not p.exists():
                 continue
@@ -272,6 +480,7 @@ class Qwen3TTSService:
         self._model: Any = None
         self._load_lock = asyncio.Lock()
         self._runtime_device: str = "cpu"
+        self._runtime_precision: str = "fp32"
         self._last_device_error: Optional[str] = None
 
     def get_runtime_status(self) -> Dict[str, Any]:
@@ -280,6 +489,7 @@ class Qwen3TTSService:
             "model_key": self._model_key,
             "model_path": self._model_path,
             "device": self._runtime_device,
+            "precision": self._runtime_precision,
             "last_device_error": self._last_device_error,
         }
 
@@ -310,7 +520,7 @@ class Qwen3TTSService:
             return False, f"model_invalid:{model_key}:{','.join(missing)}|path={model_dir}"
         return True, ""
 
-    async def _load_model(self, model_key: str, device: Optional[str] = None) -> None:
+    async def _load_model(self, model_key: str, device: Optional[str] = None, precision: Optional[str] = None) -> None:
         async with self._load_lock:
             _prepare_windows_dll_search_paths()
             pm = Qwen3TTSPathManager()
@@ -329,17 +539,41 @@ class Qwen3TTSService:
                 except Exception:
                     requested_device = "cpu"
 
+            p_in = (precision or "").strip().lower()
+            if p_in in {"fp16", "float16", "half"}:
+                requested_precision = "fp16"
+            elif p_in in {"bf16", "bfloat16"}:
+                requested_precision = "bf16"
+            elif p_in in {"fp32", "float32"}:
+                requested_precision = "fp32"
+            else:
+                requested_precision = "fp16" if requested_device.startswith("cuda") else "fp32"
+
             if (
                 self._model is not None
                 and self._model_key == model_key
                 and self._model_path == model_path
                 and self._runtime_device == requested_device
+                and self._runtime_precision == requested_precision
             ):
                 return
 
             ready, err = self._ensure_ready(model_key)
             if not ready:
                 raise RuntimeError(err)
+
+            try:
+                _prepare_windows_dll_search_paths()
+            except Exception:
+                pass
+
+            try:
+                import torch
+                _ensure_torch_cpu_half_replication_pad_patch()
+                _ensure_torch_cuda_device_mix_patch()
+                _ensure_torch_cuda_multinomial_stability_patch()
+            except Exception:
+                pass
 
             try:
                 from modules.vendor.qwen_tts import Qwen3TTSModel
@@ -352,33 +586,61 @@ class Qwen3TTSService:
             chosen_attn = None
             try:
                 import torch
-                _ensure_torch_cpu_half_replication_pad_patch()
-                _ensure_torch_cuda_device_mix_patch()
-                _ensure_torch_cuda_multinomial_stability_patch()
                 if q.startswith("cuda") and torch.cuda.is_available():
-                    def _load_flash():
-                        return Qwen3TTSModel.from_pretrained(
-                            model_path,
-                            dtype=torch.bfloat16,
-                            attn_implementation="flash_attention_2",
-                        )
-                    try:
-                        inst = await asyncio.get_running_loop().run_in_executor(None, _load_flash)
-                        chosen_dtype = torch.bfloat16
-                        chosen_attn = "flash_attention_2"
-                    except Exception:
-                        if getattr(getattr(torch, "cuda", None), "is_bf16_supported", None) and torch.cuda.is_bf16_supported():
-                            def _load_sdpa_bf16():
-                                return Qwen3TTSModel.from_pretrained(
-                                    model_path,
-                                    dtype=torch.bfloat16,
-                                    attn_implementation="sdpa",
-                                )
-                            try:
+                    if requested_precision == "fp32":
+                        def _load_sdpa_fp32():
+                            return Qwen3TTSModel.from_pretrained(
+                                model_path,
+                                dtype=torch.float32,
+                                attn_implementation="sdpa",
+                            )
+                        inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp32)
+                        chosen_dtype = torch.float32
+                        chosen_attn = "sdpa"
+                    else:
+                        def _load_flash():
+                            return Qwen3TTSModel.from_pretrained(
+                                model_path,
+                                dtype=torch.bfloat16,
+                                attn_implementation="flash_attention_2",
+                            )
+                        try:
+                            inst = await asyncio.get_running_loop().run_in_executor(None, _load_flash)
+                            chosen_dtype = torch.bfloat16
+                            chosen_attn = "flash_attention_2"
+                        except Exception:
+                            if requested_precision == "bf16":
+                                def _load_sdpa_bf16():
+                                    return Qwen3TTSModel.from_pretrained(
+                                        model_path,
+                                        dtype=torch.bfloat16,
+                                        attn_implementation="sdpa",
+                                    )
                                 inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_bf16)
                                 chosen_dtype = torch.bfloat16
                                 chosen_attn = "sdpa"
-                            except Exception:
+                            elif getattr(getattr(torch, "cuda", None), "is_bf16_supported", None) and torch.cuda.is_bf16_supported():
+                                def _load_sdpa_bf16():
+                                    return Qwen3TTSModel.from_pretrained(
+                                        model_path,
+                                        dtype=torch.bfloat16,
+                                        attn_implementation="sdpa",
+                                    )
+                                try:
+                                    inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_bf16)
+                                    chosen_dtype = torch.bfloat16
+                                    chosen_attn = "sdpa"
+                                except Exception:
+                                    def _load_sdpa_fp16():
+                                        return Qwen3TTSModel.from_pretrained(
+                                            model_path,
+                                            dtype=torch.float16,
+                                            attn_implementation="sdpa",
+                                        )
+                                    inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp16)
+                                    chosen_dtype = torch.float16
+                                    chosen_attn = "sdpa"
+                            else:
                                 def _load_sdpa_fp16():
                                     return Qwen3TTSModel.from_pretrained(
                                         model_path,
@@ -388,16 +650,6 @@ class Qwen3TTSService:
                                 inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp16)
                                 chosen_dtype = torch.float16
                                 chosen_attn = "sdpa"
-                        else:
-                            def _load_sdpa_fp16():
-                                return Qwen3TTSModel.from_pretrained(
-                                    model_path,
-                                    dtype=torch.float16,
-                                    attn_implementation="sdpa",
-                                )
-                            inst = await asyncio.get_running_loop().run_in_executor(None, _load_sdpa_fp16)
-                            chosen_dtype = torch.float16
-                            chosen_attn = "sdpa"
                 else:
                     def _load_cpu():
                         return Qwen3TTSModel.from_pretrained(
@@ -437,9 +689,10 @@ class Qwen3TTSService:
             self._model_path = model_path
             self._model = inst
             self._runtime_device = actual_device
+            self._runtime_precision = ("fp32" if actual_device == "cpu" else requested_precision)
             try:
                 logging.getLogger("modules.qwen3_tts_service").info(
-                    f"Qwen3-TTS loaded: key={model_key} path={model_path} device={actual_device} dtype={str(chosen_dtype)} attn={str(chosen_attn or '')}"
+                    f"Qwen3-TTS loaded: key={model_key} path={model_path} device={actual_device} dtype={str(chosen_dtype)} attn={str(chosen_attn or '')} precision={self._runtime_precision}"
                 )
             except Exception:
                 pass
@@ -496,11 +749,11 @@ class Qwen3TTSService:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._load_model(model_key=model_key, device=device)
-        m = cast(Any, self._model)
-        if m is None:
-            raise RuntimeError("qwen3_tts_model_not_loaded")
 
         def _run() -> Tuple[np.ndarray, int]:
+            m = cast(Any, self._model)
+            if m is None:
+                raise RuntimeError("qwen3_tts_model_not_loaded")
             wavs, sr = m.generate_custom_voice(
                 text=text,
                 speaker=speaker,
@@ -517,7 +770,13 @@ class Qwen3TTSService:
                 raise RuntimeError("empty_audio")
             return wavs[0].astype(np.float32), int(sr)
 
-        return await self._write_wav(out_path, _run)
+        try:
+            return await self._write_wav(out_path, _run)
+        except Exception as e:
+            if self._runtime_device.startswith("cuda") and self._runtime_precision != "fp32" and _is_replication_pad_half_not_implemented(e):
+                await self._load_model(model_key=model_key, device=self._runtime_device, precision="fp32")
+                return await self._write_wav(out_path, _run)
+            raise
 
     async def synthesize_voice_clone_to_wav(
         self,
@@ -531,11 +790,11 @@ class Qwen3TTSService:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._load_model(model_key=model_key, device=device)
-        m = cast(Any, self._model)
-        if m is None:
-            raise RuntimeError("qwen3_tts_model_not_loaded")
 
         def _run() -> Tuple[np.ndarray, int]:
+            m = cast(Any, self._model)
+            if m is None:
+                raise RuntimeError("qwen3_tts_model_not_loaded")
             wavs, sr = m.generate_voice_clone(
                 text=text,
                 language=language,
@@ -553,7 +812,13 @@ class Qwen3TTSService:
                 raise RuntimeError("empty_audio")
             return wavs[0].astype(np.float32), int(sr)
 
-        return await self._write_wav(out_path, _run)
+        try:
+            return await self._write_wav(out_path, _run)
+        except Exception as e:
+            if self._runtime_device.startswith("cuda") and self._runtime_precision != "fp32" and _is_replication_pad_half_not_implemented(e):
+                await self._load_model(model_key=model_key, device=self._runtime_device, precision="fp32")
+                return await self._write_wav(out_path, _run)
+            raise
 
     async def synthesize_voice_design_to_wav(
         self,
@@ -565,11 +830,11 @@ class Qwen3TTSService:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._load_model(model_key=model_key, device=device)
-        m = cast(Any, self._model)
-        if m is None:
-            raise RuntimeError("qwen3_tts_model_not_loaded")
 
         def _run() -> Tuple[np.ndarray, int]:
+            m = cast(Any, self._model)
+            if m is None:
+                raise RuntimeError("qwen3_tts_model_not_loaded")
             wavs, sr = m.generate_voice_design(
                 text=text,
                 language=language,
@@ -585,7 +850,13 @@ class Qwen3TTSService:
                 raise RuntimeError("empty_audio")
             return wavs[0].astype(np.float32), int(sr)
 
-        return await self._write_wav(out_path, _run)
+        try:
+            return await self._write_wav(out_path, _run)
+        except Exception as e:
+            if self._runtime_device.startswith("cuda") and self._runtime_precision != "fp32" and _is_replication_pad_half_not_implemented(e):
+                await self._load_model(model_key=model_key, device=self._runtime_device, precision="fp32")
+                return await self._write_wav(out_path, _run)
+            raise
 
     async def synthesize_by_voice_asset(
         self,
@@ -730,3 +1001,11 @@ class Qwen3TTSService:
 
 
 qwen3_tts_service = Qwen3TTSService()
+
+try:
+    _prepare_windows_dll_search_paths()
+    _ensure_torch_cpu_half_replication_pad_patch()
+    _ensure_torch_cuda_device_mix_patch()
+    _ensure_torch_cuda_multinomial_stability_patch()
+except Exception:
+    pass
