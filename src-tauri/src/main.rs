@@ -388,6 +388,8 @@ fn ensure_backend_executable_available(
         .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
     let extracted_backend_dir = app_data_dir.join("superAutoCutVideoBackend");
     let nested_backend_dir = extracted_backend_dir.join("superAutoCutVideoBackend");
+    let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
+    let stamp_path = extracted_backend_dir.join(".backend_zip_stamp");
     let is_valid_backend_root = |root: &std::path::Path| -> Option<PathBuf> {
         let exe = root.join("superAutoCutVideoBackend.exe");
         if !exe.exists() {
@@ -400,17 +402,42 @@ fn ensure_backend_executable_available(
             None
         }
     };
+
+    let zip_stamp = || -> Option<String> {
+        let mt = std::fs::metadata(&zip_path).ok()?.modified().ok()?;
+        let d = mt.duration_since(std::time::UNIX_EPOCH).ok()?;
+        Some(format!("{}.{}", d.as_secs(), d.subsec_nanos()))
+    };
+    let read_stamp = || -> Option<String> {
+        std::fs::read_to_string(&stamp_path).ok().map(|s| s.trim().to_string())
+    };
+    let should_refresh = || -> bool {
+        if !zip_path.exists() {
+            return false;
+        }
+        let want = match zip_stamp() {
+            Some(v) => v,
+            None => return false,
+        };
+        match read_stamp() {
+            Some(got) if got == want => false,
+            _ => true,
+        }
+    };
+
     if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
-        return Ok(exe);
+        if !should_refresh() {
+            return Ok(exe);
+        }
     }
     if let Some(exe) = is_valid_backend_root(&nested_backend_dir) {
-        return Ok(exe);
+        if !should_refresh() {
+            return Ok(exe);
+        }
     }
     if extracted_backend_dir.exists() {
         let _ = std::fs::remove_dir_all(&extracted_backend_dir);
     }
-
-    let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
     if !zip_path.exists() {
         return Ok(extracted_backend_dir.join("superAutoCutVideoBackend.exe"));
     }
@@ -457,6 +484,9 @@ fn ensure_backend_executable_available(
                 status.code()
             ));
         }
+    }
+    if let Some(stamp) = zip_stamp() {
+        let _ = std::fs::write(&stamp_path, stamp);
     }
 
     if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {

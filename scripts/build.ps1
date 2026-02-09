@@ -3,7 +3,9 @@ param(
   [ValidateSet('cpu','gpu','all')]
   [string]$Variant = 'all',
   [switch]$RecreateBackendVenv,
-  [switch]$TauriDebug
+  [switch]$TauriDebug,
+  [switch]$SkipClean,
+  [switch]$SkipPortable
 )
 
 Set-StrictMode -Version Latest
@@ -13,10 +15,83 @@ function Step($msg) { Write-Host "[+] $msg" -ForegroundColor Cyan }
 function Info($msg) { Write-Host "    $msg" }
 function Fail($msg) { Write-Host "[x] $msg" -ForegroundColor Red ; exit 1 }
 
-function Invoke-CompressArchiveWithRetry([string]$sourcePath, [string]$destinationPath, [int]$retries = 5, [int]$delayMs = 800) {
+function Invoke-ProcessWithHeartbeat(
+  [string]$filePath,
+  [string[]]$argumentList,
+  [string]$title,
+  [int]$heartbeatSeconds = 30
+) {
+  $p = Start-Process -FilePath $filePath -ArgumentList $argumentList -NoNewWindow -PassThru
+  $start = Get-Date
+  $lastBeat = Get-Date
+  while (-not $p.HasExited) {
+    Start-Sleep -Seconds 2
+    $p.Refresh()
+    $now = Get-Date
+    if ((New-TimeSpan -Start $lastBeat -End $now).TotalSeconds -ge $heartbeatSeconds) {
+      $elapsed = New-TimeSpan -Start $start -End $now
+      $cpuSec = 0
+      $wsMb = 0
+      try {
+        $gp = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+        if ($gp) {
+          $cpuSec = [math]::Round($gp.CPU, 1)
+          $wsMb = [math]::Round(($gp.WorkingSet64 / 1MB), 0)
+        }
+      } catch { }
+
+      $baseZip = Join-Path (Get-Location).Path "build\\backend\\base_library.zip"
+      $baseZipTime = ""
+      if (Test-Path $baseZip) {
+        try { $baseZipTime = (Get-Item $baseZip).LastWriteTime.ToString("HH:mm:ss") } catch { }
+      }
+
+      $distDir = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
+      $distCount = ""
+      if (Test-Path $distDir) {
+        try { $distCount = (Get-ChildItem -Path $distDir -Force -ErrorAction SilentlyContinue | Measure-Object).Count } catch { }
+      }
+
+      $suffix = ""
+      if ($baseZipTime) { $suffix = $suffix + "; base_library.zip=" + $baseZipTime }
+      if ($distCount -ne "") { $suffix = $suffix + "; dist_items=" + $distCount }
+      $elapsedText = "{0:00}:{1:00}" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds
+      Info ("{0} running... elapsed={1} cpu={2}s ws={3}MB{4}" -f $title, $elapsedText, $cpuSec, $wsMb, $suffix)
+      $lastBeat = $now
+    }
+  }
+  $p.Refresh()
+  $exitCode = 0
+  try { $exitCode = $p.ExitCode } catch { $exitCode = 0 }
+  if ($exitCode -eq $null) { $exitCode = 0 }
+  return $exitCode
+}
+
+function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinationPath, [int]$retries = 5, [int]$delayMs = 800) {
+  if (-not (Test-Path $sourceDir)) { Fail "Zip source not found: $sourceDir" }
+  try { Add-Type -AssemblyName System.IO.Compression } catch { }
+  try { Add-Type -AssemblyName System.IO.Compression.FileSystem } catch { }
   for ($i = 1; $i -le $retries; $i++) {
     try {
-      Compress-Archive -Path $sourcePath -DestinationPath $destinationPath -Force
+      if (Test-Path $destinationPath) { Microsoft.PowerShell.Management\Remove-Item $destinationPath -Force -ErrorAction SilentlyContinue }
+      $base = (Resolve-Path $sourceDir).Path
+      $baseTrim = $base.TrimEnd('\')
+      $baseLen = $baseTrim.Length + 1
+      $fs = [System.IO.File]::Open($destinationPath, [System.IO.FileMode]::CreateNew)
+      try {
+        $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+        try {
+          Get-ChildItem -Path $baseTrim -Recurse -File -Force | ForEach-Object {
+            $full = $_.FullName
+            $rel = $full.Substring($baseLen)
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $full, $rel, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+          }
+        } finally {
+          $zip.Dispose()
+        }
+      } finally {
+        $fs.Dispose()
+      }
       return
     } catch {
       Info "Compress-Archive retry $i/${retries}: $($_.Exception.Message)"
@@ -33,38 +108,54 @@ function Invoke-CompressArchiveWithRetry([string]$sourcePath, [string]$destinati
 function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
-  if ($content -match [regex]::Escape("superAutoCutVideoBackend_gpu.zip")) { return }
+  $alreadyHasBackendCopy = $content -match [regex]::Escape("superAutoCutVideoBackend_gpu.zip")
 
-  $insertAfter = 'File /a "/oname=resources\\ffprobe.exe"'
-  if ($content -notmatch [regex]::Escape($insertAfter)) {
-    Fail "Failed to patch NSIS script (marker not found): $insertAfter"
+  if ($content -notmatch '(?m)^!ifndef OUTFILE\s*$') {
+    $content = [regex]::Replace(
+      $content,
+      '(?m)^!define OUTFILE "([^"]+)"\s*$',
+      { param($m) ("!ifndef OUTFILE`r`n!define OUTFILE `"$($m.Groups[1].Value)`"`r`n!endif") }
+    )
   }
 
-  $snippet = @"
+  if (-not $alreadyHasBackendCopy) {
+    $insertPattern = 'File /a "/oname=resources\\ffprobe\.exe" "[^"]+ffprobe\.exe"'
+    if ($content -notmatch $insertPattern) {
+      Fail "Failed to patch NSIS script (marker not found): $insertPattern"
+    }
+
+    $snippet = @"
 
     SetOverwrite on
     StrCpy `$R0 "`$EXEDIR\superAutoCutVideoBackend_gpu.zip"
-    `${If} `${FileExists} "`$R0"
-      CopyFiles /SILENT "`$R0" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
-    `${Else}
+    StrCpy `$R1 "superAutoCutVideoBackend_gpu.zip"
+    `${IfNot} `${FileExists} "`$R0"
       StrCpy `$R0 "`$EXEDIR\superAutoCutVideoBackend.zip"
-      `${If} `${FileExists} "`$R0"
-        CopyFiles /SILENT "`$R0" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+      StrCpy `$R1 "superAutoCutVideoBackend.zip"
+    `${EndIf}
+
+    `${If} `${FileExists} "`$R0"
+      DetailPrint "Copy backend zip: `$R0"
+      CopyFiles /SILENT "`$R0" "`$INSTDIR\resources"
+      `${If} `$R1 != "superAutoCutVideoBackend.zip"
+        Delete "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+        Rename "`$INSTDIR\resources\`$R1" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+      `${EndIf}
+    `${Else}
+      `${If} `${Silent}
+        Abort
       `${Else}
-        `${If} `${Silent}
-          Abort
-        `${Else}
-          MessageBox MB_ICONSTOP|MB_OK "GPU backend zip not found. Place superAutoCutVideoBackend_gpu.zip next to the installer and retry."
-          Abort
-        `${EndIf}
+        MessageBox MB_ICONSTOP|MB_OK "GPU backend zip not found. Place superAutoCutVideoBackend_gpu.zip next to the installer and retry."
+        Abort
       `${EndIf}
     `${EndIf}
 "@
 
-  $content = $content -replace [regex]::Escape($insertAfter), ($insertAfter + $snippet)
+    $content = $content -replace $insertPattern, ('$&' + $snippet)
+  }
 
   $uninstallMarker = 'Delete "$INSTDIR\resources\ffprobe.exe"'
-  if ($content -match [regex]::Escape($uninstallMarker)) {
+  if ($content -match [regex]::Escape($uninstallMarker) -and $content -notmatch [regex]::Escape('Delete "$INSTDIR\resources\superAutoCutVideoBackend.zip"')) {
     $content = $content -replace [regex]::Escape($uninstallMarker), ($uninstallMarker + "`r`n    Delete `"`$INSTDIR\resources\superAutoCutVideoBackend.zip`"")
   }
 
@@ -136,30 +227,34 @@ if (Get-Command cnpm -ErrorAction SilentlyContinue) {
 try { & $pythonCmd $pythonArgsPrefix "-m" "pip" "show" "pyinstaller" | Out-Null } catch { }
 if (-not $?) { Step "Install PyInstaller" ; & $pythonCmd $pythonArgsPrefix "-m" "pip" "install" "pyinstaller" | Out-Null }
 
-Step "Clean old artifacts"
-@(
-  'backend\\dist',
-  'backend\\build',
-  'src-tauri\\target\\release',
-  'src-tauri\\target\\release\\dist',
-  'src-tauri\\target\\debug',
-  'src-tauri\\target\\debug\\dist',
-  'src-tauri\\target\\tauri_cpu',
-  'src-tauri\\target\\tauri_cpu_debug',
-  'src-tauri\\target\\tauri_gpu',
-  'src-tauri\\target\\tauri_gpu_debug'
-) | ForEach-Object {
-  if (Test-Path $_) {
-    try { Microsoft.PowerShell.Management\Remove-Item $_ -Recurse -Force -ErrorAction Stop }
-    catch { Info "Skip cleaning (locked or in use): $_" }
+if ($SkipClean) {
+  Step "Skip cleaning old artifacts"
+} else {
+  Step "Clean old artifacts"
+  @(
+    'backend\\dist',
+    'backend\\build',
+    'src-tauri\\target\\release',
+    'src-tauri\\target\\release\\dist',
+    'src-tauri\\target\\debug',
+    'src-tauri\\target\\debug\\dist',
+    'src-tauri\\target\\tauri_cpu',
+    'src-tauri\\target\\tauri_cpu_debug',
+    'src-tauri\\target\\tauri_gpu',
+    'src-tauri\\target\\tauri_gpu_debug'
+  ) | ForEach-Object {
+    if (Test-Path $_) {
+      try { Microsoft.PowerShell.Management\Remove-Item $_ -Recurse -Force -ErrorAction Stop }
+      catch { Info "Skip cleaning (locked or in use): $_" }
+    }
   }
+  try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.exe') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.exe' -Force -ErrorAction Stop } }
+  catch { Info "Skip removing resource backend (locked): src-tauri\\resources\\superAutoCutVideoBackend.exe" }
+  try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend' -Recurse -Force -ErrorAction Stop } }
+  catch { Info "Skip removing resource backend dir (locked): src-tauri\\resources\\superAutoCutVideoBackend" }
+  try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.zip') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.zip' -Force -ErrorAction Stop } }
+  catch { Info "Skip removing resource backend zip (locked): src-tauri\\resources\\superAutoCutVideoBackend.zip" }
 }
-try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.exe') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.exe' -Force -ErrorAction Stop } }
-catch { Info "Skip removing resource backend (locked): src-tauri\\resources\\superAutoCutVideoBackend.exe" }
-try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend' -Recurse -Force -ErrorAction Stop } }
-catch { Info "Skip removing resource backend dir (locked): src-tauri\\resources\\superAutoCutVideoBackend" }
-try { if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.zip') { Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.zip' -Force -ErrorAction Stop } }
-catch { Info "Skip removing resource backend zip (locked): src-tauri\\resources\\superAutoCutVideoBackend.zip" }
 
 Step "Build frontend"
 Push-Location frontend
@@ -210,6 +305,9 @@ foreach ($variant in $variants) {
       & $venvPy "-m" "ensurepip" "--upgrade" | Out-Null
       if ($LASTEXITCODE -ne 0) { throw "ensurepip failed (code $LASTEXITCODE)" }
     }
+
+    Step "Configure pip mirror ($variant)"
+    $env:PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 
     Step "Upgrade pip tooling ($variant)"
     & $venvPy "-m" "pip" "install" "-U" "pip" "setuptools" "wheel" | Out-Null
@@ -316,10 +414,45 @@ foreach ($variant in $variants) {
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
-    Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 300
-    & $venvPy "-m" "PyInstaller" "--clean" "--noconfirm" "--distpath" "dist" "backend.spec"
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
+    $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
+    $distExe = Join-Path $distRoot "superAutoCutVideoBackend.exe"
+    $distVariantMarker = Join-Path $distRoot ".build_variant"
+    $shouldRebuildBackend = $true
+    if (Test-Path $distExe) {
+      $shouldRebuildBackend = $false
+      try {
+        if (Test-Path $distVariantMarker) {
+          $builtVariant = (Get-Content $distVariantMarker -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if ($builtVariant -and ($builtVariant.Trim().ToLower() -ne $variant.Trim().ToLower())) {
+            $shouldRebuildBackend = $true
+          }
+        } else {
+          $shouldRebuildBackend = $true
+        }
+        $distTime = (Get-Item $distExe).LastWriteTime
+        $watchPaths = @('main.py','backend.spec','routes','modules','services','serviceData')
+        $latest = Get-ChildItem -Path $watchPaths -Recurse -File -ErrorAction SilentlyContinue |
+          Where-Object { $_.Name -eq 'backend.spec' -or $_.Extension -eq '.py' -or $_.FullName -match '\\\\serviceData\\\\' } |
+          Sort-Object LastWriteTime -Descending |
+          Select-Object -First 1
+        if ($latest -and $latest.LastWriteTime -gt $distTime) { $shouldRebuildBackend = $true }
+      } catch {
+        $shouldRebuildBackend = $true
+      }
+      if (-not $shouldRebuildBackend) { Step "Backend already built - skip PyInstaller ($variant)" }
+    }
+    if ($shouldRebuildBackend) {
+      Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Milliseconds 300
+      $oldWarn = $env:PYTHONWARNINGS
+      $env:PYTHONWARNINGS = "ignore"
+      $exitCode = Invoke-ProcessWithHeartbeat $venvPy @("-m","PyInstaller","--clean","--noconfirm","--distpath","dist","backend.spec") ("PyInstaller ($variant)") 30
+      $env:PYTHONWARNINGS = $oldWarn
+      if ($exitCode -ne 0) { throw "PyInstaller exited with code $exitCode" }
+    }
+    if (Test-Path $distExe) {
+      try { Set-Content -Path $distVariantMarker -Value $variant -Encoding ASCII } catch { }
+    }
   }
   catch {
     $pos = $_.InvocationInfo.PositionMessage
@@ -416,43 +549,68 @@ foreach ($variant in $variants) {
     $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
     Patch-GpuNsisInstaller $installerNsi
     $makensis = Get-TauriMakensisPath
-    & $makensis $installerNsi | Out-Null
+    $bundleNsisDir = Join-Path $variantTargetDir "release\\bundle\\nsis"
+    $bundleExe = $null
+    if (Test-Path $bundleNsisDir) {
+      try { $bundleExe = Get-ChildItem -Path $bundleNsisDir -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
+    }
+    if ($bundleExe -and (Test-Path $bundleExe.FullName)) {
+      $outArg = "/DOUTFILE=$($bundleExe.FullName)"
+      & $makensis $outArg $installerNsi | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        $tmpOut = Join-Path $env:TEMP ("nsis_{0}_{1}.exe" -f $variant, ([guid]::NewGuid().ToString("N")))
+        $tmpArg = "/DOUTFILE=$tmpOut"
+        & $makensis $tmpArg $installerNsi | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
+        try {
+          Microsoft.PowerShell.Management\Copy-Item -Force $tmpOut $bundleExe.FullName
+        } finally {
+          Microsoft.PowerShell.Management\Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+        }
+      }
+    } else {
+      & $makensis $installerNsi | Out-Null
+    }
     if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
   }
 
   Step "Create portable ZIP and installers ($variant)"
   $releaseDir = Join-Path $variantTargetDir $profileName
-  $portableTemp = Join-Path $releaseDir 'portable_temp'
-  if (Test-Path $portableTemp) { Microsoft.PowerShell.Management\Remove-Item $portableTemp -Recurse -Force }
-  New-Item -ItemType Directory -Force $portableTemp | Out-Null
-  Step "Ensure no running instances before zip ($variant)"
-  try {
-    Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
-  } catch { }
-  Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
-  New-Item -ItemType Directory -Force (Join-Path $portableTemp 'resources') | Out-Null
-  $backendZipInRelease = Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.zip'
-  $backendZipForPortable = if (Test-Path $backendZipInRelease) { $backendZipInRelease } else { Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip' }
-  Microsoft.PowerShell.Management\Copy-Item -Force $backendZipForPortable (Join-Path $portableTemp 'resources\\superAutoCutVideoBackend.zip')
-  $relRes = Join-Path $releaseDir 'resources'
-  $ffmpegRelease = Join-Path $relRes 'ffmpeg.exe'
-  $ffprobeRelease = Join-Path $relRes 'ffprobe.exe'
-  $ffmpegPortable = Join-Path $portableTemp 'resources\\ffmpeg.exe'
-  $ffprobePortable = Join-Path $portableTemp 'resources\\ffprobe.exe'
-  if (Test-Path $ffmpegRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegRelease $ffmpegPortable }
-  if (Test-Path $ffprobeRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeRelease $ffprobePortable }
-  foreach ($doc in @('README.md','USAGE.md','LICENSE')) {
-    if (Test-Path $doc) { Microsoft.PowerShell.Management\Copy-Item -Force $doc $portableTemp }
-  }
-  $safeProduct = ($productName -replace '[^A-Za-z0-9_.-]', '_')
   $zipVariantSuffix = if ($TauriDebug) { "${variant}_debug" } else { $variant }
-  $zipName = "${safeProduct}_v${version}_${zipVariantSuffix}_portable.zip"
   $variantOut = Join-Path $artifactBase $zipVariantSuffix
   New-Item -ItemType Directory -Force $variantOut | Out-Null
-  $zipPath = Join-Path $variantOut $zipName
-  Invoke-CompressArchiveWithRetry (Join-Path $portableTemp '*') $zipPath
-  Microsoft.PowerShell.Management\Remove-Item $portableTemp -Recurse -Force
+
+  $zipPath = ""
+  if (-not $SkipPortable) {
+    $portableTemp = Join-Path $releaseDir 'portable_temp'
+    if (Test-Path $portableTemp) { Microsoft.PowerShell.Management\Remove-Item $portableTemp -Recurse -Force }
+    New-Item -ItemType Directory -Force $portableTemp | Out-Null
+    Step "Ensure no running instances before zip ($variant)"
+    try {
+      Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
+      Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
+    } catch { }
+    Microsoft.PowerShell.Management\Copy-Item -Force (Join-Path $releaseDir 'super-auto-cut-video.exe') $portableTemp
+    New-Item -ItemType Directory -Force (Join-Path $portableTemp 'resources') | Out-Null
+    $backendZipInRelease = Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.zip'
+    $backendZipForPortable = if (Test-Path $backendZipInRelease) { $backendZipInRelease } else { Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip' }
+    Microsoft.PowerShell.Management\Copy-Item -Force $backendZipForPortable (Join-Path $portableTemp 'resources\\superAutoCutVideoBackend.zip')
+    $relRes = Join-Path $releaseDir 'resources'
+    $ffmpegRelease = Join-Path $relRes 'ffmpeg.exe'
+    $ffprobeRelease = Join-Path $relRes 'ffprobe.exe'
+    $ffmpegPortable = Join-Path $portableTemp 'resources\\ffmpeg.exe'
+    $ffprobePortable = Join-Path $portableTemp 'resources\\ffprobe.exe'
+    if (Test-Path $ffmpegRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegRelease $ffmpegPortable }
+    if (Test-Path $ffprobeRelease) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeRelease $ffprobePortable }
+    foreach ($doc in @('README.md','USAGE.md','LICENSE')) {
+      if (Test-Path $doc) { Microsoft.PowerShell.Management\Copy-Item -Force $doc $portableTemp }
+    }
+    $safeProduct = ($productName -replace '[^A-Za-z0-9_.-]', '_')
+    $zipName = "${safeProduct}_v${version}_${zipVariantSuffix}_portable.zip"
+    $zipPath = Join-Path $variantOut $zipName
+    Invoke-CompressArchiveWithRetry $portableTemp $zipPath
+    Microsoft.PowerShell.Management\Remove-Item $portableTemp -Recurse -Force
+  }
 
   $installersOut = Join-Path $variantOut 'installers'
   New-Item -ItemType Directory -Force $installersOut | Out-Null
@@ -466,7 +624,13 @@ foreach ($variant in $variants) {
         $base = $_.BaseName
         $ext = $_.Extension
         $dst = Join-Path $installersOut ("${base}_${variant}${ext}")
-        Microsoft.PowerShell.Management\Copy-Item -Force $_.FullName $dst
+        try {
+          Microsoft.PowerShell.Management\Copy-Item -Force $_.FullName $dst
+        } catch {
+          $stamp = (Get-Date -Format 'yyyyMMddHHmmss')
+          $dst2 = Join-Path $installersOut ("${base}_${variant}_${stamp}${ext}")
+          Microsoft.PowerShell.Management\Copy-Item -Force $_.FullName $dst2
+        }
       }
     }
   }
@@ -474,13 +638,23 @@ foreach ($variant in $variants) {
   if (-not $TauriDebug -and $variant -eq 'gpu') {
     $srcZip = Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
     if (Test-Path $srcZip) {
-      Microsoft.PowerShell.Management\Copy-Item -Force $srcZip (Join-Path $installersOut 'superAutoCutVideoBackend_gpu.zip')
+      $dstZip = Join-Path $installersOut 'superAutoCutVideoBackend_gpu.zip'
+      try {
+        Microsoft.PowerShell.Management\Copy-Item -Force $srcZip $dstZip
+      } catch {
+        try {
+          if (Test-Path $dstZip) { Microsoft.PowerShell.Management\Remove-Item $dstZip -Force -ErrorAction SilentlyContinue }
+          Microsoft.PowerShell.Management\Move-Item -Force $srcZip $dstZip
+        } catch {
+          throw
+        }
+      }
     }
   }
 
   Step "Build completed ($variant)"
   Info "App: $(Join-Path $releaseDir 'super-auto-cut-video.exe')"
   Info "Backend ZIP: $(Join-Path $releaseDir 'resources\\superAutoCutVideoBackend.zip')"
-  Info "Portable ZIP: $zipPath"
+  if ($zipPath) { Info "Portable ZIP: $zipPath" }
   Info "Installers dir: $installersOut"
 }
