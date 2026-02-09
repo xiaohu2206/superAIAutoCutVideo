@@ -5,7 +5,7 @@
 
 
 ## 软件版本
-- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.4/SuperAIAutoCutVideo_1.0.4_x64-setup-cpu.zip">SuperAI-v1.0.4</a>
+- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/tag/v1.0.4">SuperAI-v1.0.4</a>
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
 <img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
