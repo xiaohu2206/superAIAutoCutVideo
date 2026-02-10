@@ -549,6 +549,13 @@ class Qwen3TTSService:
             else:
                 requested_precision = "fp16" if requested_device.startswith("cuda") else "fp32"
 
+            try:
+                logging.getLogger("modules.qwen3_tts_service").info(
+                    f"准备加载Qwen3-TTS模型: key={model_key} 设备={requested_device or 'cpu'} 精度={requested_precision} 路径={model_path}"
+                )
+            except Exception:
+                pass
+
             if (
                 self._model is not None
                 and self._model_key == model_key
@@ -662,6 +669,13 @@ class Qwen3TTSService:
             except Exception as e:
                 raise RuntimeError(f"qwen_tts_model_load_failed:{e}")
 
+            try:
+                logging.getLogger("modules.qwen3_tts_service").info(
+                    f"已创建Qwen3-TTS实例: 目标设备={q} 选择dtype={str(chosen_dtype)} 注意力={str(chosen_attn or '')}"
+                )
+            except Exception:
+                pass
+
             actual_device = "cpu"
             self._last_device_error = None
             if q and q != "cpu":
@@ -670,8 +684,20 @@ class Qwen3TTSService:
 
                     inst.model.to(torch.device(q))
                     actual_device = q
+                    try:
+                        logging.getLogger("modules.qwen3_tts_service").info(
+                            f"模型已迁移到设备: {actual_device}"
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     self._last_device_error = f"model_to_device_failed:{e}"
+                    try:
+                        logging.getLogger("modules.qwen3_tts_service").error(
+                            f"模型迁移到设备失败: 目标={q} 错误={e}"
+                        )
+                    except Exception:
+                        pass
                     if q.startswith("cuda"):
                         raise RuntimeError(self._last_device_error)
                     actual_device = "cpu"
@@ -684,6 +710,12 @@ class Qwen3TTSService:
                         inst.model.float()
                     except Exception:
                         pass
+                try:
+                    logging.getLogger("modules.qwen3_tts_service").info(
+                        "当前在CPU上运行（精度将设为FP32）"
+                    )
+                except Exception:
+                    pass
 
             self._model_key = model_key
             self._model_path = model_path
@@ -693,6 +725,12 @@ class Qwen3TTSService:
             try:
                 logging.getLogger("modules.qwen3_tts_service").info(
                     f"Qwen3-TTS loaded: key={model_key} path={model_path} device={actual_device} dtype={str(chosen_dtype)} attn={str(chosen_attn or '')} precision={self._runtime_precision}"
+                )
+            except Exception:
+                pass
+            try:
+                logging.getLogger("modules.qwen3_tts_service").info(
+                    f"Qwen3-TTS 已就绪: 模型={model_key} 设备={actual_device} 精度={self._runtime_precision} dtype={str(chosen_dtype)} 注意力={str(chosen_attn or '')}"
                 )
             except Exception:
                 pass
