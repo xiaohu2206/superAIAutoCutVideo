@@ -16,11 +16,15 @@ interface ProjectEditGenerateStepProps {
 
   isGeneratingVideo: boolean;
   handleGenerateVideo: () => void;
+  handleStopGenerateVideo: () => void;
+  isStoppingVideo: boolean;
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
 
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
+  handleStopGenerateDraft: () => void;
+  isStoppingDraft: boolean;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
 
@@ -43,10 +47,14 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   scriptGenLogs,
   isGeneratingVideo,
   handleGenerateVideo,
+  handleStopGenerateVideo,
+  isStoppingVideo,
   videoGenProgress,
   videoGenLogs,
   isGeneratingDraft,
   handleGenerateDraft,
+  handleStopGenerateDraft,
+  isStoppingDraft,
   draftGenProgress,
   draftGenLogs,
   showMergedPreview,
@@ -89,10 +97,14 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           scriptGenLogs={scriptGenLogs}
           isGeneratingVideo={isGeneratingVideo}
           handleGenerateVideo={handleGenerateVideo}
+          handleStopGenerateVideo={handleStopGenerateVideo}
+          isStoppingVideo={isStoppingVideo}
           videoGenProgress={videoGenProgress}
           videoGenLogs={videoGenLogs}
           isGeneratingDraft={isGeneratingDraft}
           handleGenerateDraft={handleGenerateDraft}
+          handleStopGenerateDraft={handleStopGenerateDraft}
+          isStoppingDraft={isStoppingDraft}
           draftGenProgress={draftGenProgress}
           draftGenLogs={draftGenLogs}
           showMergedPreview={showMergedPreview}

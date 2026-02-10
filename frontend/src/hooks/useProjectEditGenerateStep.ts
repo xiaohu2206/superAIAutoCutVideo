@@ -9,7 +9,7 @@ export interface UseProjectEditGenerateStepOptions {
   extractingSubtitle: boolean;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
-  generateVideo: () => Promise<string | null>;
+  generateVideo: () => Promise<{ task_id: string; scope?: string } | null>;
   refreshProject: () => Promise<void>;
   showSuccess: (text: string, durationSec?: number) => void;
   showErrorText: (text: string, durationSec?: number) => void;
@@ -25,10 +25,14 @@ export interface UseProjectEditGenerateStepReturn {
   scriptGenLogs: WsProgressLog[];
   isGeneratingVideo: boolean;
   handleGenerateVideo: () => void;
+  handleStopGenerateVideo: () => void;
+  isStoppingVideo: boolean;
   videoGenProgress: number;
   videoGenLogs: WsProgressLog[];
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
+  handleStopGenerateDraft: () => void;
+  isStoppingDraft: boolean;
   draftGenProgress: number;
   draftGenLogs: WsProgressLog[];
   showMergedPreview: boolean;
@@ -51,7 +55,10 @@ export function useProjectEditGenerateStep(
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [isStoppingVideo, setIsStoppingVideo] = useState(false);
+  const [isStoppingDraft, setIsStoppingDraft] = useState(false);
   const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
+  const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
   const [showMergedPreview, setShowMergedPreview] = useState(false);
 
   const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
@@ -131,6 +138,7 @@ export function useProjectEditGenerateStep(
         applyRunningTask(res.generate_video, (task) => {
           setIsGeneratingVideo(true);
           setVideoGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          setVideoTaskId(task.task_id || null);
           if (task.message) {
             setVideoGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
           }
@@ -155,7 +163,7 @@ export function useProjectEditGenerateStep(
 
   useEffect(() => {
     if (!project?.id) return;
-    if (!isGeneratingScript && !isGeneratingDraft) return;
+    if (!isGeneratingScript && !isGeneratingDraft && !isGeneratingVideo) return;
     let stopped = false;
     const tick = async () => {
       try {
@@ -182,6 +190,18 @@ export function useProjectEditGenerateStep(
             void options.refreshProject();
           }
         }
+
+        if (isGeneratingVideo) {
+          const t = latest.generate_video;
+          if (t?.task_id && !videoTaskId) {
+            setVideoTaskId(t.task_id || null);
+          }
+          if (isTaskFinished(t)) {
+            setIsGeneratingVideo(false);
+            setVideoGenProgress(100);
+            void options.refreshProject();
+          }
+        }
       } catch {
         return;
       }
@@ -193,7 +213,7 @@ export function useProjectEditGenerateStep(
       stopped = true;
       window.clearInterval(id);
     };
-  }, [draftTaskId, isGeneratingDraft, isGeneratingScript, isTaskFinished, options, project?.id]);
+  }, [draftTaskId, isGeneratingDraft, isGeneratingScript, isGeneratingVideo, isTaskFinished, options, project?.id, videoTaskId]);
 
   const handleGenerateScript = useCallback(async () => {
     if (!project) return;
@@ -276,14 +296,18 @@ export function useProjectEditGenerateStep(
     setIsGeneratingVideo(true);
     setVideoGenProgress(0);
     setVideoGenLogs([]);
+    setVideoTaskId(null);
     try {
-      const outputPath = await options.generateVideo();
-      if (outputPath) {
-        options.showSuccess("视频生成成功！");
+      const res = await options.generateVideo();
+      const taskId = res?.task_id;
+      if (taskId) {
+        setVideoTaskId(taskId);
+      } else {
+        setIsGeneratingVideo(false);
+        options.showErrorText("生成视频失败");
       }
     } catch (err) {
       options.showError(err, "生成视频失败");
-    } finally {
       setIsGeneratingVideo(false);
     }
   }, [options, project?.script, project?.video_path]);
@@ -313,6 +337,32 @@ export function useProjectEditGenerateStep(
     }
   }, [options, project?.id, project?.video_path]);
 
+  const handleStopGenerateVideo = useCallback(async () => {
+    if (!project?.id) return;
+    try {
+      setIsStoppingVideo(true);
+      options.showSuccess("正在停止视频生成...");
+      await projectService.cancelTask(project.id, { scope: "generate_video", task_id: videoTaskId });
+    } catch (err) {
+      options.showError(err, "停止生成失败");
+    } finally {
+      setIsStoppingVideo(false);
+    }
+  }, [options, project?.id, videoTaskId]);
+
+  const handleStopGenerateDraft = useCallback(async () => {
+    if (!project?.id) return;
+    try {
+      setIsStoppingDraft(true);
+      options.showSuccess("正在停止剪映草稿生成...");
+      await projectService.cancelTask(project.id, { scope: "generate_jianying_draft", task_id: draftTaskId });
+    } catch (err) {
+      options.showError(err, "停止生成失败");
+    } finally {
+      setIsStoppingDraft(false);
+    }
+  }, [draftTaskId, options, project?.id]);
+
   useWsTaskProgress({
     scope: "generate_script",
     projectId: project?.id,
@@ -334,12 +384,19 @@ export function useProjectEditGenerateStep(
   useWsTaskProgress({
     scope: "generate_video",
     projectId: project?.id,
+    taskId: videoTaskId,
     onProgress: setVideoGenProgress,
     onLog: (log) => setVideoGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingVideo(false);
       setVideoGenProgress(100);
       options.showSuccess("视频生成成功！");
+      void options.refreshProject();
+    },
+    onCancelled: (m: WebSocketMessage) => {
+      setIsGeneratingVideo(false);
+      setVideoGenProgress(0);
+      options.showSuccess(m.message || "视频生成已停止");
       void options.refreshProject();
     },
     onError: (m: WebSocketMessage) => {
@@ -360,6 +417,12 @@ export function useProjectEditGenerateStep(
       options.showSuccess("剪映草稿生成成功！");
       void options.refreshProject();
     },
+    onCancelled: (m: WebSocketMessage) => {
+      setIsGeneratingDraft(false);
+      setDraftGenProgress(0);
+      options.showSuccess(m.message || "剪映草稿生成已停止");
+      void options.refreshProject();
+    },
     onError: (m: WebSocketMessage) => {
       setIsGeneratingDraft(false);
       options.showErrorText(m.message || "生成剪映草稿失败");
@@ -375,10 +438,14 @@ export function useProjectEditGenerateStep(
     scriptGenLogs,
     isGeneratingVideo,
     handleGenerateVideo,
+    handleStopGenerateVideo,
+    isStoppingVideo,
     videoGenProgress,
     videoGenLogs,
     isGeneratingDraft,
     handleGenerateDraft,
+    handleStopGenerateDraft,
+    isStoppingDraft,
     draftGenProgress,
     draftGenLogs,
     showMergedPreview,

@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors, Square } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
@@ -15,10 +15,14 @@ interface ProjectOperationsProps {
   scriptGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingVideo: boolean;
   handleGenerateVideo: () => void;
+  handleStopGenerateVideo: () => void;
+  isStoppingVideo: boolean;
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
+  handleStopGenerateDraft: () => void;
+  isStoppingDraft: boolean;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; type?: string }[];
   showMergedPreview: boolean;
@@ -35,10 +39,14 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   scriptGenLogs,
   isGeneratingVideo,
   handleGenerateVideo,
+  handleStopGenerateVideo,
+  isStoppingVideo,
   videoGenProgress,
   videoGenLogs,
   isGeneratingDraft,
   handleGenerateDraft,
+  handleStopGenerateDraft,
+  isStoppingDraft,
   draftGenProgress,
   draftGenLogs,
   showMergedPreview,
@@ -172,7 +180,22 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         <div className="w-full mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>视频生成进度</span>
-            <span>{Math.round(videoGenProgress)}%</span>
+            <div className="flex items-center gap-2">
+              <span>{Math.round(videoGenProgress)}%</span>
+              <button
+                onClick={handleStopGenerateVideo}
+                disabled={isStoppingVideo}
+                title="停止生成"
+                className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStoppingVideo ? (
+                  <Loader className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+                <span className="text-xs font-medium">停止</span>
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
             <div
@@ -202,7 +225,22 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         <div className="w-full mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>剪映草稿生成进度</span>
-            <span>{Math.round(draftGenProgress)}%</span>
+            <div className="flex items-center gap-2">
+              <span>{Math.round(draftGenProgress)}%</span>
+              <button
+                onClick={handleStopGenerateDraft}
+                disabled={isStoppingDraft}
+                title="停止生成"
+                className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStoppingDraft ? (
+                  <Loader className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+                <span className="text-xs font-medium">停止</span>
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
             <div

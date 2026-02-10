@@ -7,6 +7,7 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+from modules.task_cancel_store import task_cancel_store
 
 
 def _build_atempo_filters(speed_ratio: float) -> Optional[str]:
@@ -35,7 +36,15 @@ def _build_atempo_filters(speed_ratio: float) -> Optional[str]:
     return ",".join(parts)
 
 
-async def apply_audio_speed(input_path: str, speed_ratio: float) -> Dict[str, Any]:
+async def apply_audio_speed(
+    input_path: str,
+    speed_ratio: float,
+    *,
+    scope: Optional[str] = None,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    cancel_event: Optional[asyncio.Event] = None,
+) -> Dict[str, Any]:
     if not os.path.exists(input_path):
         return {"success": False, "error": "audio_not_found"}
     filters = _build_atempo_filters(speed_ratio)
@@ -71,7 +80,40 @@ async def apply_audio_speed(input_path: str, speed_ratio: float) -> Dict[str, An
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-    _, stderr = await proc.communicate()
+    tracking = bool(scope and project_id and task_id and cancel_event)
+    if tracking:
+        task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+    try:
+        if cancel_event:
+            comm_task = asyncio.create_task(proc.communicate())
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+            if cancel_task in done:
+                try:
+                    if proc.returncode is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        await asyncio.wait_for(comm_task, timeout=1.5)
+                    except Exception:
+                        try:
+                            comm_task.cancel()
+                        except Exception:
+                            pass
+                raise asyncio.CancelledError()
+            try:
+                cancel_task.cancel()
+            except Exception:
+                pass
+            _, stderr = await comm_task
+        else:
+            _, stderr = await proc.communicate()
+    finally:
+        if tracking:
+            task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
     if proc.returncode != 0:
         try:
             if tmp_path.exists():

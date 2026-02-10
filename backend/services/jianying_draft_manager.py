@@ -17,6 +17,7 @@ from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.tts_service import tts_service
 from modules.audio_normalizer import AudioNormalizer
+from modules.task_cancel_store import task_cancel_store
 
 
 def _now_ts() -> str:
@@ -196,7 +197,18 @@ def _probe_audio_duration(audio_path: Path) -> float:
     except Exception:
         return 0.0
 
-def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path: Path, output_path: Path) -> bool:
+async def _gen_blank_video_with_audio(
+    width: int,
+    height: int,
+    fps: float,
+    audio_path: Path,
+    output_path: Path,
+    *,
+    scope: Optional[str] = None,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    cancel_event: Optional[asyncio.Event] = None,
+) -> bool:
     try:
         fr = 30
         try:
@@ -216,16 +228,52 @@ def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path:
             "-movflags", "+faststart",
             "-y", str(output_path),
         ]
+        kwargs: Dict[str, Any] = {}
         if os.name == "nt":
-            subprocess.check_call(
-                cmd,
-                stderr=subprocess.STDOUT,
-                stdout=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
-        return output_path.exists()
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs,
+        )
+        tracking = bool(scope and project_id and task_id and cancel_event)
+        if tracking:
+            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+        try:
+            if cancel_event:
+                comm_task = asyncio.create_task(proc.communicate())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        if proc.returncode is None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                    finally:
+                        try:
+                            await asyncio.wait_for(comm_task, timeout=1.5)
+                        except Exception:
+                            try:
+                                comm_task.cancel()
+                            except Exception:
+                                pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                await comm_task
+            else:
+                await proc.communicate()
+        finally:
+            if tracking:
+                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
+        return proc.returncode == 0 and output_path.exists()
+    except asyncio.CancelledError:
+        raise
     except Exception:
         return False
 @dataclass
@@ -769,7 +817,7 @@ class JianyingDraftManager:
             )
 
     @staticmethod
-    async def generate_draft_folder(project_id: str, task_id: str) -> DraftGenerateFolderResult:
+    async def generate_draft_folder(project_id: str, task_id: str, cancel_event: Optional[asyncio.Event] = None) -> DraftGenerateFolderResult:
         p: Optional[Project] = projects_store.get_project(project_id)
         if not p:
             raise ValueError("项目不存在")
@@ -842,6 +890,8 @@ class JianyingDraftManager:
             })
             total_segments = len(segments)
             for idx, seg in enumerate(segments, start=1):
+                if cancel_event and cancel_event.is_set():
+                    raise asyncio.CancelledError()
                 st = float(seg.get("start_time") or 0.0)
                 et = float(seg.get("end_time") or 0.0)
                 if et <= st:
@@ -865,14 +915,33 @@ class JianyingDraftManager:
                     })
                 else:
                     tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError()
                     res = await tts_service.synthesize(text, str(tts_out), None)
                     if not res.get("success"):
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                     norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
-                    ok_norm = await audio_norm.normalize_audio_loudness(str(tts_out), str(norm_out))
+                    ok_norm = await audio_norm.normalize_audio_loudness(
+                        str(tts_out),
+                        str(norm_out),
+                        scope=JianyingDraftManager.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
                     narr_used = norm_out if ok_norm else tts_out
                     ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
-                    ok_ov = _gen_blank_video_with_audio(int(meta.get("width") or 1920), int(meta.get("height") or 1080), float(meta.get("fps") or 30.0), narr_used, ov_out)
+                    ok_ov = await _gen_blank_video_with_audio(
+                        int(meta.get("width") or 1920),
+                        int(meta.get("height") or 1080),
+                        float(meta.get("fps") or 30.0),
+                        narr_used,
+                        ov_out,
+                        scope=JianyingDraftManager.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
                     if not ok_ov:
                         raise RuntimeError(f"生成叠加视频失败: {idx}")
                     adur = _try_parse_float(res.get("duration"))

@@ -18,6 +18,7 @@ from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.tts_service import tts_service
 from modules.ws_manager import manager
+from modules.task_cancel_store import task_cancel_store
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class VideoGenerationService:
         return safe
 
     @staticmethod
-    async def generate_from_script(project_id: str) -> Dict[str, Any]:
+    async def generate_from_script(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
         """
         根据项目的脚本生成视频：剪辑+拼接。
 
@@ -118,6 +119,7 @@ class VideoGenerationService:
                     "type": "progress",
                     "scope": "generate_video",
                     "project_id": project_id,
+                    "task_id": task_id,
                     "phase": "start",
                     "message": "开始生成视频",
                     "progress": 1,
@@ -165,6 +167,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "prepare_output",
                         "message": "准备输出与临时目录",
                         "progress": 10,
@@ -183,6 +186,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "cutting_segments_start",
                         "message": "正在剪切视频片段并生成配音",
                         "progress": 15,
@@ -193,6 +197,8 @@ class VideoGenerationService:
                 pass
 
             for idx, seg in enumerate(segments, start=1):
+                if cancel_event.is_set():
+                    raise asyncio.CancelledError()
                 start = float(seg.get("start_time", 0.0))
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
@@ -206,7 +212,14 @@ class VideoGenerationService:
                 logger.info(f"DEBUG segment_init idx={idx} start={start} end={end} duration={duration} ost={ost_flag} text_len={len(text)} is_original={is_original}")
 
                 ok = await video_processor.cut_video_segment(
-                    str(input_abs), str(clip_abs), start, duration
+                    str(input_abs),
+                    str(clip_abs),
+                    start,
+                    duration,
+                    scope="generate_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
                 if not ok:
                     raise RuntimeError(f"剪切片段失败: {idx}")
@@ -222,6 +235,8 @@ class VideoGenerationService:
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
                     sy = await tts_service.synthesize(text, str(seg_audio), None)
                     if not sy.get("success"):
                         raise RuntimeError(f"TTS合成失败: {idx} - {sy.get('error')}")
@@ -245,7 +260,14 @@ class VideoGenerationService:
                             new_dur = input_dur - new_start
                         logger.info(f"DEBUG segment_extend idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2 = await video_processor.cut_video_segment(
-                            str(input_abs), str(clip_abs), new_start, new_dur
+                            str(input_abs),
+                            str(clip_abs),
+                            new_start,
+                            new_dur,
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
                         )
                         if not ok2:
                             raise RuntimeError(f"片段延长失败: {idx}")
@@ -254,12 +276,27 @@ class VideoGenerationService:
                         new_dur = adur
                         logger.info(f"DEBUG segment_shorten idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2s = await video_processor.cut_video_segment(
-                            str(input_abs), str(clip_abs), new_start, new_dur
+                            str(input_abs),
+                            str(clip_abs),
+                            new_start,
+                            new_dur,
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
                         )
                         if not ok2s:
                             raise RuntimeError(f"片段缩短失败: {idx}")
                     clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
-                    rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
+                    rep_ok = await video_processor.replace_audio_with_narration(
+                        str(clip_abs),
+                        str(seg_audio),
+                        str(clip_nar_abs),
+                        scope="generate_video",
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
                     if not rep_ok:
                         raise RuntimeError(f"片段配音替换失败: {idx}")
                     try:
@@ -287,7 +324,34 @@ class VideoGenerationService:
                             stderr=asyncio.subprocess.PIPE,
                             **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
                         )
-                        _, e3 = await p3.communicate()
+                        task_cancel_store.register_process("generate_video", project_id, task_id, p3)
+                        try:
+                            comm_task = asyncio.create_task(p3.communicate())
+                            cancel_task = asyncio.create_task(cancel_event.wait())
+                            done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                            if cancel_task in done:
+                                try:
+                                    if p3.returncode is None:
+                                        try:
+                                            p3.terminate()
+                                        except Exception:
+                                            pass
+                                finally:
+                                    try:
+                                        await asyncio.wait_for(comm_task, timeout=1.5)
+                                    except Exception:
+                                        try:
+                                            comm_task.cancel()
+                                        except Exception:
+                                            pass
+                                raise asyncio.CancelledError()
+                            try:
+                                cancel_task.cancel()
+                            except Exception:
+                                pass
+                            _, e3 = await comm_task
+                        finally:
+                            task_cancel_store.unregister_process("generate_video", project_id, task_id, p3)
                         if p3.returncode != 0:
                             raise RuntimeError(f"片段配音替换失败(强制重编码): {idx} - {e3.decode(errors='ignore')}")
                         vinfo_chk2, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
@@ -306,6 +370,7 @@ class VideoGenerationService:
                             "type": "progress",
                             "scope": "generate_video",
                             "project_id": project_id,
+                            "task_id": task_id,
                             "phase": "segment_processed",
                             "message": f"已处理片段 {idx}/{total_segments}",
                             "progress": min(70, progress),
@@ -335,6 +400,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "concat_start",
                         "message": "正在拼接视频片段",
                         "progress": 75,
@@ -344,7 +410,14 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            ok_concat = await video_processor.concat_videos(clip_paths, str(output_abs))
+            ok_concat = await video_processor.concat_videos(
+                clip_paths,
+                str(output_abs),
+                scope="generate_video",
+                project_id=project_id,
+                task_id=task_id,
+                cancel_event=cancel_event,
+            )
             if not ok_concat:
                 try:
                     if tmp_dir.exists():
@@ -362,6 +435,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "concat_done",
                         "message": "片段拼接完成",
                         "progress": 85,
@@ -378,6 +452,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "normalize_start",
                         "message": "正在统一响度标准化",
                         "progress": 90,
@@ -387,7 +462,14 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(str(output_abs), str(norm_abs))
+            ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(
+                str(output_abs),
+                str(norm_abs),
+                scope="generate_video",
+                project_id=project_id,
+                task_id=task_id,
+                cancel_event=cancel_event,
+            )
             if not ok_norm:
                 raise RuntimeError("响度标准化失败")
             try:
@@ -415,6 +497,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "normalize_done",
                         "message": "响度标准化完成",
                         "progress": 95,
@@ -437,6 +520,7 @@ class VideoGenerationService:
                         "type": "completed",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "done",
                         "message": "视频生成成功",
                         "progress": 100,
