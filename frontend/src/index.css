@@ -11,6 +11,7 @@
   
   html {
     scroll-behavior: smooth;
+    color-scheme: light dark;
   }
 }
 
@@ -110,6 +111,7 @@
 @media (prefers-color-scheme: dark) {
   body {
     @apply bg-gray-900 text-white;
+    --tw-ring-offset-color: #111827;
   }
   
   .card {
@@ -138,6 +140,90 @@
   
   ::-webkit-scrollbar-thumb:hover {
     background: #9ca3af;
+  }
+}
+
+@layer utilities {
+  @media (prefers-color-scheme: dark) {
+    .bg-white {
+      @apply bg-gray-800;
+    }
+
+    .bg-white\/80 {
+      @apply bg-gray-800/80;
+    }
+
+    .bg-white\/90 {
+      @apply bg-gray-800/90;
+    }
+
+    .bg-gray-50 {
+      @apply bg-gray-900;
+    }
+
+    .bg-gray-100 {
+      @apply bg-gray-800;
+    }
+
+    .bg-gray-200 {
+      @apply bg-gray-700;
+    }
+
+    .bg-gray-300 {
+      @apply bg-gray-600;
+    }
+
+    .border-gray-100 {
+      @apply border-gray-800;
+    }
+
+    .border-gray-200 {
+      @apply border-gray-700;
+    }
+
+    .border-gray-300 {
+      @apply border-gray-600;
+    }
+
+    .text-gray-900 {
+      @apply text-gray-100;
+    }
+
+    .text-gray-800 {
+      @apply text-gray-100;
+    }
+
+    .text-gray-700 {
+      @apply text-gray-200;
+    }
+
+    .text-gray-600 {
+      @apply text-gray-300;
+    }
+
+    .text-gray-500 {
+      @apply text-gray-400;
+    }
+
+    .placeholder\:text-gray-500::placeholder {
+      @apply text-gray-400;
+    }
+
+    .hover\:bg-gray-50:hover {
+      @apply bg-gray-800;
+    }
+
+    .hover\:bg-gray-100:hover {
+      @apply bg-gray-700;
+    }
+
+    .hover\:bg-gray-200:hover {
+      @apply bg-gray-600;
+    }
+
+    .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+      @apply border-gray-700;
+    }
   }
 }
 

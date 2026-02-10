@@ -8,13 +8,22 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+from modules.task_cancel_store import task_cancel_store
 
 class AudioNormalizer:
     def __init__(self, target_lufs: float = -20.0, max_peak: float = -1.0):
         self.target_lufs = target_lufs
         self.max_peak = max_peak
 
-    async def _first_pass(self, input_path: str) -> Optional[Dict[str, float]]:
+    async def _first_pass(
+        self,
+        input_path: str,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> Optional[Dict[str, float]]:
         cmd = [
             "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "error",
             "-i", input_path,
@@ -34,7 +43,40 @@ class AudioNormalizer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        _, stderr = await proc.communicate()
+        tracking = bool(scope and project_id and task_id and cancel_event)
+        if tracking:
+            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+        try:
+            if cancel_event:
+                comm_task = asyncio.create_task(proc.communicate())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        if proc.returncode is None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                    finally:
+                        try:
+                            await asyncio.wait_for(comm_task, timeout=1.5)
+                        except Exception:
+                            try:
+                                comm_task.cancel()
+                            except Exception:
+                                pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                _, stderr = await comm_task
+            else:
+                _, stderr = await proc.communicate()
+        finally:
+            if tracking:
+                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
         if proc.returncode != 0:
             return None
         text = stderr.decode(errors="ignore")
@@ -61,11 +103,22 @@ class AudioNormalizer:
         except Exception:
             return None
 
-    async def normalize_audio_loudness(self, input_path: str, output_path: str, sample_rate: int = 44100, channels: int = 2) -> bool:
+    async def normalize_audio_loudness(
+        self,
+        input_path: str,
+        output_path: str,
+        sample_rate: int = 44100,
+        channels: int = 2,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> bool:
         if not os.path.exists(input_path):
             logger.error(f"音频不存在: {input_path}")
             return False
-        measured = await self._first_pass(input_path)
+        measured = await self._first_pass(input_path, scope=scope, project_id=project_id, task_id=task_id, cancel_event=cancel_event)
         # 根据输出扩展名选择编码器
         ext = os.path.splitext(output_path)[1].lower()
         if ext in {".mp3"}:
@@ -120,17 +173,62 @@ class AudioNormalizer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        _, stderr = await proc.communicate()
+        tracking = bool(scope and project_id and task_id and cancel_event)
+        if tracking:
+            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+        try:
+            if cancel_event:
+                comm_task = asyncio.create_task(proc.communicate())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        if proc.returncode is None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                    finally:
+                        try:
+                            await asyncio.wait_for(comm_task, timeout=1.5)
+                        except Exception:
+                            try:
+                                comm_task.cancel()
+                            except Exception:
+                                pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                _, stderr = await comm_task
+            else:
+                _, stderr = await proc.communicate()
+        finally:
+            if tracking:
+                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
         if proc.returncode == 0:
             logger.info(f"音频标准化处理完成: {input_path} -> {output_path}")
             return True
         logger.error(stderr.decode(errors="ignore"))
         return False
-    async def normalize_video_loudness(self, input_path: str, output_path: str, sample_rate: int = 44100, channels: int = 2) -> bool:
+
+    async def normalize_video_loudness(
+        self,
+        input_path: str,
+        output_path: str,
+        sample_rate: int = 44100,
+        channels: int = 2,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> bool:
         if not os.path.exists(input_path):
             logger.error(f"音频不存在: {input_path}")
             return False
-        measured = await self._first_pass(input_path)
+        measured = await self._first_pass(input_path, scope=scope, project_id=project_id, task_id=task_id, cancel_event=cancel_event)
         if measured is None or ("target_offset" not in measured):
             cmd = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -179,7 +277,40 @@ class AudioNormalizer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        _, stderr = await proc.communicate()
+        tracking = bool(scope and project_id and task_id and cancel_event)
+        if tracking:
+            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+        try:
+            if cancel_event:
+                comm_task = asyncio.create_task(proc.communicate())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        if proc.returncode is None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                    finally:
+                        try:
+                            await asyncio.wait_for(comm_task, timeout=1.5)
+                        except Exception:
+                            try:
+                                comm_task.cancel()
+                            except Exception:
+                                pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                _, stderr = await comm_task
+            else:
+                _, stderr = await proc.communicate()
+        finally:
+            if tracking:
+                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
         if proc.returncode == 0:
             logger.info(f"音频标准化处理完成: {input_path} -> {output_path}")
             return True
