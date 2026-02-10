@@ -10,6 +10,7 @@ import wave
 import platform
 import subprocess
 import sys
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
@@ -32,6 +33,7 @@ from modules.qwen3_tts_service import qwen3_tts_service
 from modules.qwen3_tts_acceleration import get_qwen3_tts_acceleration_status
 
 router = APIRouter(prefix="/api/tts/qwen3", tags=["Qwen3-TTS"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/acceleration-status")
@@ -40,7 +42,12 @@ async def get_qwen3_tts_acceleration() -> Dict[str, Any]:
         "acceleration": get_qwen3_tts_acceleration_status(),
         "runtime": qwen3_tts_service.get_runtime_status(),
     }
-    return {"success": True, "data": data, "message": "ok"}
+    resp = {"success": True, "data": data, "message": "ok"}
+    try:
+        logger.info("Qwen3-TTS acceleration-status resp=%s", json.dumps(resp, ensure_ascii=False))
+    except Exception:
+        pass
+    return resp
 
 _download_tasks: Dict[str, asyncio.Task] = {}
 _download_states: Dict[str, Dict[str, Any]] = {}
@@ -48,11 +55,13 @@ _download_lock = asyncio.Lock()
 _download_processes: Dict[str, multiprocessing.Process] = {}
 _download_result_queues: Dict[str, multiprocessing.Queue] = {}
 
+
 def _modelscope_cache_base() -> Path:
     env = os.environ.get("MODELSCOPE_CACHE")
     if env:
         return Path(env).expanduser()
     return Path.home() / ".cache" / "modelscope"
+
 
 def _clear_modelscope_cache() -> None:
     base = _modelscope_cache_base()
@@ -62,6 +71,7 @@ def _clear_modelscope_cache() -> None:
             shutil.rmtree(target)
     except Exception:
         pass
+
 
 def _is_modelscope_cache_error(err: Exception) -> bool:
     if isinstance(err, json.JSONDecodeError):
@@ -100,7 +110,6 @@ def _download_worker(key: str, provider: str, target_dir: str, result_queue: mul
     total_bytes = QWEN3_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(key)
     stop_event = threading.Event()
     target_path = Path(target_dir)
-    cache_path = target_path / ".modelscope_cache"
 
     def calc_dir_size(path: Path) -> int:
         if not path.exists():
@@ -119,7 +128,7 @@ def _download_worker(key: str, provider: str, target_dir: str, result_queue: mul
         while not stop_event.is_set():
             current = calc_dir_size(target_path)
             # 注意：calc_dir_size 使用 os.walk 会递归计算子目录，包括 .modelscope_cache
-            # 所以不需要额外加上 cache_path 的大小，否则会导致重复计算
+            # 所以不需要额外计算其大小，否则会导致重复计算
             if current != last_reported:
                 result_queue.put(
                     {
@@ -378,6 +387,8 @@ async def _stop_download_task(key: str) -> Dict[str, Any]:
         }
     )
     return {"success": True, "data": {"key": key, "status": "cancelled"}, "message": "下载任务已停止"}
+
+
 class Qwen3TTSDownloadRequest(BaseModel):
     key: str = Field(..., description="模型key，如 base_0_6b")
     provider: str = Field(..., description="hf 或 modelscope")
@@ -709,6 +720,7 @@ async def get_qwen3_model_capabilities(model_key: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 def _find_ffmpeg() -> Optional[str]:
     name = "ffmpeg.exe" if "windows" in platform.system().lower() else "ffmpeg"
     env_path = os.environ.get("FFMPEG_PATH")
@@ -774,7 +786,8 @@ def _find_ffmpeg() -> Optional[str]:
         except Exception:
             continue
     return None
- 
+
+
 async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
