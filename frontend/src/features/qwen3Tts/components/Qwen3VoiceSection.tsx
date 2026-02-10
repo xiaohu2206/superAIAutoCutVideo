@@ -53,8 +53,10 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
   const [editVoice, setEditVoice] = useState<Qwen3TtsVoice | null>(null);
 
   const [accelerationStatus, setAccelerationStatus] = useState<Qwen3TtsAccelerationStatus | null>(null);
+  const [accelerationRaw, setAccelerationRaw] = useState<any>(null);
   const [accelerationLoading, setAccelerationLoading] = useState<boolean>(false);
   const [accelerationError, setAccelerationError] = useState<string | null>(null);
+  const [accelerationDebugOpen, setAccelerationDebugOpen] = useState<boolean>(false);
   
   const [providerByOptionId, setProviderByOptionId] = useState<Record<string, Qwen3TtsDownloadProvider>>({});
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
     setAccelerationError(null);
     try {
       const res = await qwen3TtsService.getAccelerationStatus();
+      setAccelerationRaw(res ?? null);
       if (res?.success) {
         setAccelerationStatus((res as any).data || null);
       } else {
@@ -393,12 +396,15 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
             <h4 className="text-md font-semibold text-gray-900">Qwen3-TTS 音色库</h4>
             {error ? <div className="text-xs text-red-600 mt-1">{error}</div> : null}
             <div className="mt-2 flex items-center gap-2">
-              <span
+              <button
+                type="button"
+                onClick={() => setAccelerationDebugOpen((prev) => !prev)}
                 className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
                 title={accelerationView.title}
+                aria-expanded={accelerationDebugOpen}
               >
                 {accelerationView.text}
-              </span>
+              </button>
               <button
                 onClick={() => refreshAcceleration()}
                 disabled={accelerationLoading}
@@ -408,6 +414,14 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
                 <RefreshCw className={`h-3.5 w-3.5 ${accelerationLoading ? "animate-spin" : ""}`} />
               </button>
             </div>
+            {accelerationDebugOpen ? (
+              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="text-[11px] text-gray-500 mb-1">/api/tts/qwen3/acceleration-status</div>
+                <pre className="text-[11px] leading-4 whitespace-pre-wrap break-words text-gray-800 max-h-56 overflow-auto">
+                  {JSON.stringify(accelerationRaw ?? { success: true, data: accelerationStatus, message: "ok" }, null, 2)}
+                </pre>
+              </div>
+            ) : null}
           </div>
           
           <div className="flex bg-gray-100/80 p-1 rounded-lg">
