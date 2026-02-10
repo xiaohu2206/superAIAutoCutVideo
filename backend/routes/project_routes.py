@@ -44,6 +44,7 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
 from modules.task_progress_store import task_progress_store
+from modules.task_cancel_store import task_cancel_store
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -257,6 +258,10 @@ class MergeTaskStatus(BaseModel):
 MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
 
 DRAFT_TASKS: Dict[str, MergeTaskStatus] = {}
+VIDEO_TASKS: Dict[str, MergeTaskStatus] = {}
+
+DRAFT_TASK_HANDLES: Dict[str, asyncio.Task] = {}
+VIDEO_TASK_HANDLES: Dict[str, asyncio.Task] = {}
 
 
 class TrimTimeRange(BaseModel):
@@ -1671,31 +1676,122 @@ async def generate_video(project_id: str):
     if not p.video_path:
         raise HTTPException(status_code=400, detail="请先上传原始视频文件")
 
-    # 状态置为 processing
-    projects_store.update_project(project_id, {"status": "processing"})
+    task_id = f"video_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    VIDEO_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
+    task_progress_store.set_state(
+        scope="generate_video",
+        project_id=project_id,
+        task_id=task_id,
+        status="pending",
+        progress=0.0,
+        message="准备生成",
+        phase="start",
+        msg_type="progress",
+        timestamp=now_ts(),
+    )
 
-    try:
-        result = await video_generation_service.generate_from_script(project_id)
-        return {
-            "message": "视频生成成功",
-            "data": result,
-            "timestamp": now_ts(),
-        }
-    except Exception as e:
-        projects_store.update_project(project_id, {"status": "failed"})
-        # 广播错误事件
+    cancel_event = task_cancel_store.get_event("generate_video", project_id, task_id)
+
+    async def _run():
         try:
-            await manager.broadcast(json.dumps({
-                "type": "error",
-                "scope": "generate_video",
-                "project_id": project_id,
-                "phase": "failed",
-                "message": f"生成视频失败: {str(e)}",
-                "timestamp": now_ts(),
-            }))
+            VIDEO_TASKS[task_id].status = "processing"
+            VIDEO_TASKS[task_id].message = "生成中"
+            VIDEO_TASKS[task_id].progress = 1.0
+            projects_store.update_project(project_id, {"status": "processing"})
+            result = await video_generation_service.generate_from_script(project_id, task_id=task_id, cancel_event=cancel_event)
+            VIDEO_TASKS[task_id].file_path = result.get("output_path") if isinstance(result, dict) else None
+            VIDEO_TASKS[task_id].status = "completed"
+            VIDEO_TASKS[task_id].message = "生成完成"
+            VIDEO_TASKS[task_id].progress = 100.0
+        except asyncio.CancelledError:
+            VIDEO_TASKS[task_id].status = "cancelled"
+            VIDEO_TASKS[task_id].message = "已停止"
+            VIDEO_TASKS[task_id].progress = 0.0
+            projects_store.update_project(project_id, {"status": "cancelled"})
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "cancelled",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "cancelled",
+                    "message": "视频生成已停止",
+                    "progress": VIDEO_TASKS[task_id].progress,
+                    "timestamp": now_ts(),
+                }))
+            except Exception:
+                pass
+        except Exception as e:
+            VIDEO_TASKS[task_id].status = "failed"
+            VIDEO_TASKS[task_id].message = str(e) or "生成失败"
+            VIDEO_TASKS[task_id].progress = 0.0
+            projects_store.update_project(project_id, {"status": "failed"})
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "scope": "generate_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "failed",
+                    "message": f"生成视频失败: {str(e)}",
+                    "progress": VIDEO_TASKS[task_id].progress,
+                    "timestamp": now_ts(),
+                }))
+            except Exception:
+                pass
+        finally:
+            VIDEO_TASK_HANDLES.pop(task_id, None)
+
+    VIDEO_TASK_HANDLES[task_id] = asyncio.create_task(_run())
+
+    return {
+        "message": "开始生成视频",
+        "data": {
+            "task_id": task_id,
+            "scope": "generate_video",
+        },
+        "timestamp": now_ts(),
+    }
+
+
+class CancelTaskRequest(BaseModel):
+    scope: str
+    task_id: Optional[str] = None
+
+
+@router.post("/{project_id}/tasks/cancel")
+async def cancel_project_task(project_id: str, req: CancelTaskRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    scope = str(req.scope or "").strip()
+    if not scope:
+        raise HTTPException(status_code=400, detail="缺少 scope")
+    task_id = str(req.task_id or "").strip()
+    if not task_id:
+        st = task_progress_store.get_state(scope, project_id)
+        if st and st.get("task_id"):
+            task_id = str(st.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="未找到可停止的任务")
+
+    stopped_procs = await task_cancel_store.cancel(scope, project_id, task_id)
+    t = VIDEO_TASK_HANDLES.get(task_id) or DRAFT_TASK_HANDLES.get(task_id) or MERGE_TASKS.get(task_id)
+    if hasattr(t, "cancel"):
+        try:
+            t.cancel()
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"生成视频失败: {str(e)}")
+
+    return {
+        "message": "已请求停止任务",
+        "data": {
+            "scope": scope,
+            "task_id": task_id,
+            "processes_stopped": stopped_procs,
+        },
+        "timestamp": now_ts(),
+    }
 
 
 @router.get("/{project_id}/tasks/running")
@@ -1852,13 +1948,14 @@ async def generate_jianying_draft(project_id: str):
         msg_type="progress",
         timestamp=now_ts(),
     )
+    cancel_event = task_cancel_store.get_event(JianyingDraftManager.SCOPE, project_id, task_id)
 
     async def _run():
         try:
             DRAFT_TASKS[task_id].status = "processing"
             DRAFT_TASKS[task_id].message = "生成中"
             DRAFT_TASKS[task_id].progress = 1.0
-            r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id)
+            r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id, cancel_event=cancel_event)
             DRAFT_TASKS[task_id].file_path = r.dir_web
             DRAFT_TASKS[task_id].status = "completed"
             DRAFT_TASKS[task_id].message = "生成完成"
@@ -1870,6 +1967,23 @@ async def generate_jianying_draft(project_id: str):
                     "jianying_draft_last_dir_web": r.dir_web,
                     "jianying_draft_dirs": list(set((projects_store.get_project(project_id).model_dump().get("jianying_draft_dirs") or []) + [r.dir_web])),
                 })
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            DRAFT_TASKS[task_id].status = "cancelled"
+            DRAFT_TASKS[task_id].message = "已停止"
+            DRAFT_TASKS[task_id].progress = 0.0
+            try:
+                await manager.broadcast(json.dumps({
+                    "type": "cancelled",
+                    "scope": JianyingDraftManager.SCOPE,
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "cancelled",
+                    "message": "剪映草稿生成已停止",
+                    "progress": DRAFT_TASKS[task_id].progress,
+                    "timestamp": now_ts(),
+                }))
             except Exception:
                 pass
         except Exception as e:
@@ -1889,8 +2003,10 @@ async def generate_jianying_draft(project_id: str):
                 }))
             except Exception:
                 pass
+        finally:
+            DRAFT_TASK_HANDLES.pop(task_id, None)
 
-    asyncio.create_task(_run())
+    DRAFT_TASK_HANDLES[task_id] = asyncio.create_task(_run())
 
     return {
         "message": "开始生成剪映草稿",

@@ -2,9 +2,9 @@ import type {
   CreateProjectRequest,
   FileUploadResponse,
   GenerateScriptRequest,
+  Project,
   ProjectLatestTasks,
   ProjectRunningTasks,
-  Project,
   SubtitleResult,
   SubtitleSegment,
   UpdateProjectRequest,
@@ -393,12 +393,12 @@ export class ProjectService {
   }
 
   /**
-   * 根据脚本生成输出视频
+   * 根据脚本生成输出视频（后台任务 + WebSocket 进度）
    */
-  async generateVideo(projectId: string): Promise<{ output_path: string; segments_count: number } | null> {
-    const response = await apiClient.post<
-      ApiResponse<{ output_path: string; segments_count: number }>
-    >(`/api/projects/${projectId}/generate-video`);
+  async startGenerateVideo(projectId: string): Promise<{ task_id: string; scope?: string } | null> {
+    const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string }>>(
+      `/api/projects/${projectId}/generate-video`
+    );
     return response.data ?? null;
   }
 
@@ -408,6 +408,17 @@ export class ProjectService {
   async startGenerateJianyingDraft(projectId: string): Promise<{ task_id: string; scope?: string } | null> {
     const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string }>>(
       `/api/projects/${projectId}/generate-jianying-draft`
+    );
+    return response.data ?? null;
+  }
+
+  /**
+   * 停止任务（停止生成）
+   */
+  async cancelTask(projectId: string, payload: { scope: string; task_id?: string | null }): Promise<{ scope: string; task_id: string; processes_stopped?: number } | null> {
+    const response = await apiClient.post<ApiResponse<{ scope: string; task_id: string; processes_stopped?: number }>>(
+      `/api/projects/${projectId}/tasks/cancel`,
+      payload
     );
     return response.data ?? null;
   }

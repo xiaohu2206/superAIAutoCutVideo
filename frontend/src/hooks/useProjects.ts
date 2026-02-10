@@ -162,7 +162,7 @@ export interface UseProjectDetailReturn {
   reorderVideos: (orderedPaths: string[]) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
-  generateVideo: () => Promise<string | null>;
+  generateVideo: () => Promise<{ task_id: string; scope?: string } | null>;
   downloadVideo: () => void;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
@@ -495,17 +495,13 @@ export const useProjectDetail = (
   /**
    * 根据脚本生成视频
    */
-  const generateVideo = useCallback(async (): Promise<string | null> => {
+  const generateVideo = useCallback(async (): Promise<{ task_id: string; scope?: string } | null> => {
     if (!project) return null;
     setError(null);
     setLoading(true);
     try {
-      const result = await projectService.generateVideo(project.id);
-      const outputPath = result?.output_path ?? null;
-      if (outputPath) {
-        setProject((prev) => (prev ? { ...prev, output_video_path: outputPath, status: "completed" as any } : null));
-      }
-      return outputPath;
+      const result = await projectService.startGenerateVideo(project.id);
+      return result ?? null;
     } catch (err) {
       setError(getErrorMessage(err, "生成视频失败"));
       throw err;
