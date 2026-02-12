@@ -8,6 +8,7 @@ import { VideoModelSettings } from "./components/models/video/VideoModelSettings
 import MonitorSection from "./components/MonitorSection";
 import StorageSettingsSection from "./components/StorageSettingsSection";
 import { TtsSettings } from "./components/tts/TtsSettings";
+import { GlobalParamsSettings } from "./components/GlobalParamsSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
 import { useVideoModelConfig } from "./hooks/useVideoModelConfig";
@@ -106,6 +107,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         return <TtsSettings />;
       case "storage":
         return <StorageSettingsSection />;
+      case "globalParams":
+        return <GlobalParamsSettings />;
       case "monitor":
         return (
           <MonitorSection

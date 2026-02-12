@@ -57,6 +57,7 @@ from routes.tts_routes import router as tts_router
 from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
+from routes.generate_routes import router as generate_router
 from routes.storage_routes import router as settings_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
@@ -324,6 +325,7 @@ app.include_router(tts_router)
 app.include_router(qwen3_tts_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
+app.include_router(generate_router)
 app.include_router(settings_router)
 
 
