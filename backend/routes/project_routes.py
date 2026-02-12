@@ -45,6 +45,8 @@ from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
+from modules.task_scheduler import task_scheduler
+from modules.config.generate_concurrency_config import generate_concurrency_config_manager
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -1676,76 +1678,63 @@ async def generate_video(project_id: str):
     if not p.video_path:
         raise HTTPException(status_code=400, detail="请先上传原始视频文件")
 
-    task_id = f"video_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-    VIDEO_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
-    task_progress_store.set_state(
+    candidate_task_id = f"video_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    max_workers, _src = generate_concurrency_config_manager.get_effective("generate_video")
+    allow_parallel = bool(generate_concurrency_config_manager.config.allow_same_project_parallel)
+
+    def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
+        t = VIDEO_TASKS.get(task_id)
+        if not t:
+            t = MergeTaskStatus(task_id=task_id, status=status, progress=progress, message=message)
+            VIDEO_TASKS[task_id] = t
+        t.status = status
+        t.progress = progress
+        if status == "queued":
+            t.message = "进入队列"
+        elif status == "processing":
+            t.message = "生成中"
+        elif status == "completed":
+            t.message = "生成完成"
+        elif status == "cancelled":
+            t.message = "已停止"
+        elif status == "failed":
+            t.message = message or "生成失败"
+        else:
+            t.message = message
+        if file_path:
+            t.file_path = file_path
+
+        if status == "processing":
+            projects_store.update_project(project_id, {"status": "processing"})
+        elif status == "cancelled":
+            projects_store.update_project(project_id, {"status": "cancelled"})
+        elif status == "failed":
+            projects_store.update_project(project_id, {"status": "failed"})
+
+    def _handle_update(task_id: str, task: Optional[asyncio.Task]) -> None:
+        if task is None:
+            VIDEO_TASK_HANDLES.pop(task_id, None)
+        else:
+            VIDEO_TASK_HANDLES[task_id] = task
+
+    async def _run(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
+        result = await video_generation_service.generate_from_script(project_id, task_id=task_id, cancel_event=cancel_event)
+        return result if isinstance(result, dict) else {}
+
+    task_id = await task_scheduler.enqueue(
         scope="generate_video",
         project_id=project_id,
-        task_id=task_id,
-        status="pending",
-        progress=0.0,
-        message="准备生成",
-        phase="start",
-        msg_type="progress",
-        timestamp=now_ts(),
+        run_fn=_run,
+        task_id=candidate_task_id,
+        concurrency=int(max_workers or 2),
+        dedup=True,
+        allow_same_project_parallel=allow_parallel,
+        local_update=_local_update,
+        handle_update=_handle_update,
     )
 
-    cancel_event = task_cancel_store.get_event("generate_video", project_id, task_id)
-
-    async def _run():
-        try:
-            VIDEO_TASKS[task_id].status = "processing"
-            VIDEO_TASKS[task_id].message = "生成中"
-            VIDEO_TASKS[task_id].progress = 1.0
-            projects_store.update_project(project_id, {"status": "processing"})
-            result = await video_generation_service.generate_from_script(project_id, task_id=task_id, cancel_event=cancel_event)
-            VIDEO_TASKS[task_id].file_path = result.get("output_path") if isinstance(result, dict) else None
-            VIDEO_TASKS[task_id].status = "completed"
-            VIDEO_TASKS[task_id].message = "生成完成"
-            VIDEO_TASKS[task_id].progress = 100.0
-        except asyncio.CancelledError:
-            VIDEO_TASKS[task_id].status = "cancelled"
-            VIDEO_TASKS[task_id].message = "已停止"
-            VIDEO_TASKS[task_id].progress = 0.0
-            projects_store.update_project(project_id, {"status": "cancelled"})
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "cancelled",
-                    "scope": "generate_video",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "cancelled",
-                    "message": "视频生成已停止",
-                    "progress": VIDEO_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
-        except Exception as e:
-            VIDEO_TASKS[task_id].status = "failed"
-            VIDEO_TASKS[task_id].message = str(e) or "生成失败"
-            VIDEO_TASKS[task_id].progress = 0.0
-            projects_store.update_project(project_id, {"status": "failed"})
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "generate_video",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "failed",
-                    "message": f"生成视频失败: {str(e)}",
-                    "progress": VIDEO_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
-        finally:
-            VIDEO_TASK_HANDLES.pop(task_id, None)
-
-    VIDEO_TASK_HANDLES[task_id] = asyncio.create_task(_run())
-
     return {
-        "message": "开始生成视频",
+        "message": "开始生成视频" if task_id == candidate_task_id else "任务已存在",
         "data": {
             "task_id": task_id,
             "scope": "generate_video",
@@ -1776,6 +1765,10 @@ async def cancel_project_task(project_id: str, req: CancelTaskRequest):
         raise HTTPException(status_code=400, detail="未找到可停止的任务")
 
     stopped_procs = await task_cancel_store.cancel(scope, project_id, task_id)
+    try:
+        await task_scheduler.cancel(scope, project_id, task_id)
+    except Exception:
+        pass
     t = VIDEO_TASK_HANDLES.get(task_id) or DRAFT_TASK_HANDLES.get(task_id) or MERGE_TASKS.get(task_id)
     if hasattr(t, "cancel"):
         try:
@@ -1935,81 +1928,69 @@ async def generate_jianying_draft(project_id: str):
     if not cfg_path or not cfg_path.exists():
         raise HTTPException(status_code=400, detail="未设置剪映草稿路径，无法生成")
 
-    task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-    DRAFT_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
-    task_progress_store.set_state(
-        scope=JianyingDraftManager.SCOPE,
-        project_id=project_id,
-        task_id=task_id,
-        status="pending",
-        progress=0.0,
-        message="准备生成",
-        phase="start",
-        msg_type="progress",
-        timestamp=now_ts(),
-    )
-    cancel_event = task_cancel_store.get_event(JianyingDraftManager.SCOPE, project_id, task_id)
+    candidate_task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    max_workers, _src = generate_concurrency_config_manager.get_effective("generate_jianying_draft")
+    allow_parallel = bool(generate_concurrency_config_manager.config.allow_same_project_parallel)
 
-    async def _run():
+    def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
+        t = DRAFT_TASKS.get(task_id)
+        if not t:
+            t = MergeTaskStatus(task_id=task_id, status=status, progress=progress, message=message)
+            DRAFT_TASKS[task_id] = t
+        t.status = status
+        t.progress = progress
+        if status == "queued":
+            t.message = "进入队列"
+        elif status == "processing":
+            t.message = "生成中"
+        elif status == "completed":
+            t.message = "生成完成"
+        elif status == "cancelled":
+            t.message = "已停止"
+        elif status == "failed":
+            t.message = message or "生成失败"
+        else:
+            t.message = message
+        if file_path:
+            t.file_path = file_path
+
+    def _handle_update(task_id: str, task: Optional[asyncio.Task]) -> None:
+        if task is None:
+            DRAFT_TASK_HANDLES.pop(task_id, None)
+        else:
+            DRAFT_TASK_HANDLES[task_id] = task
+
+    async def _run(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
+        r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id, cancel_event=cancel_event)
         try:
-            DRAFT_TASKS[task_id].status = "processing"
-            DRAFT_TASKS[task_id].message = "生成中"
-            DRAFT_TASKS[task_id].progress = 1.0
-            r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id, cancel_event=cancel_event)
-            DRAFT_TASKS[task_id].file_path = r.dir_web
-            DRAFT_TASKS[task_id].status = "completed"
-            DRAFT_TASKS[task_id].message = "生成完成"
-            DRAFT_TASKS[task_id].progress = 100.0
-            try:
-                # 写入项目草稿信息
-                projects_store.update_project(project_id, {
+            projects_store.update_project(
+                project_id,
+                {
                     "jianying_draft_last_dir": str(r.dir_abs),
                     "jianying_draft_last_dir_web": r.dir_web,
-                    "jianying_draft_dirs": list(set((projects_store.get_project(project_id).model_dump().get("jianying_draft_dirs") or []) + [r.dir_web])),
-                })
-            except Exception:
-                pass
-        except asyncio.CancelledError:
-            DRAFT_TASKS[task_id].status = "cancelled"
-            DRAFT_TASKS[task_id].message = "已停止"
-            DRAFT_TASKS[task_id].progress = 0.0
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "cancelled",
-                    "scope": JianyingDraftManager.SCOPE,
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "cancelled",
-                    "message": "剪映草稿生成已停止",
-                    "progress": DRAFT_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
-        except Exception as e:
-            DRAFT_TASKS[task_id].status = "failed"
-            DRAFT_TASKS[task_id].message = str(e) or "生成失败"
-            DRAFT_TASKS[task_id].progress = 0.0
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": JianyingDraftManager.SCOPE,
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "failed",
-                    "message": f"剪映草稿生成失败: {str(e)}",
-                    "progress": DRAFT_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
-        finally:
-            DRAFT_TASK_HANDLES.pop(task_id, None)
+                    "jianying_draft_dirs": list(
+                        set((projects_store.get_project(project_id).model_dump().get("jianying_draft_dirs") or []) + [r.dir_web])
+                    ),
+                },
+            )
+        except Exception:
+            pass
+        return {"file_path": r.dir_web}
 
-    DRAFT_TASK_HANDLES[task_id] = asyncio.create_task(_run())
+    task_id = await task_scheduler.enqueue(
+        scope=JianyingDraftManager.SCOPE,
+        project_id=project_id,
+        run_fn=_run,
+        task_id=candidate_task_id,
+        concurrency=int(max_workers or 4),
+        dedup=True,
+        allow_same_project_parallel=allow_parallel,
+        local_update=_local_update,
+        handle_update=_handle_update,
+    )
 
     return {
-        "message": "开始生成剪映草稿",
+        "message": "开始生成剪映草稿" if task_id == candidate_task_id else "任务已存在",
         "data": {
             "task_id": task_id,
             "scope": JianyingDraftManager.SCOPE,

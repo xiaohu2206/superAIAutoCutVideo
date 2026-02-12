@@ -1,4 +1,4 @@
-import { Activity, FileText, Info, Mic, FolderOpen, HardDrive } from "lucide-react";
+import { Activity, FileText, Info, Mic, FolderOpen, HardDrive, Settings } from "lucide-react";
 import type { AppSettings, SettingsSection } from "./types";
 
 /**
@@ -27,6 +27,7 @@ export const sections: SettingsSection[] = [
   { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
   { id: "storage", label: "存储设置", icon: HardDrive },
+  { id: "globalParams", label: "全局参数", icon: Settings },
   { id: "monitor", label: "状态监控", icon: Activity },
   { id: "about", label: "关于", icon: Info },
 ];
