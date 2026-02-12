@@ -917,14 +917,20 @@ class Qwen3TTSService:
         model_key = v.get("model_key", "base_0_6b")
         language = v.get("language", "Auto")
         try:
+            device_s = (str(device or "").strip() or "auto")
+            actual_text = (v.get("ref_text") if kind == "design_clone" else text) or ""
+            preview = actual_text.replace("\r", " ").replace("\n", " ")
+            if len(preview) > 120:
+                preview = preview[:120] + "..."
             logging.getLogger("modules.qwen3_tts_service").info(
-                f"Qwen3-TTS synthesize request: kind={kind} key={model_key} language={language} device={str(device or '').strip() or 'auto'}"
+                f"Qwen3-TTS 开始合成: kind={kind} key={model_key} language={language} device={device_s} out={Path(out_path).name} "
+                f"文本长度={len(actual_text)} 预览=\"{preview}\" 进度=0%"
             )
         except Exception:
             pass
 
         if kind == "custom_role":
-            return await self.synthesize_custom_voice_to_wav(
+            res = await self.synthesize_custom_voice_to_wav(
                 text=text,
                 out_path=out_path,
                 model_key=model_key,
@@ -934,7 +940,7 @@ class Qwen3TTSService:
                 device=device,
             )
         elif kind == "design_clone":
-            return await self.synthesize_voice_clone_to_wav(
+            res = await self.synthesize_voice_clone_to_wav(
                 text=v.get("ref_text"),
                 out_path=out_path,
                 model_key=model_key,
@@ -945,7 +951,7 @@ class Qwen3TTSService:
                 device=device,
             )
         else:  # clone
-            return await self.synthesize_voice_clone_to_wav(
+            res = await self.synthesize_voice_clone_to_wav(
                 text=text,
                 out_path=out_path,
                 model_key=model_key,
@@ -955,6 +961,15 @@ class Qwen3TTSService:
                 x_vector_only_mode=bool(v.get("x_vector_only_mode", True)),
                 device=device,
             )
+
+        try:
+            logging.getLogger("modules.qwen3_tts_service").info(
+                f"Qwen3-TTS 完成合成: kind={kind} key={model_key} out={Path(out_path).name} "
+                f"时长={res.get('duration') if isinstance(res, dict) else None} 进度=100%"
+            )
+        except Exception:
+            pass
+        return res
 
     async def synthesize_to_wav(
         self,
