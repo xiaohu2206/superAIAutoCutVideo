@@ -43,6 +43,8 @@ class Project(BaseModel):
     subtitle_updated_at: Optional[str] = None
     subtitle_format: Optional[str] = None
     audio_path: Optional[str] = None
+    chunk_audio_paths: List[str] = Field(default_factory=list)
+    chunk_results: List[Dict[str, Any]] = Field(default_factory=list)
     plot_analysis_path: Optional[str] = None
     output_video_path: Optional[str] = None
     # 剪映草稿相关字段
@@ -109,6 +111,10 @@ class ProjectsStore:
                                 p["original_ratio"] = 70
                             if "script_language" not in p:
                                 p["script_language"] = "zh"
+                            if "chunk_audio_paths" not in p:
+                                p["chunk_audio_paths"] = []
+                            if "chunk_results" not in p:
+                                p["chunk_results"] = []
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -167,6 +173,8 @@ class ProjectsStore:
             subtitle_updated_at=None,
             subtitle_format=None,
             audio_path=None,
+            chunk_audio_paths=[],
+            chunk_results=[],
             plot_analysis_path=None,
             output_video_path=None,
             script=None,
@@ -205,6 +213,8 @@ class ProjectsStore:
                 "subtitle_updated_at",
                 "subtitle_format",
                 "audio_path",
+                "chunk_audio_paths",
+                "chunk_results",
                 "plot_analysis_path",
                 "output_video_path",
                 "jianying_draft_last_dir",

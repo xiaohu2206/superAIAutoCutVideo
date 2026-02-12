@@ -14,8 +14,10 @@ from fastapi import HTTPException
 from modules.projects_store import projects_store, Project
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
+from services.asr_batch import AsrStartThrottle, dedupe_utterances, run_bcut_asr_with_retry, shift_utterances
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
+from services.audio_chunking import AudioChunkPlan, cut_audio_mp3, get_audio_duration_ms, plan_audio_chunks
 
 
 logger = logging.getLogger(__name__)
@@ -256,22 +258,151 @@ class ExtractSubtitleService:
             projects_store.update_project(project_id, {"audio_path": audio_web})
             await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45)
 
-        await _ws(project_id, "progress", "asr_start", "ASR 识别中", 55)
-        asr = BcutASR(str(audio_abs))
-        try:
-            data = await _run_in_thread(asr.run)
-        except Exception as e:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
-            raise HTTPException(status_code=500, detail="语音识别失败")
+        total_ms = await get_audio_duration_ms(audio_abs)
+        utterances: List[Dict[str, Any]] = []
 
-        utterances = data.get("utterances") if isinstance(data, dict) else None
+        if not total_ms:
+            await _ws(project_id, "progress", "asr_start", "ASR 识别中", 55)
+            asr = BcutASR(str(audio_abs))
+            try:
+                data = await _run_in_thread(asr.run)
+            except Exception as e:
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
+                raise HTTPException(status_code=500, detail="语音识别失败")
+
+            u = data.get("utterances") if isinstance(data, dict) else None
+            if not isinstance(u, list) or not u:
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "asr_failed", "语音识别失败")
+                raise HTTPException(status_code=500, detail="语音识别失败")
+            utterances = u
+        else:
+            await _ws(project_id, "progress", "splitting_audio", "分割音频中", 50)
+
+            base_ms = int(float(os.environ.get("CHUNK_BASE_MINUTES", "5")) * 60 * 1000)
+            min_ms = int(float(os.environ.get("CHUNK_MIN_MINUTES", "2")) * 60 * 1000)
+            max_ms = int(float(os.environ.get("CHUNK_MAX_MINUTES", "7")) * 60 * 1000)
+            overlap_ms = int(float(os.environ.get("CHUNK_OVERLAP_SECONDS", "30")) * 1000)
+            throttle_seconds = float(os.environ.get("ASR_THROTTLE_SECONDS", "2"))
+            retry_max = int(os.environ.get("ASR_RETRY_MAX", "2"))
+            backoff_base_seconds = float(os.environ.get("ASR_RETRY_BACKOFF_BASE", "2"))
+
+            plans: List[AudioChunkPlan] = plan_audio_chunks(
+                total_ms,
+                base_ms=base_ms,
+                min_ms=min_ms,
+                max_ms=max_ms,
+                overlap_ms=overlap_ms,
+            )
+            if not plans:
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "audio_split_failed", "音频分割失败")
+                raise HTTPException(status_code=500, detail="音频分割失败")
+
+            old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
+            if isinstance(old_chunk_paths, list):
+                for wp in old_chunk_paths:
+                    try:
+                        f = _resolve_path(str(wp))
+                        if f.exists():
+                            f.unlink()
+                    except Exception:
+                        pass
+
+            ts_chunks = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            chunk_dir = _uploads_dir() / "audios" / "chunks"
+            chunk_items: List[Dict[str, Any]] = []
+            for plan in plans:
+                chunk_out = chunk_dir / f"{project_id}_{plan.chunk_id}_{ts_chunks}.mp3"
+                ok = await cut_audio_mp3(audio_abs, chunk_out, start_ms=plan.start_ms, end_ms=plan.end_ms)
+                if not ok:
+                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "audio_split_failed", "音频分割失败")
+                    raise HTTPException(status_code=500, detail="音频分割失败")
+                chunk_items.append({
+                    "plan": plan,
+                    "audio_path": chunk_out,
+                    "audio_web": _to_web_path(chunk_out),
+                })
+
+            projects_store.update_project(project_id, {
+                "chunk_audio_paths": [it["audio_web"] for it in chunk_items],
+                "chunk_results": [],
+            })
+            await _ws(project_id, "progress", "splitting_audio", f"分割完成，共 {len(chunk_items)} 段", 50)
+
+            await _ws(project_id, "progress", "asr_start_batch", "开始批量 ASR（并发不限，启动节流 2s）", 55)
+            throttle = AsrStartThrottle(throttle_seconds)
+
+            total_chunks = len(chunk_items)
+            done_chunks = 0
+            chunk_results: List[Dict[str, Any]] = []
+            all_utterances: List[Dict[str, Any]] = []
+
+            async def _asr_one(it: Dict[str, Any]) -> Dict[str, Any]:
+                plan: AudioChunkPlan = it["plan"]
+                utt, attempts = await run_bcut_asr_with_retry(
+                    str(it["audio_path"]),
+                    throttle=throttle,
+                    retry_max=retry_max,
+                    backoff_base_seconds=backoff_base_seconds,
+                )
+                shifted = shift_utterances(utt, plan.start_ms)
+                return {
+                    "chunk_id": plan.chunk_id,
+                    "utterances": shifted,
+                    "attempts": attempts,
+                    "start_ms": plan.start_ms,
+                    "end_ms": plan.end_ms,
+                    "core_start_ms": plan.core_start_ms,
+                    "core_end_ms": plan.core_end_ms,
+                }
+
+            tasks = [asyncio.create_task(_asr_one(it)) for it in chunk_items]
+            pending = set(tasks)
+            try:
+                while pending:
+                    done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                    for t in done:
+                        exc = t.exception()
+                        if exc:
+                            for pt in pending:
+                                try:
+                                    pt.cancel()
+                                except Exception:
+                                    pass
+                            await asyncio.gather(*pending, return_exceptions=True)
+                            raise exc
+                        r = t.result()
+                        done_chunks += 1
+                        all_utterances.extend(r.get("utterances") or [])
+                        chunk_results.append({
+                            "chunk_id": r.get("chunk_id"),
+                            "attempts": r.get("attempts"),
+                            "utterance_count": len(r.get("utterances") or []),
+                            "start_ms": r.get("start_ms"),
+                            "end_ms": r.get("end_ms"),
+                            "core_start_ms": r.get("core_start_ms"),
+                            "core_end_ms": r.get("core_end_ms"),
+                        })
+                        prog = 55 + int((done_chunks / max(1, total_chunks)) * 25)
+                        await _ws(project_id, "progress", "asr_chunk_progress", f"片段识别完成 {done_chunks}/{total_chunks}", prog)
+            except Exception as e:
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
+                raise HTTPException(status_code=500, detail="语音识别失败")
+
+            projects_store.update_project(project_id, {"chunk_results": chunk_results})
+            await _ws(project_id, "progress", "reassemble", "拼接与去重中", 82)
+            utterances = dedupe_utterances(all_utterances)
+
         if not isinstance(utterances, list) or not utterances:
             projects_store.update_project(project_id, {"subtitle_status": "failed"})
             await _ws(project_id, "error", "asr_failed", "语音识别失败")
             raise HTTPException(status_code=500, detail="语音识别失败")
 
-        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 75)
+        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90)
         srt_text = utterances_to_srt(utterances)
         compressed = _compress_srt(srt_text)
 
@@ -293,10 +424,10 @@ class ExtractSubtitleService:
             "subtitle_updated_at": _now_ts(),
             "subtitle_format": "compressed_srt_v1",
         })
-        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 85)
+        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 95)
 
         segments = _parse_srt_content(compressed)
-        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 95)
+        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 98)
         await _ws(project_id, "completed", "done", "提取字幕成功", 100)
 
         p2 = projects_store.get_project(project_id) or p
