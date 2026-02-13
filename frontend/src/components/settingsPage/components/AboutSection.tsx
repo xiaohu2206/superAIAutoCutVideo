@@ -1,18 +1,9 @@
 import { Info } from "lucide-react";
-import React, { useEffect, useState } from "react";
-import { TauriCommands } from "../../../services/tauriService";
+import React from "react";
+import { useAppVersion } from "../../../hooks/useAppVersion";
 
 const AboutSection: React.FC = () => {
-  const [appVersion, setAppVersion] = useState<string>("");
-
-  useEffect(() => {
-    const loadAppInfo = async () => {
-      const info = await TauriCommands.getAppInfo();
-      const v = (info && (info as any).version) || "";
-      if (v) setAppVersion(v);
-    };
-    void loadAppInfo();
-  }, []);
+  const { appVersion } = useAppVersion();
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

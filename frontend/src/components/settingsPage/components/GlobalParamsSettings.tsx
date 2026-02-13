@@ -290,7 +290,6 @@ export const GlobalParamsSettings: React.FC = () => {
           <p className="mt-1 opacity-90">
             增加并发数可以提高任务处理速度，但会占用更多的 CPU、内存和显存资源。
             如果设置过高，可能导致系统卡顿或任务失败（OOM）。
-            建议保持“系统推荐”设置，除非您确信机器有足够的资源。
           </p>
         </div>
       </div>
@@ -318,24 +317,6 @@ export const GlobalParamsSettings: React.FC = () => {
           onChange={handleScopeChange}
           description="同时进行的剪映草稿生成任务数量 (主要消耗磁盘 IO)"
         />
-
-        <div className="p-4 border rounded-lg bg-gray-50/50 flex items-center justify-between">
-          <div>
-            <h4 className="font-medium text-gray-900">允许同一项目并行任务</h4>
-            <p className="text-xs text-gray-500 mt-0.5">
-              是否允许对同一个项目 ID 同时发起多个生成任务。关闭后，重复提交会返回正在运行的任务。
-            </p>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              className="sr-only peer"
-              checked={data?.config.allow_same_project_parallel || false}
-              onChange={(e) => handleAllowParallelChange(e.target.checked)}
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
-        </div>
       </div>
     </div>
   );

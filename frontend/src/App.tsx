@@ -5,6 +5,7 @@ import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
 import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
+import { useAppVersion } from "./hooks/useAppVersion";
 import {
   TauriCommands,
   WebSocketMessage,
@@ -40,6 +41,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const { appVersion } = useAppVersion();
 
   // 初始化应用
   useEffect(() => {
@@ -219,6 +221,7 @@ const App: React.FC = () => {
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">SuperAI</p>
+          {!!appVersion && <p className="text-xs text-gray-400 mt-1">v{appVersion}</p>}
           <p className="text-sm text-gray-500">请不要相信,基于本项目改造的付费版本</p>
         </div>
       </div>
