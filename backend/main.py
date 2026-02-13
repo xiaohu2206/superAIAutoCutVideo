@@ -895,10 +895,14 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"默认查找剪映草稿路径失败: {e}")
     try:
-        scope = _get_runtime_scope()
-        auto = str(os.environ.get("SACV_FFMPEG_AUTO_DOWNLOAD") or "").strip().lower() in {"1", "true", "yes"}
-        if scope == "dev" and auto:
-            asyncio.create_task(_async_setup_ffmpeg())
+        auto_raw = str(os.environ.get("SACV_FFMPEG_AUTO_DOWNLOAD") or "").strip().lower()
+        if os.name == "nt":
+            auto = auto_raw in {"1", "true", "yes"}
+            _inject_ffmpeg_into_path()
+            has_ffmpeg = bool(shutil.which("ffmpeg"))
+            has_ffprobe = bool(shutil.which("ffprobe"))
+            if auto and (not has_ffmpeg or not has_ffprobe):
+                await _async_setup_ffmpeg()
     except Exception:
         pass
 

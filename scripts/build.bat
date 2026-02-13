@@ -167,23 +167,23 @@ if errorlevel 1 (
 )
 pip uninstall -y torchaudio
 pip uninstall -y torch torchvision
-if /I "%VARIANT%"=="cpu" (set "SUFFIX=cpu") else (set "SUFFIX=cu121")
-set "TORCH_WHL=%TORCH_WHEEL_DIR%\torch-2.5.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
-set "VISION_WHL=%TORCH_WHEEL_DIR%\torchvision-0.20.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
+if /I "%VARIANT%"=="cpu" (set "SUFFIX=cpu") else (set "SUFFIX=cu128")
+set "TORCH_WHL=%TORCH_WHEEL_DIR%\torch-2.7.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
+set "VISION_WHL=%TORCH_WHEEL_DIR%\torchvision-0.22.1+%SUFFIX%-cp311-cp311-win_amd64.whl"
 if defined TORCH_WHEEL_DIR if exist "%TORCH_WHL%" if exist "%VISION_WHL%" (
     echo 使用本地轮子安装 PyTorch (%SUFFIX%)
-    pip install --no-index --find-links "%TORCH_WHEEL_DIR%" "%TORCH_WHL%" "%VISION_WHL%"
+    pip install --no-deps --no-index --find-links "%TORCH_WHEEL_DIR%" "%TORCH_WHL%" "%VISION_WHL%"
 ) else (
     if /I "%VARIANT%"=="cpu" (
-        pip install torch==2.5.1+cpu torchvision==0.20.1+cpu --index-url https://download.pytorch.org/whl/cpu
+        pip install --no-deps torch==2.7.1+cpu torchvision==0.22.1+cpu --index-url https://download.pytorch.org/whl/cpu
     ) else (
-        pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+        pip install --no-deps torch==2.7.1+cu128 torchvision==0.22.1+cu128 --index-url https://download.pytorch.org/whl/cu128
     )
 )
 if /I "%VARIANT%"=="cpu" (
-    pip install torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
+    pip install --no-deps torchaudio==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ) else (
-    pip install torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+    pip install --no-deps torchaudio==2.7.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 )
 echo 安装 qwen-tts（不解析依赖）
 pip install qwen-tts --no-deps

@@ -8,12 +8,15 @@ python-dotenv==1.0.0
 loguru==0.7.2
 tencentcloud-sdk-python==3.0.1220
 aiohttp==3.9.0
+psutil==5.9.8
 edge-tts==7.2.6
 transformers==4.57.3
-numpy<=2.3.5
+numpy==1.26.4
 huggingface_hub==0.34.0
+fsspec==2024.2.0
 soundfile==0.12.1
 modelscope==1.14.0
 librosa==0.10.2.post1
 onnxruntime==1.18.1
 tbb
+imageio-ffmpeg==0.6.0
