@@ -742,6 +742,16 @@ def _find_ffmpeg() -> Optional[str]:
     hit = shutil.which("ffmpeg")
     if hit:
         return hit
+    try:
+        import imageio_ffmpeg
+
+        p = imageio_ffmpeg.get_ffmpeg_exe()
+        if p:
+            pp = Path(p)
+            if pp.exists():
+                return str(pp)
+    except Exception:
+        pass
     candidates: List[Path] = []
     try:
         exe_dir = Path(sys.executable).resolve().parent
@@ -798,7 +808,10 @@ async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
 async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, Any]:
     ffmpeg_bin = _find_ffmpeg()
     if not ffmpeg_bin:
-        raise RuntimeError("Missing dependency 'ffmpeg'. Please install it on server.")
+        raise RuntimeError(
+            "Missing dependency 'ffmpeg'. Put ffmpeg.exe/ffprobe.exe into src-tauri/resources or install FFmpeg to PATH. "
+            "On Windows you can also set SACV_FFMPEG_AUTO_DOWNLOAD=1 and restart backend to auto-prepare it."
+        )
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     cmd = [

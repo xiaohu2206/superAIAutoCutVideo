@@ -105,6 +105,39 @@ function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinatio
   Fail "Portable ZIP creation failed (file locked)"
 }
 
+function Ensure-FFmpegInTauriResources([string]$venvPy) {
+  $resDir = Join-Path (Get-Location).Path "src-tauri\\resources"
+  New-Item -ItemType Directory -Force $resDir | Out-Null
+  $ffmpegOut = Join-Path $resDir "ffmpeg.exe"
+  if (Test-Path $ffmpegOut) { return }
+
+  try {
+    if ($venvPy -and (Test-Path $venvPy)) {
+      $p = (& $venvPy "-c" "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" 2>$null | Select-Object -First 1)
+      if ($p) {
+        $pp = $p.Trim()
+        if ($pp -and (Test-Path $pp)) {
+          Microsoft.PowerShell.Management\Copy-Item -Force $pp $ffmpegOut
+          return
+        }
+      }
+    }
+  } catch { }
+
+  try {
+    $ffmpegExe = Get-ChildItem "C:\\ProgramData\\chocolatey\\lib\\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $ffmpegExe) {
+      $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+      if ($cmd) { $ffmpegExe = Get-Item $cmd.Path }
+    }
+    if ($ffmpegExe) {
+      Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName $ffmpegOut
+      return
+    }
+    Info "FFmpeg not found; please ensure ffmpeg.exe is available."
+  } catch { }
+}
+
 function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
@@ -119,7 +152,7 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   }
 
   if (-not $alreadyHasBackendCopy) {
-    $insertPattern = 'File /a "/oname=resources\\ffprobe\.exe" "[^"]+ffprobe\.exe"'
+    $insertPattern = 'File /a "/oname=resources\\ffmpeg\.exe" "[^"]+ffmpeg\.exe"'
     if ($content -notmatch $insertPattern) {
       Fail "Failed to patch NSIS script (marker not found): $insertPattern"
     }
@@ -154,12 +187,12 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     $content = $content -replace $insertPattern, ('$&' + $snippet)
   }
 
-  $uninstallMarker = 'Delete "$INSTDIR\resources\ffprobe.exe"'
+  $uninstallMarker = 'Delete "$INSTDIR\resources\ffmpeg.exe"'
   if ($content -match [regex]::Escape($uninstallMarker) -and $content -notmatch [regex]::Escape('Delete "$INSTDIR\resources\superAutoCutVideoBackend.zip"')) {
     $content = $content -replace [regex]::Escape($uninstallMarker), ($uninstallMarker + "`r`n    Delete `"`$INSTDIR\resources\superAutoCutVideoBackend.zip`"")
   }
 
-  Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
+  Microsoft.PowerShell.Management\Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
 }
 
 function Get-TauriMakensisPath() {
@@ -178,7 +211,9 @@ Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
 $repoRoot = (Get-Location).Path
-$tempRoot = Join-Path $repoRoot '.build_tmp'
+$sysDrive = $env:SystemDrive
+if (-not $sysDrive) { $sysDrive = "C:" }
+$tempRoot = Join-Path $sysDrive '.sacv_build_tmp'
 New-Item -ItemType Directory -Force $tempRoot | Out-Null
 $buildTemp = Join-Path $tempRoot 'build_temp'
 New-Item -ItemType Directory -Force $buildTemp | Out-Null
@@ -189,8 +224,11 @@ $env:TMP = $buildTemp
 $env:PIP_CACHE_DIR = $pipCache
 
 Step "Check toolchain"
-foreach ($cmd in @('node','python','pip','cargo')) {
+foreach ($cmd in @('node','cargo')) {
   if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Command not found: $cmd" }
+}
+if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+  Fail "Command not found: python (or py)"
 }
 $pythonCmd = "python"
 $pythonArgsPrefix = @()
@@ -286,7 +324,7 @@ foreach ($variant in $variants) {
     $venvDir = Join-Path (Get-Location).Path (".venv_pack_{0}" -f $variant)
     if ($RecreateBackendVenv -and (Test-Path $venvDir)) {
       Step "Recreate backend venv ($variant)"
-      Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue
+      Microsoft.PowerShell.Management\Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     if (-not (Test-Path $venvDir)) {
       Step "Create backend venv ($variant)"
@@ -335,6 +373,11 @@ foreach ($variant in $variants) {
       $tmpRuntime = Join-Path $env:TEMP "requirements.runtime.filtered.txt"
     (Microsoft.PowerShell.Management\Get-Content requirements.runtime.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpRuntime
       & $venvPy "-m" "pip" "install" "-r" $tmpRuntime
+      if ($LASTEXITCODE -ne 0) {
+        Info "Runtime dependency install failed; retry once ($variant)"
+        & $venvPy "-m" "pip" "install" "-r" $tmpRuntime
+      }
+      if ($LASTEXITCODE -ne 0) { throw "Runtime dependency install failed (code $LASTEXITCODE)" }
     Microsoft.PowerShell.Management\Remove-Item $tmpRuntime -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.txt) {
@@ -346,8 +389,8 @@ foreach ($variant in $variants) {
     }
     else { Fail "No backend requirements file found" }
 
-    $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu121" }
-    $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu121" }
+    $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
+    $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu128" }
     $torchAlreadyOk = $false
     try {
       $vers = & $venvPy "-c" "import torch, torchvision, torchaudio; print(torch.__version__); print(torchvision.__version__); print(torchaudio.__version__)" 2>$null
@@ -367,11 +410,11 @@ foreach ($variant in $variants) {
     $wheelDir = $env:TORCH_WHEEL_DIR
     $usedLocal = $false
     if (-not $torchAlreadyOk -and $wheelDir -and (Test-Path $wheelDir)) {
-      $torchWhl = Join-Path $wheelDir "torch-2.5.1+${suffix}-cp311-cp311-win_amd64.whl"
-      $visionWhl = Join-Path $wheelDir "torchvision-0.20.1+${suffix}-cp311-cp311-win_amd64.whl"
+      $torchWhl = Join-Path $wheelDir "torch-2.7.1+${suffix}-cp311-cp311-win_amd64.whl"
+      $visionWhl = Join-Path $wheelDir "torchvision-0.22.1+${suffix}-cp311-cp311-win_amd64.whl"
       if ((Test-Path $torchWhl) -and (Test-Path $visionWhl)) {
         Step "Install PyTorch from local wheels ($suffix)"
-        & $venvPy "-m" "pip" "install" "--no-index" "--find-links" "$wheelDir" "$torchWhl" "$visionWhl"
+        & $venvPy "-m" "pip" "install" "--no-deps" "--no-index" "--find-links" "$wheelDir" "$torchWhl" "$visionWhl"
         if ($LASTEXITCODE -ne 0) { throw "PyTorch wheel install failed (code $LASTEXITCODE)" }
         $usedLocal = $true
       } else {
@@ -380,24 +423,24 @@ foreach ($variant in $variants) {
     }
     if (-not $torchAlreadyOk -and -not $usedLocal) {
       if ($variant -eq "cpu") {
-        & $venvPy "-m" "pip" "install" "torch==2.5.1+cpu" "torchvision==0.20.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
+        & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
       } else {
-        & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
+        & $venvPy "-m" "pip" "install" "torch==2.7.1+cu128" "torchvision==0.22.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
         if ($LASTEXITCODE -ne 0) {
           Info "Official PyTorch index failed; fallback to Aliyun wheels (-f)"
-          & $venvPy "-m" "pip" "install" "torch==2.5.1+cu121" "torchvision==0.20.1+cu121" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu121/"
+          & $venvPy "-m" "pip" "install" "torch==2.7.1+cu128" "torchvision==0.22.1+cu128" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu128/" "--extra-index-url" "$env:PIP_INDEX_URL"
         }
       }
       if ($LASTEXITCODE -ne 0) { throw "PyTorch install failed (code $LASTEXITCODE)" }
     }
     if (-not $torchAlreadyOk) {
       if ($variant -eq "cpu") {
-        & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu"
+        & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
       } else {
-        & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "--index-url" "https://download.pytorch.org/whl/cu121"
+        & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
         if ($LASTEXITCODE -ne 0) {
           Info "Official PyTorch index failed; fallback to Aliyun wheels (-f)"
-          & $venvPy "-m" "pip" "install" "torchaudio==2.5.1+cu121" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu121/"
+          & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu128/" "--extra-index-url" "$env:PIP_INDEX_URL"
         }
       }
       if ($LASTEXITCODE -ne 0) { throw "Torchaudio install failed (code $LASTEXITCODE)" }
@@ -474,30 +517,7 @@ foreach ($variant in $variants) {
   }
   Microsoft.PowerShell.Management\Copy-Item -Recurse -Force 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend'
   Invoke-CompressArchiveWithRetry 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
-  try {
-    $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $ffmpegExe) {
-      $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-      if ($cmd) { $ffmpegExe = Get-Item $cmd.Path }
-    }
-    if (-not $ffprobeExe) {
-      $cmd = Get-Command ffprobe -ErrorAction SilentlyContinue
-      if ($cmd) { $ffprobeExe = Get-Item $cmd.Path }
-    }
-    if (-not $ffmpegExe -or -not $ffprobeExe) {
-      if (Get-Command choco -ErrorAction SilentlyContinue) {
-        Step "Install FFmpeg via Chocolatey"
-        choco install ffmpeg -y --no-progress | Out-Null
-        $ffmpegExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-        $ffprobeExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-      } else {
-        Info "FFmpeg not found and Chocolatey unavailable; please ensure ffmpeg.exe and ffprobe.exe are in PATH"
-      }
-    }
-    if ($ffmpegExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName "src-tauri\\resources\\ffmpeg.exe" }
-    if ($ffprobeExe) { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeExe.FullName "src-tauri\\resources\\ffprobe.exe" }
-  } catch { Info "Skip FFmpeg copy: $($_.Exception.Message)" }
+  try { Ensure-FFmpegInTauriResources $venvPy } catch { Info "Skip FFmpeg prepare: $($_.Exception.Message)" }
  
 
   Step "Ensure no running instances before Tauri build ($variant)"

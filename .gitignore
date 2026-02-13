@@ -16,6 +16,7 @@ Thumbs.db
 desktop.ini
 .vscode/
 .venv_pack_cpu
+.venv_gpu
 # ========================================
 # Node.js / Frontend
 # ========================================
