@@ -21,9 +21,9 @@ class ScopeConcurrencyConfig(BaseModel):
 
 
 class GenerateConcurrencyConfig(BaseModel):
-    generate_video: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=2, override=False))
-    generate_jianying_draft: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=4, override=False))
-    tts: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=4, override=False))
+    generate_video: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=16, override=True))
+    generate_jianying_draft: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=16, override=True))
+    tts: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=16, override=True))
 
 
 class GenerateConcurrencyConfigManager:
@@ -43,10 +43,29 @@ class GenerateConcurrencyConfigManager:
                 if isinstance(data, dict):
                     data.pop("allow_same_project_parallel", None)
                     self.config = GenerateConcurrencyConfig(**data)
+                    if self._is_legacy_defaults():
+                        self.config = GenerateConcurrencyConfig()
+                        self.save()
             else:
                 self.save()
         except Exception:
             self.config = GenerateConcurrencyConfig()
+
+    def _is_legacy_defaults(self) -> bool:
+        try:
+            v = self.config.generate_video
+            d = self.config.generate_jianying_draft
+            t = self.config.tts
+            return (
+                v.override is False
+                and d.override is False
+                and t.override is False
+                and int(v.max_workers) == 2
+                and int(d.max_workers) == 4
+                and int(t.max_workers) == 4
+            )
+        except Exception:
+            return False
 
     def save(self) -> None:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -85,35 +104,35 @@ class GenerateConcurrencyConfigManager:
                 per_task_vram = 3 * 1024**3
                 headroom_ram = 0.5
                 headroom_vram = 0.7
-                base_default = 2
+                base_default = 16
             elif scope == "generate_jianying_draft":
                 per_task_ram = 512 * 1024**2
                 per_task_vram = 2 * 1024**3
                 headroom_ram = 0.5
                 headroom_vram = 0.7
-                base_default = 4
+                base_default = 16
             else:
                 per_task_ram = 256 * 1024**2
                 per_task_vram = 2 * 1024**3
                 headroom_ram = 0.5
                 headroom_vram = 0.7
-                base_default = 4
+                base_default = 16
 
             if has_gpu and vram > 0:
                 by_vram = max(1, math.floor((vram * headroom_vram) / per_task_vram))
                 by_ram = max(1, math.floor((ram_avail * headroom_ram) / per_task_ram))
                 by_core = max(1, cores // 2)
-                return max(1, min(by_vram, by_ram, by_core))
+                return max(1, min(by_vram, by_ram, by_core, 16))
 
             by_ram = max(1, math.floor((ram_avail * headroom_ram) / per_task_ram))
             by_core = max(1, cores // 2)
-            return max(1, min(by_ram, by_core, base_default))
+            return max(1, min(by_ram, by_core, base_default, 16))
         except Exception:
             if scope == "generate_video":
-                return 2
+                return 16
             if scope == "generate_jianying_draft":
-                return 4
-            return 4
+                return 16
+            return 16
 
     def get_effective(self, scope: ScopeName) -> Tuple[int, SourceName]:
         cfg = getattr(self.config, scope)
