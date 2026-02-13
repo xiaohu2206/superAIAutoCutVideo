@@ -1680,7 +1680,12 @@ async def generate_video(project_id: str):
 
     candidate_task_id = f"video_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     max_workers, _src = generate_concurrency_config_manager.get_effective("generate_video")
-    allow_parallel = bool(generate_concurrency_config_manager.config.allow_same_project_parallel)
+    logger.info(
+        "生成视频入队请求: project_id=%s candidate_task_id=%s concurrency=%s",
+        project_id,
+        candidate_task_id,
+        int(max_workers or 2),
+    )
 
     def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
         t = VIDEO_TASKS.get(task_id)
@@ -1728,9 +1733,14 @@ async def generate_video(project_id: str):
         task_id=candidate_task_id,
         concurrency=int(max_workers or 2),
         dedup=True,
-        allow_same_project_parallel=allow_parallel,
         local_update=_local_update,
         handle_update=_handle_update,
+    )
+    logger.info(
+        "生成视频入队结果: project_id=%s task_id=%s dedup_hit=%s",
+        project_id,
+        task_id,
+        task_id != candidate_task_id,
     )
 
     return {
@@ -1765,8 +1775,9 @@ async def cancel_project_task(project_id: str, req: CancelTaskRequest):
         raise HTTPException(status_code=400, detail="未找到可停止的任务")
 
     stopped_procs = await task_cancel_store.cancel(scope, project_id, task_id)
+    cancelled = False
     try:
-        await task_scheduler.cancel(scope, project_id, task_id)
+        cancelled = await task_scheduler.cancel(scope, project_id, task_id)
     except Exception:
         pass
     t = VIDEO_TASK_HANDLES.get(task_id) or DRAFT_TASK_HANDLES.get(task_id) or MERGE_TASKS.get(task_id)
@@ -1775,6 +1786,14 @@ async def cancel_project_task(project_id: str, req: CancelTaskRequest):
             t.cancel()
         except Exception:
             pass
+    logger.info(
+        "停止任务请求: project_id=%s scope=%s task_id=%s processes_stopped=%s scheduler_cancelled=%s",
+        project_id,
+        scope,
+        task_id,
+        stopped_procs,
+        cancelled,
+    )
 
     return {
         "message": "已请求停止任务",
@@ -1930,7 +1949,12 @@ async def generate_jianying_draft(project_id: str):
 
     candidate_task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     max_workers, _src = generate_concurrency_config_manager.get_effective("generate_jianying_draft")
-    allow_parallel = bool(generate_concurrency_config_manager.config.allow_same_project_parallel)
+    logger.info(
+        "生成剪映草稿入队请求: project_id=%s candidate_task_id=%s concurrency=%s",
+        project_id,
+        candidate_task_id,
+        int(max_workers or 4),
+    )
 
     def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
         t = DRAFT_TASKS.get(task_id)
@@ -1984,9 +2008,14 @@ async def generate_jianying_draft(project_id: str):
         task_id=candidate_task_id,
         concurrency=int(max_workers or 4),
         dedup=True,
-        allow_same_project_parallel=allow_parallel,
         local_update=_local_update,
         handle_update=_handle_update,
+    )
+    logger.info(
+        "生成剪映草稿入队结果: project_id=%s task_id=%s dedup_hit=%s",
+        project_id,
+        task_id,
+        task_id != candidate_task_id,
     )
 
     return {
