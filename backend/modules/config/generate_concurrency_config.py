@@ -11,7 +11,7 @@ import psutil
 from pydantic import BaseModel, Field
 
 
-ScopeName = Literal["generate_video", "generate_jianying_draft"]
+ScopeName = Literal["generate_video", "generate_jianying_draft", "tts"]
 SourceName = Literal["user", "env", "recommended"]
 
 
@@ -23,7 +23,7 @@ class ScopeConcurrencyConfig(BaseModel):
 class GenerateConcurrencyConfig(BaseModel):
     generate_video: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=2, override=False))
     generate_jianying_draft: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=4, override=False))
-    allow_same_project_parallel: bool = Field(default=False)
+    tts: ScopeConcurrencyConfig = Field(default_factory=lambda: ScopeConcurrencyConfig(max_workers=4, override=False))
 
 
 class GenerateConcurrencyConfigManager:
@@ -41,6 +41,7 @@ class GenerateConcurrencyConfigManager:
             if self.config_file.exists():
                 data = json.loads(self.config_file.read_text("utf-8"))
                 if isinstance(data, dict):
+                    data.pop("allow_same_project_parallel", None)
                     self.config = GenerateConcurrencyConfig(**data)
             else:
                 self.save()
@@ -85,8 +86,14 @@ class GenerateConcurrencyConfigManager:
                 headroom_ram = 0.5
                 headroom_vram = 0.7
                 base_default = 2
-            else:
+            elif scope == "generate_jianying_draft":
                 per_task_ram = 512 * 1024**2
+                per_task_vram = 2 * 1024**3
+                headroom_ram = 0.5
+                headroom_vram = 0.7
+                base_default = 4
+            else:
+                per_task_ram = 256 * 1024**2
                 per_task_vram = 2 * 1024**3
                 headroom_ram = 0.5
                 headroom_vram = 0.7
@@ -102,7 +109,11 @@ class GenerateConcurrencyConfigManager:
             by_core = max(1, cores // 2)
             return max(1, min(by_ram, by_core, base_default))
         except Exception:
-            return 2 if scope == "generate_video" else 4
+            if scope == "generate_video":
+                return 2
+            if scope == "generate_jianying_draft":
+                return 4
+            return 4
 
     def get_effective(self, scope: ScopeName) -> Tuple[int, SourceName]:
         cfg = getattr(self.config, scope)
@@ -113,8 +124,12 @@ class GenerateConcurrencyConfigManager:
             v = self._env_int("SACV_GENERATE_VIDEO_MAX_WORKERS")
             if v:
                 return v, "env"
-        else:
+        elif scope == "generate_jianying_draft":
             v = self._env_int("SACV_JY_DRAFT_MAX_WORKERS")
+            if v:
+                return v, "env"
+        else:
+            v = self._env_int("SACV_TTS_MAX_WORKERS")
             if v:
                 return v, "env"
 
@@ -123,18 +138,20 @@ class GenerateConcurrencyConfigManager:
     def snapshot(self) -> Dict[str, Any]:
         eff_video, src_video = self.get_effective("generate_video")
         eff_draft, src_draft = self.get_effective("generate_jianying_draft")
+        eff_tts, src_tts = self.get_effective("tts")
         return {
             "config": self.config.model_dump(),
             "effective": {
                 "generate_video": {"max_workers": eff_video, "source": src_video},
                 "generate_jianying_draft": {"max_workers": eff_draft, "source": src_draft},
+                "tts": {"max_workers": eff_tts, "source": src_tts},
             },
             "timestamp": datetime.now().isoformat(),
         }
 
     def update(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = self.config.model_dump()
-        for k in ["generate_video", "generate_jianying_draft", "allow_same_project_parallel"]:
+        for k in ["generate_video", "generate_jianying_draft", "tts"]:
             if k in payload:
                 data[k] = payload[k]
         self.config = GenerateConcurrencyConfig(**data)
@@ -143,4 +160,3 @@ class GenerateConcurrencyConfigManager:
 
 
 generate_concurrency_config_manager = GenerateConcurrencyConfigManager()
-

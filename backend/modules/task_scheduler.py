@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,8 @@ from modules.ws_manager import manager
 RunFn = Callable[[str, str, asyncio.Event], Awaitable[Dict[str, Any]]]
 LocalUpdateFn = Callable[[str, str, float, str, Optional[str]], None]
 HandleUpdateFn = Callable[[str, Optional[asyncio.Task]], None]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,30 @@ class TaskScheduler:
         self._scopes: Dict[str, ScopeState] = {}
         self._lock = asyncio.Lock()
 
+    async def get_scope_stats(self, scope: str) -> Dict[str, Any]:
+        s = self._scopes.get(scope)
+        if not s:
+            return {
+                "scope": scope,
+                "concurrency": 0,
+                "workers_alive": 0,
+                "queue_size": 0,
+                "pending": 0,
+                "running": 0,
+                "dedup": 0,
+            }
+        async with s.lock:
+            self._cleanup_workers(s)
+            return {
+                "scope": s.scope,
+                "concurrency": int(s.concurrency),
+                "workers_alive": int(len([w for w in s.workers if not w.done()])),
+                "queue_size": int(s.queue.qsize()),
+                "pending": int(len(s.pending)),
+                "running": int(len(s.running)),
+                "dedup": int(len(s.dedup)),
+            }
+
     async def ensure_scope(self, scope: str, concurrency: int) -> ScopeState:
         if not scope:
             raise ValueError("scope is required")
@@ -52,6 +79,12 @@ class TaskScheduler:
                 self._scopes[scope] = s
                 for _ in range(s.concurrency):
                     s.workers.append(asyncio.create_task(self._worker(s)))
+                logger.info(
+                    "任务调度器 scope 已创建: scope=%s concurrency=%s workers=%s",
+                    scope,
+                    s.concurrency,
+                    len(s.workers),
+                )
                 return s
         await self.resize(scope, concurrency)
         return self._scopes[scope]
@@ -65,7 +98,6 @@ class TaskScheduler:
         task_id: Optional[str] = None,
         concurrency: int = 2,
         dedup: bool = True,
-        allow_same_project_parallel: bool = False,
         local_update: Optional[LocalUpdateFn] = None,
         handle_update: Optional[HandleUpdateFn] = None,
     ) -> str:
@@ -77,9 +109,20 @@ class TaskScheduler:
         s = await self.ensure_scope(scope, concurrency)
         async with s.lock:
             self._cleanup_workers(s)
-            if dedup and (not allow_same_project_parallel):
+            if dedup:
                 existed = s.dedup.get(project_id)
                 if existed and (existed in s.pending or existed in s.running):
+                    logger.info(
+                        "任务调度器入队去重命中: scope=%s project_id=%s existed_task_id=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                        s.scope,
+                        project_id,
+                        existed,
+                        s.concurrency,
+                        len([w for w in s.workers if not w.done()]),
+                        s.queue.qsize(),
+                        len(s.pending),
+                        len(s.running),
+                    )
                     return existed
             if not task_id:
                 task_id = f"{scope}_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -91,9 +134,20 @@ class TaskScheduler:
                 handle_update=handle_update,
             )
             s.pending[task_id] = item
-            if dedup and (not allow_same_project_parallel):
+            if dedup:
                 s.dedup[project_id] = task_id
             await s.queue.put(task_id)
+            logger.info(
+                "任务调度器已入队: scope=%s project_id=%s task_id=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                s.scope,
+                project_id,
+                task_id,
+                s.concurrency,
+                len([w for w in s.workers if not w.done()]),
+                s.queue.qsize(),
+                len(s.pending),
+                len(s.running),
+            )
 
         await self._emit(
             scope=scope,
@@ -117,8 +171,20 @@ class TaskScheduler:
         if t:
             try:
                 t.cancel()
+                logger.info(
+                    "任务调度器取消运行中任务: scope=%s project_id=%s task_id=%s",
+                    scope,
+                    project_id,
+                    task_id,
+                )
                 return True
             except Exception:
+                logger.exception(
+                    "任务调度器取消运行中任务失败: scope=%s project_id=%s task_id=%s",
+                    scope,
+                    project_id,
+                    task_id,
+                )
                 return False
 
         async with s.lock:
@@ -127,6 +193,17 @@ class TaskScheduler:
                 return False
             if s.dedup.get(project_id) == task_id:
                 s.dedup.pop(project_id, None)
+            logger.info(
+                "任务调度器取消排队中任务: scope=%s project_id=%s task_id=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                s.scope,
+                project_id,
+                task_id,
+                s.concurrency,
+                len([w for w in s.workers if not w.done()]),
+                s.queue.qsize(),
+                len(s.pending),
+                len(s.running),
+            )
 
         await self._emit(
             scope=scope,
@@ -152,6 +229,13 @@ class TaskScheduler:
             self._cleanup_workers(s)
             if concurrency == s.concurrency:
                 return
+            before = {
+                "concurrency": int(s.concurrency),
+                "workers_alive": int(len([w for w in s.workers if not w.done()])),
+                "queue_size": int(s.queue.qsize()),
+                "pending": int(len(s.pending)),
+                "running": int(len(s.running)),
+            }
             s.concurrency = concurrency
             alive = [w for w in s.workers if not w.done()]
             s.workers = alive
@@ -161,6 +245,14 @@ class TaskScheduler:
             elif len(alive) > concurrency:
                 for _ in range(len(alive) - concurrency):
                     await s.queue.put(None)
+            after = {
+                "concurrency": int(s.concurrency),
+                "workers_alive": int(len([w for w in s.workers if not w.done()])),
+                "queue_size": int(s.queue.qsize()),
+                "pending": int(len(s.pending)),
+                "running": int(len(s.running)),
+            }
+            logger.info("任务调度器并发已调整: scope=%s before=%s after=%s", s.scope, before, after)
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -178,13 +270,35 @@ class TaskScheduler:
         while True:
             item_id = await s.queue.get()
             item: Optional[TaskItem] = None
+            started_at: Optional[datetime] = None
             try:
                 if item_id is None:
+                    logger.info(
+                        "任务调度器 worker 退出: scope=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                        s.scope,
+                        s.concurrency,
+                        len([w for w in s.workers if not w.done()]),
+                        s.queue.qsize(),
+                        len(s.pending),
+                        len(s.running),
+                    )
                     return
 
                 item = s.pending.pop(item_id, None)
                 if not item:
                     continue
+                started_at = datetime.now()
+                logger.info(
+                    "任务调度器已出队开始执行: scope=%s project_id=%s task_id=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                    s.scope,
+                    item.project_id,
+                    item.task_id,
+                    s.concurrency,
+                    len([w for w in s.workers if not w.done()]),
+                    s.queue.qsize(),
+                    len(s.pending),
+                    len(s.running),
+                )
 
                 cancel_event = task_cancel_store.get_event(s.scope, item.project_id, item.task_id)
                 if cancel_event.is_set():
@@ -236,6 +350,12 @@ class TaskScheduler:
                         local_update=item.local_update,
                     )
                 except Exception as e:
+                    logger.exception(
+                        "任务调度器任务执行异常: scope=%s project_id=%s task_id=%s",
+                        s.scope,
+                        item.project_id,
+                        item.task_id,
+                    )
                     await self._emit(
                         scope=s.scope,
                         project_id=item.project_id,
@@ -282,6 +402,25 @@ class TaskScheduler:
                         async with s.lock:
                             if s.dedup.get(item.project_id) == item.task_id:
                                 s.dedup.pop(item.project_id, None)
+                    except Exception:
+                        pass
+                    try:
+                        ended_at = datetime.now()
+                        duration_ms = None
+                        if started_at:
+                            duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+                        logger.info(
+                            "任务调度器任务结束: scope=%s project_id=%s task_id=%s duration_ms=%s concurrency=%s workers_alive=%s queue_size=%s pending=%s running=%s",
+                            s.scope,
+                            item.project_id,
+                            item.task_id,
+                            duration_ms,
+                            s.concurrency,
+                            len([w for w in s.workers if not w.done()]),
+                            s.queue.qsize(),
+                            len(s.pending),
+                            len(s.running),
+                        )
                     except Exception:
                         pass
                 s.queue.task_done()

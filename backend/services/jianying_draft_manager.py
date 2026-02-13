@@ -16,7 +16,6 @@ from modules.projects_store import Project, projects_store
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.tts_service import tts_service
-from modules.audio_normalizer import AudioNormalizer
 from modules.task_cancel_store import task_cancel_store
 
 
@@ -822,7 +821,6 @@ class JianyingDraftManager:
         if not p:
             raise ValueError("项目不存在")
         tmp_dir: Optional[Path] = None
-        audio_norm = AudioNormalizer()
         try:
             await JianyingDraftManager._broadcast({
                 "type": "progress",
@@ -889,6 +887,86 @@ class JianyingDraftManager:
                 "timestamp": _now_ts(),
             })
             total_segments = len(segments)
+            need_tts: List[Dict[str, Any]] = []
+            for idx, seg in enumerate(segments, start=1):
+                st = float(seg.get("start_time") or 0.0)
+                et = float(seg.get("end_time") or 0.0)
+                if et <= st:
+                    continue
+                text = str(seg.get("text") or "").strip()
+                ost_flag = seg.get("OST")
+                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                if not is_original:
+                    need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
+
+            tts_results: Dict[int, Dict[str, Any]] = {}
+            if need_tts:
+                await JianyingDraftManager._broadcast({
+                    "type": "progress",
+                    "scope": JianyingDraftManager.SCOPE,
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "tts_generate",
+                    "message": f"并发生成配音（{len(need_tts)} 段）",
+                    "progress": 41,
+                    "timestamp": _now_ts(),
+                })
+
+                async def _tts_job(idx: int, text: str, out_path: Path):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    res = await tts_service.synthesize(text, str(out_path), None)
+                    if not res.get("success"):
+                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
+                    return idx, (res if isinstance(res, dict) else {})
+
+                tasks: List[asyncio.Task] = []
+                for it in need_tts:
+                    tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
+
+                completed = 0
+                try:
+                    for fut in asyncio.as_completed(tasks):
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        try:
+                            idx, r = await fut
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            for ot in tasks:
+                                if ot is not fut and not ot.done():
+                                    try:
+                                        ot.cancel()
+                                    except Exception:
+                                        pass
+                            raise
+                        tts_results[idx] = r
+                        completed += 1
+                        try:
+                            base = 41
+                            span = 9
+                            prog = base + int((completed / max(1, len(need_tts))) * span)
+                            await JianyingDraftManager._broadcast({
+                                "type": "progress",
+                                "scope": JianyingDraftManager.SCOPE,
+                                "project_id": project_id,
+                                "task_id": task_id,
+                                "phase": "tts_generate_progress",
+                                "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                "progress": min(50, prog),
+                                "timestamp": _now_ts(),
+                            })
+                        except Exception:
+                            pass
+                finally:
+                    for ot in tasks:
+                        if not ot.done():
+                            try:
+                                ot.cancel()
+                            except Exception:
+                                pass
+
             for idx, seg in enumerate(segments, start=1):
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
@@ -917,19 +995,10 @@ class JianyingDraftManager:
                     tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
                     if cancel_event and cancel_event.is_set():
                         raise asyncio.CancelledError()
-                    res = await tts_service.synthesize(text, str(tts_out), None)
-                    if not res.get("success"):
-                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
-                    norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
-                    ok_norm = await audio_norm.normalize_audio_loudness(
-                        str(tts_out),
-                        str(norm_out),
-                        scope=JianyingDraftManager.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        cancel_event=cancel_event,
-                    )
-                    narr_used = norm_out if ok_norm else tts_out
+                    res = tts_results.get(idx)
+                    if not res:
+                        raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
+                    narr_used = tts_out
                     ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
                     ok_ov = await _gen_blank_video_with_audio(
                         int(meta.get("width") or 1920),
@@ -979,8 +1048,8 @@ class JianyingDraftManager:
                         "overlay_duration_us": _s_to_us(adur),
                     })
                 try:
-                    base = 40
-                    span = 25
+                    base = 50
+                    span = 15
                     progress = base + int((idx / max(1, total_segments)) * span)
                     await JianyingDraftManager._broadcast({
                         "type": "progress",

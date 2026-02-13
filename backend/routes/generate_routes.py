@@ -25,7 +25,7 @@ class ScopeConcurrencyPatch(BaseModel):
 class UpdateGenerateConcurrencyRequest(BaseModel):
     generate_video: Optional[ScopeConcurrencyPatch] = None
     generate_jianying_draft: Optional[ScopeConcurrencyPatch] = None
-    allow_same_project_parallel: Optional[bool] = None
+    tts: Optional[ScopeConcurrencyPatch] = None
 
 
 @router.get("/concurrency")
@@ -47,8 +47,11 @@ async def update_generate_concurrency(req: UpdateGenerateConcurrencyRequest = Bo
             **(generate_concurrency_config_manager.config.generate_jianying_draft.model_dump()),
             **{k: v for k, v in req.generate_jianying_draft.model_dump().items() if v is not None},
         }
-    if req.allow_same_project_parallel is not None:
-        payload["allow_same_project_parallel"] = bool(req.allow_same_project_parallel)
+    if req.tts is not None:
+        payload["tts"] = {
+            **(generate_concurrency_config_manager.config.tts.model_dump()),
+            **{k: v for k, v in req.tts.model_dump().items() if v is not None},
+        }
 
     snap = generate_concurrency_config_manager.update(payload)
     return {"message": "updated", "data": snap, "timestamp": now_ts()}
@@ -60,13 +63,12 @@ class ResizeRequest(BaseModel):
 
 @router.post("/concurrency/resize")
 async def resize_generate_concurrency(req: ResizeRequest = Body(default=ResizeRequest())) -> Dict[str, Any]:
-    scopes = req.scopes or ["generate_video", "generate_jianying_draft"]
-    allowed = {"generate_video", "generate_jianying_draft"}
+    scopes = req.scopes or ["generate_video", "generate_jianying_draft", "tts"]
+    allowed = {"generate_video", "generate_jianying_draft", "tts"}
     for s in scopes:
         if s not in allowed:
             raise HTTPException(status_code=400, detail=f"不支持的 scope: {s}")
     for s in scopes:
         max_workers, _src = generate_concurrency_config_manager.get_effective(s)  # type: ignore[arg-type]
-        await task_scheduler.resize(s if s != "generate_jianying_draft" else "generate_jianying_draft", int(max_workers or 1))
+        await task_scheduler.resize(s, int(max_workers or 1))
     return {"message": "resized", "data": {"scopes": scopes}, "timestamp": now_ts()}
-
