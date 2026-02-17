@@ -384,6 +384,7 @@ export const useProjectDetail = (
         | boolean
         | {
             force?: boolean;
+            task_id?: string | null;
             asr_provider?: "bcut" | "fun_asr";
             asr_model_key?: string | null;
             asr_language?: string | null;

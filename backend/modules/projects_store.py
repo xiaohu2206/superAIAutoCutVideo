@@ -42,6 +42,7 @@ class Project(BaseModel):
     subtitle_updated_by_user: bool = Field(default=False)
     subtitle_updated_at: Optional[str] = None
     subtitle_format: Optional[str] = None
+    subtitle_extract_run_id: Optional[str] = None
     asr_provider: str = Field(default="bcut")
     asr_model_key: Optional[str] = None
     asr_language: Optional[str] = None
@@ -110,6 +111,8 @@ class ProjectsStore:
                                 p["subtitle_updated_at"] = p.get("updated_at") or None
                             if "subtitle_format" not in p:
                                 p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
+                            if "subtitle_extract_run_id" not in p:
+                                p["subtitle_extract_run_id"] = None
                             if "asr_provider" not in p:
                                 p["asr_provider"] = "bcut"
                             if "asr_model_key" not in p:
@@ -224,6 +227,7 @@ class ProjectsStore:
                 "subtitle_updated_by_user",
                 "subtitle_updated_at",
                 "subtitle_format",
+                "subtitle_extract_run_id",
                 "asr_provider",
                 "asr_model_key",
                 "asr_language",
@@ -302,6 +306,7 @@ class ProjectsStore:
             data["subtitle_updated_by_user"] = False
             data["subtitle_updated_at"] = datetime.now().isoformat()
             data["subtitle_format"] = None
+            data["subtitle_extract_run_id"] = None
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)

@@ -305,6 +305,7 @@ class GenerateScriptRequest(BaseModel):
 
 class ExtractSubtitleRequest(BaseModel):
     force: bool = False
+    task_id: Optional[str] = None
     asr_provider: Optional[str] = None
     asr_model_key: Optional[str] = None
     asr_language: Optional[str] = None
@@ -567,6 +568,7 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
         data = await extract_subtitle_service.extract_subtitle(
             project_id=project_id,
             force=bool(req.force),
+            task_id=req.task_id,
             asr_provider=req.asr_provider,
             asr_model_key=req.asr_model_key,
             asr_language=req.asr_language,
@@ -582,7 +584,10 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
         raise
     except Exception as e:
         try:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
+            p = projects_store.get_project(project_id)
+            cur = getattr(p, "subtitle_extract_run_id", None) if p else None
+            if not req.task_id or (cur and cur == req.task_id):
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"字幕提取失败: {str(e)}")

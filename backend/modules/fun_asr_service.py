@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from modules.app_paths import uploads_dir
-from modules.fun_asr_acceleration import get_fun_asr_preferred_device
+from modules.fun_asr_acceleration import get_fun_asr_preferred_device, prepare_windows_dll_search_paths
 from modules.fun_asr_model_manager import FUN_ASR_MODEL_REGISTRY, FunASRPathManager, validate_model_dir
 
 
@@ -393,13 +393,21 @@ class FunASRService:
 
     async def _load_models(self, asr_key: str, device: Optional[str] = None) -> None:
         async with self._load_lock:
+            try:
+                prepare_windows_dll_search_paths()
+            except Exception:
+                pass
+
             ok_dep, err = _ensure_dependency_ready()
             if not ok_dep:
                 raise RuntimeError(err)
 
+            explicit_device = bool((device or "").strip())
             requested_device = self._normalize_device(device)
             if not requested_device:
                 requested_device = self._normalize_device(get_fun_asr_preferred_device())
+            if not explicit_device and requested_device.startswith("cuda") and self._runtime_device == "cpu" and self._last_device_error:
+                requested_device = "cpu"
 
             asr_dir = self._resolve_model_dir(asr_key)
             asr_path = str(asr_dir)
@@ -430,45 +438,63 @@ class FunASRService:
             except Exception as e:
                 raise RuntimeError(f"missing_dependency:funasr_import_failed:{e}")
 
-            def _load_asr():
+            def _load_asr(target_device: str):
                 if asr_has_remote:
                     return AutoModel(
                         model=asr_path,
                         trust_remote_code=True,
                         remote_code="./model.py",
-                        device=requested_device,
+                        device=target_device,
                         hub="modelscope",
                     )
                 return AutoModel(
                     model=asr_path,
-                    device=requested_device,
+                    device=target_device,
                     hub="modelscope",
                 )
 
-            def _load_vad():
+            def _load_vad(target_device: str):
                 return AutoModel(
                     model=vad_path,
-                    device=requested_device,
+                    device=target_device,
                     hub="modelscope",
                 )
 
+            loop = asyncio.get_running_loop()
+            cuda_error: Optional[str] = None
             try:
-                loop = asyncio.get_running_loop()
-                asr_model = await loop.run_in_executor(None, _load_asr)
-                vad_model = await loop.run_in_executor(None, _load_vad)
+                asr_model = await loop.run_in_executor(None, _load_asr, requested_device)
+                vad_model = await loop.run_in_executor(None, _load_vad, requested_device)
+                actual_device = requested_device
             except Exception as e:
-                raise RuntimeError(f"funasr_model_load_failed:{e}")
+                err_load = f"funasr_model_load_failed:{e}"
+                if requested_device.startswith("cuda") and not explicit_device:
+                    cuda_error = err_load
+                    try:
+                        logging.getLogger("modules.fun_asr_service").warning(
+                            f"FunASR 加载到 {requested_device} 失败，将回退 CPU：{e}"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        asr_model = await loop.run_in_executor(None, _load_asr, "cpu")
+                        vad_model = await loop.run_in_executor(None, _load_vad, "cpu")
+                        actual_device = "cpu"
+                    except Exception as e2:
+                        raise RuntimeError(f"funasr_model_load_failed:{e2}")
+                else:
+                    raise RuntimeError(err_load)
 
             self._asr_key = asr_key
             self._asr_model_path = asr_path
             self._asr_model = asr_model
             self._vad_model_path = vad_path
             self._vad_model = vad_model
-            self._runtime_device = requested_device
-            self._last_device_error = None
+            self._runtime_device = actual_device
+            self._last_device_error = cuda_error
             try:
                 logging.getLogger("modules.fun_asr_service").info(
-                    f"FunASR loaded: key={asr_key} path={asr_path} device={requested_device} vad={vad_path}"
+                    f"FunASR loaded: key={asr_key} path={asr_path} device={actual_device} vad={vad_path}"
                 )
             except Exception:
                 pass

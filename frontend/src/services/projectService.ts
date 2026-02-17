@@ -349,6 +349,7 @@ export class ProjectService {
       | boolean
       | {
           force?: boolean;
+          task_id?: string | null;
           asr_provider?: "bcut" | "fun_asr";
           asr_model_key?: string | null;
           asr_language?: string | null;
@@ -364,6 +365,7 @@ export class ProjectService {
         : options
           ? {
               force: Boolean(options.force),
+              task_id: options.task_id ?? undefined,
               asr_provider: options.asr_provider,
               asr_model_key: options.asr_model_key ?? undefined,
               asr_language: options.asr_language ?? undefined,

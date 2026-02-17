@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -151,11 +152,19 @@ async def _run_in_thread(func, *args, **kwargs):
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-async def _ws(project_id: str, type_: str, phase: str, message: str, progress: Optional[int] = None) -> None:
+async def _ws(
+    project_id: str,
+    type_: str,
+    phase: str,
+    message: str,
+    progress: Optional[int] = None,
+    task_id: Optional[str] = None,
+) -> None:
     payload: Dict[str, Any] = {
         "type": type_,
         "scope": "extract_subtitle",
         "project_id": project_id,
+        "task_id": task_id,
         "phase": phase,
         "message": message,
         "timestamp": _now_ts(),
@@ -182,11 +191,33 @@ def _subtitle_meta(p: Project) -> Dict[str, Any]:
     }
 
 
+def _is_latest_subtitle_run(project_id: str, run_id: str) -> bool:
+    try:
+        p = projects_store.get_project(project_id)
+        if not p:
+            return False
+        cur = str(getattr(p, "subtitle_extract_run_id", "") or "")
+        return cur == str(run_id or "")
+    except Exception:
+        return False
+
+
+def _update_project_if_latest(project_id: str, run_id: str, updates: Dict[str, Any]) -> bool:
+    if not _is_latest_subtitle_run(project_id, run_id):
+        return False
+    try:
+        projects_store.update_project(project_id, updates)
+        return True
+    except Exception:
+        return False
+
+
 class ExtractSubtitleService:
     @staticmethod
     async def extract_subtitle(
         project_id: str,
         force: bool = False,
+        task_id: Optional[str] = None,
         asr_provider: Optional[str] = None,
         asr_model_key: Optional[str] = None,
         asr_language: Optional[str] = None,
@@ -210,42 +241,51 @@ class ExtractSubtitleService:
         subtitle_updated_by_user = bool(getattr(p, "subtitle_updated_by_user", False))
         if subtitle_source == "user" and getattr(p, "subtitle_path", None):
             raise HTTPException(status_code=409, detail="已上传字幕，无法提取；请先删除字幕")
-        if subtitle_status == "extracting":
+        if subtitle_status == "extracting" and not force:
             raise HTTPException(status_code=409, detail="正在提取中")
         if subtitle_updated_by_user and not force:
             raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
         if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
             raise HTTPException(status_code=409, detail="已存在提取字幕，若需重提请传 force=true")
 
+        run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
+
         video_path = (getattr(p, "video_path", None) or "").strip()
         if not video_path:
-            await _ws(project_id, "error", "video_missing", "未找到可用的视频文件")
+            await _ws(project_id, "error", "video_missing", "未找到可用的视频文件", task_id=run_id)
             raise HTTPException(status_code=400, detail="未找到可用的视频文件")
         video_abs = _resolve_path(video_path)
         if not video_abs.exists():
-            await _ws(project_id, "error", "video_missing", "视频文件不存在")
+            await _ws(project_id, "error", "video_missing", "视频文件不存在", task_id=run_id)
             raise HTTPException(status_code=400, detail="视频文件不存在")
 
         projects_store.update_project(project_id, {
             "subtitle_status": "extracting",
             "subtitle_source": "extracted" if subtitle_source != "user" else subtitle_source,
             "subtitle_updated_at": _now_ts(),
+            "subtitle_extract_run_id": run_id,
             "asr_provider": provider,
             "asr_model_key": model_key if provider == "fun_asr" else None,
             "asr_language": lang if provider == "fun_asr" else None,
         })
 
-        await _ws(project_id, "progress", "start", "开始提取字幕", 1)
+        await _ws(project_id, "progress", "start", "开始提取字幕", 1, task_id=run_id)
 
         if provider == "bcut":
-            await _ws(project_id, "progress", "validating_asr", "验证 ASR 服务可用性", 10)
+            await _ws(project_id, "progress", "validating_asr", "验证 ASR 服务可用性", 10, task_id=run_id)
             asr_check = await _run_in_thread(BcutASR.test_connection)
             if not asr_check.get("success", False):
-                projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                await _ws(project_id, "error", "asr_unavailable", asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(
+                    project_id,
+                    "error",
+                    "asr_unavailable",
+                    asr_check.get("error") or asr_check.get("message") or "ASR服务不可用",
+                    task_id=run_id,
+                )
                 raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
         else:
-            await _ws(project_id, "progress", "validating_funasr", "验证 FunASR 模型可用性", 10)
+            await _ws(project_id, "progress", "validating_funasr", "验证 FunASR 模型可用性", 10, task_id=run_id)
 
         audio_abs: Optional[Path] = None
         audio_web: Optional[str] = None
@@ -273,13 +313,13 @@ class ExtractSubtitleService:
             await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)
             ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
             if not ok_audio:
-                projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败")
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败", task_id=run_id)
                 raise HTTPException(status_code=500, detail="音频提取失败")
             audio_abs = audio_out
             audio_web = _to_web_path(audio_out)
-            projects_store.update_project(project_id, {"audio_path": audio_web})
-            await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45)
+            _update_project_if_latest(project_id, run_id, {"audio_path": audio_web})
+            await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45, task_id=run_id)
 
         utterances: Optional[List[Dict[str, Any]]] = None
         if provider == "bcut":
@@ -290,8 +330,8 @@ class ExtractSubtitleService:
                 try:
                     data = await _run_in_thread(asr.run)
                 except Exception as e:
-                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                    await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}", task_id=run_id)
                     raise HTTPException(status_code=500, detail="语音识别失败")
 
                 u = data.get("utterances") if isinstance(data, dict) else None
@@ -315,8 +355,8 @@ class ExtractSubtitleService:
                     overlap_ms=overlap_ms,
                 )
                 if not plans:
-                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                    await _ws(project_id, "error", "audio_split_failed", "音频分割失败")
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "audio_split_failed", "音频分割失败", task_id=run_id)
                     raise HTTPException(status_code=500, detail="音频分割失败")
 
                 old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
@@ -336,8 +376,8 @@ class ExtractSubtitleService:
                     chunk_out = chunk_dir / f"{project_id}_{plan.chunk_id}_{ts_chunks}.mp3"
                     ok = await cut_audio_mp3(audio_abs, chunk_out, start_ms=plan.start_ms, end_ms=plan.end_ms)
                     if not ok:
-                        projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                        await _ws(project_id, "error", "audio_split_failed", "音频分割失败")
+                        _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                        await _ws(project_id, "error", "audio_split_failed", "音频分割失败", task_id=run_id)
                         raise HTTPException(status_code=500, detail="音频分割失败")
                     chunk_items.append({
                         "plan": plan,
@@ -345,7 +385,7 @@ class ExtractSubtitleService:
                         "audio_web": _to_web_path(chunk_out),
                     })
 
-                projects_store.update_project(project_id, {
+                _update_project_if_latest(project_id, run_id, {
                     "chunk_audio_paths": [it["audio_web"] for it in chunk_items],
                     "chunk_results": [],
                 })
@@ -408,57 +448,209 @@ class ExtractSubtitleService:
                             prog = 55 + int((done_chunks / max(1, total_chunks)) * 25)
                             await _ws(project_id, "progress", "asr_chunk_progress", f"片段识别完成 {done_chunks}/{total_chunks}", prog)
                 except Exception as e:
-                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                    await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}", task_id=run_id)
                     raise HTTPException(status_code=500, detail="语音识别失败")
 
-                projects_store.update_project(project_id, {"chunk_results": chunk_results})
+                _update_project_if_latest(project_id, run_id, {"chunk_results": chunk_results})
                 await _ws(project_id, "progress", "reassemble", "拼接与去重中", 82)
                 utterances = dedupe_utterances(all_utterances)
         else:
-            await _ws(project_id, "progress", "funasr_start", "FunASR 识别中", 55)
+            total_ms = await get_audio_duration_ms(audio_abs)
+            if not total_ms:
+                await _ws(project_id, "progress", "funasr_start", "FunASR 识别中", 55, task_id=run_id)
 
-            def _on_progress(pct: int, msg: str) -> None:
+                def _on_progress(pct: int, msg: str) -> None:
+                    try:
+                        asyncio.create_task(_ws(project_id, "progress", "funasr_progress", msg, int(pct), task_id=run_id))
+                    except Exception:
+                        pass
+
                 try:
-                    asyncio.create_task(_ws(project_id, "progress", "funasr_progress", msg, int(pct)))
-                except Exception:
-                    pass
+                    utterances = await fun_asr_service.transcribe_to_utterances(
+                        audio_path=audio_abs,
+                        model_key=model_key,
+                        language=lang,
+                        itn=bool(itn),
+                        hotwords=hotwords_list,
+                        device=None,
+                        on_progress=_on_progress,
+                    )
+                except Exception as e:
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}", task_id=run_id)
+                    raise HTTPException(status_code=500, detail="语音识别失败")
+            else:
+                await _ws(project_id, "progress", "splitting_audio", "分割音频中", 50, task_id=run_id)
 
-            try:
-                utterances = await fun_asr_service.transcribe_to_utterances(
-                    audio_path=audio_abs,
-                    model_key=model_key,
-                    language=lang,
-                    itn=bool(itn),
-                    hotwords=hotwords_list,
-                    device=None,
-                    on_progress=_on_progress,
+                base_ms = int(float(os.environ.get("CHUNK_BASE_MINUTES", "5")) * 60 * 1000)
+                min_ms = int(float(os.environ.get("CHUNK_MIN_MINUTES", "2")) * 60 * 1000)
+                max_ms = int(float(os.environ.get("CHUNK_MAX_MINUTES", "7")) * 60 * 1000)
+                overlap_ms = int(float(os.environ.get("CHUNK_OVERLAP_SECONDS", "30")) * 1000)
+                retry_max = int(os.environ.get("ASR_RETRY_MAX", "2"))
+                backoff_base_seconds = float(os.environ.get("ASR_RETRY_BACKOFF_BASE", "2"))
+                chunk_concurrency = int(os.environ.get("FUNASR_CHUNK_CONCURRENCY", "128"))
+                chunk_concurrency = max(1, min(128, chunk_concurrency))
+
+                plans: List[AudioChunkPlan] = plan_audio_chunks(
+                    total_ms,
+                    base_ms=base_ms,
+                    min_ms=min_ms,
+                    max_ms=max_ms,
+                    overlap_ms=overlap_ms,
                 )
-            except Exception as e:
-                projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}")
-                raise HTTPException(status_code=500, detail="语音识别失败")
+                if not plans:
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "audio_split_failed", "音频分割失败", task_id=run_id)
+                    raise HTTPException(status_code=500, detail="音频分割失败")
+
+                old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
+                if isinstance(old_chunk_paths, list):
+                    for wp in old_chunk_paths:
+                        try:
+                            f = _resolve_path(str(wp))
+                            if f.exists():
+                                f.unlink()
+                        except Exception:
+                            pass
+
+                ts_chunks = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                chunk_dir = _uploads_dir() / "audios" / "chunks"
+                chunk_items: List[Dict[str, Any]] = []
+                for plan in plans:
+                    chunk_out = chunk_dir / f"{project_id}_{plan.chunk_id}_{ts_chunks}.mp3"
+                    ok = await cut_audio_mp3(audio_abs, chunk_out, start_ms=plan.start_ms, end_ms=plan.end_ms)
+                    if not ok:
+                        _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                        await _ws(project_id, "error", "audio_split_failed", "音频分割失败", task_id=run_id)
+                        raise HTTPException(status_code=500, detail="音频分割失败")
+                    chunk_items.append({
+                        "plan": plan,
+                        "audio_path": chunk_out,
+                        "audio_web": _to_web_path(chunk_out),
+                    })
+
+                _update_project_if_latest(project_id, run_id, {
+                    "chunk_audio_paths": [it["audio_web"] for it in chunk_items],
+                    "chunk_results": [],
+                })
+                await _ws(project_id, "progress", "splitting_audio", f"分割完成，共 {len(chunk_items)} 段", 50, task_id=run_id)
+
+                await _ws(
+                    project_id,
+                    "progress",
+                    "funasr_start_batch",
+                    f"开始批量 FunASR（并发 {chunk_concurrency}，队列满则排队）",
+                    55,
+                    task_id=run_id,
+                )
+                sem = asyncio.Semaphore(chunk_concurrency)
+
+                total_chunks = len(chunk_items)
+                done_chunks = 0
+                chunk_results: List[Dict[str, Any]] = []
+                all_utterances: List[Dict[str, Any]] = []
+
+                async def _funasr_one(it: Dict[str, Any]) -> Dict[str, Any]:
+                    plan: AudioChunkPlan = it["plan"]
+                    last_err: Optional[str] = None
+                    attempts = 0
+                    async with sem:
+                        for i in range(max(0, int(retry_max)) + 1):
+                            attempts = i + 1
+                            try:
+                                utt = await fun_asr_service.transcribe_to_utterances(
+                                    audio_path=Path(str(it["audio_path"])),
+                                    model_key=model_key,
+                                    language=lang,
+                                    itn=bool(itn),
+                                    hotwords=hotwords_list,
+                                    device=None,
+                                    on_progress=None,
+                                )
+                                shifted = shift_utterances(utt, plan.start_ms)
+                                return {
+                                    "chunk_id": plan.chunk_id,
+                                    "utterances": shifted,
+                                    "attempts": attempts,
+                                    "start_ms": plan.start_ms,
+                                    "end_ms": plan.end_ms,
+                                    "core_start_ms": plan.core_start_ms,
+                                    "core_end_ms": plan.core_end_ms,
+                                }
+                            except Exception as e:
+                                last_err = str(e) or "FunASR 识别失败"
+                                if i < retry_max:
+                                    await asyncio.sleep(max(0.1, float(backoff_base_seconds)) * (2 ** i))
+                    raise RuntimeError(last_err or "FunASR 识别失败")
+
+                tasks = [asyncio.create_task(_funasr_one(it)) for it in chunk_items]
+                pending = set(tasks)
+                try:
+                    while pending:
+                        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                        for t in done:
+                            exc = t.exception()
+                            if exc:
+                                for pt in pending:
+                                    try:
+                                        pt.cancel()
+                                    except Exception:
+                                        pass
+                                await asyncio.gather(*pending, return_exceptions=True)
+                                raise exc
+                            r = t.result()
+                            done_chunks += 1
+                            all_utterances.extend(r.get("utterances") or [])
+                            chunk_results.append({
+                                "chunk_id": r.get("chunk_id"),
+                                "attempts": r.get("attempts"),
+                                "utterance_count": len(r.get("utterances") or []),
+                                "start_ms": r.get("start_ms"),
+                                "end_ms": r.get("end_ms"),
+                                "core_start_ms": r.get("core_start_ms"),
+                                "core_end_ms": r.get("core_end_ms"),
+                            })
+                            prog = 55 + int((done_chunks / max(1, total_chunks)) * 25)
+                            await _ws(project_id, "progress", "funasr_chunk_progress", f"片段识别完成 {done_chunks}/{total_chunks}", prog, task_id=run_id)
+                except Exception as e:
+                    _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                    await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}", task_id=run_id)
+                    raise HTTPException(status_code=500, detail="语音识别失败")
+
+                _update_project_if_latest(project_id, run_id, {"chunk_results": chunk_results})
+                await _ws(project_id, "progress", "reassemble", "拼接与去重中", 82, task_id=run_id)
+                utterances = dedupe_utterances(all_utterances)
 
         if not isinstance(utterances, list) or not utterances:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "asr_failed", "语音识别失败")
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "asr_failed", "语音识别失败", task_id=run_id)
             raise HTTPException(status_code=500, detail="语音识别失败")
 
-        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90)
+        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90, task_id=run_id)
         srt_text = utterances_to_srt(utterances)
         compressed = _compress_srt(srt_text)
+
+        if not _is_latest_subtitle_run(project_id, run_id):
+            await _ws(project_id, "cancelled", "stale", "检测到新的字幕提取任务，本次结果已丢弃", 100, task_id=run_id)
+            p2 = projects_store.get_project(project_id) or p
+            return {
+                "segments": [],
+                "subtitle_meta": _subtitle_meta(p2),
+                "task_id": run_id,
+            }
 
         ts2 = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt"
         try:
             srt_out.write_text(compressed, encoding="utf-8")
         except Exception:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "subtitle_saved_failed", "字幕写入失败")
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "subtitle_saved_failed", "字幕写入失败", task_id=run_id)
             raise HTTPException(status_code=500, detail="字幕写入失败")
 
         web_path = _to_web_path(srt_out)
-        projects_store.update_project(project_id, {
+        _update_project_if_latest(project_id, run_id, {
             "subtitle_path": web_path,
             "subtitle_source": "extracted",
             "subtitle_status": "ready",
@@ -466,16 +658,17 @@ class ExtractSubtitleService:
             "subtitle_updated_at": _now_ts(),
             "subtitle_format": "compressed_srt_v1",
         })
-        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 95)
+        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 95, task_id=run_id)
 
         segments = _parse_srt_content(compressed)
-        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 98)
-        await _ws(project_id, "completed", "done", "提取字幕成功", 100)
+        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 98, task_id=run_id)
+        await _ws(project_id, "completed", "done", "提取字幕成功", 100, task_id=run_id)
 
         p2 = projects_store.get_project(project_id) or p
         return {
             "segments": segments,
             "subtitle_meta": _subtitle_meta(p2),
+            "task_id": run_id,
         }
 
 

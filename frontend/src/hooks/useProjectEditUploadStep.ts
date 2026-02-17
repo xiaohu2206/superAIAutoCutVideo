@@ -29,6 +29,7 @@ export interface UseProjectEditUploadStepOptions {
       | boolean
       | {
           force?: boolean;
+          task_id?: string | null;
           asr_provider?: "bcut" | "fun_asr";
           asr_model_key?: string | null;
           asr_language?: string | null;
@@ -370,10 +371,6 @@ export function useProjectEditUploadStep(
       options.showErrorText("已上传字幕，需先删除才能提取");
       return;
     }
-    if (project.subtitle_status === "extracting") {
-      options.showErrorText("正在提取中");
-      return;
-    }
     // 每次都强制重新提取，不使用缓存的音频
     let force = true;
     if (project.subtitle_updated_by_user) {
@@ -386,8 +383,15 @@ export function useProjectEditUploadStep(
     setSubtitleExtractLogs([]);
     try {
       const isFun = subtitleAsr.provider === "fun_asr";
+      const taskId =
+        globalThis.crypto &&
+        "randomUUID" in globalThis.crypto &&
+        typeof (globalThis.crypto as any).randomUUID === "function"
+          ? (globalThis.crypto as any).randomUUID()
+          : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
       await options.extractSubtitle({
         force,
+        task_id: taskId,
         asr_provider: subtitleAsr.provider,
         asr_model_key: isFun ? subtitleAsr.modelKey : null,
         asr_language: isFun ? subtitleAsr.language : "中文",
