@@ -47,6 +47,14 @@ class TaskCancelStore:
             if not s:
                 self._procs.pop(k, None)
 
+    def is_cancelled(self, scope: str, project_id: str, task_id: str) -> bool:
+        k = self._key(scope, project_id, task_id)
+        with self._lock:
+            ev = self._events.get(k)
+            if ev is None:
+                return False
+            return ev.is_set()
+
     async def cancel(self, scope: str, project_id: str, task_id: str) -> int:
         k = self._key(scope, project_id, task_id)
         ev = self.get_event(scope, project_id, task_id)

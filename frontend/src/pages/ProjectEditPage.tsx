@@ -37,6 +37,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     mergeProgress,
     merging,
     refreshProject,
+    extractScenes,
+    sceneResult,
+    extractingScene,
+    sceneExtractProgress,
   } = useProjectDetail(projectId);
 
   const [currentStep, setCurrentStep] = useState<"upload" | "generate">("upload");
@@ -98,6 +102,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     reorderVideos,
     mergeVideos,
     refreshProject,
+    extractScenes,
+    sceneResult,
+    extractingScene,
+    sceneExtractProgress,
     showSuccess,
     showErrorText,
     showError,

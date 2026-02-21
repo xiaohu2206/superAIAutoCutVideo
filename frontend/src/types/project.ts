@@ -88,6 +88,7 @@ export interface Project {
   id: string; // 项目ID
   name: string; // 项目名称
   description?: string; // 项目描述
+  project_type?: "subtitle" | "visual";
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number;
@@ -109,6 +110,8 @@ export interface Project {
   asr_model_key?: string | null;
   asr_language?: string | null;
   output_video_path?: string; // 输出视频文件路径
+  scenes_path?: string; // 镜头分割结果路径
+  scenes_updated_at?: string; // 镜头更新时间
   // 剪映草稿相关
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径
   jianying_draft_last_dir_web?: string; // 最新草稿目录Web路径
@@ -148,6 +151,7 @@ export interface ProjectLatestTasks {
 export interface CreateProjectRequest {
   name: string;
   description?: string;
+  project_type?: "subtitle" | "visual";
   narration_type?: NarrationType;
 }
 
@@ -157,6 +161,7 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
+  project_type?: "subtitle" | "visual";
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number;

@@ -24,6 +24,7 @@ class Project(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    project_type: str = Field(default="subtitle") # subtitle | visual
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
     original_ratio: int = Field(default=70)
@@ -51,6 +52,10 @@ class Project(BaseModel):
     chunk_results: List[Dict[str, Any]] = Field(default_factory=list)
     plot_analysis_path: Optional[str] = None
     output_video_path: Optional[str] = None
+    scenes_path: Optional[str] = None
+    scenes_updated_at: Optional[str] = None
+    scenes_raw_path: Optional[str] = None
+    scenes_raw_updated_at: Optional[str] = None
     # 剪映草稿相关字段
     jianying_draft_last_dir: Optional[str] = None
     jianying_draft_last_dir_web: Optional[str] = None
@@ -127,6 +132,16 @@ class ProjectsStore:
                                 p["chunk_audio_paths"] = []
                             if "chunk_results" not in p:
                                 p["chunk_results"] = []
+                            if "project_type" not in p:
+                                p["project_type"] = "subtitle"
+                            if "scenes_path" not in p:
+                                p["scenes_path"] = None
+                            if "scenes_updated_at" not in p:
+                                p["scenes_updated_at"] = None
+                            if "scenes_raw_path" not in p:
+                                p["scenes_raw_path"] = None
+                            if "scenes_raw_updated_at" not in p:
+                                p["scenes_raw_updated_at"] = None
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -163,7 +178,7 @@ class ProjectsStore:
         with self._lock:
             return self._projects.get(project_id)
 
-    def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说") -> Project:
+    def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说", project_type: str = "subtitle") -> Project:
         now = datetime.now().isoformat()
         new_id = str(uuid.uuid4())
         effective_narration_type = narration_type or "短剧解说"
@@ -171,6 +186,7 @@ class ProjectsStore:
             id=new_id,
             name=name,
             description=description,
+            project_type=project_type,
             narration_type=effective_narration_type,
             script_length=self._get_default_script_length(effective_narration_type),
             script_language="zh",
@@ -211,6 +227,7 @@ class ProjectsStore:
             for key in [
                 "name",
                 "description",
+                "project_type",
                 "narration_type",
                 "script_length",
                 "original_ratio",
@@ -236,6 +253,10 @@ class ProjectsStore:
                 "chunk_results",
                 "plot_analysis_path",
                 "output_video_path",
+                "scenes_path",
+                "scenes_updated_at",
+                "scenes_raw_path",
+                "scenes_raw_updated_at",
                 "jianying_draft_last_dir",
                 "jianying_draft_last_dir_web",
                 "jianying_draft_dirs",

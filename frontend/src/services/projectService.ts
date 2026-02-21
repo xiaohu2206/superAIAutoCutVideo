@@ -10,6 +10,7 @@ import type {
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
+import type { SceneResult } from "../types/scene";
 import { apiClient, type ApiResponse } from "./clients";
 
 /**
@@ -508,6 +509,16 @@ export class ProjectService {
   }
 
   /**
+   * 获取项目原始视频播放链接（后端直接返回文件）
+   */
+  getVideoStreamUrl(projectId: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/video/stream`;
+    return cacheBust !== undefined && cacheBust !== null
+      ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
+      : base;
+  }
+
+  /**
    * 获取已合并视频播放链接（后端直接返回文件）
    */
   getMergedVideoUrl(projectId: string, cacheBust?: string | number): string {
@@ -547,6 +558,52 @@ export class ProjectService {
       throw new Error(msg);
     }
     return await res.blob();
+  }
+
+  async extractScenes(
+    projectId: string,
+    options?: {
+      force?: boolean;
+      task_id?: string | null;
+    }
+  ): Promise<{ task_id: string; status: string; message: string }> {
+    const payload = options
+      ? {
+          force: Boolean(options.force),
+          task_id: options.task_id ?? undefined,
+        }
+      : undefined;
+    const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
+      `/api/projects/${projectId}/extract-scene`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error("镜头提取失败：响应为空");
+    }
+    return response.data;
+  }
+
+  async getScenes(projectId: string): Promise<SceneResult> {
+     // Assuming we can get the JSON content via a new API or just fetching the static file if we have the path.
+     // But `projects` API returns `scenes_path` which is a web path.
+     // We can just fetch that URL.
+     // However, a dedicated API is better for error handling.
+     // Let's assume we use a dedicated API or just `fetch`.
+     // Since I didn't create a specific GET /scenes endpoint in backend, 
+     // but the project object has `scenes_path`.
+     // I should probably add `getScenes` in backend or just use `getProject` and fetch the file.
+     // Let's add `getScenes` to backend `project_routes.py`.
+     const response: any = await apiClient.get<ApiResponse<SceneResult>>(
+       `/api/projects/${projectId}/scenes`
+     );
+     return response.data;
+  }
+
+  async getSceneStatus(projectId: string, taskId: string): Promise<any> {
+    const response = await apiClient.get<ApiResponse<any>>(
+      `/api/projects/${projectId}/scene-status/${taskId}`
+    );
+    return response.data;
   }
 }
 

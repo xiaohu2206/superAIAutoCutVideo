@@ -43,6 +43,10 @@ export interface UseProjectEditUploadStepOptions {
   reorderVideos: (videoPaths: string[]) => Promise<void>;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  sceneResult: any | null;
+  extractingScene: boolean;
+  sceneExtractProgress: number;
   showSuccess: (text: string, durationSec?: number) => void;
   showErrorText: (text: string, durationSec?: number) => void;
   showError: (err: unknown, fallback: string) => void | Promise<void>;
@@ -85,6 +89,10 @@ export interface UseProjectEditUploadStepReturn {
   onReloadSubtitle: () => void;
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
+  onExtractScenes: () => void;
+  extractingScene: boolean;
+  sceneExtractProgress: number;
+  sceneResult: any | null;
 }
 
 export function useProjectEditUploadStep(
@@ -470,6 +478,20 @@ export function useProjectEditUploadStep(
     }
   }, [options, subtitleDraft]);
 
+  const onExtractScenes = useCallback(async () => {
+    if (!options.project) return;
+    if (!options.project.video_path) {
+      options.showErrorText("请先上传视频文件");
+      return;
+    }
+    try {
+      await options.extractScenes({ force: true });
+      options.showSuccess("镜头提取任务已提交");
+    } catch (err) {
+      options.showError(err, "镜头提取失败");
+    }
+  }, [options]);
+
   return {
     showAdvancedConfig,
     setShowAdvancedConfig,
@@ -507,5 +529,9 @@ export function useProjectEditUploadStep(
     onReloadSubtitle,
     onSaveSubtitle,
     onSubtitleDraftChange: setSubtitleDraft,
+    onExtractScenes,
+    extractingScene: options.extractingScene,
+    sceneExtractProgress: options.sceneExtractProgress,
+    sceneResult: options.sceneResult,
   };
 }
