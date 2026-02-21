@@ -113,7 +113,13 @@ class TransNetV2:
 
         return single_frame_pred[:len(frames)], all_frames_pred[:len(frames)]  # remove extra padded frames
 
-    def predict_video(self, video_fn: str, progress_callback: Optional[Callable[[float], None]] = None):
+    def predict_video(
+        self,
+        video_fn: str,
+        progress_callback: Optional[Callable[[float], None]] = None,
+        start_time: Optional[float] = None,
+        duration: Optional[float] = None,
+    ):
         try:
             import ffmpeg
         except ModuleNotFoundError:
@@ -122,17 +128,17 @@ class TransNetV2:
                                       "install python wrapper by `pip install ffmpeg-python`.")
 
         # print("[TransNetV2] Extracting frames from {}".format(video_fn))
-        start_time = time.time()
+        start_ts = time.time()
         
         # We can't easily get progress from ffmpeg stdout capture this way without complex parsing
         # So we report 0-10% for ffmpeg extraction, 10-100% for prediction
         if progress_callback:
             progress_callback(1.0)
-            
-        video_stream, err = ffmpeg.input(video_fn).output(
+        inp = ffmpeg.input(video_fn, ss=start_time, t=duration) if (start_time is not None or duration is not None) else ffmpeg.input(video_fn)
+        video_stream, err = inp.output(
             "pipe:", format="rawvideo", pix_fmt="rgb24", s="48x27"
         ).run(capture_stdout=True, capture_stderr=True)
-        # print("[TransNetV2] Done in {:.2f}s".format(time.time() - start_time))
+        # print("[TransNetV2] Done in {:.2f}s".format(time.time() - start_ts))
 
         video = np.frombuffer(video_stream, np.uint8).reshape([-1, 27, 48, 3])
         
