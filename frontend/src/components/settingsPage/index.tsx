@@ -9,6 +9,7 @@ import MonitorSection from "./components/MonitorSection";
 import StorageSettingsSection from "./components/StorageSettingsSection";
 import { TtsSettings } from "./components/tts/TtsSettings";
 import SubtitleAsrSettings from "@/features/subtitleAsr/components/SubtitleAsrSettings";
+import { VisionModelSettings } from "@/features/visionModel/components/VisionModelSettings";
 import { GlobalParamsSettings } from "./components/GlobalParamsSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
@@ -106,6 +107,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         return <JianyingDraftPathSection />;
       case "tts":
         return <TtsSettings />;
+      case "visionModel":
+        return <VisionModelSettings />;
       case "subtitleAsr":
         return <SubtitleAsrSettings />;
       case "storage":

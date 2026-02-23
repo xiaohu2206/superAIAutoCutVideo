@@ -565,12 +565,16 @@ export class ProjectService {
     options?: {
       force?: boolean;
       task_id?: string | null;
+      analyzeVision?: boolean;
+      visionMode?: string;
     }
   ): Promise<{ task_id: string; status: string; message: string }> {
     const payload = options
       ? {
           force: Boolean(options.force),
           task_id: options.task_id ?? undefined,
+          analyzeVision: Boolean(options.analyzeVision),
+          visionMode: options.visionMode ?? "no_subtitles",
         }
       : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(

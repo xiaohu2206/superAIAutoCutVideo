@@ -41,6 +41,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     sceneResult,
     extractingScene,
     sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
   } = useProjectDetail(projectId);
 
   const [currentStep, setCurrentStep] = useState<"upload" | "generate">("upload");
@@ -106,6 +108,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     sceneResult,
     extractingScene,
     sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
     showSuccess,
     showErrorText,
     showError,
@@ -222,4 +226,3 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
 };
 
 export default ProjectEditPage;
-

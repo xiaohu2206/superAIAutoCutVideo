@@ -410,6 +410,8 @@ class ExtractSubtitleRequest(BaseModel):
     asr_language: Optional[str] = None
     itn: bool = True
     hotwords: Optional[List[str]] = None
+    analyzeVision: bool = False
+    visionMode: str = "no_subtitles"
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -626,6 +628,8 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
             project_id=project_id,
             force=bool(req.force),
             task_id=req.task_id,
+            analyze_vision=bool(req.analyzeVision),
+            vision_mode=req.visionMode,
         )
         return {
             "message": "镜头提取任务已提交",

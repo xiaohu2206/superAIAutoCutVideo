@@ -183,6 +183,8 @@ export interface UseProjectDetailReturn {
   sceneResult: any | null; // using any for now or define SceneResult
   extractingScene: boolean;
   sceneExtractProgress: number;
+  sceneExtractMessage: string;
+  sceneExtractPhase: string | null;
 }
 
 /**
@@ -203,6 +205,8 @@ export const useProjectDetail = (
   const [sceneResult, setSceneResult] = useState<any | null>(null);
   const [extractingScene, setExtractingScene] = useState(false);
   const [sceneExtractProgress, setSceneExtractProgress] = useState(0);
+  const [sceneExtractMessage, setSceneExtractMessage] = useState<string>("");
+  const [sceneExtractPhase, setSceneExtractPhase] = useState<string | null>(null);
 
   /**
    * 获取项目详情
@@ -667,11 +671,13 @@ export const useProjectDetail = (
     }
   }, [projectId, fetchProject]);
 
-  const extractScenes = useCallback(async (options?: { force?: boolean; task_id?: string | null }) => {
+  const extractScenes = useCallback(async (options?: { force?: boolean; task_id?: string | null; analyzeVision?: boolean; visionMode?: string }) => {
     if (!project) return;
     setError(null);
     setExtractingScene(true);
     setSceneExtractProgress(0);
+    setSceneExtractMessage("");
+    setSceneExtractPhase(null);
     try {
         const res = await projectService.extractScenes(project.id, options);
         // Start polling for progress
@@ -684,17 +690,23 @@ export const useProjectDetail = (
                 if (status.status === "completed") {
                     setExtractingScene(false);
                     setSceneExtractProgress(100);
+                    setSceneExtractMessage(status.message || "镜头提取完成");
+                    setSceneExtractPhase(status.phase || null);
                     // Fetch result
                     const scenes = await projectService.getScenes(project.id);
                     setSceneResult(scenes);
                     // Refresh project
                     fetchProject(project.id);
-                } else if (status.status === "failed") {
+                } else if (status.status === "failed" || status.status === "cancelled") {
                     setExtractingScene(false);
                     setError(status.message || "镜头提取失败");
+                    setSceneExtractMessage(status.message || "镜头提取失败");
+                    setSceneExtractPhase(status.phase || null);
                 } else {
                     // processing
                     setSceneExtractProgress(status.progress || 0);
+                    setSceneExtractMessage(status.message || "");
+                    setSceneExtractPhase(status.phase || null);
                     setTimeout(poll, 1000);
                 }
             } catch (e) {
@@ -707,6 +719,8 @@ export const useProjectDetail = (
     } catch (err) {
         setError(getErrorMessage(err, "镜头提取失败"));
         setExtractingScene(false);
+        setSceneExtractMessage(getErrorMessage(err, "镜头提取失败"));
+        setSceneExtractPhase(null);
         throw err;
     }
   }, [project, fetchProject]);
@@ -749,5 +763,7 @@ export const useProjectDetail = (
     sceneResult,
     extractingScene,
     sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
   };
 };

@@ -59,11 +59,13 @@ interface ProjectEditUploadStepProps {
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
   onNextStep: () => void;
-
-  onExtractScenes: () => void;
+  
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string }) => void;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
+  sceneExtractMessage: string;
+  sceneExtractPhase: string | null;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -114,6 +116,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   extractingScene,
   sceneExtractProgress,
   sceneResult,
+  sceneExtractMessage,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
@@ -129,6 +132,9 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
     startTime: 0,
     endTime: 0,
   });
+
+  const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("no_subtitles");
+  const analyzeVision = true;
 
   return (
     <>
@@ -223,8 +229,37 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
           
           {project.project_type === "visual" ? (
-             <button
-                onClick={onExtractScenes}
+             <div className="flex flex-col gap-2 items-end">
+               <div className="flex items-center gap-2 text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded">
+                  <span className="text-gray-600 select-none">视觉分析(Moondream)</span>
+                  <span className="text-gray-300">|</span>
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                    <input
+                      type="radio"
+                      name="visionMode"
+                      value="no_subtitles"
+                      checked={visionMode === "no_subtitles"}
+                      onChange={e => setVisionMode(e.target.value as any)}
+                      disabled={extractingScene}
+                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    仅无字幕镜头
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                    <input
+                      type="radio"
+                      name="visionMode"
+                      value="all"
+                      checked={visionMode === "all"}
+                      onChange={e => setVisionMode(e.target.value as any)}
+                      disabled={extractingScene}
+                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    所有镜头
+                  </label>
+               </div>
+               <button
+                onClick={() => onExtractScenes({ analyzeVision, visionMode })}
                 disabled={
                   subtitleLoading ||
                   extractingSubtitle ||
@@ -242,6 +277,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   "提取镜头"
                 )}
               </button>
+             </div>
           ) : (
               <button
                 onClick={onExtractSubtitle}
@@ -306,6 +342,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                 style={{ width: `${Math.round(sceneExtractProgress)}%` }}
               />
             </div>
+            {sceneExtractMessage ? (
+              <div className="mt-2 text-xs text-gray-700 break-all">
+                {sceneExtractMessage}
+              </div>
+            ) : null}
           </div>
         )}
         

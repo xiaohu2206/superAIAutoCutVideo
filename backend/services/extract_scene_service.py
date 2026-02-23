@@ -20,6 +20,7 @@ from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 from modules.transnetv2 import TransNetV2
 from services.extract_subtitle_service import extract_subtitle_service, _resolve_path, _uploads_dir, _to_web_path
+from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,8 @@ class ExtractSceneService:
         project_id: str,
         force: bool = False,
         task_id: Optional[str] = None,
+        analyze_vision: bool = False,
+        vision_mode: str = "no_subtitles",
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -325,6 +328,33 @@ class ExtractSceneService:
                 
                 optimized_scenes = self._optimize_scenes(scenes, fps, current_p)
                 
+                # 4.5 视觉分析 (Moondream)
+                if analyze_vision:
+                    try:
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=90,
+                            message="准备进行视觉分析...",
+                        )
+                        optimized_scenes = await vision_frame_analyzer.analyze_scenes(
+                            project_id=project_id,
+                            video_path=str(video_abs_path),
+                            scenes=optimized_scenes,
+                            mode=vision_mode,
+                            task_id=task_id
+                        )
+                    except Exception as e:
+                        logger.error(f"Vision analysis failed: {e}")
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            message=f"视觉分析失败: {str(e)} (继续保存结果)",
+                        )
+
                 # 5. 保存结果
                 # 保存为 json
                 result_data = {
