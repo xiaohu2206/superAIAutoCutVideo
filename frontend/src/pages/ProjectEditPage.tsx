@@ -30,6 +30,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     subtitleLoading,
     deleteVideoItem,
     reorderVideos,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,
@@ -118,6 +120,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
   const generateStep = useProjectEditGenerateStep({
     project,
     extractingSubtitle: uploadStep.extractingSubtitle,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,

@@ -29,6 +29,7 @@ class Project(BaseModel):
     script_length: Optional[str] = None
     original_ratio: int = Field(default=70)
     script_language: str = Field(default="zh")
+    copywriting_word_count: Optional[int] = None
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -50,7 +51,8 @@ class Project(BaseModel):
     audio_path: Optional[str] = None
     chunk_audio_paths: List[str] = Field(default_factory=list)
     chunk_results: List[Dict[str, Any]] = Field(default_factory=list)
-    plot_analysis_path: Optional[str] = None
+    narration_copywriting: Optional[Dict[str, Any]] = None
+    narration_copywriting_path: Optional[str] = None
     output_video_path: Optional[str] = None
     scenes_path: Optional[str] = None
     scenes_updated_at: Optional[str] = None
@@ -132,6 +134,10 @@ class ProjectsStore:
                                 p["chunk_audio_paths"] = []
                             if "chunk_results" not in p:
                                 p["chunk_results"] = []
+                            if "narration_copywriting" not in p:
+                                p["narration_copywriting"] = None
+                            if "narration_copywriting_path" not in p:
+                                p["narration_copywriting_path"] = None
                             if "project_type" not in p:
                                 p["project_type"] = "subtitle"
                             if "scenes_path" not in p:
@@ -206,7 +212,8 @@ class ProjectsStore:
             audio_path=None,
             chunk_audio_paths=[],
             chunk_results=[],
-            plot_analysis_path=None,
+            narration_copywriting=None,
+            narration_copywriting_path=None,
             output_video_path=None,
             script=None,
             created_at=now,
@@ -232,6 +239,7 @@ class ProjectsStore:
                 "script_length",
                 "original_ratio",
                 "script_language",
+                "copywriting_word_count",
                 "status",
                 "video_path",
                 "video_paths",
@@ -251,7 +259,8 @@ class ProjectsStore:
                 "audio_path",
                 "chunk_audio_paths",
                 "chunk_results",
-                "plot_analysis_path",
+                "narration_copywriting",
+                "narration_copywriting_path",
                 "output_video_path",
                 "scenes_path",
                 "scenes_updated_at",
@@ -262,7 +271,11 @@ class ProjectsStore:
                 "jianying_draft_dirs",
                 "script",
             ]:
-                if key in updates and updates[key] is not None:
+                if key not in updates:
+                    continue
+                if key == "copywriting_word_count":
+                    data[key] = updates[key]
+                elif updates[key] is not None:
                     data[key] = updates[key]
             data["updated_at"] = datetime.now().isoformat()
             try:

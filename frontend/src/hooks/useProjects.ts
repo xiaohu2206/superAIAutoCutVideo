@@ -5,7 +5,9 @@ import { projectService } from "../services/projectService";
 import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
 import type {
   CreateProjectRequest,
+  GenerateCopywritingRequest,
   GenerateScriptRequest,
+  NarrationCopywriting,
   Project,
   SubtitleMeta,
   SubtitleSegment,
@@ -171,6 +173,8 @@ export interface UseProjectDetailReturn {
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
   reorderVideos: (orderedPaths: string[]) => Promise<void>;
+  generateCopywriting: (data: GenerateCopywritingRequest) => Promise<NarrationCopywriting>;
+  saveCopywriting: (copywriting: NarrationCopywriting) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   generateVideo: () => Promise<{ task_id: string; scope?: string } | null>;
@@ -486,6 +490,50 @@ export const useProjectDetail = (
   }, [project]);
 
   /**
+   * 生成解说文案
+   */
+  const generateCopywriting = useCallback(
+    async (data: GenerateCopywritingRequest): Promise<NarrationCopywriting> => {
+      if (!project) {
+        throw new Error("项目不存在或未加载");
+      }
+      setError(null);
+      setLoading(true);
+      try {
+        const copywriting = await projectService.generateCopywriting(data);
+        setProject((prev) => (prev ? { ...prev, narration_copywriting: copywriting } : null));
+        return copywriting;
+      } catch (err) {
+        setError(getErrorMessage(err, "生成解说文案失败"));
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [project]
+  );
+
+  /**
+   * 保存解说文案
+   */
+  const saveCopywriting = useCallback(
+    async (copywriting: NarrationCopywriting) => {
+      if (!project) return;
+      setError(null);
+      try {
+        const savedCopywriting = await projectService.saveCopywriting(project.id, copywriting);
+        setProject((prev) =>
+          prev ? { ...prev, narration_copywriting: savedCopywriting } : null
+        );
+      } catch (err) {
+        setError(getErrorMessage(err, "保存解说文案失败"));
+        throw err;
+      }
+    },
+    [project]
+  );
+
+  /**
    * 生成解说脚本
    */
   const generateScript = useCallback(
@@ -751,6 +799,8 @@ export const useProjectDetail = (
     deleteVideo,
     deleteVideoItem,
     reorderVideos,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,

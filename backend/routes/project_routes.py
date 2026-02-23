@@ -38,6 +38,7 @@ from modules.projects_store import projects_store
 from modules.video_processor import video_processor
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
+from services.generate_copywriting_service import generate_copywriting_service
 from services.extract_subtitle_service import extract_subtitle_service
 from services.extract_scene_service import extract_scene_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
@@ -287,7 +288,7 @@ def cleanup_project_assets(p) -> None:
     _add(getattr(p, "merged_video_path", None))
     _add(getattr(p, "subtitle_path", None))
     _add(getattr(p, "audio_path", None))
-    _add(getattr(p, "plot_analysis_path", None))
+    _add(getattr(p, "narration_copywriting_path", None))
     _add(getattr(p, "output_video_path", None))
     _add(getattr(p, "jianying_draft_last_dir", None))
     _add(getattr(p, "jianying_draft_last_dir_web", None))
@@ -315,6 +316,7 @@ def cleanup_project_assets(p) -> None:
     remove_matching_glob(up / "videos", f"{getattr(p, 'id', '')}_video_*")
     remove_matching_glob(up / "subtitles", f"{getattr(p, 'id', '')}_subtitle_*")
     remove_matching_glob(up / "audios", f"{getattr(p, 'id', '')}_audio_*")
+    remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_copywriting_*")
     remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_analysis_*")
 
 
@@ -332,11 +334,13 @@ class UpdateProjectRequest(BaseModel):
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
     script_language: Optional[str] = None
+    copywriting_word_count: Optional[int] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     audio_path: Optional[str] = None
-    plot_analysis_path: Optional[str] = None
+    narration_copywriting: Optional[Dict[str, Any]] = None
+    narration_copywriting_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
 
 
@@ -396,6 +400,13 @@ class UpdateVideoOrderRequest(BaseModel):
 
 
 class GenerateScriptRequest(BaseModel):
+    project_id: str
+    video_path: str
+    subtitle_path: Optional[str] = None
+    narration_type: str
+
+
+class GenerateCopywritingRequest(BaseModel):
     project_id: str
     video_path: str
     subtitle_path: Optional[str] = None
@@ -587,6 +598,54 @@ async def generate_script(req: GenerateScriptRequest):
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"脚本生成失败: {str(e)}")
+
+
+@router.post("/generate-copywriting")
+async def generate_copywriting(req: GenerateCopywritingRequest):
+    try:
+        try:
+            logger.info(
+                "route generate-copywriting project_id=%s video_path=%s subtitle_path=%s narration_type=%s",
+                req.project_id,
+                req.video_path,
+                req.subtitle_path,
+                (req.narration_type or "")[:50],
+            )
+        except Exception:
+            pass
+        return await generate_copywriting_service.generate_copywriting(
+            project_id=req.project_id,
+            video_path=req.video_path,
+            subtitle_path=req.subtitle_path,
+            narration_type=req.narration_type,
+        )
+    except HTTPException as e:
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "文案生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        projects_store.update_project(req.project_id, {"status": "failed"})
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": f"文案生成失败: {str(e)}",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"文案生成失败: {str(e)}")
 
 
 @router.post("/{project_id}/extract-subtitle")
@@ -1787,6 +1846,10 @@ class SaveScriptRequest(BaseModel):
     script: Dict[str, Any]
 
 
+class SaveCopywritingRequest(BaseModel):
+    copywriting: Dict[str, Any]
+
+
 @router.post("/{project_id}/script")
 async def save_script(project_id: str, req: SaveScriptRequest):
     p = projects_store.get_project(project_id)
@@ -1804,6 +1867,44 @@ async def save_script(project_id: str, req: SaveScriptRequest):
     return {
         "message": "脚本保存成功",
         "data": script,
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/copywriting")
+async def save_copywriting(project_id: str, req: SaveCopywritingRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    copywriting = req.copywriting
+    if not isinstance(copywriting, dict):
+        raise HTTPException(status_code=400, detail="文案格式错误")
+    if not str(copywriting.get("content", "")).strip():
+        raise HTTPException(status_code=400, detail="文案内容不能为空")
+
+    try:
+        out_dir = uploads_dir() / "analyses"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = out_dir / f"{project_id}_copywriting_{ts}.json"
+        out_path.write_text(
+            json.dumps(copywriting, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        web_path = to_web_path(out_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文案保存失败: {str(e)}")
+
+    p2 = projects_store.update_project(project_id, {
+        "narration_copywriting": copywriting,
+        "narration_copywriting_path": web_path,
+    })
+    if not p2:
+        raise HTTPException(status_code=500, detail="服务器错误")
+
+    return {
+        "message": "文案保存成功",
+        "data": copywriting,
         "timestamp": now_ts(),
     }
 
@@ -1955,6 +2056,7 @@ async def get_project_running_tasks(project_id: str):
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = {
+        "generate_copywriting": task_progress_store.get_latest_running("generate_copywriting", project_id),
         "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
@@ -1973,6 +2075,7 @@ async def get_project_latest_tasks(project_id: str):
         return {
             "message": "项目不存在",
             "data": {
+                "generate_copywriting": None,
                 "generate_script": None,
                 "generate_video": None,
                 "generate_jianying_draft": None,
@@ -1982,6 +2085,7 @@ async def get_project_latest_tasks(project_id: str):
     return {
         "message": "获取任务进度",
         "data": {
+            "generate_copywriting": task_progress_store.get_state("generate_copywriting", project_id),
             "generate_script": task_progress_store.get_state("generate_script", project_id),
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),

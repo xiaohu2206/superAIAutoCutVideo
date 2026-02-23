@@ -11,11 +11,7 @@ from services.ai_service import ai_service
 
 from .constants import MAX_SUBTITLE_ITEMS_PER_CALL, SOFT_INPUT_FACTOR
 from .length_planner import parse_script_length_selection, allocate_output_counts
-from .plot_analysis import (
-    generate_plot_analysis,
-    generate_plot_analysis_pipeline,
-    _filter_plot_analysis_by_time,
-)
+from .copywriting_builder import generate_copywriting_from_subtitles
 from .script_builder import _generate_script_chunk, _merge_items, _refine_full_script
 from .subtitle_utils import compute_subtitle_chunks, _parse_srt_subtitles, _parse_timestamp_pair
 
@@ -24,27 +20,28 @@ logger = logging.getLogger(__name__)
 
 class ScriptGenerationService:
     @staticmethod
-    async def generate_plot_analysis(subtitle_content: str) -> str:
-        return await generate_plot_analysis(subtitle_content)
-
-    @staticmethod
-    async def generate_plot_analysis_pipeline(
+    async def generate_copywriting_pipeline(
         subtitle_content: str,
-        chunk_chars_max: int = 15000,
-        overlap_ratio: float = 0.12,
-        max_points_per_chunk: int = 20,
+        drama_name: str,
+        project_id: Optional[str] = None,
+        script_language: Optional[str] = None,
+        script_length: Optional[str] = None,
+        copywriting_word_count: Optional[int] = None,
     ) -> str:
-        return await generate_plot_analysis_pipeline(
-            subtitle_content,
-            chunk_chars_max,
-            overlap_ratio,
-            max_points_per_chunk,
+        """使用提示词模板生成纯文本解说文案。"""
+        return await generate_copywriting_from_subtitles(
+            subtitle_content=subtitle_content,
+            drama_name=drama_name,
+            project_id=project_id,
+            script_language=script_language,
+            script_length=script_length,
+            copywriting_word_count=copywriting_word_count,
         )
 
     @staticmethod
     async def generate_script_json(
         drama_name: str,
-        plot_analysis: str,
+        copywriting_text: str,
         subtitle_content: str,
         project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -103,16 +100,13 @@ class ScriptGenerationService:
 
         async def generate_one(chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
             async with sem:
-                local_plot = _filter_plot_analysis_by_time(
-                    plot_analysis, chunk["start"], chunk["end"]
-                )
                 return await _generate_script_chunk(
                     chunk["idx"],
                     len(chunks),
                     chunk["start"],
                     chunk["end"],
                     chunk["subs"],
-                    local_plot,
+                    copywriting_text,
                     drama_name,
                     project_id,
                     per_call_counts[int(chunk["idx"])],
@@ -133,7 +127,7 @@ class ScriptGenerationService:
             final_items = await _refine_full_script(
                 merged_items,
                 drama_name,
-                plot_analysis,
+                copywriting_text,
                 None,
                 effective_target,
                 original_ratio,

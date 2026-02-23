@@ -5,6 +5,10 @@ import {
 } from "lucide-react";
 
 interface ScriptEditorProps {
+  editedCopywriting: string;
+  setEditedCopywriting: (copywriting: string) => void;
+  isSavingCopywriting: boolean;
+  handleSaveCopywriting: () => void;
   editedScript: string;
   setEditedScript: (script: string) => void;
   isSaving: boolean;
@@ -12,6 +16,10 @@ interface ScriptEditorProps {
 }
 
 const ScriptEditor: React.FC<ScriptEditorProps> = ({
+  editedCopywriting,
+  setEditedCopywriting,
+  isSavingCopywriting,
+  handleSaveCopywriting,
   editedScript,
   setEditedScript,
   isSaving,
@@ -19,6 +27,46 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({
 }) => {
   return (
     <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900">解说文案</h2>
+        <button
+          onClick={handleSaveCopywriting}
+          disabled={!editedCopywriting.trim() || isSavingCopywriting}
+          className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSavingCopywriting ? (
+            <>
+              <Loader className="h-4 w-4 mr-2 animate-spin" />
+              保存中...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </div>
+
+      <p className="text-sm text-gray-600">
+        点击“生成解说文案”后，文案 JSON 会显示在下方，您可以修改后保存。
+      </p>
+
+      <div className="relative">
+        <textarea
+          value={editedCopywriting}
+          onChange={(e) => setEditedCopywriting(e.target.value)}
+          placeholder="文案数据将以 JSON 格式显示在这里..."
+          className="w-full h-72 px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all resize-none"
+        />
+        {editedCopywriting && (
+          <div className="absolute top-2 right-2 bg-gray-100 px-2 py-1 rounded text-xs text-gray-600">
+            JSON 格式
+          </div>
+        )}
+      </div>
+
+      <hr className="border-gray-200" />
+
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">视频脚本</h2>
         <button
@@ -40,7 +88,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({
       </div>
 
       <p className="text-sm text-gray-600">
-        点击"生成解说脚本"后，脚本数据将显示在下方的编辑器中，您可以修改后保存。
+        点击“生成解说脚本”后，脚本数据将显示在下方编辑器中，您可以修改后保存。
       </p>
 
       {/* JSON 编辑器 */}

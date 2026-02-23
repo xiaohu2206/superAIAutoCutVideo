@@ -57,6 +57,15 @@ export interface VideoScript {
   };
 }
 
+export interface NarrationCopywriting {
+  version: string;
+  title?: string;
+  narration_type?: string;
+  content: string;
+  generated_at?: string;
+  metadata?: Record<string, any>;
+}
+
 export type SubtitleSource = null | "user" | "extracted";
 export type SubtitleStatus = null | "none" | "extracting" | "ready" | "failed";
 
@@ -93,6 +102,7 @@ export interface Project {
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number;
   script_language?: ScriptLanguage;
+  copywriting_word_count?: number | null;
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -109,6 +119,8 @@ export interface Project {
   asr_provider?: "bcut" | "fun_asr";
   asr_model_key?: string | null;
   asr_language?: string | null;
+  narration_copywriting?: NarrationCopywriting;
+  narration_copywriting_path?: string;
   output_video_path?: string; // 输出视频文件路径
   scenes_path?: string; // 镜头分割结果路径
   scenes_updated_at?: string; // 镜头更新时间
@@ -134,12 +146,14 @@ export interface TaskProgressState {
 }
 
 export interface ProjectRunningTasks {
+  generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
+  generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
@@ -166,6 +180,7 @@ export interface UpdateProjectRequest {
   script_length?: ScriptLengthOption;
   original_ratio?: number;
   script_language?: ScriptLanguage;
+  copywriting_word_count?: number | null;
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];
@@ -176,6 +191,8 @@ export interface UpdateProjectRequest {
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;
+  narration_copywriting?: NarrationCopywriting;
+  narration_copywriting_path?: string;
   output_video_path?: string;
   script?: VideoScript;
 }
@@ -184,6 +201,13 @@ export interface UpdateProjectRequest {
  * 生成解说脚本请求接口
  */
 export interface GenerateScriptRequest {
+  project_id: string;
+  video_path: string;
+  subtitle_path?: string;
+  narration_type: NarrationType;
+}
+
+export interface GenerateCopywritingRequest {
   project_id: string;
   video_path: string;
   subtitle_path?: string;

@@ -1,7 +1,9 @@
 import type {
   CreateProjectRequest,
   FileUploadResponse,
+  GenerateCopywritingRequest,
   GenerateScriptRequest,
+  NarrationCopywriting,
   Project,
   ProjectLatestTasks,
   ProjectRunningTasks,
@@ -333,14 +335,38 @@ export class ProjectService {
   
 
   /**
+   * 生成解说文案
+   */
+  async generateCopywriting(data: GenerateCopywritingRequest): Promise<NarrationCopywriting> {
+    const response = await apiClient.post<ApiResponse<{ copywriting: NarrationCopywriting }>>(
+      "/api/projects/generate-copywriting",
+      data
+    );
+    return response.data?.copywriting as NarrationCopywriting;
+  }
+
+  /**
+   * 保存解说文案
+   */
+  async saveCopywriting(
+    projectId: string,
+    copywriting: NarrationCopywriting
+  ): Promise<NarrationCopywriting> {
+    const response = await apiClient.post<{ data: NarrationCopywriting }>(
+      `/api/projects/${projectId}/copywriting`,
+      { copywriting }
+    );
+    return response.data;
+  }
+
+  /**
    * 生成解说脚本
    */
   async generateScript(data: GenerateScriptRequest): Promise<VideoScript> {
-    const response = await apiClient.post<
-      ApiResponse<{ script: VideoScript; plot_analysis: string }>
-    >("/api/projects/generate-script", data);
-    // 后端返回形如 { message, data: { script, plot_analysis }, timestamp }
-    // 这里只提取脚本对象返回
+    const response = await apiClient.post<ApiResponse<{ script: VideoScript }>>(
+      "/api/projects/generate-script",
+      data
+    );
     return response.data?.script as VideoScript;
   }
 

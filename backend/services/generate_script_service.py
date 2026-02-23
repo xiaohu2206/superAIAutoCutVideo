@@ -418,7 +418,6 @@ class GenerateScriptService:
         except Exception:
             pass
 
-        segments: List[Dict[str, Any]] = []
         subtitle_text: str = ""
         sub_abs: Optional[Path] = None
         created_tmp: List[Path] = []
@@ -513,11 +512,6 @@ class GenerateScriptService:
                 subtitle_text = sub_abs.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 subtitle_text = ""
-            segments = _parse_srt(sub_abs)
-            try:
-                logger.info(f"subtitle parsed project_id={project_id} subtitle_abs={sub_abs} segments_count={len(segments)}")
-            except Exception:
-                pass
             try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
@@ -547,36 +541,31 @@ class GenerateScriptService:
 
         try:
             drama_name = p.name or "剧名"
-            plot_analysis: str = ""
-            # Always generate plot analysis, ignore cache
+            copywriting_data = getattr(p, "narration_copywriting", None)
+            if not isinstance(copywriting_data, dict):
+                raise HTTPException(status_code=400, detail="请先生成并保存解说文案")
+            copywriting_text = str(copywriting_data.get("content", "")).strip()
+            if not copywriting_text:
+                raise HTTPException(status_code=400, detail="请先生成并保存解说文案")
             try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
                     "scope": "generate_script",
                     "project_id": project_id,
-                    "phase": "llm_analyze_subtitle",
-                    "message": "大模型分析字幕",
+                    "phase": "load_copywriting",
+                    "message": "加载解说文案",
                     "progress": 70,
                     "timestamp": _now_ts(),
                 }))
             except Exception:
                 pass
-            plot_analysis = await ScriptGenerationService.generate_plot_analysis_pipeline(subtitle_text)
-            ts_pa = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pa_out = _uploads_dir() / "analyses" / f"{project_id}_analysis_{ts_pa}.txt"
-            try:
-                pa_out.write_text(plot_analysis, encoding="utf-8")
-                web_pa = _to_web_path(pa_out)
-                projects_store.update_project(project_id, {"plot_analysis_path": web_pa})
-            except Exception:
-                pass
             try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
                     "scope": "generate_script",
                     "project_id": project_id,
-                    "phase": "llm_analysis_done",
-                    "message": "字幕分析完成",
+                    "phase": "copywriting_ready",
+                    "message": "解说文案准备完成",
                     "progress": 75,
                     "timestamp": _now_ts(),
                 }))
@@ -597,7 +586,7 @@ class GenerateScriptService:
                 pass
             script_json = await ScriptGenerationService.generate_script_json(
                 drama_name=drama_name,
-                plot_analysis=plot_analysis,
+                copywriting_text=copywriting_text,
                 subtitle_content=subtitle_text,
                 project_id=project_id,
             )
@@ -649,7 +638,7 @@ class GenerateScriptService:
                 "message": "解说脚本生成成功",
                 "data": {
                     "script": script,
-                    "plot_analysis": plot_analysis,
+                    "copywriting": copywriting_data,
                 },
                 "timestamp": _now_ts(),
             }

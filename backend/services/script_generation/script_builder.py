@@ -4,11 +4,9 @@ from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
-from modules.prompts.prompt_manager import prompt_manager
 from services.ai_service import ai_service
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
-from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
 from modules.prompts.common.output_format_blocks import short_drama, movie
 
@@ -27,13 +25,75 @@ def _normalize_original_ratio(value: Optional[int]) -> int:
     return num
 
 
+def _detect_narration_type(project_id: Optional[str]) -> str:
+    if not project_id:
+        return "short_drama_narration"
+    try:
+        from modules.projects_store import projects_store
+        p = projects_store.get_project(project_id)
+        if p:
+            t = str(getattr(p, "narration_type", "") or "")
+            if t == "电影解说":
+                return "movie_narration"
+    except Exception:
+        pass
+    return "short_drama_narration"
+
+
+def _build_fixed_script_prompt(
+    drama_name: str,
+    copywriting_text: str,
+    subs_text: str,
+    narration_type: str,
+    script_language: Optional[str],
+) -> str:
+    """构建固定的脚本生成提示词（不使用提示词模板系统）。"""
+    lang = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
+
+    prompt = f"""# 解说脚本生成任务
+
+## 任务目标
+根据提供的解说文案和原始字幕时间戳，将文案内容精确匹配到对应的时间段，生成带时间轴的解说脚本。
+
+## 输入说明
+1. **解说文案**：一段完整的叙述文本，这是要使用的解说内容
+2. **字幕内容**：带有精确时间戳的原始字幕，用于确定每段解说对应的时间范围
+
+## 任务要求
+- 将解说文案拆分为多个片段，每个片段精确对应字幕中的时间范围
+- 保持文案内容的完整性，按照时间顺序排列
+- 合理分配原声片段（OST=1）和解说片段（OST=0）
+- 时间戳格式必须与字幕中的格式一致
+
+## 原声片段规则
+- OST=1 表示保留原声，narration 使用"播放原片+序号"格式
+- OST=0 表示解说，narration 填写对应的解说文案内容
+- 在关键情绪爆发点、重要对白、爽点瞬间保留原声
+- 原声片段要在整个视频中均匀分布
+
+## 解说文案
+<copywriting>
+{copywriting_text}
+</copywriting>
+
+## 原始字幕（含精确时间戳）
+<subtitles>
+{subs_text}
+</subtitles>
+
+## 剧名
+《{drama_name}》
+"""
+    return prompt
+
+
 async def _generate_script_chunk(
     chunk_idx: int,
     chunk_total: int,
     start_time: float,
     end_time: float,
     subtitles: List[Dict[str, Any]],
-    plot_analysis_snippet: str,
+    copywriting_text: str,
     drama_name: str,
     project_id: Optional[str] = None,
     target_items_count: Optional[int] = None,
@@ -47,69 +107,31 @@ async def _generate_script_chunk(
     subs_text = "\n".join(subs_text_lines)
     if len(subs_text) > MAX_SUBTITLE_CHARS_PER_CALL:
         subs_text = subs_text[:MAX_SUBTITLE_CHARS_PER_CALL]
-    default_key = _default_prompt_key_for_project(project_id)
-    key = _resolve_prompt_key(project_id, default_key)
-    if script_language and ":" in key:
-        lang = str(script_language).strip().lower()
-        cat, name = key.split(":", 1)
-        if lang in {"en", "en-us", "英文", "english"}:
-            if name != "script_generation_en":
-                candidate = f"{cat}:script_generation_en"
-                try:
-                    if prompt_manager.get_prompt(candidate):
-                        key = candidate
-                except Exception:
-                    pass
-        elif lang in {"zh", "zh-cn", "中文", "chinese"}:
-            if name != "script_generation":
-                candidate = f"{cat}:script_generation"
-                try:
-                    if prompt_manager.get_prompt(candidate):
-                        key = candidate
-                except Exception:
-                    pass
-    variables = {
-        "drama_name": drama_name,
-        "plot_analysis": plot_analysis_snippet or "",
-        "subtitle_content": subs_text,
-    }
-    try:
-        messages_dicts = prompt_manager.build_chat_messages(key, variables)
-    except KeyError:
-        try:
-            cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
-            if cat == "movie_narration":
-                from modules.prompts.movie_narration import register_prompts
-            else:
-                from modules.prompts.short_drama_narration import register_prompts
-            register_prompts()
-            messages_dicts = prompt_manager.build_chat_messages(key, variables)
-        except Exception:
-            key = default_key
-            messages_dicts = prompt_manager.build_chat_messages(key, variables)
-    messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
 
-    # 如果是用户自定义提示词（或提示词中缺少格式要求），需要根据语言拼接 output_format_blocks
-    sys_msgs_content = "".join([m.content for m in messages if m.role == "system" and m.content])
-    if "## 原声片段格式要求" not in sys_msgs_content:
-        current_lang = "zh"
-        if script_language:
-            l = str(script_language).strip().lower()
-            if l in {"en", "en-us", "英文", "english"}:
-                current_lang = "en"
+    narration_type = _detect_narration_type(project_id)
+    lang_key = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
 
-        prompt_cat = "short_drama_narration"
-        if ":" in key:
-            prompt_cat = key.split(":", 1)[0]
+    user_prompt = _build_fixed_script_prompt(
+        drama_name=drama_name,
+        copywriting_text=copywriting_text,
+        subs_text=subs_text,
+        narration_type=narration_type,
+        script_language=script_language,
+    )
 
-        if prompt_cat == "movie_narration":
-            format_block = movie(current_lang)
-        else:
-            format_block = short_drama(current_lang)
+    system_prompt = (
+        "你是一位专业的视频脚本时间轴编辑器。"
+        "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。\n\n"
+    )
+    if narration_type == "movie_narration":
+        system_prompt += movie(lang_key)
+    else:
+        system_prompt += short_drama(lang_key)
 
-        messages.append(ChatMessage(role="system", content=format_block))
-
-    logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
+    messages: List[ChatMessage] = [
+        ChatMessage(role="system", content=system_prompt),
+        ChatMessage(role="user", content=user_prompt),
+    ]
 
     ratio_val = _normalize_original_ratio(original_ratio)
     if int(chunk_total or 0) > 0:
@@ -139,7 +161,7 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"你必须仅输出一个JSON对象，键为'items'。"
-                    f"items数组长度必须严格等于{n}，不能多不能少。"
+                    f"items数组长度大约{n}"
                     f"start_time和end_time时间间隔不能低于1s"
                     f"每条必须包含'_id','timestamp','picture','narration','OST'。"
                     f"不得输出除JSON以外的任何文字。"
@@ -178,6 +200,7 @@ async def _generate_script_chunk(
                     ),
                 ),
             )
+
     system_contents: List[str] = []
     non_system_messages: List[ChatMessage] = []
     for message in messages:
@@ -191,6 +214,9 @@ async def _generate_script_chunk(
         messages = [ChatMessage(role="system", content=merged_system), *non_system_messages]
     else:
         messages = non_system_messages
+
+    logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
+
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
@@ -296,7 +322,7 @@ def _merge_items(all_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def _refine_full_script(
     segments: List[Dict[str, Any]],
     drama_name: str,
-    plot_analysis: str,
+    copywriting_text: str,
     length_mode: Optional[str] = None,
     target_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
