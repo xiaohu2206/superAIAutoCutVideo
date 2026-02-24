@@ -18,11 +18,25 @@ def _normalize_original_ratio(value: Optional[int]) -> int:
         num = int(value)
     except Exception:
         return 70
-    if num < 10:
-        return 10
-    if num > 90:
-        return 90
+    if num < 0:
+        return 0
+    if num > 100:
+        return 100
     return num
+
+
+def _build_ost_system_hint(original_ratio: Optional[int]) -> str:
+    if original_ratio is None:
+        return "原声片段标识：OST=1表示原声，OST=0表示解说。"
+    ratio_val = _normalize_original_ratio(original_ratio)
+    if ratio_val <= 0:
+        return "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
+    if ratio_val >= 100:
+        return "本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“播放原片+序号”格式；不得输出解说文案。"
+    return (
+        f"原片占比范围：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
+        "原声片段标识：OST=1表示原声，OST=0表示解说。"
+    )
 
 
 def _detect_narration_type(project_id: Optional[str]) -> str:
@@ -46,9 +60,46 @@ def _build_fixed_script_prompt(
     subs_text: str,
     narration_type: str,
     script_language: Optional[str],
+    original_ratio: Optional[int] = None,
 ) -> str:
     """构建固定的脚本生成提示词（不使用提示词模板系统）。"""
     lang = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
+    ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+
+    requirements_extra = ""
+    ost_rules = ""
+    if ratio_val is None:
+        requirements_extra = "- 合理分配原声片段（OST=1）和解说片段（OST=0）\n"
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+            "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
+            "- 原声片段要在整个视频中均匀分布\n"
+        )
+    elif ratio_val <= 0:
+        requirements_extra = "- 本次只生成解说片段（OST 必须为 0），不得输出原声片段\n"
+        ost_rules = (
+            "## 解说片段规则\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+        )
+    elif ratio_val >= 100:
+        requirements_extra = "- 本次只生成原声片段（OST 必须为 1），不得输出解说片段\n"
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+        )
+    else:
+        requirements_extra = (
+            f"- 合理分配原声片段（OST=1）和解说片段（OST=0），原片占比约 {ratio_val}%\n"
+        )
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+            "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
+            "- 原声片段要在整个视频中均匀分布\n"
+        )
 
     prompt = f"""# 解说脚本生成任务
 
@@ -62,19 +113,14 @@ def _build_fixed_script_prompt(
 ## 任务要求
 - 将解说文案拆分为多个片段，每个片段精确对应字幕中的时间范围
 - 保持文案内容的完整性，按照时间顺序排列
-- 合理分配原声片段（OST=1）和解说片段（OST=0）
+{requirements_extra}- 时间戳格式必须与字幕中的格式一致
 - 时间戳格式必须与字幕中的格式一致
-
-## 原声片段规则
-- OST=1 表示保留原声，narration 使用"播放原片+序号"格式
-- OST=0 表示解说，narration 填写对应的解说文案内容
-- 在关键情绪爆发点、重要对白、爽点瞬间保留原声
+{ost_rules}
 - 原声片段要在整个视频中均匀分布
 
 ## 解说文案
 <copywriting>
 {copywriting_text}
-</copywriting>
 
 ## 原始字幕（含精确时间戳）
 <subtitles>
@@ -117,23 +163,24 @@ async def _generate_script_chunk(
         subs_text=subs_text,
         narration_type=narration_type,
         script_language=script_language,
+        original_ratio=original_ratio,
     )
 
     system_prompt = (
         "你是一位专业的视频脚本时间轴编辑器。"
         "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。\n\n"
     )
+    ratio_for_blocks = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
     if narration_type == "movie_narration":
-        system_prompt += movie(lang_key)
+        system_prompt += movie(lang_key, ratio_for_blocks)
     else:
-        system_prompt += short_drama(lang_key)
+        system_prompt += short_drama(lang_key, ratio_for_blocks)
 
     messages: List[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
         ChatMessage(role="user", content=user_prompt),
     ]
 
-    ratio_val = _normalize_original_ratio(original_ratio)
     if int(chunk_total or 0) > 0:
         total = int(chunk_total)
         idx = int(chunk_idx)
@@ -161,7 +208,7 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"你必须仅输出一个JSON对象，键为'items'。"
-                    f"items数组长度大约{n}"
+                    f"items数组长度，在保证质量的情况下，必须保证严格遵守{n}条，不得少于或多于{n}条。"
                     f"start_time和end_time时间间隔不能低于1s"
                     f"每条必须包含'_id','timestamp','picture','narration','OST'。"
                     f"不得输出除JSON以外的任何文字。"
@@ -172,10 +219,7 @@ async def _generate_script_chunk(
         0,
         ChatMessage(
             role="system",
-            content=(
-                f"原片占比范围：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
-                "原声片段标识：OST=1表示原声，OST=0表示解说。"
-            ),
+            content=_build_ost_system_hint(original_ratio),
         ),
     )
     if script_language:
@@ -347,13 +391,23 @@ async def _refine_full_script(
             f"返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
         )
 
-    ratio_val = _normalize_original_ratio(original_ratio)
+    ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+    if ratio_val is None:
+        ratio_hint = "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+    elif ratio_val <= 0:
+        ratio_hint = "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
+    elif ratio_val >= 100:
+        ratio_hint = "本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“播放原片+序号”格式；不得输出解说文案。"
+    else:
+        ratio_hint = (
+            f"**原片占比范围**：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
+            "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+        )
     system_prompt = (
         "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
-        + retain_desc +
-        f"**原片占比范围**：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
-        "**原声片段标识**：OST=1表示原声，OST=0表示解说"
-        "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
+        + retain_desc
+        + ratio_hint
+        + "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
         "对于所有脚本内容，是通过多个模型生成的，每个模型生成的脚本段容易出现开头语和结尾语，但可能是中间段，如果是中间段应该把开头语或结尾语条目删除"
         "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
         "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"

@@ -82,6 +82,41 @@ try:
 except Exception:
     pass
 
+
+class _UvicornAccessDenyFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        method = None
+        path = None
+
+        args = getattr(record, "args", None)
+        if isinstance(args, tuple) and len(args) >= 3:
+            try:
+                method = str(args[1]).upper() if args[1] is not None else None
+            except Exception:
+                method = None
+            try:
+                path = str(args[2]) if args[2] is not None else None
+            except Exception:
+                path = None
+        if not path:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = ""
+            m = re.search(r'"([A-Z]+)\s+([^ ]+)\s+HTTP/', msg)
+            if m:
+                method = m.group(1)
+                path = m.group(2)
+
+        if path and "/api/projects/" in path and "/tasks/latest" in path:
+            return False
+        return True
+
+
+_access_logger = logging.getLogger("uvicorn.access")
+if not any(isinstance(f, _UvicornAccessDenyFilter) for f in getattr(_access_logger, "filters", []) or []):
+    _access_logger.addFilter(_UvicornAccessDenyFilter())
+
 _single_instance_lock_handle = None
 
 

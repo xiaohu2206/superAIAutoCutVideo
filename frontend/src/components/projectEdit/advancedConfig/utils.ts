@@ -16,8 +16,8 @@ export const SCRIPT_LENGTH_OPTIONS: Array<{
 
 export const CUSTOM_SCRIPT_LENGTH_MIN = 5;
 export const CUSTOM_SCRIPT_LENGTH_MAX = 200;
-export const ORIGINAL_RATIO_MIN = 10;
-export const ORIGINAL_RATIO_MAX = 90;
+export const ORIGINAL_RATIO_MIN = 0;
+export const ORIGINAL_RATIO_MAX = 100;
 export const DEFAULT_ORIGINAL_RATIO = 70;
 
 export const normalizeRangeSeparators = (value: string) =>
@@ -100,4 +100,9 @@ export const normalizeOriginalRatio = (value: unknown): number => {
   if (!Number.isFinite(num)) return DEFAULT_ORIGINAL_RATIO;
   const rounded = Math.round(num);
   return Math.min(ORIGINAL_RATIO_MAX, Math.max(ORIGINAL_RATIO_MIN, rounded));
+};
+
+export const normalizeOriginalRatioSelection = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  return normalizeOriginalRatio(value);
 };

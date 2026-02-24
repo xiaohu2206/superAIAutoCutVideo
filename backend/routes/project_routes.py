@@ -854,13 +854,17 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     if "original_ratio" in updates:
-        try:
-            ratio_val = int(updates.get("original_ratio"))
-        except Exception:
-            raise HTTPException(status_code=400, detail="原片占比必须为整数")
-        if ratio_val < 10 or ratio_val > 90:
-            raise HTTPException(status_code=400, detail="原片占比范围为 10%~90%")
-        updates["original_ratio"] = ratio_val
+        ratio_raw = updates.get("original_ratio")
+        if ratio_raw is None:
+            updates["original_ratio"] = None
+        else:
+            try:
+                ratio_val = int(ratio_raw)
+            except Exception:
+                raise HTTPException(status_code=400, detail="原片占比必须为整数")
+            if ratio_val < 0 or ratio_val > 100:
+                raise HTTPException(status_code=400, detail="原片占比范围为 0%~100%")
+            updates["original_ratio"] = ratio_val
     if "script_language" in updates:
         try:
             lang_raw = (updates.get("script_language") or "").strip().lower()

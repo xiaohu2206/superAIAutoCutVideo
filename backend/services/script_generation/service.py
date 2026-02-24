@@ -12,7 +12,7 @@ from services.ai_service import ai_service
 from .constants import MAX_SUBTITLE_ITEMS_PER_CALL, SOFT_INPUT_FACTOR
 from .length_planner import parse_script_length_selection, allocate_output_counts
 from .copywriting_builder import generate_copywriting_from_subtitles
-from .script_builder import _generate_script_chunk, _merge_items, _refine_full_script
+from .script_builder import _generate_script_chunk, _merge_items
 from .subtitle_utils import compute_subtitle_chunks, _parse_srt_subtitles, _parse_timestamp_pair
 
 logger = logging.getLogger(__name__)
@@ -121,18 +121,7 @@ class ScriptGenerationService:
             all_items.extend(res)
         merged_items = _merge_items(all_items)
         effective_target = min(len(merged_items), int(plan.final_target_count))
-        if len(chunks) <= 1:
-            final_items = merged_items[:effective_target] if effective_target > 0 else []
-        else:
-            final_items = await _refine_full_script(
-                merged_items,
-                drama_name,
-                copywriting_text,
-                None,
-                effective_target,
-                original_ratio,
-                script_language,
-            )
+        final_items = merged_items[:effective_target] if effective_target > 0 else []
         data = {"items": final_items}
         validated = validate_script_items(data)
         return cast(Dict[str, Any], validated)

@@ -100,7 +100,7 @@ export interface Project {
   project_type?: "subtitle" | "visual";
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
-  original_ratio?: number;
+  original_ratio?: number | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status: ProjectStatus; // 项目状态
@@ -178,7 +178,7 @@ export interface UpdateProjectRequest {
   project_type?: "subtitle" | "visual";
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
-  original_ratio?: number;
+  original_ratio?: number | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status?: ProjectStatus;

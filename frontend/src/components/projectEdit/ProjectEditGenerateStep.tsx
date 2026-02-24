@@ -39,7 +39,7 @@ interface ProjectEditGenerateStepProps {
   editedCopywriting: string;
   setEditedCopywriting: (copywriting: string) => void;
   isSavingCopywriting: boolean;
-  handleSaveCopywriting: () => void;
+  handleSaveCopywriting: (content?: string) => void;
 
   editedScript: string;
   setEditedScript: (script: string) => void;

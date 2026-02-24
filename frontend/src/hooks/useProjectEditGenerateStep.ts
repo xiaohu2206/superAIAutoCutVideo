@@ -35,7 +35,7 @@ export interface UseProjectEditGenerateStepReturn {
   editedCopywriting: string;
   setEditedCopywriting: (copywriting: string) => void;
   isSavingCopywriting: boolean;
-  handleSaveCopywriting: () => void;
+  handleSaveCopywriting: (content?: string) => void;
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
   generateScriptDisabled: boolean;
@@ -142,7 +142,7 @@ export function useProjectEditGenerateStep(
 
   useEffect(() => {
     if (!project?.narration_copywriting) return;
-    const next = JSON.stringify(project.narration_copywriting, null, 2);
+    const next = String(project.narration_copywriting.content || "");
     if (!hasInitializedCopywriting || (!copywritingDirty && next !== editedCopywriting)) {
       setEditedCopywritingSafe(next);
     }
@@ -328,7 +328,7 @@ export function useProjectEditGenerateStep(
         narration_type: project.narration_type,
       });
       if (copywriting) {
-        setEditedCopywritingSafe(JSON.stringify(copywriting, null, 2));
+        setEditedCopywritingSafe(String(copywriting.content || ""));
       }
       options.showSuccess("解说文案生成成功！");
     } catch (err) {
@@ -410,28 +410,38 @@ export function useProjectEditGenerateStep(
     }
   }, [editedScript, options]);
 
-  const handleSaveCopywriting = useCallback(async () => {
-    if (!editedCopywriting.trim()) {
+  const handleSaveCopywriting = useCallback(async (content?: string) => {
+    const contentToSave = typeof content === "string" ? content : editedCopywriting;
+
+    if (!contentToSave.trim()) {
       options.showErrorText("文案内容不能为空");
       return;
     }
 
     try {
-      const copywritingData: NarrationCopywriting = JSON.parse(editedCopywriting);
+      const base: NarrationCopywriting = project?.narration_copywriting
+        ? project.narration_copywriting
+        : { version: "1.0", content: "" };
+      const copywritingData: NarrationCopywriting = {
+        ...base,
+        content: contentToSave.trim(),
+      };
       setIsSavingCopywriting(true);
       await options.saveCopywriting(copywritingData);
+      
+      // If content was passed, we should also update the local state to match
+      if (typeof content === "string") {
+        setEditedCopywritingSafe(content);
+      }
+      
       setCopywritingDirty(false);
       options.showSuccess("文案保存成功！");
     } catch (err) {
-      if (err instanceof SyntaxError) {
-        options.showErrorText("文案格式错误，请检查 JSON 格式是否正确");
-      } else {
-        options.showError(err, "保存文案失败");
-      }
+      options.showError(err, "保存文案失败");
     } finally {
       setIsSavingCopywriting(false);
     }
-  }, [editedCopywriting, options]);
+  }, [editedCopywriting, options, project?.narration_copywriting, setEditedCopywritingSafe]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!project) return;

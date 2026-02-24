@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { projectService } from "../../../services/projectService";
 import type { ScriptLengthOption } from "../../../types/project";
-import { normalizeOriginalRatio, normalizeScriptLength } from "./utils";
+import { normalizeOriginalRatio, normalizeOriginalRatioSelection, normalizeScriptLength } from "./utils";
 
 export function useProjectCopywritingWordCount(projectId: string): {
   copywritingWordCount: number | null;
@@ -108,12 +108,12 @@ export function useProjectScriptLength(projectId: string): {
 }
 
 export function useProjectOriginalRatio(projectId: string): {
-  originalRatio: number;
+  originalRatio: number | null;
   loading: boolean;
   saving: boolean;
-  setOriginalRatioAndPersist: (value: number) => Promise<void>;
+  setOriginalRatioAndPersist: (value: number | null) => Promise<void>;
 } {
-  const [originalRatio, setOriginalRatio] = useState(70);
+  const [originalRatio, setOriginalRatio] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveSeqRef = useRef(0);
@@ -122,7 +122,7 @@ export function useProjectOriginalRatio(projectId: string): {
     setLoading(true);
     try {
       const p = await projectService.getProject(projectId);
-      const normalized = normalizeOriginalRatio(p?.original_ratio);
+      const normalized = normalizeOriginalRatioSelection(p?.original_ratio);
       setOriginalRatio(normalized);
       if (p?.original_ratio !== undefined && p.original_ratio !== normalized) {
         const seq = ++saveSeqRef.current;
@@ -147,8 +147,8 @@ export function useProjectOriginalRatio(projectId: string): {
   }, [load]);
 
   const setOriginalRatioAndPersist = useCallback(
-    async (value: number) => {
-      const normalized = normalizeOriginalRatio(value);
+    async (value: number | null) => {
+      const normalized = value === null ? null : normalizeOriginalRatio(value);
       setOriginalRatio(normalized);
       const seq = ++saveSeqRef.current;
       setSaving(true);

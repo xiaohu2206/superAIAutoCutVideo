@@ -27,7 +27,7 @@ class Project(BaseModel):
     project_type: str = Field(default="subtitle") # subtitle | visual
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
-    original_ratio: int = Field(default=70)
+    original_ratio: Optional[int] = None
     script_language: str = Field(default="zh")
     copywriting_word_count: Optional[int] = None
     status: str = Field(default="draft")
@@ -127,7 +127,7 @@ class ProjectsStore:
                             if "asr_language" not in p:
                                 p["asr_language"] = None
                             if "original_ratio" not in p:
-                                p["original_ratio"] = 70
+                                p["original_ratio"] = None
                             if "script_language" not in p:
                                 p["script_language"] = "zh"
                             if "chunk_audio_paths" not in p:
@@ -276,6 +276,8 @@ class ProjectsStore:
                 if key == "copywriting_word_count":
                     data[key] = updates[key]
                 elif updates[key] is not None:
+                    data[key] = updates[key]
+                elif key in {"script_length", "original_ratio"}:
                     data[key] = updates[key]
             data["updated_at"] = datetime.now().isoformat()
             try:
