@@ -118,7 +118,7 @@ const ScenePlayModal: React.FC<ScenePlayModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-75" onClick={onClose}>
       <div className="relative bg-black rounded-lg overflow-hidden max-w-4xl w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
         <button
           onClick={onClose}

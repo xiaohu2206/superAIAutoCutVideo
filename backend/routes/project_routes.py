@@ -422,7 +422,7 @@ class ExtractSubtitleRequest(BaseModel):
     itn: bool = True
     hotwords: Optional[List[str]] = None
     analyzeVision: bool = False
-    visionMode: str = "no_subtitles"
+    visionMode: str = "all"
 
 
 class SubtitleSegmentInput(BaseModel):

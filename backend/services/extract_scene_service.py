@@ -67,7 +67,7 @@ class ExtractSceneService:
         force: bool = False,
         task_id: Optional[str] = None,
         analyze_vision: bool = False,
-        vision_mode: str = "no_subtitles",
+        vision_mode: str = "all",
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:

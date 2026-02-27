@@ -458,7 +458,7 @@ class VisionFrameAnalyzer:
         project_id: str,
         video_path: str, 
         scenes: List[Dict[str, Any]], 
-        mode: str = "no_subtitles",
+        mode: str = "all",
         task_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """

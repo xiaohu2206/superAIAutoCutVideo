@@ -133,23 +133,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
     endTime: 0,
   });
 
-  const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("no_subtitles");
+  const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("all");
   const analyzeVision = true;
 
   return (
     <>
-      <ScenePlayModal
-        isOpen={scenePlayState.isOpen}
-        onClose={() => setScenePlayState((prev) => ({ ...prev, isOpen: false }))}
-        videoUrl={
-            project.merged_video_path 
-            ? projectService.getMergedVideoUrl(project.id)
-            : (project.video_path ? projectService.getVideoStreamUrl(project.id) : "")
-        }
-        startTime={scenePlayState.startTime}
-        endTime={scenePlayState.endTime}
-      />
-      
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">项目配置</h2>
@@ -349,15 +337,6 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             ) : null}
           </div>
         )}
-        
-        {project.project_type === "visual" && sceneResult && (
-              <SceneListTable 
-                 sceneResult={sceneResult} 
-                 onPlayScene={(start, end) => {
-                     setScenePlayState({ isOpen: true, startTime: start, endTime: end });
-                 }}
-              />
-         )}
       </div>
       <div className="flex justify-end">
           <button
@@ -392,6 +371,14 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             />
           </button>
         </div>
+        {project.project_type === "visual" && sceneResult && (
+              <SceneListTable 
+                 sceneResult={sceneResult} 
+                 onPlayScene={(start, end) => {
+                     setScenePlayState({ isOpen: true, startTime: start, endTime: end });
+                 }}
+              />
+         )}
         {project.subtitle_source === "extracted" && (
           <SubtitleEditor
             segments={subtitleDraft}
@@ -403,6 +390,17 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             onChange={onSubtitleDraftChange}
           />
         )}
+      <ScenePlayModal
+        isOpen={scenePlayState.isOpen}
+        onClose={() => setScenePlayState((prev) => ({ ...prev, isOpen: false }))}
+        videoUrl={
+            project.merged_video_path 
+            ? projectService.getMergedVideoUrl(project.id)
+            : (project.video_path ? projectService.getVideoStreamUrl(project.id) : "")
+        }
+        startTime={scenePlayState.startTime}
+        endTime={scenePlayState.endTime}
+      />
     </>
   );
 };

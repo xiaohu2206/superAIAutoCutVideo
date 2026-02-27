@@ -600,7 +600,7 @@ export class ProjectService {
           force: Boolean(options.force),
           task_id: options.task_id ?? undefined,
           analyzeVision: Boolean(options.analyzeVision),
-          visionMode: options.visionMode ?? "no_subtitles",
+          visionMode: options.visionMode ?? "all",
         }
       : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
