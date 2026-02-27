@@ -75,7 +75,6 @@ def _build_fixed_script_prompt(
             "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
             "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
-            "- 原声片段要在整个视频中均匀分布\n"
         )
     elif ratio_val <= 0:
         requirements_extra = "- 本次只生成解说片段（OST 必须为 0），不得输出原声片段\n"
@@ -98,29 +97,24 @@ def _build_fixed_script_prompt(
             "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
             "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
-            "- 原声片段要在整个视频中均匀分布\n"
         )
 
     prompt = f"""# 解说脚本生成任务
 
 ## 任务目标
-根据提供的解说文案和原始字幕时间戳，将文案内容精确匹配到对应的时间段，生成带时间轴的解说脚本。
+从整部视频中挑选“值得解说的精彩片段”，将解说文案的关键内容对齐到字幕时间戳，生成带时间轴的解说脚本。
+尽量保留“解说文案”完整拆分并全部对齐到字幕时间轴中对应的时间段，生成带时间轴的解说脚本；尽量不遗漏任何文案内容。允许必要压缩但不得改变原意。
 
 ## 输入说明
 1. **解说文案**：一段完整的叙述文本，这是要使用的解说内容
 2. **字幕内容**：带有精确时间戳的原始字幕，用于确定每段解说对应的时间范围
 
 ## 任务要求
-- 将解说文案拆分为多个片段，每个片段精确对应字幕中的时间范围
-- 保持文案内容的完整性，按照时间顺序排列
+- 不需要按时间顺序抽取字幕（时间戳可以大幅跳跃，不要求连续覆盖全片），但尽量覆盖完整“解说文案”内容；
+- 只输出需要解说的精彩片段；允许时间戳不连续
+- narration 必须严格从“解说文案”拆分/压缩而来；不得新增未出现的信息
 {requirements_extra}- 时间戳格式必须与字幕中的格式一致
-- 时间戳格式必须与字幕中的格式一致
 {ost_rules}
-- 原声片段要在整个视频中均匀分布
-
-## 解说文案
-<copywriting>
-{copywriting_text}
 
 ## 原始字幕（含精确时间戳）
 <subtitles>
@@ -151,8 +145,6 @@ async def _generate_script_chunk(
         ts = _format_timestamp_range(float(s["start"]), float(s["end"]))
         subs_text_lines.append(f"[{ts}] {s['text']}")
     subs_text = "\n".join(subs_text_lines)
-    if len(subs_text) > MAX_SUBTITLE_CHARS_PER_CALL:
-        subs_text = subs_text[:MAX_SUBTITLE_CHARS_PER_CALL]
 
     narration_type = _detect_narration_type(project_id)
     lang_key = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
@@ -178,9 +170,28 @@ async def _generate_script_chunk(
 
     messages: List[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
+        ChatMessage(
+            role="user",
+            content=(
+                "## 解说文案\n"
+                "<copywriting>\n"
+                f"{copywriting_text}\n"
+                "</copywriting>"
+            ),
+        ),
         ChatMessage(role="user", content=user_prompt),
     ]
 
+    messages.insert(
+        0,
+        ChatMessage(
+            role="system",
+            content=(
+                "以下为必须严格使用的解说文案文本：所有条目的'narration'必须仅基于该文案进行时间轴拆分；"
+                "不得编造或新增任何未出现的内容；允许必要压缩但不得改变含义，但尽量不修改文案；禁止用字幕原文替代解说文案。"
+            ),
+        ),
+    )
     if int(chunk_total or 0) > 0:
         total = int(chunk_total)
         idx = int(chunk_idx)
@@ -196,7 +207,8 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"这是分段生成脚本的第{idx + 1}段/共{total}段，位置为{pos_label}。"
-                    "开始（1）段可引入剧情，中间段不要重复开场或收尾（因为需要合并其它段进来），末尾段需要收束剧情并避免新开头。"
+                    "本段不得输出0条（items 不可为空），并将本时间段内的解说文案对齐到字幕时间轴。"
+                    "避免重复的开场白/总结句等套话。"
                 ),
             ),
         )
@@ -208,10 +220,10 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"你必须仅输出一个JSON对象，键为'items'。"
-                    f"items数组长度，在保证质量的情况下，必须保证严格遵守{n}条，不得少于或多于{n}条。"
-                    f"start_time和end_time时间间隔不能低于1s"
-                    f"每条必须包含'_id','timestamp','picture','narration','OST'。"
-                    f"不得输出除JSON以外的任何文字。"
+                    # f"items数组长度大约控制为{n}条"
+                    "每条时间段长度不能低于1秒。"
+                    "每条必须包含'_id','timestamp','picture','narration','OST'。"
+                    "不得输出除JSON以外的任何文字。"
                 ),
             ),
         )
@@ -294,20 +306,6 @@ async def _generate_script_chunk(
                     if len(out) >= n:
                         break
                     out.append(it)
-                if len(out) < n:
-                    for it in items:
-                        if len(out) >= n:
-                            break
-                        out.append(
-                            {
-                                "_id": it.get("_id"),
-                                "timestamp": str(it.get("timestamp")),
-                                "picture": it.get("picture"),
-                                "narration": str(it.get("narration", "")),
-                                "OST": 1 if it.get("OST") == 1 else 0,
-                                "_chunk_idx": chunk_idx,
-                            }
-                        )
                 return out
             return valid_items
         except Exception as e:
@@ -407,6 +405,8 @@ async def _refine_full_script(
         "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
         + retain_desc
         + ratio_hint
+        + "本次输出目标是“精彩片段解说”，不要求覆盖整部影片时间轴，允许大段跳过。"
+        + "当需要删减时，优先删除那些时间上紧贴上一条/下一条、信息密度低、重复、过渡或铺垫过长的条目；避免出现大量连续衔接的时间戳导致覆盖整片。"
         + "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
         "对于所有脚本内容，是通过多个模型生成的，每个模型生成的脚本段容易出现开头语和结尾语，但可能是中间段，如果是中间段应该把开头语或结尾语条目删除"
         "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"

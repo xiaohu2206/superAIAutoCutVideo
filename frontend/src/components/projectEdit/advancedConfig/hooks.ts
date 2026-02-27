@@ -55,7 +55,7 @@ export function useProjectScriptLength(projectId: string): {
   saving: boolean;
   setScriptLengthAndPersist: (value: ScriptLengthOption) => Promise<void>;
 } {
-  const [scriptLength, setScriptLength] = useState<ScriptLengthOption>("30～40条");
+  const [scriptLength, setScriptLength] = useState<ScriptLengthOption>("auto");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveSeqRef = useRef(0);

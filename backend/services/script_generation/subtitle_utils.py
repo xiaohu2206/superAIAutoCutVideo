@@ -44,8 +44,24 @@ def compute_subtitle_chunks(
     split_slices: List[List[Dict[str, Any]]] = []
     for ch in base_slices:
         split_slices.extend(_split_subtitles_if_oversize(ch, max_items, soft_factor))
+    ranges_with_overlap: List[Tuple[int, int]] = []
+    for ch in split_slices:
+        try:
+            s_idx = subtitles.index(ch[0])
+        except Exception:
+            s_idx = 0
+        e_idx = s_idx + len(ch)
+        length = max(0, e_idx - s_idx)
+        overlap = int(math.floor(length * 0.5))
+        new_s = max(0, s_idx - overlap)
+        new_e = min(n, e_idx + overlap)
+        if new_e > new_s:
+            ranges_with_overlap.append((new_s, new_e))
     chunks: List[Dict[str, Any]] = []
-    for idx, ch in enumerate(split_slices):
+    for idx, (s_i, e_i) in enumerate(ranges_with_overlap):
+        ch = subtitles[s_i:e_i]
+        if not ch:
+            continue
         try:
             start_s = float(ch[0].get("start") or 0.0)
             end_s = float(ch[-1].get("end") or start_s)

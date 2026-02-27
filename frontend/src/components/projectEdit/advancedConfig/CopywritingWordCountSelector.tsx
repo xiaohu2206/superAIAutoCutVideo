@@ -7,9 +7,10 @@ interface Props {
   setCopywritingWordCountAndPersist: (value: number | null) => Promise<void>;
 }
 
-const MIN_COUNT = 1000;
-const MAX_COUNT = 20000;
-const STEP = 1000;
+const MIN_COUNT = 300;
+const MAX_COUNT = 50000;
+const STEP = 100;
+const MARKS = [MIN_COUNT, 5000, 15000, 20000, 30000, 35000, 45000, MAX_COUNT];
 
 const CopywritingWordCountSelector: React.FC<Props> = ({
   copywritingWordCount,
@@ -134,11 +135,9 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
         </div>
       </div>
       <div className="flex justify-between text-[10px] text-gray-400 mt-1 px-[52px]">
-        <span>1000</span>
-        <span>5000</span>
-        <span>10000</span>
-        <span>15000</span>
-        <span>20000</span>
+        {MARKS.map((v) => (
+          <span key={v}>{v.toLocaleString()}</span>
+        ))}
       </div>
     </div>
   );

@@ -422,108 +422,177 @@ class GenerateScriptService:
         sub_abs: Optional[Path] = None
         created_tmp: List[Path] = []
 
-        subtitle_status = getattr(p, "subtitle_status", None)
-        if subtitle_status and subtitle_status != "ready":
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "subtitle_not_ready",
-                    "message": "字幕尚未就绪，请先提取字幕或上传字幕",
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-            raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
+        project_type = str(getattr(p, "project_type", None) or "subtitle").strip().lower()
+        use_visual = project_type == "visual"
+        scenes_data: Optional[Dict[str, Any]] = None
 
-        if p.subtitle_path:
-            cand = _resolve_path(p.subtitle_path)
-            try:
-                logger.info(f"project subtitle candidate project_id={project_id} cand_input={p.subtitle_path} cand_resolved={cand} exists={cand.exists()}")
-            except Exception:
-                pass
-            if cand.exists():
-                sub_abs = cand
+        if use_visual:
+            scenes_abs: Optional[Path] = None
+            if getattr(p, "scenes_path", None):
+                cand = _resolve_path(str(getattr(p, "scenes_path", None) or ""))
+                try:
+                    logger.info(f"project scenes candidate project_id={project_id} cand_input={getattr(p, 'scenes_path', None)} cand_resolved={cand} exists={cand.exists()}")
+                except Exception:
+                    pass
+                if cand.exists():
+                    scenes_abs = cand
+            if not scenes_abs:
+                cand = _uploads_dir() / "analyses" / f"{project_id}_scenes.json"
+                try:
+                    if cand.exists():
+                        scenes_abs = cand
+                except Exception:
+                    pass
+
+            if not scenes_abs:
                 try:
                     await manager.broadcast(json.dumps({
-                        "type": "progress",
+                        "type": "error",
                         "scope": "generate_script",
                         "project_id": project_id,
-                        "phase": "subtitle_exists",
-                        "message": "已存在字幕文件，跳过ASR",
-                        "progress": 60,
+                        "phase": "scenes_missing",
+                        "message": "镜头数据不存在，请先提取镜头",
                         "timestamp": _now_ts(),
                     }))
                 except Exception:
                     pass
-                try:
-                    if getattr(p, "subtitle_status", None) != "ready":
-                        projects_store.update_project(project_id, {"subtitle_status": "ready"})
-                except Exception:
-                    pass
+                raise HTTPException(status_code=400, detail="镜头数据不存在，请先提取镜头")
 
-        if not sub_abs and subtitle_path:
-            cand = _resolve_path(subtitle_path)
             try:
-                logger.info(f"request subtitle candidate project_id={project_id} cand_input={subtitle_path} cand_resolved={cand} exists={cand.exists()}")
+                raw = scenes_abs.read_text(encoding="utf-8", errors="ignore")
+                scenes_data = json.loads(raw) if raw.strip() else {}
             except Exception:
-                pass
-            if cand.exists():
-                sub_abs = cand
+                scenes_data = {}
+
+            if not isinstance(scenes_data, dict) or not isinstance(scenes_data.get("scenes"), list) or not scenes_data.get("scenes"):
                 try:
                     await manager.broadcast(json.dumps({
-                        "type": "progress",
+                        "type": "error",
                         "scope": "generate_script",
                         "project_id": project_id,
-                        "phase": "subtitle_exists",
-                        "message": "已提供字幕文件，跳过ASR",
-                        "progress": 60,
+                        "phase": "scenes_invalid",
+                        "message": "镜头数据无效，请重新提取镜头",
                         "timestamp": _now_ts(),
                     }))
                 except Exception:
                     pass
-                try:
-                    if not getattr(p, "subtitle_path", None):
-                        projects_store.update_project(project_id, {
-                            "subtitle_path": subtitle_path,
-                            "subtitle_status": "ready",
-                            "subtitle_updated_at": _now_ts(),
-                        })
-                except Exception:
-                    pass
+                raise HTTPException(status_code=400, detail="镜头数据无效，请重新提取镜头")
 
-        if not sub_abs:
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "generate_script",
-                    "project_id": project_id,
-                    "phase": "subtitle_missing",
-                    "message": "请先提取字幕或上传字幕",
-                    "timestamp": _now_ts(),
-                }))
-            except Exception:
-                pass
-            raise HTTPException(status_code=400, detail="请先提取字幕或上传字幕")
-
-        if sub_abs and sub_abs.exists():
-            try:
-                subtitle_text = sub_abs.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                subtitle_text = ""
             try:
                 await manager.broadcast(json.dumps({
                     "type": "progress",
                     "scope": "generate_script",
                     "project_id": project_id,
-                    "phase": "subtitle_parsed",
-                    "message": "已解析字幕内容",
+                    "phase": "scenes_parsed",
+                    "message": "已解析镜头与视觉信息",
                     "progress": 65,
                     "timestamp": _now_ts(),
                 }))
             except Exception:
                 pass
+        else:
+            subtitle_status = getattr(p, "subtitle_status", None)
+            if subtitle_status and subtitle_status != "ready":
+                try:
+                    await manager.broadcast(json.dumps({
+                        "type": "error",
+                        "scope": "generate_script",
+                        "project_id": project_id,
+                        "phase": "subtitle_not_ready",
+                        "message": "字幕尚未就绪，请先提取字幕或上传字幕",
+                        "timestamp": _now_ts(),
+                    }))
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
+
+            if p.subtitle_path:
+                cand = _resolve_path(p.subtitle_path)
+                try:
+                    logger.info(f"project subtitle candidate project_id={project_id} cand_input={p.subtitle_path} cand_resolved={cand} exists={cand.exists()}")
+                except Exception:
+                    pass
+                if cand.exists():
+                    sub_abs = cand
+                    try:
+                        await manager.broadcast(json.dumps({
+                            "type": "progress",
+                            "scope": "generate_script",
+                            "project_id": project_id,
+                            "phase": "subtitle_exists",
+                            "message": "已存在字幕文件，跳过ASR",
+                            "progress": 60,
+                            "timestamp": _now_ts(),
+                        }))
+                    except Exception:
+                        pass
+                    try:
+                        if getattr(p, "subtitle_status", None) != "ready":
+                            projects_store.update_project(project_id, {"subtitle_status": "ready"})
+                    except Exception:
+                        pass
+
+            if not sub_abs and subtitle_path:
+                cand = _resolve_path(subtitle_path)
+                try:
+                    logger.info(f"request subtitle candidate project_id={project_id} cand_input={subtitle_path} cand_resolved={cand} exists={cand.exists()}")
+                except Exception:
+                    pass
+                if cand.exists():
+                    sub_abs = cand
+                    try:
+                        await manager.broadcast(json.dumps({
+                            "type": "progress",
+                            "scope": "generate_script",
+                            "project_id": project_id,
+                            "phase": "subtitle_exists",
+                            "message": "已提供字幕文件，跳过ASR",
+                            "progress": 60,
+                            "timestamp": _now_ts(),
+                        }))
+                    except Exception:
+                        pass
+                    try:
+                        if not getattr(p, "subtitle_path", None):
+                            projects_store.update_project(project_id, {
+                                "subtitle_path": subtitle_path,
+                                "subtitle_status": "ready",
+                                "subtitle_updated_at": _now_ts(),
+                            })
+                    except Exception:
+                        pass
+
+            if not sub_abs:
+                try:
+                    await manager.broadcast(json.dumps({
+                        "type": "error",
+                        "scope": "generate_script",
+                        "project_id": project_id,
+                        "phase": "subtitle_missing",
+                        "message": "请先提取字幕或上传字幕",
+                        "timestamp": _now_ts(),
+                    }))
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail="请先提取字幕或上传字幕")
+
+            if sub_abs and sub_abs.exists():
+                try:
+                    subtitle_text = sub_abs.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    subtitle_text = ""
+                try:
+                    await manager.broadcast(json.dumps({
+                        "type": "progress",
+                        "scope": "generate_script",
+                        "project_id": project_id,
+                        "phase": "subtitle_parsed",
+                        "message": "已解析字幕内容",
+                        "progress": 65,
+                        "timestamp": _now_ts(),
+                    }))
+                except Exception:
+                    pass
 
         projects_store.update_project(project_id, {"status": "processing"})
         try:
@@ -588,6 +657,11 @@ class GenerateScriptService:
                 drama_name=drama_name,
                 copywriting_text=copywriting_text,
                 subtitle_content=subtitle_text,
+                project_id=project_id,
+            ) if not use_visual else await ScriptGenerationService.generate_script_json_from_scenes(
+                drama_name=drama_name,
+                copywriting_text=copywriting_text,
+                scenes_data=scenes_data or {},
                 project_id=project_id,
             )
             try:

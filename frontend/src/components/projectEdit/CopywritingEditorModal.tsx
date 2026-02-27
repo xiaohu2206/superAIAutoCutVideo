@@ -57,6 +57,9 @@ const CopywritingEditorModal: React.FC<CopywritingEditorModalProps> = ({
               placeholder="请输入解说文案..."
               autoFocus
             />
+            <div className="mt-2 text-right text-sm text-gray-500">
+              字数：{internalValue.length}
+            </div>
           </div>
 
           {/* Footer */}

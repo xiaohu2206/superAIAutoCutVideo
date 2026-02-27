@@ -1,12 +1,13 @@
 import type { ScriptLengthOption } from "../../../types/project";
 
-export const DEFAULT_SCRIPT_LENGTH: ScriptLengthOption = "30～40条";
+export const DEFAULT_SCRIPT_LENGTH: ScriptLengthOption = "auto";
 
 export const SCRIPT_LENGTH_OPTIONS: Array<{
   value: ScriptLengthOption;
   title: string;
   subtitle: string;
 }> = [
+  { value: "auto", title: "自动", subtitle: "根据文案字数自动: 500字\\模型" },
   { value: "15～20条", title: "15～20 条", subtitle: "预计最少 2 次模型调用" },
   { value: "30～40条", title: "30～40 条", subtitle: "预计最少 4 次模型调用" },
   { value: "40～60条", title: "40～60 条", subtitle: "预计最少 5 次模型调用" },
@@ -67,6 +68,7 @@ export const estimateCallsForDisplay = (maxCount: number) => {
 export const normalizeScriptLengthString = (value: string): ScriptLengthOption | null => {
   const cleaned = normalizeRangeSeparators(value);
   if (!cleaned) return null;
+  if (cleaned.toLowerCase() === "auto" || cleaned === "自动") return "auto";
   const presetRange = parseRangeFromString(cleaned);
   if (presetRange) return formatRangeValue(presetRange);
   const numMatch = cleaned.match(/(\d+)/);
@@ -80,6 +82,7 @@ export const normalizeScriptLengthString = (value: string): ScriptLengthOption |
 export const normalizeScriptLength = (value: unknown): ScriptLengthOption => {
   const v = typeof value === "string" ? value : "";
   const allowed = new Set<ScriptLengthOption>([
+    "auto",
     "15～20条",
     "30～40条",
     "40～60条",

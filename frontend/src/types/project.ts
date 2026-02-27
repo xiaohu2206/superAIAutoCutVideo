@@ -9,6 +9,7 @@ export enum NarrationType {
 }
 
 export type ScriptLengthOption =
+  | "auto"
   | "15～20条"
   | "30～40条"
   | "40～60条"

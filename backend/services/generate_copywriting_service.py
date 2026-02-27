@@ -91,6 +91,29 @@ def _load_subtitle_text(p: Project, subtitle_path: Optional[str]) -> str:
     return sub_abs.read_text(encoding="utf-8", errors="ignore")
 
 
+def _load_scenes_data(p: Project, project_id: str) -> Dict[str, Any]:
+    scenes_abs: Optional[Path] = None
+    if getattr(p, "scenes_path", None):
+        cand = _resolve_path(str(getattr(p, "scenes_path", None) or ""))
+        if cand.exists():
+            scenes_abs = cand
+    if not scenes_abs:
+        cand = _uploads_dir() / "analyses" / f"{project_id}_scenes.json"
+        if cand.exists():
+            scenes_abs = cand
+    if not scenes_abs:
+        raise HTTPException(status_code=400, detail="镜头数据不存在，请先提取镜头")
+
+    try:
+        raw = scenes_abs.read_text(encoding="utf-8", errors="ignore")
+        scenes_data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        scenes_data = {}
+    if not isinstance(scenes_data, dict) or not isinstance(scenes_data.get("scenes"), list) or not scenes_data.get("scenes"):
+        raise HTTPException(status_code=400, detail="镜头数据无效，请重新提取镜头")
+    return scenes_data
+
+
 class GenerateCopywritingService:
     @staticmethod
     async def generate_copywriting(
@@ -107,9 +130,13 @@ class GenerateCopywritingService:
         if not video_abs.exists():
             raise HTTPException(status_code=400, detail="视频文件不存在")
 
-        subtitle_status = getattr(p, "subtitle_status", None)
-        if subtitle_status and subtitle_status != "ready":
-            raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
+        project_type = str(getattr(p, "project_type", None) or "subtitle").strip().lower()
+        use_visual = project_type == "visual"
+
+        if not use_visual:
+            subtitle_status = getattr(p, "subtitle_status", None)
+            if subtitle_status and subtitle_status != "ready":
+                raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
 
         try:
             await manager.broadcast(
@@ -128,7 +155,8 @@ class GenerateCopywritingService:
         except Exception:
             pass
 
-        subtitle_text = _load_subtitle_text(p, subtitle_path)
+        subtitle_text = _load_subtitle_text(p, subtitle_path) if not use_visual else ""
+        scenes_data = _load_scenes_data(p, project_id) if use_visual else None
         drama_name = p.name or "剧名"
 
         script_language = getattr(p, "script_language", None)
@@ -152,14 +180,24 @@ class GenerateCopywritingService:
         except Exception:
             pass
 
-        copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline(
-            subtitle_content=subtitle_text,
-            drama_name=drama_name,
-            project_id=project_id,
-            script_language=str(script_language) if script_language else None,
-            script_length=str(script_length) if script_length else None,
-            copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
-        )
+        if use_visual and scenes_data is not None:
+            copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
+                scenes_data=scenes_data,
+                drama_name=drama_name,
+                project_id=project_id,
+                script_language=str(script_language) if script_language else None,
+                script_length=str(script_length) if script_length else None,
+                copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+            )
+        else:
+            copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline(
+                subtitle_content=subtitle_text,
+                drama_name=drama_name,
+                project_id=project_id,
+                script_language=str(script_language) if script_language else None,
+                script_length=str(script_length) if script_length else None,
+                copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+            )
         copywriting = {
             "version": "1.0",
             "title": drama_name,
@@ -167,7 +205,7 @@ class GenerateCopywritingService:
             "content": copywriting_text,
             "generated_at": _now_ts(),
             "metadata": {
-                "source": "subtitle",
+                "source": "scene" if use_visual else "subtitle",
                 "script_language": str(script_language) if script_language else "zh",
                 "script_length": str(script_length) if script_length else "",
                 "copywriting_word_count": int(copywriting_word_count) if copywriting_word_count else None,

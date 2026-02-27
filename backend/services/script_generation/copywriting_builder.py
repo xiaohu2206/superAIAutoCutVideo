@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import math
+import re
 from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
@@ -14,6 +15,7 @@ from services.ai_service import ai_service
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
+from .scene_utils import scenes_to_timeline_items
 from .subtitle_utils import _format_timestamp_range, _parse_srt_subtitles
 
 logger = logging.getLogger(__name__)
@@ -136,6 +138,8 @@ def _add_language_and_count_messages(
             f"你必须输出一篇连续的纯文本解说文案，{count_hint}。"
             "不要输出JSON格式、代码块或任何格式标记，只输出解说文案正文。"
             "文案应按照剧情时间顺序完整讲述，段落之间用换行分隔。"
+            "字幕仅用于理解剧情信息，不要逐字照搬字幕原句；不要用引号直接输出字幕台词（尤其不要用一整句原文台词做开头）。"
+            "如需表达人物对话，请用转述/概述方式改写，不要出现与字幕连续8个字以上完全相同的句子。"
         ),
     ))
     return msgs
@@ -166,6 +170,36 @@ def _strip_code_fences(text: str) -> str:
     return text
 
 
+def _remove_leading_quoted_subtitle_lines(text: str) -> str:
+    lines = text.splitlines()
+    out: List[str] = []
+
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            out.append("")
+            continue
+
+        opening = s[0]
+        closing = {"“": "”", "「": "」", '"': '"', "『": "』"}.get(opening)
+        if closing:
+            idx = s.find(closing, 1)
+            if idx != -1:
+                after = s[idx + 1 :].lstrip(" \t-—:：，,。.!！?？\"”'」』")
+                if after:
+                    out.append(after)
+                continue
+
+        if re.fullmatch(r"[“「『\"].{1,120}[”」』\"]", s):
+            continue
+
+        out.append(s)
+
+    merged = "\n".join(out)
+    merged = re.sub(r"\n{3,}", "\n\n", merged).strip()
+    return merged
+
+
 async def _call_llm_text(messages: List[ChatMessage], max_retries: int = 3) -> str:
     merged = _merge_system_messages(messages)
     for attempt in range(max_retries + 1):
@@ -194,6 +228,7 @@ async def _generate_outline(
         f"你是一位专业的解说文案策划。请根据字幕内容，为《{drama_name}》的解说文案生成{num_sections}段大纲。"
         f"每段大纲用一行描述该段应该讲述的剧情内容和时间范围（如果能判断的话）。"
         f"只输出大纲列表，每行一段，格式为「段落N：内容摘要」，不要输出其他文字。"
+        "不要逐字引用字幕台词或原句，只做剧情概述。"
         f"必须使用{lang_hint}输出。"
     )
     user = (
@@ -213,8 +248,7 @@ async def _generate_outline(
         for i in range(num_sections):
             start = i * chunks_per
             end = min((i + 1) * chunks_per, len(all_lines))
-            snippet = " ".join(all_lines[start:end])[:200]
-            lines.append(f"段落{i + 1}：{snippet}")
+            lines.append(f"段落{i + 1}：概述字幕第{start + 1}-{end}行对应剧情")
     return lines[:num_sections]
 
 
@@ -258,6 +292,7 @@ async def _generate_section(
 
     messages = _add_language_and_count_messages(messages, script_language, per_section_chars)
     text = await _call_llm_text(messages)
+    text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"分段文案 {section_idx + 1}/{total_sections} 生成完成, 字数: {len(text)}")
     return text
 
@@ -285,8 +320,63 @@ async def generate_copywriting_from_subtitles(
         ts = _format_timestamp_range(float(s["start"]), float(s["end"]))
         subs_text_lines.append(f"[{ts}] {s['text']}")
     subs_text = "\n".join(subs_text_lines)
-    if len(subs_text) > MAX_SUBTITLE_CHARS_PER_CALL * 3:
-        subs_text = subs_text[: MAX_SUBTITLE_CHARS_PER_CALL * 3]
+
+    target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
+
+    template_key = _resolve_template_key(project_id, script_language)
+    default_key = _default_prompt_key_for_project(project_id)
+
+    need_segmented = target_chars is not None and target_chars > SINGLE_CALL_MAX_CHARS
+
+    if need_segmented:
+        return await _generate_segmented(
+            target_chars=target_chars,
+            drama_name=drama_name,
+            subs_text=subs_text,
+            template_key=template_key,
+            default_key=default_key,
+            script_language=script_language,
+        )
+
+    return await _generate_single(
+        target_chars=target_chars,
+        drama_name=drama_name,
+        subs_text=subs_text,
+        template_key=template_key,
+        default_key=default_key,
+        script_language=script_language,
+    )
+
+
+async def generate_copywriting_from_scenes(
+    scenes_data: Dict[str, Any],
+    drama_name: str,
+    project_id: Optional[str] = None,
+    script_language: Optional[str] = None,
+    script_length: Optional[str] = None,
+    copywriting_word_count: Optional[int] = None,
+) -> str:
+    scenes_raw = scenes_data.get("scenes") if isinstance(scenes_data, dict) else None
+    if not isinstance(scenes_raw, list) or not scenes_raw:
+        return ""
+
+    scene_items = scenes_to_timeline_items(scenes_raw)
+    if not scene_items:
+        return ""
+
+    subs_text_lines = []
+    for item in scene_items:
+        try:
+            start_s = float(item.get("start") or 0.0)
+            end_s = float(item.get("end") or start_s)
+        except Exception:
+            continue
+        ts = _format_timestamp_range(start_s, end_s)
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        subs_text_lines.append(f"[{ts}] {text}")
+    subs_text = "\n".join(subs_text_lines)
 
     target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
 
@@ -326,6 +416,7 @@ async def _generate_single(
     messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
     messages = _add_language_and_count_messages(messages, script_language, target_chars)
     text = await _call_llm_text(messages)
+    text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"解说文案生成完成 (单次), 字数: {len(text)}")
     return text
 
@@ -375,5 +466,6 @@ async def _generate_segmented(
     await asyncio.gather(*tasks)
 
     merged = "\n\n".join(t for t in section_texts if t)
+    merged = _remove_leading_quoted_subtitle_lines(merged)
     logger.info(f"解说文案生成完成 (分段合并), 总字数: {len(merged)}")
     return merged

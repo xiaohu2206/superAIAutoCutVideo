@@ -194,7 +194,7 @@ class ProjectsStore:
             description=description,
             project_type=project_type,
             narration_type=effective_narration_type,
-            script_length=self._get_default_script_length(effective_narration_type),
+            script_length="auto",
             script_language="zh",
             status="draft",
             video_path=None,
