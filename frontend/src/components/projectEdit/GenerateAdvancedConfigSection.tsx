@@ -208,6 +208,12 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
 
   return (
     <div className="border-gray-200 pt-4 space-y-3">
+      <CopywritingWordCountSelector
+        copywritingWordCount={copywritingWordCount}
+        loading={copywritingWordCountLoading}
+        saving={copywritingWordCountSaving}
+        setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
+      />
       <ScriptLengthSelector
         scriptLength={scriptLength}
         loading={scriptLengthLoading}
@@ -226,12 +232,6 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
         loading={scriptLanguageLoading}
         saving={scriptLanguageSaving}
         setScriptLanguageAndPersist={setScriptLanguageAndPersist}
-      />
-      <CopywritingWordCountSelector
-        copywritingWordCount={copywritingWordCount}
-        loading={copywritingWordCountLoading}
-        saving={copywritingWordCountSaving}
-        setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
       />
       {error ? <div className="text-xs text-red-600 mb-2">{error}</div> : null}
       <PromptTemplateList
