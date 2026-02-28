@@ -1,7 +1,10 @@
 import asyncio
+import hashlib
 import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 from typing import Any, Dict, Optional, Tuple, cast
 
 import numpy as np
@@ -380,6 +383,8 @@ def _prepare_windows_dll_search_paths() -> None:
     if sys.platform != "win32":
         return
 
+    _patch_windows_add_dll_directory()
+
     try:
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     except Exception:
@@ -473,6 +478,127 @@ def _prepare_windows_dll_search_paths() -> None:
             pass
 
 
+_WIN_ADD_DLL_DIRECTORY_PATCHED = False
+
+
+def _to_extended_length_windows_path(p: str) -> str:
+    s = (p or "").strip()
+    if not s:
+        return s
+    s = s.replace("/", "\\")
+    if s.startswith("\\\\?\\"):
+        return s
+    if s.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + s[2:]
+    return "\\\\?\\" + s
+
+
+def _try_get_windows_short_path(p: str) -> Optional[str]:
+    if sys.platform != "win32":
+        return None
+    s = (p or "").strip()
+    if not s:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        buf = ctypes.create_unicode_buffer(32768)
+        r = ctypes.windll.kernel32.GetShortPathNameW(wintypes.LPCWSTR(s), buf, wintypes.DWORD(len(buf)))
+        if not r:
+            return None
+        v = (buf.value or "").strip()
+        return v or None
+    except Exception:
+        return None
+
+
+def _try_get_windows_junction_alias(target_dir: str) -> Optional[str]:
+    if sys.platform != "win32":
+        return None
+    s = (target_dir or "").strip()
+    if not s:
+        return None
+    try:
+        t = Path(s)
+        if not t.exists() or not t.is_dir():
+            return None
+    except Exception:
+        return None
+
+    try:
+        base = Path(tempfile.gettempdir()) / "sacv_dll_junctions"
+        base.mkdir(parents=True, exist_ok=True)
+        h = hashlib.sha1(str(t).encode("utf-8", errors="ignore")).hexdigest()[:12]
+        link = base / f"j_{h}"
+        try:
+            if link.exists() and link.is_dir():
+                return str(link)
+        except Exception:
+            return None
+
+        r = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(t)],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            return None
+        try:
+            if link.exists() and link.is_dir():
+                return str(link)
+        except Exception:
+            return None
+        return None
+    except Exception:
+        return None
+
+
+def _patch_windows_add_dll_directory() -> None:
+    global _WIN_ADD_DLL_DIRECTORY_PATCHED
+    if _WIN_ADD_DLL_DIRECTORY_PATCHED or sys.platform != "win32":
+        return
+    orig = getattr(os, "add_dll_directory", None)
+    if not callable(orig):
+        _WIN_ADD_DLL_DIRECTORY_PATCHED = True
+        return
+    if getattr(orig, "__sacv_win_add_dll_directory_patched__", False):
+        _WIN_ADD_DLL_DIRECTORY_PATCHED = True
+        return
+
+    def _wrapped(path):
+        try:
+            return orig(path)
+        except OSError as e:
+            if getattr(e, "winerror", None) == 206:
+                try:
+                    p0 = str(path)
+                except Exception:
+                    p0 = path
+                try:
+                    p1 = os.path.abspath(p0)
+                except Exception:
+                    p1 = p0
+                try:
+                    return orig(_to_extended_length_windows_path(p1))
+                except Exception:
+                    pass
+                sp = _try_get_windows_short_path(p1)
+                if sp and sp != p1:
+                    return orig(sp)
+                jp = _try_get_windows_junction_alias(p1)
+                if jp:
+                    return orig(jp)
+            raise
+
+    setattr(_wrapped, "__sacv_win_add_dll_directory_patched__", True)
+    try:
+        os.add_dll_directory = _wrapped
+    except Exception:
+        pass
+    _WIN_ADD_DLL_DIRECTORY_PATCHED = True
+
+
 class Qwen3TTSService:
     def __init__(self) -> None:
         self._model_key: Optional[str] = None
@@ -496,6 +622,8 @@ class Qwen3TTSService:
     def _normalize_device(self, device: Optional[str]) -> str:
         d = (device or "").strip()
         if not d:
+            return ""
+        if d.lower() in {"auto", "default"}:
             return ""
         if d == "cuda":
             return "cuda:0"
@@ -521,6 +649,34 @@ class Qwen3TTSService:
         return True, ""
 
     async def _load_model(self, model_key: str, device: Optional[str] = None, precision: Optional[str] = None) -> None:
+        _prepare_windows_dll_search_paths()
+        pm = Qwen3TTSPathManager()
+        try:
+            model_dir = pm.model_path(model_key)
+        except KeyError:
+            raise RuntimeError(f"unknown_model_key:{model_key}")
+
+        model_path = self._normalize_model_path(str(model_dir))
+        requested_device = self._normalize_device(device)
+        requested_precision: Optional[str] = None
+        if precision is not None:
+            p_in = (precision or "").strip().lower()
+            if p_in in {"fp16", "float16", "half"}:
+                requested_precision = "fp16"
+            elif p_in in {"bf16", "bfloat16"}:
+                requested_precision = "bf16"
+            elif p_in in {"fp32", "float32"}:
+                requested_precision = "fp32"
+
+        if (
+            self._model is not None
+            and self._model_key == model_key
+            and self._model_path == model_path
+            and (not requested_device or self._runtime_device == requested_device)
+            and (requested_precision is None or self._runtime_precision == requested_precision)
+        ):
+            return
+
         async with self._load_lock:
             _prepare_windows_dll_search_paths()
             pm = Qwen3TTSPathManager()
@@ -531,6 +687,25 @@ class Qwen3TTSService:
 
             model_path = self._normalize_model_path(str(model_dir))
             requested_device = self._normalize_device(device)
+            requested_precision = None
+            if precision is not None:
+                p_in = (precision or "").strip().lower()
+                if p_in in {"fp16", "float16", "half"}:
+                    requested_precision = "fp16"
+                elif p_in in {"bf16", "bfloat16"}:
+                    requested_precision = "bf16"
+                elif p_in in {"fp32", "float32"}:
+                    requested_precision = "fp32"
+
+            if (
+                self._model is not None
+                and self._model_key == model_key
+                and self._model_path == model_path
+                and (not requested_device or self._runtime_device == requested_device)
+                and (requested_precision is None or self._runtime_precision == requested_precision)
+            ):
+                return
+
             if not requested_device:
                 try:
                     from modules.qwen3_tts_acceleration import get_qwen3_tts_preferred_device
@@ -538,15 +713,7 @@ class Qwen3TTSService:
                     requested_device = self._normalize_device(get_qwen3_tts_preferred_device())
                 except Exception:
                     requested_device = "cpu"
-
-            p_in = (precision or "").strip().lower()
-            if p_in in {"fp16", "float16", "half"}:
-                requested_precision = "fp16"
-            elif p_in in {"bf16", "bfloat16"}:
-                requested_precision = "bf16"
-            elif p_in in {"fp32", "float32"}:
-                requested_precision = "fp32"
-            else:
+            if requested_precision is None:
                 requested_precision = "fp16" if requested_device.startswith("cuda") else "fp32"
 
             try:
@@ -555,15 +722,6 @@ class Qwen3TTSService:
                 )
             except Exception:
                 pass
-
-            if (
-                self._model is not None
-                and self._model_key == model_key
-                and self._model_path == model_path
-                and self._runtime_device == requested_device
-                and self._runtime_precision == requested_precision
-            ):
-                return
 
             ready, err = self._ensure_ready(model_key)
             if not ready:
@@ -585,7 +743,13 @@ class Qwen3TTSService:
             try:
                 from modules.vendor.qwen_tts import Qwen3TTSModel
             except Exception as e:
-                raise RuntimeError(f"qwen_tts_import_failed:{e}")
+                hint = ""
+                try:
+                    if sys.platform == "win32" and (getattr(e, "winerror", None) == 206 or "WinError 206" in str(e) or "文件名或扩展名太长" in str(e)):
+                        hint = " | windows_path_too_long: 建议将后端安装/运行目录移到更短路径，或在系统中启用 Windows 长路径支持"
+                except Exception:
+                    hint = ""
+                raise RuntimeError(f"qwen_tts_import_failed:{e}{hint}")
 
             q = requested_device or "cpu"
             inst = None

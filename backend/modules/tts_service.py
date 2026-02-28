@@ -37,7 +37,15 @@ async def _get_tts_semaphore() -> asyncio.Semaphore:
 
 @asynccontextmanager
 async def _tts_slot():
-    yield
+    sem = await _get_tts_semaphore()
+    await sem.acquire()
+    try:
+        yield
+    finally:
+        try:
+            sem.release()
+        except Exception:
+            pass
 
 
 async def _ensure_dir(path: Path) -> None:

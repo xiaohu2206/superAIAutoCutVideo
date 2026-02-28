@@ -29,3 +29,36 @@ export type MoondreamDownloadTask = {
   downloaded_bytes?: number;
   total_bytes?: number;
 };
+
+export type MoondreamInferenceSettings = {
+  inference_device: string;
+  n_gpu_layers: number | null;
+};
+
+export type MoondreamResolvedRuntime = {
+  device: string;
+  main_gpu: number | null;
+  n_gpu_layers: number;
+};
+
+export type MoondreamRuntimeStatus = {
+  loaded: boolean;
+  model_dir?: string | null;
+  device?: string | null;
+  n_gpu_layers?: number | null;
+  main_gpu?: number | null;
+};
+
+export type MoondreamAccelerationStatusData = {
+  acceleration: any;
+  settings: MoondreamInferenceSettings;
+  resolved: MoondreamResolvedRuntime;
+  resolved_meta?: any;
+  runtime: MoondreamRuntimeStatus;
+};
+
+export type MoondreamSettingsResponseData = {
+  settings: MoondreamInferenceSettings;
+  resolved: MoondreamResolvedRuntime;
+  meta?: any;
+};

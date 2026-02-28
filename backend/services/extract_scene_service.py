@@ -18,7 +18,6 @@ import numpy as np
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from modules.transnetv2 import TransNetV2
 from services.extract_subtitle_service import extract_subtitle_service, _resolve_path, _uploads_dir, _to_web_path
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
@@ -29,10 +28,10 @@ class ExtractSceneService:
     SCOPE = "extract_scene"
     
     def __init__(self):
-        self._model: Optional[TransNetV2] = None
+        self._model: Optional[Any] = None
         self._model_lock = asyncio.Lock()
 
-    def _get_model(self) -> TransNetV2:
+    def _get_model(self):
         if self._model:
             return self._model
 
@@ -41,6 +40,30 @@ class ExtractSceneService:
             raise FileNotFoundError(f"TransNetV2 weights not found at {weights_dir}")
             
         logger.info(f"Loading TransNetV2 model from {weights_dir}")
+        backend = str(os.environ.get("TRANSNETV2_BACKEND") or "auto").strip().lower()
+        if backend in {"torch", "auto"}:
+            try:
+                import torch
+                from modules.transnetv2_torch import TransNetV2Torch
+
+                w = os.environ.get("TRANSNETV2_PYTORCH_WEIGHTS") or str(weights_dir / "transnetv2-pytorch-weights.pth")
+                use_torch = bool(w and Path(w).exists() and torch.cuda.is_available())
+                if backend == "torch":
+                    use_torch = bool(w and Path(w).exists())
+                if use_torch:
+                    self._model = TransNetV2Torch(str(weights_dir))
+                    try:
+                        info = self._model.get_backend_info()
+                        logger.info(f"TransNetV2 backend: {info}")
+                    except Exception:
+                        pass
+                    return self._model
+            except Exception as e:
+                if backend == "torch":
+                    raise
+                logger.warning(f"TransNetV2 torch backend unavailable, fallback to tensorflow: {e}")
+
+        from modules.transnetv2 import TransNetV2
         self._model = TransNetV2(str(weights_dir))
         return self._model
 
@@ -134,6 +157,29 @@ class ExtractSceneService:
                 model = self._get_model()
                 chunk_seconds = 180.0
                 overlap_frames = 25
+                max_chunk_concurrency = 0
+                try:
+                    v = str(os.environ.get("TRANSNETV2_CHUNK_SECONDS") or "").strip()
+                    if v:
+                        chunk_seconds = float(v)
+                except Exception:
+                    chunk_seconds = 180.0
+                try:
+                    v = str(os.environ.get("TRANSNETV2_OVERLAP_FRAMES") or "").strip()
+                    if v:
+                        overlap_frames = int(v)
+                except Exception:
+                    overlap_frames = 25
+                try:
+                    v = str(os.environ.get("TRANSNETV2_MAX_CONCURRENCY") or "").strip()
+                    if v:
+                        max_chunk_concurrency = int(v)
+                except Exception:
+                    max_chunk_concurrency = 0
+                if overlap_frames < 0:
+                    overlap_frames = 0
+                if chunk_seconds <= 0:
+                    chunk_seconds = 180.0
                 single_frame_predictions = None
                 import cv2
                 cap0 = cv2.VideoCapture(str(video_abs_path))
@@ -225,11 +271,19 @@ class ExtractSceneService:
                         _update_overall()
                         return si, sf, ef, pred
                     pending = set()
-                    for i, sf in enumerate(starts):
-                        ef = min(total_frames0, sf + chunk_frames)
-                        asf = max(0, sf - (overlap_frames if sf > 0 else 0))
-                        aef = min(total_frames0, ef + (overlap_frames if ef < total_frames0 else 0))
-                        pending.add(asyncio.create_task(run_chunk(i, sf, ef, asf, aef)))
+                    next_i = 0
+                    total_chunks = len(starts)
+                    effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
+                    def _enqueue_more():
+                        nonlocal next_i
+                        while next_i < total_chunks and len(pending) < effective_concurrency:
+                            sf = starts[next_i]
+                            ef = min(total_frames0, sf + chunk_frames)
+                            asf = max(0, sf - (overlap_frames if sf > 0 else 0))
+                            aef = min(total_frames0, ef + (overlap_frames if ef < total_frames0 else 0))
+                            pending.add(asyncio.create_task(run_chunk(next_i, sf, ef, asf, aef)))
+                            next_i += 1
+                    _enqueue_more()
                     processed = 0
                     try:
                         while pending:
@@ -256,6 +310,7 @@ class ExtractSceneService:
                                             pass
                                     await asyncio.gather(*pending, return_exceptions=True)
                                     raise asyncio.CancelledError("任务已取消")
+                            _enqueue_more()
                     except Exception:
                         for pt in pending:
                             try:
@@ -352,6 +407,8 @@ class ExtractSceneService:
                             scope=self.SCOPE,
                             project_id=project_id,
                             task_id=task_id,
+                            status="processing",
+                            progress=90,
                             message=f"视觉分析失败: {str(e)} (继续保存结果)",
                         )
 

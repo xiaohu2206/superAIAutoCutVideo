@@ -14,6 +14,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from modules.moondream_model_manager import MoondreamPathManager, validate_model_dir, download_model_snapshot
+from modules.moondream_acceleration import get_moondream_acceleration_status
+from modules.moondream_inference_settings import (
+    get_moondream_settings,
+    resolve_moondream_runtime_config,
+    update_moondream_settings,
+)
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.app_paths import user_data_dir
 from modules.ws_manager import manager
@@ -32,6 +38,10 @@ class DownloadRequest(BaseModel):
 
 class StopDownloadRequest(BaseModel):
     key: str = "moondream2_gguf"
+
+class MoondreamSettingsUpdateRequest(BaseModel):
+    inference_device: Optional[str] = None
+    n_gpu_layers: Optional[int] = None
 
 _download_tasks: Dict[str, asyncio.Task] = {}
 _download_states: Dict[str, Dict[str, Any]] = {}
@@ -203,6 +213,43 @@ async def validate_model(req: ValidateRequest) -> Dict[str, Any]:
     pm = MoondreamPathManager()
     status = pm.get_status()
     return {"success": True, "data": {"key": status.key, "path": status.path, "valid": status.valid, "missing": status.missing}}
+
+def _env_n_gpu_layers() -> int:
+    raw = str(os.environ.get("MOONDREAM_N_GPU_LAYERS") or "").strip()
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except Exception:
+        return 0
+
+
+@router.get("/settings")
+async def get_settings() -> Dict[str, Any]:
+    st = get_moondream_settings()
+    runtime, meta = resolve_moondream_runtime_config(st, env_n_gpu_layers=_env_n_gpu_layers())
+    return {"success": True, "data": {"settings": st, "resolved": runtime, "meta": meta}, "message": "ok"}
+
+
+@router.post("/settings")
+async def update_settings(req: MoondreamSettingsUpdateRequest) -> Dict[str, Any]:
+    st = update_moondream_settings(req.model_dump())
+    runtime, meta = resolve_moondream_runtime_config(st, env_n_gpu_layers=_env_n_gpu_layers())
+    return {"success": True, "data": {"settings": st, "resolved": runtime, "meta": meta}, "message": "ok"}
+
+
+@router.get("/acceleration-status")
+async def get_acceleration_status() -> Dict[str, Any]:
+    st = get_moondream_settings()
+    resolved, meta = resolve_moondream_runtime_config(st, env_n_gpu_layers=_env_n_gpu_layers())
+    data = {
+        "acceleration": get_moondream_acceleration_status(),
+        "settings": st,
+        "resolved": resolved,
+        "resolved_meta": meta,
+        "runtime": vision_frame_analyzer.get_moondream_runtime_status(),
+    }
+    return {"success": True, "data": data, "message": "ok"}
 
 @router.post("/models/download")
 async def download_model(req: DownloadRequest) -> Dict[str, Any]:

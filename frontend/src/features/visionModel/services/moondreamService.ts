@@ -1,5 +1,12 @@
 import { apiClient } from "@/services/clients";
-import type { ApiOk, MoondreamModelStatus, MoondreamTestResult, MoondreamDownloadTask } from "../types";
+import type {
+  ApiOk,
+  MoondreamModelStatus,
+  MoondreamTestResult,
+  MoondreamDownloadTask,
+  MoondreamAccelerationStatusData,
+  MoondreamSettingsResponseData,
+} from "../types";
 
 export const moondreamService = {
   listModels(): Promise<ApiOk<MoondreamModelStatus[]>> {
@@ -47,5 +54,17 @@ export const moondreamService = {
 
   stopDownload(key: string): Promise<ApiOk<any>> {
     return apiClient.post("/api/vision/moondream/models/downloads/stop", { key });
+  },
+
+  getAccelerationStatus(): Promise<ApiOk<MoondreamAccelerationStatusData>> {
+    return apiClient.get("/api/vision/moondream/acceleration-status");
+  },
+
+  getSettings(): Promise<ApiOk<MoondreamSettingsResponseData>> {
+    return apiClient.get("/api/vision/moondream/settings");
+  },
+
+  updateSettings(patch: { inference_device?: string; n_gpu_layers?: number | null }): Promise<ApiOk<MoondreamSettingsResponseData>> {
+    return apiClient.post("/api/vision/moondream/settings", patch);
   },
 };

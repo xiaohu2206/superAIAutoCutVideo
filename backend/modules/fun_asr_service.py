@@ -96,7 +96,8 @@ def _ensure_dependency_ready() -> Tuple[bool, str]:
         import funasr  # type: ignore
         from funasr.register import tables  # type: ignore
     except Exception as e:
-        return False, f"missing_dependency:funasr:{e}"
+        hint = "请在后端 Python 环境安装 FunASR 依赖（例如：python -m pip install -r backend/requirements.runtime.txt）"
+        return False, f"missing_dependency:funasr:{e}。{hint}"
 
     # Patch for FunASRNano if missing (often missing in funasr < 1.4)
     # We load our patched version which fixes broken imports in the site-packages version

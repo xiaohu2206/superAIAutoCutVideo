@@ -50,9 +50,11 @@ _maybe_packages = [
     'fastapi',
     'pydantic',
     'onnxruntime',
+    'tensorflow',
     'librosa',
     'soundfile',
     'modelscope',
+    'funasr',
     'transformers',
     'huggingface_hub',
     'torch',
@@ -67,6 +69,17 @@ for package in ['onnxruntime', 'librosa', 'transformers', 'modelscope', 'torch',
         datas += collect_data_files(package)
     except Exception as e:
         print(f"Warning: Failed to collect data files for {package}: {e}")
+
+try:
+    _funasr_ok = importlib.util.find_spec("funasr") is not None
+except Exception:
+    _funasr_ok = False
+if _funasr_ok:
+    try:
+        hiddenimports += collect_submodules("funasr")
+        datas += collect_data_files("funasr")
+    except Exception as e:
+        print(f"Warning: Failed to collect funasr extras: {e}")
 
 for package in ['onnxruntime', 'torch', 'torchvision', 'torchaudio', 'soundfile']:
     try:

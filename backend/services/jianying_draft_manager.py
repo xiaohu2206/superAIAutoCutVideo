@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import uuid
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,8 +16,11 @@ from typing import Any, Dict, List, Optional, Sequence
 from modules.projects_store import Project, projects_store
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
+from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.task_cancel_store import task_cancel_store
+
+logger = logging.getLogger(__name__)
 
 
 def _now_ts() -> str:
@@ -966,6 +970,36 @@ class JianyingDraftManager:
                                 ot.cancel()
                             except Exception:
                                 pass
+
+                try:
+                    cfg = tts_engine_config_manager.get_active_config()
+                    provider = (getattr(cfg, "provider", None) or "").lower()
+                    if provider == "qwen3_tts":
+                        total_tts_dur = 0.0
+                        missing = 0
+                        for it in need_tts:
+                            idx = int(it.get("idx") or 0)
+                            r = tts_results.get(idx) or {}
+                            d = _try_parse_float(r.get("duration"))
+                            if d <= 0.0:
+                                try:
+                                    d = _probe_audio_duration(Path(it.get("out"))) or 0.0
+                                except Exception:
+                                    d = 0.0
+                            if d > 0.0:
+                                total_tts_dur += d
+                            else:
+                                missing += 1
+                        logger.info(
+                            "QwenTTS 总配音时长: project_id=%s task_id=%s segments=%s total_duration_s=%.3f missing=%s",
+                            project_id,
+                            task_id,
+                            len(need_tts),
+                            total_tts_dur,
+                            missing,
+                        )
+                except Exception:
+                    pass
 
             for idx, seg in enumerate(segments, start=1):
                 if cancel_event and cancel_event.is_set():

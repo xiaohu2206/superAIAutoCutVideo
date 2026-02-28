@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional
 from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.tts_service import tts_service
+from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
 from modules.task_cancel_store import task_cancel_store
 
@@ -335,6 +336,43 @@ class VideoGenerationService:
                                 ot.cancel()
                             except Exception:
                                 pass
+
+                try:
+                    cfg = tts_engine_config_manager.get_active_config()
+                    provider = (getattr(cfg, "provider", None) or "").lower()
+                    if provider == "qwen3_tts":
+                        total_tts_dur = 0.0
+                        missing = 0
+                        for it in need_tts:
+                            idx = int(it.get("idx") or 0)
+                            r = tts_results.get(idx) or {}
+                            d0 = r.get("duration")
+                            if isinstance(d0, (int, float)):
+                                d = float(d0)
+                            elif isinstance(d0, str):
+                                try:
+                                    d = float(d0.strip())
+                                except Exception:
+                                    d = 0.0
+                            else:
+                                d = 0.0
+                            if d <= 0.0:
+                                seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                                d = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                            if d > 0.0:
+                                total_tts_dur += d
+                            else:
+                                missing += 1
+                        logger.info(
+                            "QwenTTS 总配音时长: project_id=%s task_id=%s segments=%s total_duration_s=%.3f missing=%s",
+                            project_id,
+                            task_id,
+                            len(need_tts),
+                            total_tts_dur,
+                            missing,
+                        )
+                except Exception:
+                    pass
 
             for it in segment_items:
                 idx = int(it["idx"])

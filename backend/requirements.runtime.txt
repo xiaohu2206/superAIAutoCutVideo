@@ -16,10 +16,13 @@ huggingface_hub==0.34.0
 fsspec==2024.2.0
 soundfile==0.12.1
 modelscope==1.14.0
-funasr==0.7.5
+funasr==1.3.1
+openai-whisper==20250625
 librosa==0.10.2.post1
 onnxruntime==1.18.1
 tbb
 imageio-ffmpeg==0.6.0
+ffmpeg-python==0.2.0
 Pillow==10.0.0
-llama-cpp-python==0.2.90
+tensorflow==2.16.1
+llama-cpp-python==0.3.16

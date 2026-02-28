@@ -160,7 +160,7 @@ export const SubtitleAsrSettings: React.FC = () => {
       className: isGpu ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-600 border-gray-200",
     };
   }, [acc]);
-
+console.log("accelerationView", accelerationView);
   return (
     <div className="space-y-6">
       <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
