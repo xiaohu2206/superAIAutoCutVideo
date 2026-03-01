@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, ShieldCheck, Play, Loader, FolderOpen, ExternalLink, Download, XCircle, Cpu, RefreshCw, Save } from "lucide-react";
+import { Eye, ShieldCheck, Play, Loader, FolderOpen, ExternalLink, Download, XCircle, RefreshCw } from "lucide-react";
 import { useMoondreamModels } from "../hooks/useMoondreamModels";
 import { moondreamService } from "../services/moondreamService";
 import { message } from "@/services/message";
@@ -17,9 +17,8 @@ export const VisionModelSettings: React.FC = () => {
 
     const [accLoading, setAccLoading] = useState(false);
     const [accData, setAccData] = useState<any>(null);
-    const [device, setDevice] = useState<string>("auto");
-    const [gpuLayers, setGpuLayers] = useState<string>("");
-    const [savingSettings, setSavingSettings] = useState<boolean>(false);
+    
+    const [accDebugOpen, setAccDebugOpen] = useState<boolean>(false);
 
     const refreshAcceleration = useCallback(async () => {
         setAccLoading(true);
@@ -30,12 +29,7 @@ export const VisionModelSettings: React.FC = () => {
                 return;
             }
             setAccData(res.data || null);
-            const st = (res.data as any)?.settings;
-            if (st) {
-                setDevice(String(st.inference_device || "auto"));
-                const n = st.n_gpu_layers;
-                setGpuLayers(n === null || n === undefined ? "" : String(n));
-            }
+            
         } catch (e: any) {
             message.error(e?.message || "获取加速状态失败");
         } finally {
@@ -67,11 +61,7 @@ export const VisionModelSettings: React.FC = () => {
     
     const isDownloading = downloadTask && downloadTask.key === modelKey && downloadTask.status === "running";
 
-    const deviceOptions = useMemo(() => {
-        const count = Number((accData as any)?.acceleration?.cuda?.device_count || 0);
-        const gpus = Array.from({ length: Math.max(0, count) }, (_, i) => `cuda:${i}`);
-        return ["auto", "cpu", ...gpus];
-    }, [accData]);
+    
 
     const accelerationView = useMemo(() => {
         const a = (accData as any)?.acceleration;
@@ -91,33 +81,7 @@ export const VisionModelSettings: React.FC = () => {
         };
     }, [accData]);
 
-    const saveSettings = useCallback(async () => {
-        setSavingSettings(true);
-        try {
-            const raw = gpuLayers.trim();
-            let nVal: number | null = null;
-            if (raw !== "") {
-                const parsed = Number(raw);
-                if (Number.isFinite(parsed)) {
-                    nVal = Math.max(0, Math.floor(parsed));
-                }
-            }
-            const res = await moondreamService.updateSettings({
-                inference_device: device,
-                n_gpu_layers: nVal,
-            });
-            if (!res?.success) {
-                message.error(res?.message || "保存失败");
-                return;
-            }
-            message.success("已保存");
-            void refreshAcceleration();
-        } catch (e: any) {
-            message.error(e?.message || "保存失败");
-        } finally {
-            setSavingSettings(false);
-        }
-    }, [device, gpuLayers, refreshAcceleration]);
+    
 
     const formatBytes = (bytes?: number) => {
         if (bytes === undefined) return "-";
@@ -135,7 +99,34 @@ export const VisionModelSettings: React.FC = () => {
                     <ShieldCheck className="h-5 w-5 text-gray-700" />
                     <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
                 </div>
-                
+                 <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setAccDebugOpen((prev) => !prev)}
+                        className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
+                        title={accelerationView.title}
+                        aria-expanded={accDebugOpen}
+                    >
+                        {accelerationView.text}
+                    </button>
+                    <button
+                            type="button"
+                            onClick={() => refreshAcceleration()}
+                            disabled={accLoading}
+                            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                            title="刷新加速状态"
+                        >
+                            <RefreshCw className={`h-4 w-4 ${accLoading ? "animate-spin" : ""}`} />
+                        </button>
+                </div>
+                {accDebugOpen ? (
+                    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <div className="text-[11px] text-gray-500 mb-1">/api/vision/moondream/acceleration-status</div>
+                        <pre className="text-[11px] leading-4 whitespace-pre-wrap break-words text-gray-800 max-h-56 overflow-auto">
+                            {JSON.stringify(accData ?? null, null, 2)}
+                        </pre>
+                    </div>
+                ) : null}
                 <div className="bg-white border rounded-lg p-3 shadow-sm">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                          <div className="flex items-start gap-3">
@@ -259,76 +250,7 @@ export const VisionModelSettings: React.FC = () => {
                 </div>
             </section>
             
-            <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                        <Cpu className="h-5 w-5 text-gray-700" />
-                        <h4 className="text-md font-semibold text-gray-900">推理设备</h4>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => refreshAcceleration()}
-                            disabled={accLoading}
-                            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                            title="刷新加速状态"
-                        >
-                            <RefreshCw className={`h-4 w-4 ${accLoading ? "animate-spin" : ""}`} />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={saveSettings}
-                            disabled={savingSettings || accLoading}
-                            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                        >
-                            <Save className="h-4 w-4" />
-                            保存
-                        </button>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
-                        title={accelerationView.title}
-                    >
-                        {accelerationView.text}
-                    </button>
-                    <div className="text-xs text-gray-500">
-                        生效: {String((accData as any)?.resolved?.device || "cpu")}
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                        <label className="block text-xs text-gray-600 mb-1">推理设备</label>
-                        <select
-                            value={device}
-                            onChange={(e) => setDevice(e.target.value)}
-                            className="w-full h-9 text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                            disabled={savingSettings || accLoading}
-                        >
-                            {deviceOptions.map((d) => (
-                                <option key={d} value={d}>
-                                    {d === "auto" ? "自动" : d === "cpu" ? "CPU" : `GPU (${d})`}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-xs text-gray-600 mb-1">GPU layers（可选）</label>
-                        <input
-                            value={gpuLayers}
-                            onChange={(e) => setGpuLayers(e.target.value)}
-                            placeholder={device === "cpu" ? "CPU 模式无需设置" : "留空=自动；推荐 99"}
-                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
-                            disabled={savingSettings || accLoading || device === "cpu"}
-                            inputMode="numeric"
-                        />
-                    </div>
-                </div>
-            </section>
+          
 
             <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
                  <div className="flex items-center justify-between gap-3 flex-wrap">

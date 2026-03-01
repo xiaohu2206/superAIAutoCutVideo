@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Cpu, Loader, Play, ShieldCheck } from "lucide-react";
+import { Cpu, Loader, Play, ShieldCheck, RefreshCw } from "lucide-react";
 import { message } from "@/services/message";
 import { funAsrService } from "../services/funAsrService";
 import { FUN_ASR_MODEL_OPTIONS } from "../constants";
@@ -89,6 +89,7 @@ export const SubtitleAsrSettings: React.FC = () => {
 
   const [accLoading, setAccLoading] = useState(false);
   const [acc, setAcc] = useState<any>(null);
+  const [accDebugOpen, setAccDebugOpen] = useState<boolean>(false);
 
   const refreshAcceleration = async () => {
     setAccLoading(true);
@@ -160,45 +161,45 @@ export const SubtitleAsrSettings: React.FC = () => {
       className: isGpu ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-600 border-gray-200",
     };
   }, [acc]);
-console.log("accelerationView", accelerationView);
+
   return (
     <div className="space-y-6">
-      <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Cpu className="h-5 w-5 text-gray-700" />
-            <h4 className="text-md font-semibold text-gray-900">加速状态</h4>
-          </div>
-          <button
-            onClick={refreshAcceleration}
-            disabled={accLoading}
-            className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-gray-50 disabled:opacity-50"
-          >
-            {accLoading ? "刷新中…" : "刷新"}
-          </button>
-        </div>
-        <div
-          className={`text-xs border rounded-lg p-3 whitespace-pre-wrap break-words ${
-            accelerationView?.className || "text-gray-700 bg-gray-50 border-gray-200"
-          }`}
-        >
-          {accelerationView ? (
-            <>
-              <div className="font-semibold mb-1">当前运行设备: {accelerationView.text}</div>
-              <div className="opacity-80 leading-relaxed">{accelerationView.title}</div>
-            </>
-          ) : (
-            "暂无数据"
-          )}
-        </div>
-      </section>
 
       <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-gray-700" />
           <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
         </div>
-
+        <div>
+          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAccDebugOpen((prev) => !prev)}
+            className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView?.className || "bg-gray-50 text-gray-600 border-gray-200"}`}
+            title={accelerationView?.title || ""}
+            aria-expanded={accDebugOpen}
+          >
+            {`当前运行设备: ${accelerationView?.text || "-"}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => refreshAcceleration()}
+            disabled={accLoading}
+            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+            title="刷新加速状态"
+          >
+            <RefreshCw className={`h-4 w-4 ${accLoading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+        {accDebugOpen ? (
+          <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-[11px] text-gray-500 mb-1">/api/asr/funasr/acceleration-status</div>
+            <pre className="text-[11px] leading-4 whitespace-pre-wrap break-words text-gray-800 max-h-56 overflow-auto">
+              {JSON.stringify(acc ?? null, null, 2)}
+            </pre>
+          </div>
+        ) : null}
+        </div>
         <FunAsrModelOptionsList
           options={options}
           modelsLoading={loading}
