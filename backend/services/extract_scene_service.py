@@ -204,6 +204,8 @@ class ExtractSceneService:
                     _, sp_tmp, _ = await loop.run_in_executor(
                         None, lambda: model.predict_video(str(video_abs_path), cb_tmp)
                     )
+                    if sp_tmp is None or len(sp_tmp) == 0:
+                        raise ValueError("未能从视频中解码任何帧，无法进行镜头分析")
                     single_frame_predictions = sp_tmp
                 else:
                     chunk_frames = max(1, int(round(chunk_seconds * fps0)))

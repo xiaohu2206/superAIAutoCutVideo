@@ -70,6 +70,9 @@ class TransNetV2:
     def predict_frames(self, frames: np.ndarray, progress_callback: Optional[Callable[[float], None]] = None):
         assert len(frames.shape) == 4 and frames.shape[1:] == self._input_size, \
             "[TransNetV2] Input shape must be [frames, height, width, 3]."
+        if frames is None or len(frames) == 0:
+            empty = np.zeros((0,), dtype=np.float32)
+            return empty, empty
 
         def input_iterator():
             # return windows of size 100 where the first/last 25 frames are from the previous/next batch
@@ -152,6 +155,8 @@ class TransNetV2:
 
     @staticmethod
     def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5):
+        if predictions is None or len(predictions) == 0:
+            return np.zeros((0, 2), dtype=np.int32)
         predictions = (predictions > threshold).astype(np.uint8)
 
         scenes = []

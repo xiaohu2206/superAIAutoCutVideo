@@ -416,6 +416,9 @@ class TransNetV2Torch:
             frames = frames.astype(np.uint8, copy=False)
         if len(frames.shape) != 4 or list(frames.shape[1:]) != [27, 48, 3]:
             raise ValueError("frames shape must be [T, 27, 48, 3]")
+        if len(frames) == 0:
+            empty = np.zeros((0,), dtype=np.float32)
+            return empty, empty
 
         no_padded_frames_start = 25
         no_padded_frames_end = 25 + 50 - (len(frames) % 50 if len(frames) % 50 != 0 else 50)
@@ -491,6 +494,8 @@ class TransNetV2Torch:
 
     @staticmethod
     def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5):
+        if predictions is None or len(predictions) == 0:
+            return np.zeros((0, 2), dtype=np.int32)
         predictions = (predictions > threshold).astype(np.uint8)
         scenes = []
         t, t_prev, start = -1, 0, 0
@@ -505,4 +510,3 @@ class TransNetV2Torch:
         if len(scenes) == 0:
             return np.array([[0, len(predictions) - 1]], dtype=np.int32)
         return np.array(scenes, dtype=np.int32)
-
