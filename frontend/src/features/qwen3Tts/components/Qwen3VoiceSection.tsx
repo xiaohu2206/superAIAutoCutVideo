@@ -427,8 +427,8 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
           </div>
         </div>
               <div>
-              {error ? <div className="text-xs text-red-600 mt-1">{error}</div> : null}
-            <div className="mt-2 flex items-center gap-2">
+              {error ? <div className="text-xs text-red-600">{error}</div> : null}
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setAccelerationDebugOpen((prev) => !prev)}
