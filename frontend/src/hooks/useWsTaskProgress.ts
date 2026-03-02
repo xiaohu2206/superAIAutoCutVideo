@@ -16,6 +16,7 @@ export interface UseWsTaskProgressOptions {
   onProgress?: (progress: number) => void;
   onLog?: (log: WsProgressLog) => void;
   onCompleted?: (message: WebSocketMessage) => void;
+  onCancelled?: (message: WebSocketMessage) => void;
   onError?: (message: WebSocketMessage) => void;
 }
 
@@ -28,6 +29,7 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
   const onProgress = options.onProgress;
   const onLog = options.onLog;
   const onCompleted = options.onCompleted;
+  const onCancelled = options.onCancelled;
   const onError = options.onError;
 
   useEffect(() => {
@@ -36,7 +38,7 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
     const handler = (message: WebSocketMessage) => {
       if (
         !message ||
-        (message.type !== "progress" && message.type !== "completed" && message.type !== "error")
+        (message.type !== "progress" && message.type !== "completed" && message.type !== "error" && message.type !== "cancelled")
       ) {
         return;
       }
@@ -63,6 +65,9 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
       if (message.type === "completed") {
         onCompleted?.(message);
       }
+      if (message.type === "cancelled") {
+        onCancelled?.(message);
+      }
       if (message.type === "error") {
         onError?.(message);
       }
@@ -79,6 +84,7 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
     onProgress,
     onLog,
     onCompleted,
+    onCancelled,
     onError,
   ]);
 }

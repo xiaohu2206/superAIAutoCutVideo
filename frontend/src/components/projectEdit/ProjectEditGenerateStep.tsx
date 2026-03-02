@@ -7,6 +7,11 @@ import ScriptEditor from "./ScriptEditor";
 interface ProjectEditGenerateStepProps {
   project: Project;
 
+  isGeneratingCopywriting: boolean;
+  handleGenerateCopywriting: () => void;
+  copywritingGenProgress: number;
+  copywritingGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
+
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
   generateScriptDisabled: boolean;
@@ -16,16 +21,25 @@ interface ProjectEditGenerateStepProps {
 
   isGeneratingVideo: boolean;
   handleGenerateVideo: () => void;
+  handleStopGenerateVideo: () => void;
+  isStoppingVideo: boolean;
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
 
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
+  handleStopGenerateDraft: () => void;
+  isStoppingDraft: boolean;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
 
   showMergedPreview: boolean;
   setShowMergedPreview: React.Dispatch<React.SetStateAction<boolean>>;
+
+  editedCopywriting: string;
+  setEditedCopywriting: (copywriting: string) => void;
+  isSavingCopywriting: boolean;
+  handleSaveCopywriting: (content?: string) => void;
 
   editedScript: string;
   setEditedScript: (script: string) => void;
@@ -35,6 +49,10 @@ interface ProjectEditGenerateStepProps {
 
 const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   project,
+  isGeneratingCopywriting,
+  handleGenerateCopywriting,
+  copywritingGenProgress,
+  copywritingGenLogs,
   isGeneratingScript,
   handleGenerateScript,
   generateScriptDisabled,
@@ -43,14 +61,22 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   scriptGenLogs,
   isGeneratingVideo,
   handleGenerateVideo,
+  handleStopGenerateVideo,
+  isStoppingVideo,
   videoGenProgress,
   videoGenLogs,
   isGeneratingDraft,
   handleGenerateDraft,
+  handleStopGenerateDraft,
+  isStoppingDraft,
   draftGenProgress,
   draftGenLogs,
   showMergedPreview,
   setShowMergedPreview,
+  editedCopywriting,
+  setEditedCopywriting,
+  isSavingCopywriting,
+  handleSaveCopywriting,
   editedScript,
   setEditedScript,
   isSaving,
@@ -67,7 +93,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
             onClick={() => setShowAdvancedConfig((v) => !v)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-             <span className="text-xs text-gray-500">（脚本条数、原片占比范围、生成语言、提示词）</span>
+             <span className="text-xs text-gray-500">（解说文案字数、脚本条数、原片占比范围、生成语言、提示词）</span>
             高级配置
           </button>
         </div>
@@ -81,6 +107,10 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
         <ProjectOperations
           project={project}
+          isGeneratingCopywriting={isGeneratingCopywriting}
+          handleGenerateCopywriting={handleGenerateCopywriting}
+          copywritingGenProgress={copywritingGenProgress}
+          copywritingGenLogs={copywritingGenLogs}
           isGeneratingScript={isGeneratingScript}
           handleGenerateScript={handleGenerateScript}
           generateScriptDisabled={generateScriptDisabled}
@@ -89,10 +119,14 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           scriptGenLogs={scriptGenLogs}
           isGeneratingVideo={isGeneratingVideo}
           handleGenerateVideo={handleGenerateVideo}
+          handleStopGenerateVideo={handleStopGenerateVideo}
+          isStoppingVideo={isStoppingVideo}
           videoGenProgress={videoGenProgress}
           videoGenLogs={videoGenLogs}
           isGeneratingDraft={isGeneratingDraft}
           handleGenerateDraft={handleGenerateDraft}
+          handleStopGenerateDraft={handleStopGenerateDraft}
+          isStoppingDraft={isStoppingDraft}
           draftGenProgress={draftGenProgress}
           draftGenLogs={draftGenLogs}
           showMergedPreview={showMergedPreview}
@@ -101,6 +135,10 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
       </div>
 
       <ScriptEditor
+        editedCopywriting={editedCopywriting}
+        setEditedCopywriting={setEditedCopywriting}
+        isSavingCopywriting={isSavingCopywriting}
+        handleSaveCopywriting={handleSaveCopywriting}
         editedScript={editedScript}
         setEditedScript={setEditedScript}
         isSaving={isSaving}

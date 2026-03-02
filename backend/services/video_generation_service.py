@@ -17,7 +17,9 @@ from typing import Dict, Any, List, Optional
 from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.tts_service import tts_service
+from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
+from modules.task_cancel_store import task_cancel_store
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,7 @@ class VideoGenerationService:
         return safe
 
     @staticmethod
-    async def generate_from_script(project_id: str) -> Dict[str, Any]:
+    async def generate_from_script(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
         """
         根据项目的脚本生成视频：剪辑+拼接。
 
@@ -118,6 +120,7 @@ class VideoGenerationService:
                     "type": "progress",
                     "scope": "generate_video",
                     "project_id": project_id,
+                    "task_id": task_id,
                     "phase": "start",
                     "message": "开始生成视频",
                     "progress": 1,
@@ -165,6 +168,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "prepare_output",
                         "message": "准备输出与临时目录",
                         "progress": 10,
@@ -183,6 +187,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "cutting_segments_start",
                         "message": "正在剪切视频片段并生成配音",
                         "progress": 15,
@@ -191,8 +196,10 @@ class VideoGenerationService:
                 )
             except Exception:
                 pass
-
+            segment_items: List[Dict[str, Any]] = []
             for idx, seg in enumerate(segments, start=1):
+                if cancel_event.is_set():
+                    raise asyncio.CancelledError()
                 start = float(seg.get("start_time", 0.0))
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
@@ -206,7 +213,14 @@ class VideoGenerationService:
                 logger.info(f"DEBUG segment_init idx={idx} start={start} end={end} duration={duration} ost={ost_flag} text_len={len(text)} is_original={is_original}")
 
                 ok = await video_processor.cut_video_segment(
-                    str(input_abs), str(clip_abs), start, duration
+                    str(input_abs),
+                    str(clip_abs),
+                    start,
+                    duration,
+                    scope="generate_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
                 if not ok:
                     raise RuntimeError(f"剪切片段失败: {idx}")
@@ -217,14 +231,169 @@ class VideoGenerationService:
                     clip_size = None
                 logger.info(f"DEBUG segment_clip idx={idx} path={clip_abs} size={clip_size}")
 
+                segment_items.append({
+                    "idx": idx,
+                    "start": start,
+                    "end": end,
+                    "duration": duration,
+                    "text": text,
+                    "is_original": is_original,
+                    "clip_abs": clip_abs,
+                })
+                try:
+                    base = 15
+                    span = 15
+                    progress = base + int((idx / max(1, total_segments)) * span)
+                    await manager.broadcast(
+                        __import__("json").dumps({
+                            "type": "progress",
+                            "scope": "generate_video",
+                            "project_id": project_id,
+                            "task_id": task_id,
+                            "phase": "cutting_segments_progress",
+                            "message": f"已剪切片段 {idx}/{total_segments}",
+                            "progress": min(30, progress),
+                            "timestamp": datetime.now().isoformat(),
+                        })
+                    )
+                except Exception:
+                    pass
+
+            need_tts = [it for it in segment_items if not bool(it.get("is_original"))]
+            tts_results: Dict[int, Dict[str, Any]] = {}
+            if need_tts:
+                try:
+                    await manager.broadcast(
+                        __import__("json").dumps({
+                            "type": "progress",
+                            "scope": "generate_video",
+                            "project_id": project_id,
+                            "task_id": task_id,
+                            "phase": "tts_generate",
+                            "message": f"并发生成配音（{len(need_tts)} 段）",
+                            "progress": 31,
+                            "timestamp": datetime.now().isoformat(),
+                        })
+                    )
+                except Exception:
+                    pass
+
+                async def _tts_job(idx: int, text: str, out_path: Path):
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    res = await tts_service.synthesize(text, str(out_path), None)
+                    if not res.get("success"):
+                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
+                    return idx, (res if isinstance(res, dict) else {})
+
+                tasks: List[asyncio.Task] = []
+                for it in need_tts:
+                    idx = int(it["idx"])
+                    seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                    tasks.append(asyncio.create_task(_tts_job(idx, str(it.get("text") or ""), seg_audio)))
+
+                completed = 0
+                try:
+                    for fut in asyncio.as_completed(tasks):
+                        if cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        try:
+                            idx, r = await fut
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            for ot in tasks:
+                                if ot is not fut and not ot.done():
+                                    try:
+                                        ot.cancel()
+                                    except Exception:
+                                        pass
+                            raise
+                        tts_results[idx] = r
+                        completed += 1
+                        try:
+                            base = 31
+                            span = 19
+                            prog = base + int((completed / max(1, len(need_tts))) * span)
+                            await manager.broadcast(
+                                __import__("json").dumps({
+                                    "type": "progress",
+                                    "scope": "generate_video",
+                                    "project_id": project_id,
+                                    "task_id": task_id,
+                                    "phase": "tts_generate_progress",
+                                    "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                    "progress": min(50, prog),
+                                    "timestamp": datetime.now().isoformat(),
+                                })
+                            )
+                        except Exception:
+                            pass
+                finally:
+                    for ot in tasks:
+                        if not ot.done():
+                            try:
+                                ot.cancel()
+                            except Exception:
+                                pass
+
+                try:
+                    cfg = tts_engine_config_manager.get_active_config()
+                    provider = (getattr(cfg, "provider", None) or "").lower()
+                    if provider == "qwen3_tts":
+                        total_tts_dur = 0.0
+                        missing = 0
+                        for it in need_tts:
+                            idx = int(it.get("idx") or 0)
+                            r = tts_results.get(idx) or {}
+                            d0 = r.get("duration")
+                            if isinstance(d0, (int, float)):
+                                d = float(d0)
+                            elif isinstance(d0, str):
+                                try:
+                                    d = float(d0.strip())
+                                except Exception:
+                                    d = 0.0
+                            else:
+                                d = 0.0
+                            if d <= 0.0:
+                                seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                                d = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                            if d > 0.0:
+                                total_tts_dur += d
+                            else:
+                                missing += 1
+                        logger.info(
+                            "QwenTTS 总配音时长: project_id=%s task_id=%s segments=%s total_duration_s=%.3f missing=%s",
+                            project_id,
+                            task_id,
+                            len(need_tts),
+                            total_tts_dur,
+                            missing,
+                        )
+                except Exception:
+                    pass
+
+            for it in segment_items:
+                idx = int(it["idx"])
+                start = float(it["start"])
+                end = float(it["end"])
+                duration = float(it["duration"])
+                text = str(it.get("text") or "").strip()
+                is_original = bool(it.get("is_original"))
+                clip_abs: Path = it["clip_abs"]
+
+                if cancel_event.is_set():
+                    raise asyncio.CancelledError()
+
                 if is_original:
                     clip_paths.append(str(clip_abs))
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
-                    sy = await tts_service.synthesize(text, str(seg_audio), None)
-                    if not sy.get("success"):
-                        raise RuntimeError(f"TTS合成失败: {idx} - {sy.get('error')}")
+                    sy = tts_results.get(idx)
+                    if not sy:
+                        raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
                     adur = float(sy.get("duration") or 0.0) if isinstance(sy.get("duration"), (int, float)) else 0.0
                     if adur <= 0.0:
                         adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
@@ -245,7 +414,14 @@ class VideoGenerationService:
                             new_dur = input_dur - new_start
                         logger.info(f"DEBUG segment_extend idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2 = await video_processor.cut_video_segment(
-                            str(input_abs), str(clip_abs), new_start, new_dur
+                            str(input_abs),
+                            str(clip_abs),
+                            new_start,
+                            new_dur,
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
                         )
                         if not ok2:
                             raise RuntimeError(f"片段延长失败: {idx}")
@@ -254,12 +430,27 @@ class VideoGenerationService:
                         new_dur = adur
                         logger.info(f"DEBUG segment_shorten idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2s = await video_processor.cut_video_segment(
-                            str(input_abs), str(clip_abs), new_start, new_dur
+                            str(input_abs),
+                            str(clip_abs),
+                            new_start,
+                            new_dur,
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
                         )
                         if not ok2s:
                             raise RuntimeError(f"片段缩短失败: {idx}")
                     clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
-                    rep_ok = await video_processor.replace_audio_with_narration(str(clip_abs), str(seg_audio), str(clip_nar_abs))
+                    rep_ok = await video_processor.replace_audio_with_narration(
+                        str(clip_abs),
+                        str(seg_audio),
+                        str(clip_nar_abs),
+                        scope="generate_video",
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
                     if not rep_ok:
                         raise RuntimeError(f"片段配音替换失败: {idx}")
                     try:
@@ -284,9 +475,37 @@ class VideoGenerationService:
                         p3 = await asyncio.create_subprocess_exec(
                             *cmd_fb,
                             stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
+                            stderr=asyncio.subprocess.PIPE,
+                            **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
                         )
-                        _, e3 = await p3.communicate()
+                        task_cancel_store.register_process("generate_video", project_id, task_id, p3)
+                        try:
+                            comm_task = asyncio.create_task(p3.communicate())
+                            cancel_task = asyncio.create_task(cancel_event.wait())
+                            done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                            if cancel_task in done:
+                                try:
+                                    if p3.returncode is None:
+                                        try:
+                                            p3.terminate()
+                                        except Exception:
+                                            pass
+                                finally:
+                                    try:
+                                        await asyncio.wait_for(comm_task, timeout=1.5)
+                                    except Exception:
+                                        try:
+                                            comm_task.cancel()
+                                        except Exception:
+                                            pass
+                                raise asyncio.CancelledError()
+                            try:
+                                cancel_task.cancel()
+                            except Exception:
+                                pass
+                            _, e3 = await comm_task
+                        finally:
+                            task_cancel_store.unregister_process("generate_video", project_id, task_id, p3)
                         if p3.returncode != 0:
                             raise RuntimeError(f"片段配音替换失败(强制重编码): {idx} - {e3.decode(errors='ignore')}")
                         vinfo_chk2, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
@@ -297,14 +516,15 @@ class VideoGenerationService:
                     clip_paths.append(str(clip_nar_abs))
 
                 try:
-                    base = 15
-                    span = 55
+                    base = 50
+                    span = 20
                     progress = base + int((idx / max(1, total_segments)) * span)
                     await manager.broadcast(
                         __import__("json").dumps({
                             "type": "progress",
                             "scope": "generate_video",
                             "project_id": project_id,
+                            "task_id": task_id,
                             "phase": "segment_processed",
                             "message": f"已处理片段 {idx}/{total_segments}",
                             "progress": min(70, progress),
@@ -334,6 +554,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "concat_start",
                         "message": "正在拼接视频片段",
                         "progress": 75,
@@ -343,13 +564,23 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            ok_concat = await video_processor.concat_videos(clip_paths, str(output_abs))
+            ok_concat = await video_processor.concat_videos(
+                clip_paths,
+                str(output_abs),
+                scope="generate_video",
+                project_id=project_id,
+                task_id=task_id,
+                cancel_event=cancel_event,
+            )
             if not ok_concat:
                 try:
                     if tmp_dir.exists():
                         shutil.rmtree(tmp_dir, ignore_errors=True)
                 except Exception:
                     pass
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接视频失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接视频失败")
 
             try:
@@ -358,6 +589,7 @@ class VideoGenerationService:
                         "type": "progress",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "concat_done",
                         "message": "片段拼接完成",
                         "progress": 85,
@@ -367,31 +599,7 @@ class VideoGenerationService:
             except Exception:
                 pass
 
-            norm_abs = outputs_dir / f"{p.id}_output_{ts}_normalized.mp4"
-            try:
-                await manager.broadcast(
-                    __import__("json").dumps({
-                        "type": "progress",
-                        "scope": "generate_video",
-                        "project_id": project_id,
-                        "phase": "normalize_start",
-                        "message": "正在统一响度标准化",
-                        "progress": 90,
-                        "timestamp": datetime.now().isoformat(),
-                    })
-                )
-            except Exception:
-                pass
-
-            ok_norm = await video_processor.audio_normalizer.normalize_video_loudness(str(output_abs), str(norm_abs))
-            if not ok_norm:
-                raise RuntimeError("响度标准化失败")
-            try:
-                if output_abs.exists():
-                    output_abs.unlink()
-            except Exception:
-                pass
-            final_abs = norm_abs
+            final_abs = output_abs
             try:
                 for f in outputs_dir.glob("*.mp4"):
                     if f != final_abs:
@@ -404,21 +612,6 @@ class VideoGenerationService:
                 pass
             web_output = _to_web_path(final_abs)
             projects_store.update_project(project_id, {"output_video_path": web_output, "status": "completed"})
-
-            try:
-                await manager.broadcast(
-                    __import__("json").dumps({
-                        "type": "progress",
-                        "scope": "generate_video",
-                        "project_id": project_id,
-                        "phase": "normalize_done",
-                        "message": "响度标准化完成",
-                        "progress": 95,
-                        "timestamp": datetime.now().isoformat(),
-                    })
-                )
-            except Exception:
-                pass
 
             result = {
                 "output_path": web_output,
@@ -433,6 +626,7 @@ class VideoGenerationService:
                         "type": "completed",
                         "scope": "generate_video",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "done",
                         "message": "视频生成成功",
                         "progress": 100,

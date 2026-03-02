@@ -1,10 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SuperAIAutoCutVideo",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "identifier": "com.superautocutvideo.app",
   "build": {
-    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"try { Set-Location ../frontend; if (Get-Command cnpm -ErrorAction SilentlyContinue) { cnpm run build } else { npm run build } ; Set-Location ../backend ; if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) { pip install pyinstaller } ; if (Test-Path requirements.runtime.txt) { pip install -r requirements.runtime.txt } elseif (Test-Path requirements.txt) { pip install -r requirements.txt } ; pyinstaller --clean --distpath dist backend.spec ; New-Item -ItemType Directory -Force ../src-tauri/resources | Out-Null ; Copy-Item -Force dist/superAutoCutVideoBackend.exe ../src-tauri/resources/ ; Write-Host 'Backend packaged and copied' } catch { Write-Error $_ ; exit 1 }\"",
     "devUrl": "http://127.0.0.1:1420/",
     "frontendDist": "../frontend/dist"
   },
@@ -28,7 +27,9 @@
       }
     },
     "resources": [
-      "resources/*"
+      "resources/ffmpeg.exe",
+      "resources/NOTICE-FFmpeg.txt",
+      "resources/superAutoCutVideoBackend.zip"
     ]
   },
   "app": {
@@ -43,7 +44,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; media-src 'self' http://127.0.0.1:* http://localhost:* data: blob:; style-src 'self' 'unsafe-inline'"
     }
   },
   "plugins": {}

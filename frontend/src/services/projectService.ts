@@ -1,13 +1,18 @@
 import type {
   CreateProjectRequest,
   FileUploadResponse,
+  GenerateCopywritingRequest,
   GenerateScriptRequest,
+  NarrationCopywriting,
   Project,
+  ProjectLatestTasks,
+  ProjectRunningTasks,
   SubtitleResult,
   SubtitleSegment,
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
+import type { SceneResult } from "../types/scene";
 import { apiClient, type ApiResponse } from "./clients";
 
 /**
@@ -34,6 +39,20 @@ export class ProjectService {
       `/api/projects/${projectId}`
     );
     return response.data;
+  }
+
+  async getProjectRunningTasks(projectId: string): Promise<ProjectRunningTasks | null> {
+    const response = await apiClient.get<{ data: ProjectRunningTasks }>(
+      `/api/projects/${projectId}/tasks/running`
+    );
+    return response?.data ?? null;
+  }
+
+  async getProjectLatestTasks(projectId: string): Promise<ProjectLatestTasks | null> {
+    const response = await apiClient.get<{ data: ProjectLatestTasks }>(
+      `/api/projects/${projectId}/tasks/latest`
+    );
+    return response?.data ?? null;
   }
 
   /**
@@ -276,6 +295,32 @@ export class ProjectService {
     return response.data;
   }
 
+  async startTrimVideo(
+    projectId: string,
+    payload: {
+      file_path: string;
+      mode: "keep" | "delete";
+      ranges: { start_ms: number; end_ms: number }[];
+    }
+  ): Promise<{ task_id: string }> {
+    const response = await apiClient.post<{ data: { task_id: string } }>(
+      `/api/projects/${projectId}/trim/video`,
+      payload,
+      10000
+    );
+    return response.data;
+  }
+
+  async getTrimVideoStatus(
+    projectId: string,
+    taskId: string
+  ): Promise<{ task_id: string; status: string; progress: number; message: string; file_path?: string; output_version?: string }> {
+    const response = await apiClient.get<{ data: any }>(
+      `/api/projects/${projectId}/trim/video/status/${taskId}`
+    );
+    return response.data;
+  }
+
   /**
    * 更新视频排序（按照用户提供的顺序）
    */
@@ -290,21 +335,74 @@ export class ProjectService {
   
 
   /**
+   * 生成解说文案
+   */
+  async generateCopywriting(data: GenerateCopywritingRequest): Promise<NarrationCopywriting> {
+    const response = await apiClient.post<ApiResponse<{ copywriting: NarrationCopywriting }>>(
+      "/api/projects/generate-copywriting",
+      data
+    );
+    return response.data?.copywriting as NarrationCopywriting;
+  }
+
+  /**
+   * 保存解说文案
+   */
+  async saveCopywriting(
+    projectId: string,
+    copywriting: NarrationCopywriting
+  ): Promise<NarrationCopywriting> {
+    const response = await apiClient.post<{ data: NarrationCopywriting }>(
+      `/api/projects/${projectId}/copywriting`,
+      { copywriting }
+    );
+    return response.data;
+  }
+
+  /**
    * 生成解说脚本
    */
   async generateScript(data: GenerateScriptRequest): Promise<VideoScript> {
-    const response = await apiClient.post<
-      ApiResponse<{ script: VideoScript; plot_analysis: string }>
-    >("/api/projects/generate-script", data);
-    // 后端返回形如 { message, data: { script, plot_analysis }, timestamp }
-    // 这里只提取脚本对象返回
+    const response = await apiClient.post<ApiResponse<{ script: VideoScript }>>(
+      "/api/projects/generate-script",
+      data
+    );
     return response.data?.script as VideoScript;
   }
 
-  async extractSubtitle(projectId: string, force?: boolean): Promise<SubtitleResult> {
+  async extractSubtitle(
+    projectId: string,
+    options?:
+      | boolean
+      | {
+          force?: boolean;
+          task_id?: string | null;
+          asr_provider?: "bcut" | "fun_asr";
+          asr_model_key?: string | null;
+          asr_language?: string | null;
+          itn?: boolean;
+          hotwords?: string[];
+        }
+  ): Promise<SubtitleResult> {
+    const payload =
+      typeof options === "boolean"
+        ? options
+          ? { force: true }
+          : undefined
+        : options
+          ? {
+              force: Boolean(options.force),
+              task_id: options.task_id ?? undefined,
+              asr_provider: options.asr_provider,
+              asr_model_key: options.asr_model_key ?? undefined,
+              asr_language: options.asr_language ?? undefined,
+              itn: typeof options.itn === "boolean" ? options.itn : undefined,
+              hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
+            }
+          : undefined;
     const response = await apiClient.post<ApiResponse<SubtitleResult>>(
       `/api/projects/${projectId}/extract-subtitle`,
-      force ? { force: true } : undefined
+      payload
     );
     if (!response.data) {
       throw new Error("字幕提取失败：响应为空");
@@ -351,12 +449,12 @@ export class ProjectService {
   }
 
   /**
-   * 根据脚本生成输出视频
+   * 根据脚本生成输出视频（后台任务 + WebSocket 进度）
    */
-  async generateVideo(projectId: string): Promise<{ output_path: string; segments_count: number } | null> {
-    const response = await apiClient.post<
-      ApiResponse<{ output_path: string; segments_count: number }>
-    >(`/api/projects/${projectId}/generate-video`);
+  async startGenerateVideo(projectId: string): Promise<{ task_id: string; scope?: string } | null> {
+    const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string }>>(
+      `/api/projects/${projectId}/generate-video`
+    );
     return response.data ?? null;
   }
 
@@ -366,6 +464,17 @@ export class ProjectService {
   async startGenerateJianyingDraft(projectId: string): Promise<{ task_id: string; scope?: string } | null> {
     const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string }>>(
       `/api/projects/${projectId}/generate-jianying-draft`
+    );
+    return response.data ?? null;
+  }
+
+  /**
+   * 停止任务（停止生成）
+   */
+  async cancelTask(projectId: string, payload: { scope: string; task_id?: string | null }): Promise<{ scope: string; task_id: string; processes_stopped?: number } | null> {
+    const response = await apiClient.post<ApiResponse<{ scope: string; task_id: string; processes_stopped?: number }>>(
+      `/api/projects/${projectId}/tasks/cancel`,
+      payload
     );
     return response.data ?? null;
   }
@@ -417,6 +526,24 @@ export class ProjectService {
       : base;
   }
 
+  async prepareVideoPreview(projectId: string, filePath: string): Promise<{ file_path: string; prepared?: boolean } | null> {
+    const response = await apiClient.post<ApiResponse<{ file_path: string; prepared?: boolean }>>(
+      `/api/projects/${projectId}/video/prepare`,
+      { file_path: filePath }
+    );
+    return response.data ?? null;
+  }
+
+  /**
+   * 获取项目原始视频播放链接（后端直接返回文件）
+   */
+  getVideoStreamUrl(projectId: string, cacheBust?: string | number): string {
+    const base = `${apiClient.getBaseUrl()}/api/projects/${projectId}/video/stream`;
+    return cacheBust !== undefined && cacheBust !== null
+      ? `${base}?v=${encodeURIComponent(String(cacheBust))}`
+      : base;
+  }
+
   /**
    * 获取已合并视频播放链接（后端直接返回文件）
    */
@@ -457,6 +584,56 @@ export class ProjectService {
       throw new Error(msg);
     }
     return await res.blob();
+  }
+
+  async extractScenes(
+    projectId: string,
+    options?: {
+      force?: boolean;
+      task_id?: string | null;
+      analyzeVision?: boolean;
+      visionMode?: string;
+    }
+  ): Promise<{ task_id: string; status: string; message: string }> {
+    const payload = options
+      ? {
+          force: Boolean(options.force),
+          task_id: options.task_id ?? undefined,
+          analyzeVision: Boolean(options.analyzeVision),
+          visionMode: options.visionMode ?? "all",
+        }
+      : undefined;
+    const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
+      `/api/projects/${projectId}/extract-scene`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error("镜头提取失败：响应为空");
+    }
+    return response.data;
+  }
+
+  async getScenes(projectId: string): Promise<SceneResult> {
+     // Assuming we can get the JSON content via a new API or just fetching the static file if we have the path.
+     // But `projects` API returns `scenes_path` which is a web path.
+     // We can just fetch that URL.
+     // However, a dedicated API is better for error handling.
+     // Let's assume we use a dedicated API or just `fetch`.
+     // Since I didn't create a specific GET /scenes endpoint in backend, 
+     // but the project object has `scenes_path`.
+     // I should probably add `getScenes` in backend or just use `getProject` and fetch the file.
+     // Let's add `getScenes` to backend `project_routes.py`.
+     const response: any = await apiClient.get<ApiResponse<SceneResult>>(
+       `/api/projects/${projectId}/scenes`
+     );
+     return response.data;
+  }
+
+  async getSceneStatus(projectId: string, taskId: string): Promise<any> {
+    const response = await apiClient.get<ApiResponse<any>>(
+      `/api/projects/${projectId}/scene-status/${taskId}`
+    );
+    return response.data;
   }
 }
 

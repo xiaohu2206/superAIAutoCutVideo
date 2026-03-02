@@ -44,7 +44,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -112,6 +112,24 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('edge_tts_default')
 
+                if 'qwen3_tts_default' not in self.configs:
+                    self.configs['qwen3_tts_default'] = TtsEngineConfig(
+                        provider='qwen3_tts',
+                        secret_id=None,
+                        secret_key=None,
+                        region=None,
+                        description='Qwen3-TTS 默认配置（本地模型）',
+                        enabled=False,
+                        active_voice_id=None,
+                        speed_ratio=1.0,
+                        extra_params={
+                            "ModelKey": "custom_0_6b",
+                            "Language": "Auto",
+                            "XVectorOnly": True,
+                        }
+                    )
+                    missing_defaults.append('qwen3_tts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -168,7 +186,25 @@ class TtsEngineConfigManager:
                     speed_ratio=1.0,
                     extra_params={}
                 )
-            )
+            ),
+            (
+                'qwen3_tts_default',
+                TtsEngineConfig(
+                    provider='qwen3_tts',
+                    secret_id=None,
+                    secret_key=None,
+                    region=None,
+                    description='Qwen3-TTS 默认配置（本地模型）',
+                    enabled=False,
+                    active_voice_id=None,
+                    speed_ratio=1.0,
+                    extra_params={
+                        "ModelKey": "custom_0_6b",
+                        "Language": "Auto",
+                        "XVectorOnly": True,
+                    }
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -177,8 +213,7 @@ class TtsEngineConfigManager:
     def update_config(self, config_id: str, config: TtsEngineConfig) -> bool:
         """更新配置，确保同时只有一个配置被启用"""
         try:
-            if config_id not in self.configs:
-                raise ValueError(f"配置ID '{config_id}' 不存在")
+            is_new = config_id not in self.configs
 
             # 若启用该配置，则禁用其他配置
             if config.enabled:
@@ -189,7 +224,7 @@ class TtsEngineConfigManager:
 
             self.configs[config_id] = config
             self.save_configs()
-            logger.info(f"更新TTS引擎配置成功: {config_id}")
+            logger.info(f"{'创建' if is_new else '更新'}TTS引擎配置成功: {config_id}")
             return True
         except Exception as e:
             logger.error(f"更新TTS引擎配置失败: {e}")
@@ -217,18 +252,25 @@ class TtsEngineConfigManager:
         """返回可用引擎元信息列表"""
         return [
             {
-                'provider': 'tencent_tts',
-                'display_name': '腾讯云 TTS',
-                'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',
-                'required_fields': ['secret_id', 'secret_key'],
-                'optional_fields': ['region']
-            },
-            {
                 'provider': 'edge_tts',
                 'display_name': 'Edge TTS',
                 'description': '微软 Edge 在线语音，免凭据，适合中文合成测试与预览',
                 'required_fields': [],
                 'optional_fields': []
+            },
+            {
+                'provider': 'qwen3_tts',
+                'display_name': 'Qwen3-TTS(本地)',
+                'description': '生成配音比较慢，离线语音合成与快速声音克隆（需先下载模型）',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'tencent_tts',
+                'display_name': '腾讯云 TTS',
+                'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',
+                'required_fields': ['secret_id', 'secret_key'],
+                'optional_fields': ['region']
             }
         ]
 
@@ -373,6 +415,37 @@ class TtsEngineConfigManager:
         self._voices_cache[provider] = voices
         return voices
 
+    async def get_voices_async(self, provider: str) -> List[TtsVoice]:
+        """异步获取音色列表；Edge TTS 直接拉取最新官方列表，不使用本地缓存文件。"""
+        provider = provider.lower()
+        if provider == 'edge_tts':
+            try:
+                from modules.edge_tts_service import edge_tts_service
+                raw_list = await edge_tts_service.list_voices()
+                voices: List[TtsVoice] = []
+                for item in (raw_list or []):
+                    voices.append(TtsVoice(
+                        id=str(item.get('id') or ''),
+                        name=str(item.get('name') or ''),
+                        description=item.get('description') or None,
+                        sample_wav_url=item.get('sample_wav_url') or None,
+                        language=item.get('language') or None,
+                        gender=item.get('gender') or None,
+                        tags=item.get('tags') or [],
+                        voice_type=None,
+                        category=None,
+                        voice_quality=item.get('voice_quality') or None,
+                        voice_type_tag=item.get('voice_type_tag') or None,
+                        voice_human_style=item.get('voice_human_style') or None,
+                    ))
+                self._voices_cache[provider] = voices
+                return voices
+            except Exception as e:
+                logger.error(f"获取 Edge TTS 最新音色失败: {e}")
+                return self.get_voices(provider)
+        else:
+            return self.get_voices(provider)
+
     async def test_connection(self, config_id: str, proxy_url: Optional[str] = None) -> Dict[str, Any]:
         """测试指定配置的连通性：根据 provider 分支校验"""
         config = self.get_config(config_id)
@@ -399,6 +472,7 @@ class TtsEngineConfigManager:
                     speed_ratio=config.speed_ratio,
                     out_path=out_path,
                     proxy_override=(proxy_url if isinstance(proxy_url, str) and proxy_url.strip() else cfg_proxy),
+                    delete_after=True,
                 )
                 if res.get("success"):
                     return {

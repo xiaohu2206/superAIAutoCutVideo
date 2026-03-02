@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import uuid
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,8 +16,11 @@ from typing import Any, Dict, List, Optional, Sequence
 from modules.projects_store import Project, projects_store
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
+from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
-from modules.audio_normalizer import AudioNormalizer
+from modules.task_cancel_store import task_cancel_store
+
+logger = logging.getLogger(__name__)
 
 
 def _now_ts() -> str:
@@ -94,23 +98,41 @@ def _s_to_us(v: float) -> int:
         return 0
 
 
+def _try_parse_float(v: Any) -> float:
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except Exception:
+            return 0.0
+    return 0.0
+
+
 def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
     try:
-        result = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height,r_frame_rate,duration",
-                "-of",
-                "json",
-                str(video_path),
-            ],
-            stderr=subprocess.STDOUT,
-        )
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate,duration",
+            "-of",
+            "json",
+            str(video_path),
+        ]
+        if os.name == "nt":
+            result = subprocess.check_output(
+                cmd,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
     data = json.loads(result)
@@ -128,27 +150,68 @@ def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
 
 def _probe_audio_duration(audio_path: Path) -> float:
     try:
-        result = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=nk=1:nw=1",
-                str(audio_path),
-            ],
-            stderr=subprocess.STDOUT,
-        )
-        try:
-            return float(result.decode().strip())
-        except Exception:
+        if not audio_path.exists():
             return 0.0
+        cmd_a = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            str(audio_path),
+        ]
+        if os.name == "nt":
+            out_a = subprocess.check_output(
+                cmd_a,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            out_a = subprocess.check_output(cmd_a, stderr=subprocess.STDOUT)
+        d_a = _try_parse_float(out_a.decode(errors="ignore"))
+        if d_a > 0.0:
+            return d_a
+
+        cmd_f = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            str(audio_path),
+        ]
+        if os.name == "nt":
+            out_f = subprocess.check_output(
+                cmd_f,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            out_f = subprocess.check_output(cmd_f, stderr=subprocess.STDOUT)
+        return _try_parse_float(out_f.decode(errors="ignore"))
+    except FileNotFoundError as exc:
+        raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
     except Exception:
         return 0.0
 
-def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path: Path, output_path: Path) -> bool:
+async def _gen_blank_video_with_audio(
+    width: int,
+    height: int,
+    fps: float,
+    audio_path: Path,
+    output_path: Path,
+    *,
+    scope: Optional[str] = None,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    cancel_event: Optional[asyncio.Event] = None,
+) -> bool:
     try:
         fr = 30
         try:
@@ -168,8 +231,52 @@ def _gen_blank_video_with_audio(width: int, height: int, fps: float, audio_path:
             "-movflags", "+faststart",
             "-y", str(output_path),
         ]
-        subprocess.check_call(cmd, stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
-        return output_path.exists()
+        kwargs: Dict[str, Any] = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs,
+        )
+        tracking = bool(scope and project_id and task_id and cancel_event)
+        if tracking:
+            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
+        try:
+            if cancel_event:
+                comm_task = asyncio.create_task(proc.communicate())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        if proc.returncode is None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                    finally:
+                        try:
+                            await asyncio.wait_for(comm_task, timeout=1.5)
+                        except Exception:
+                            try:
+                                comm_task.cancel()
+                            except Exception:
+                                pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                await comm_task
+            else:
+                await proc.communicate()
+        finally:
+            if tracking:
+                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
+        return proc.returncode == 0 and output_path.exists()
+    except asyncio.CancelledError:
+        raise
     except Exception:
         return False
 @dataclass
@@ -529,9 +636,12 @@ class JianyingDraftManager:
             {"attribute": 0, "flag": 0, "id": track_video_id, "is_default_name": False, "name": "video_main", "segments": segments, "type": "video"},
             {"attribute": 0, "flag": 0, "id": uuid.uuid4().hex, "is_default_name": False, "name": "overlay_main", "segments": overlay_track_segments, "type": "video"},
         ]
-        mats = draft.get("materials", {})
-        mats["audio_track_indexes"] = []
-        draft["materials"] = mats
+        mats = draft.get("materials")
+        if isinstance(mats, dict):
+            mats["audio_track_indexes"] = []
+            draft["materials"] = mats
+        else:
+            draft["materials"] = {"audio_track_indexes": []}
         try:
             cfg = draft.get("config", {})
             cfg["record_audio_last_index"] = 1
@@ -710,12 +820,11 @@ class JianyingDraftManager:
             )
 
     @staticmethod
-    async def generate_draft_folder(project_id: str, task_id: str) -> DraftGenerateFolderResult:
+    async def generate_draft_folder(project_id: str, task_id: str, cancel_event: Optional[asyncio.Event] = None) -> DraftGenerateFolderResult:
         p: Optional[Project] = projects_store.get_project(project_id)
         if not p:
             raise ValueError("项目不存在")
         tmp_dir: Optional[Path] = None
-        audio_norm = AudioNormalizer()
         try:
             await JianyingDraftManager._broadcast({
                 "type": "progress",
@@ -782,7 +891,119 @@ class JianyingDraftManager:
                 "timestamp": _now_ts(),
             })
             total_segments = len(segments)
+            need_tts: List[Dict[str, Any]] = []
             for idx, seg in enumerate(segments, start=1):
+                st = float(seg.get("start_time") or 0.0)
+                et = float(seg.get("end_time") or 0.0)
+                if et <= st:
+                    continue
+                text = str(seg.get("text") or "").strip()
+                ost_flag = seg.get("OST")
+                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                if not is_original:
+                    need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
+
+            tts_results: Dict[int, Dict[str, Any]] = {}
+            if need_tts:
+                await JianyingDraftManager._broadcast({
+                    "type": "progress",
+                    "scope": JianyingDraftManager.SCOPE,
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "phase": "tts_generate",
+                    "message": f"并发生成配音（{len(need_tts)} 段）",
+                    "progress": 41,
+                    "timestamp": _now_ts(),
+                })
+
+                async def _tts_job(idx: int, text: str, out_path: Path):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    res = await tts_service.synthesize(text, str(out_path), None)
+                    if not res.get("success"):
+                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
+                    return idx, (res if isinstance(res, dict) else {})
+
+                tasks: List[asyncio.Task] = []
+                for it in need_tts:
+                    tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
+
+                completed = 0
+                try:
+                    for fut in asyncio.as_completed(tasks):
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        try:
+                            idx, r = await fut
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            for ot in tasks:
+                                if ot is not fut and not ot.done():
+                                    try:
+                                        ot.cancel()
+                                    except Exception:
+                                        pass
+                            raise
+                        tts_results[idx] = r
+                        completed += 1
+                        try:
+                            base = 41
+                            span = 9
+                            prog = base + int((completed / max(1, len(need_tts))) * span)
+                            await JianyingDraftManager._broadcast({
+                                "type": "progress",
+                                "scope": JianyingDraftManager.SCOPE,
+                                "project_id": project_id,
+                                "task_id": task_id,
+                                "phase": "tts_generate_progress",
+                                "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                "progress": min(50, prog),
+                                "timestamp": _now_ts(),
+                            })
+                        except Exception:
+                            pass
+                finally:
+                    for ot in tasks:
+                        if not ot.done():
+                            try:
+                                ot.cancel()
+                            except Exception:
+                                pass
+
+                try:
+                    cfg = tts_engine_config_manager.get_active_config()
+                    provider = (getattr(cfg, "provider", None) or "").lower()
+                    if provider == "qwen3_tts":
+                        total_tts_dur = 0.0
+                        missing = 0
+                        for it in need_tts:
+                            idx = int(it.get("idx") or 0)
+                            r = tts_results.get(idx) or {}
+                            d = _try_parse_float(r.get("duration"))
+                            if d <= 0.0:
+                                try:
+                                    d = _probe_audio_duration(Path(it.get("out"))) or 0.0
+                                except Exception:
+                                    d = 0.0
+                            if d > 0.0:
+                                total_tts_dur += d
+                            else:
+                                missing += 1
+                        logger.info(
+                            "QwenTTS 总配音时长: project_id=%s task_id=%s segments=%s total_duration_s=%.3f missing=%s",
+                            project_id,
+                            task_id,
+                            len(need_tts),
+                            total_tts_dur,
+                            missing,
+                        )
+                except Exception:
+                    pass
+
+            for idx, seg in enumerate(segments, start=1):
+                if cancel_event and cancel_event.is_set():
+                    raise asyncio.CancelledError()
                 st = float(seg.get("start_time") or 0.0)
                 et = float(seg.get("end_time") or 0.0)
                 if et <= st:
@@ -806,21 +1027,33 @@ class JianyingDraftManager:
                     })
                 else:
                     tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
-                    res = await tts_service.synthesize(text, str(tts_out), None)
-                    if not res.get("success"):
-                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
-                    adur = float(res.get("duration") or 0.0)
-                    if adur <= 0.0:
-                        adur = _probe_audio_duration(tts_out) or 0.0
-                    if adur <= 0.0:
-                        raise RuntimeError(f"无法获取配音时长: {idx}")
-                    norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
-                    ok_norm = await audio_norm.normalize_audio_loudness(str(tts_out), str(norm_out))
-                    narr_used = norm_out if ok_norm else tts_out
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    res = tts_results.get(idx)
+                    if not res:
+                        raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
+                    narr_used = tts_out
                     ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
-                    ok_ov = _gen_blank_video_with_audio(int(meta.get("width") or 1920), int(meta.get("height") or 1080), float(meta.get("fps") or 30.0), narr_used, ov_out)
+                    ok_ov = await _gen_blank_video_with_audio(
+                        int(meta.get("width") or 1920),
+                        int(meta.get("height") or 1080),
+                        float(meta.get("fps") or 30.0),
+                        narr_used,
+                        ov_out,
+                        scope=JianyingDraftManager.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
                     if not ok_ov:
                         raise RuntimeError(f"生成叠加视频失败: {idx}")
+                    adur = _try_parse_float(res.get("duration"))
+                    if adur <= 0.0:
+                        adur = _probe_audio_duration(narr_used) or 0.0
+                    if adur <= 0.0:
+                        adur = float((_probe_video_meta(ov_out).get("duration") or 0.0))
+                    if adur <= 0.0:
+                        raise RuntimeError(f"无法获取配音时长: {idx}")
                     # 对齐视频片段时长到配音
                     if adur > dur:
                         ext = adur - dur
@@ -849,8 +1082,8 @@ class JianyingDraftManager:
                         "overlay_duration_us": _s_to_us(adur),
                     })
                 try:
-                    base = 40
-                    span = 25
+                    base = 50
+                    span = 15
                     progress = base + int((idx / max(1, total_segments)) * span)
                     await JianyingDraftManager._broadcast({
                         "type": "progress",

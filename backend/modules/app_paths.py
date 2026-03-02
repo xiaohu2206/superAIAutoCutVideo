@@ -28,9 +28,27 @@ def app_settings_file() -> Path:
 
 def uploads_dir() -> Path:
     env = os.environ.get("SACV_UPLOADS_DIR")
+    candidates = []
     if env:
-        return Path(env)
-    return data_base_dir() / "uploads"
+        candidates.append(Path(env))
+    try:
+        settings_path = app_settings_file()
+        if settings_path.exists():
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            root = str(data.get("uploads_root") or "").strip()
+            if root:
+                candidates.append(Path(root).expanduser())
+    except Exception:
+        pass
+    candidates.append(data_base_dir() / "uploads")
+    candidates.append(user_data_dir() / "uploads")
+    for d in candidates:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+        except Exception:
+            continue
+    return candidates[0]
 
 def ensure_defaults_migrated() -> None:
     backend_dir = Path(__file__).resolve().parents[1]

@@ -44,7 +44,7 @@ const TemplateModal: React.FC<Props> = ({
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
             />
             <textarea
-              placeholder={`模版需要要求大模型输出包含这些字段，不然无法合并：_id, timestamp, picture, narration, OST`}
+              placeholder={`请输入自定义模板`}
               value={template}
               onChange={(e) => onChangeTemplate(e.target.value)}
               className="w-full h-[60vh] border border-gray-300 rounded px-3 py-2 text-sm"

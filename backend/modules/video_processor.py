@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import json
@@ -16,8 +17,10 @@ import json
 import cv2
 import numpy as np
 from .audio_normalizer import AudioNormalizer
+from modules.task_cancel_store import task_cancel_store
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 class VideoProcessor:
     """视频处理器类"""
@@ -25,9 +28,69 @@ class VideoProcessor:
     def __init__(self):
         self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
         self.audio_normalizer = AudioNormalizer()
+        self.last_concat_error: Optional[str] = None
+        self.last_concat_cmd: Optional[List[str]] = None
+
+    def _should_track(self, scope: Optional[str], project_id: Optional[str], task_id: Optional[str], cancel_event: Optional[asyncio.Event]) -> bool:
+        return bool(scope and project_id and task_id and cancel_event)
+
+    def _register_proc(self, scope: str, project_id: str, task_id: str, proc: asyncio.subprocess.Process) -> None:
+        try:
+            task_cancel_store.register_process(scope, project_id, task_id, proc)
+        except Exception:
+            return
+
+    def _unregister_proc(self, scope: str, project_id: str, task_id: str, proc: asyncio.subprocess.Process) -> None:
+        try:
+            task_cancel_store.unregister_process(scope, project_id, task_id, proc)
+        except Exception:
+            return
+
+    async def _communicate_with_cancel(
+        self,
+        proc: asyncio.subprocess.Process,
+        cancel_event: Optional[asyncio.Event],
+    ) -> Tuple[bytes, bytes]:
+        if not cancel_event:
+            return await proc.communicate()
+
+        comm_task = asyncio.create_task(proc.communicate())
+        cancel_task = asyncio.create_task(cancel_event.wait())
+        done, pending = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+        if cancel_task in done:
+            try:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    await asyncio.wait_for(comm_task, timeout=1.5)
+                except Exception:
+                    try:
+                        comm_task.cancel()
+                    except Exception:
+                        pass
+            raise asyncio.CancelledError()
+        try:
+            cancel_task.cancel()
+        except Exception:
+            pass
+        return await comm_task
     
-    async def cut_video_segment(self, input_path: str, output_path: str,
-                              start_time: float, duration: float) -> bool:
+    async def cut_video_segment(
+        self,
+        input_path: str,
+        output_path: str,
+        start_time: float,
+        duration: float,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> bool:
         """剪切视频片段
         说明：为减少后续拼接处出现非关键帧引起的卡顿，将 `-ss` 前置到 `-i` 之前，
         以便按关键帧就近截取（仍使用 `-c copy` 保持高效）。
@@ -50,32 +113,138 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
 
-            stdout, stderr = await process.communicate()
+            tracking = self._should_track(scope, project_id, task_id, cancel_event)
+            if tracking:
+                self._register_proc(str(scope), str(project_id), str(task_id), process)
+            try:
+                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+            finally:
+                if tracking:
+                    self._unregister_proc(str(scope), str(project_id), str(task_id), process)
 
             if process.returncode == 0:
-                logger.info(f"视频剪切成功: {output_path}")
-                return True
+                try:
+                    dur = await self._ffprobe_video_duration(output_path)
+                except Exception:
+                    dur = None
+                if dur is not None and dur > 0.01:
+                    logger.info(f"视频剪切成功: {output_path}")
+                    return True
+                logger.warning("剪切结果时长异常，进入重编码回退")
             else:
                 err = stderr.decode(errors="ignore")
-                logger.error(f"视频剪切失败: {err}")
+                logger.error(f"视频剪切失败，进入重编码回退: {err}")
+
+            try:
+                enc_name, vcodec_args = await self._pick_fast_encoder()
+            except Exception:
+                enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            reencode_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-i", input_path,
+                "-ss", str(start_time),
+                "-t", str(duration),
+                *vcodec_args,
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+                "-movflags", "+faststart",
+                "-y",
+                output_path
+            ]
+            p2 = await asyncio.create_subprocess_exec(
+                *reencode_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
+            )
+            tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
+            if tracking2:
+                self._register_proc(str(scope), str(project_id), str(task_id), p2)
+            try:
+                _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+            finally:
+                if tracking2:
+                    self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
+            if p2.returncode == 0:
+                try:
+                    dur2 = await self._ffprobe_video_duration(output_path)
+                except Exception:
+                    dur2 = None
+                if dur2 is not None and dur2 > 0.01:
+                    logger.info(f"视频剪切成功(重编码): {output_path}")
+                    return True
+                logger.error("重编码剪切后时长仍为0")
+                return False
+            else:
+                logger.error(f"视频剪切失败(重编码): {e2.decode(errors='ignore')}")
                 return False
 
         except Exception as e:
             logger.error(f"剪切视频时出错: {e}")
             return False
 
-    async def concat_videos(self, inputs: List[str], output_path: str, on_progress=None) -> bool:
+    async def concat_videos(
+        self,
+        inputs: List[str],
+        output_path: str,
+        on_progress=None,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> bool:
         """
         """
         try:
+            self.last_concat_error = None
+            self.last_concat_cmd = None
             if not inputs:
                 logger.error("拼接视频失败: 输入列表为空")
                 return False
 
             n = len(inputs)
+            if n == 1:
+                src = str(inputs[0])
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-i", src,
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    "-y", output_path,
+                ]
+                self.last_concat_cmd = cmd
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
+                tracking = self._should_track(scope, project_id, task_id, cancel_event)
+                if tracking:
+                    self._register_proc(str(scope), str(project_id), str(task_id), process)
+                try:
+                    _, stderr = await self._communicate_with_cancel(process, cancel_event)
+                finally:
+                    if tracking:
+                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
+                if process.returncode == 0:
+                    if on_progress:
+                        try:
+                            await on_progress(100.0)
+                        except Exception:
+                            pass
+                    return True
+                err = stderr.decode(errors="ignore")
+                self.last_concat_error = err.strip() or "单段重封装失败"
+                logger.error(f"视频拼接失败: {err}")
+                return False
 
             durations: List[float] = []
             has_audio: List[bool] = []
@@ -144,8 +313,9 @@ class VideoProcessor:
                         ):
                             copy_possible = False
                             break
+            token = uuid.uuid4().hex[:10]
             can_concat_demuxer = False
-            list_path = Path(output_path).with_suffix(".concat.txt")
+            list_path = Path(output_path).with_suffix(f".{token}.concat.txt")
             if copy_possible:
                 try:
                     lines = []
@@ -171,7 +341,7 @@ class VideoProcessor:
                     ts_files: List[Path] = []
                     procs = []
                     for idx, p in enumerate(inputs):
-                        ts_path = tmp_dir / f".concat_{idx}.ts"
+                        ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
                         ts_files.append(ts_path)
                         cmd_ts = [
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -181,7 +351,12 @@ class VideoProcessor:
                             "-f", "mpegts",
                             "-y", str(ts_path)
                         ]
-                        procs.append(asyncio.create_subprocess_exec(*cmd_ts, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE))
+                        procs.append(asyncio.create_subprocess_exec(
+                            *cmd_ts,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            creationflags=WIN_NO_WINDOW
+                        ))
                     created = await asyncio.gather(*procs, return_exceptions=True)
                     waits = []
                     for pr in created:
@@ -206,7 +381,10 @@ class VideoProcessor:
                                 await on_progress(5.0)
                         except Exception:
                             pass
-                        concat_uri = "concat:" + "|".join(str(f) for f in ts_files)
+                        concat_uri = "concat:" + "|".join(
+                            (f.resolve().as_posix() if hasattr(f, "resolve") else f.as_posix())
+                            for f in ts_files
+                        )
                         cmd = [
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
                             "-i", concat_uri,
@@ -215,18 +393,41 @@ class VideoProcessor:
                         if acodec0 == "aac":
                             cmd.extend(["-bsf:a", "aac_adtstoasc"])
                         cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        self.last_concat_cmd = cmd
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
                             stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
+                            stderr=asyncio.subprocess.PIPE,
+                            creationflags=WIN_NO_WINDOW
                         )
+                        tracking = self._should_track(scope, project_id, task_id, cancel_event)
+                        if tracking:
+                            self._register_proc(str(scope), str(project_id), str(task_id), process)
                         total_duration = sum(durations)
                         if on_progress:
                             try:
                                 last_bucket = -1
                                 seen_end = False
                                 while True:
-                                    line = await process.stdout.readline()
+                                    if cancel_event and cancel_event.is_set():
+                                        raise asyncio.CancelledError()
+                                    rl = asyncio.create_task(process.stdout.readline())
+                                    wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                                    if wt:
+                                        done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
+                                        if wt in done:
+                                            try:
+                                                rl.cancel()
+                                            except Exception:
+                                                pass
+                                            raise asyncio.CancelledError()
+                                        line = await rl
+                                        try:
+                                            wt.cancel()
+                                        except Exception:
+                                            pass
+                                    else:
+                                        line = await rl
                                     if not line:
                                         break
                                     s = line.decode(errors="ignore").strip()
@@ -253,7 +454,11 @@ class VideoProcessor:
                                         logger.info("拼接进度: 99.0% (等待完成)")
                             except Exception:
                                 pass
-                        stdout, stderr = await process.communicate()
+                        try:
+                            stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                        finally:
+                            if tracking:
+                                self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                         for f in ts_files:
                             try:
                                 if f.exists():
@@ -270,6 +475,7 @@ class VideoProcessor:
                             return True
                         else:
                             err = stderr.decode(errors="ignore")
+                            self.last_concat_error = err.strip() or "concat(ts) 失败"
                             logger.error(f"视频拼接失败: {err}")
                             return False
                 except Exception:
@@ -285,18 +491,41 @@ class VideoProcessor:
                     "-progress", "pipe:1",
                     "-y", output_path,
                 ]
+                self.last_concat_cmd = cmd
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
+                tracking = self._should_track(scope, project_id, task_id, cancel_event)
+                if tracking:
+                    self._register_proc(str(scope), str(project_id), str(task_id), process)
                 total_duration = sum(durations)
                 if on_progress:
                     try:
                         last_bucket = -1
                         seen_end = False
                         while True:
-                            line = await process.stdout.readline()
+                            if cancel_event and cancel_event.is_set():
+                                raise asyncio.CancelledError()
+                            rl = asyncio.create_task(process.stdout.readline())
+                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                            if wt:
+                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
+                                if wt in done:
+                                    try:
+                                        rl.cancel()
+                                    except Exception:
+                                        pass
+                                    raise asyncio.CancelledError()
+                                line = await rl
+                                try:
+                                    wt.cancel()
+                                except Exception:
+                                    pass
+                            else:
+                                line = await rl
                             if not line:
                                 break
                             s = line.decode(errors="ignore").strip()
@@ -323,7 +552,11 @@ class VideoProcessor:
                                 logger.info("拼接进度: 99.0% (等待完成)")
                     except Exception:
                         pass
-                stdout, stderr = await process.communicate()
+                try:
+                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                finally:
+                    if tracking:
+                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 try:
                     if list_path.exists():
                         list_path.unlink()
@@ -339,6 +572,7 @@ class VideoProcessor:
                     return True
                 else:
                     err = stderr.decode(errors="ignore")
+                    self.last_concat_error = err.strip() or "concat(demuxer) 失败"
                     logger.error(f"视频拼接失败: {err}")
                     return False
 
@@ -387,12 +621,17 @@ class VideoProcessor:
                     "-progress", "pipe:1",
                     "-y", output_path
                 ])
+                self.last_concat_cmd = cmd_try
 
                 process = await asyncio.create_subprocess_exec(
                     *cmd_try,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
+                tracking = self._should_track(scope, project_id, task_id, cancel_event)
+                if tracking:
+                    self._register_proc(str(scope), str(project_id), str(task_id), process)
 
                 total_duration = sum(durations)
                 if on_progress:
@@ -400,7 +639,25 @@ class VideoProcessor:
                         last_bucket = -1
                         seen_end = False
                         while True:
-                            line = await process.stdout.readline()
+                            if cancel_event and cancel_event.is_set():
+                                raise asyncio.CancelledError()
+                            rl = asyncio.create_task(process.stdout.readline())
+                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                            if wt:
+                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
+                                if wt in done:
+                                    try:
+                                        rl.cancel()
+                                    except Exception:
+                                        pass
+                                    raise asyncio.CancelledError()
+                                line = await rl
+                                try:
+                                    wt.cancel()
+                                except Exception:
+                                    pass
+                            else:
+                                line = await rl
                             if not line:
                                 break
                             s = line.decode(errors="ignore").strip()
@@ -428,7 +685,16 @@ class VideoProcessor:
                     except Exception:
                         pass
 
-                stdout, stderr = await process.communicate()
+                try:
+                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                finally:
+                    if tracking:
+                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
+                try:
+                    if list_path.exists():
+                        list_path.unlink()
+                except Exception:
+                    pass
                 if process.returncode == 0:
                     if on_progress:
                         try:
@@ -439,6 +705,7 @@ class VideoProcessor:
                     return True
                 else:
                     err = stderr.decode(errors="ignore")
+                    self.last_concat_error = err.strip() or "filter_complex 拼接失败"
                     last_err = err
                     logger.error(f"视频拼接失败: {err}")
                     try:
@@ -449,10 +716,12 @@ class VideoProcessor:
 
             if last_err:
                 logger.error(f"视频拼接失败: {last_err}")
+                self.last_concat_error = str(last_err).strip() or self.last_concat_error
             return False
 
         except Exception as e:
             logger.error(f"拼接视频时出错: {e}")
+            self.last_concat_error = str(e) or self.last_concat_error
             return False
 
     async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -464,7 +733,10 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -533,7 +805,8 @@ class VideoProcessor:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-encoders",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             text = out.decode(errors="ignore")
@@ -552,7 +825,8 @@ class VideoProcessor:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-hwaccels",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -588,7 +862,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -610,7 +884,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -637,7 +911,7 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -660,7 +934,10 @@ class VideoProcessor:
                 path,
             ]
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             out, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -680,7 +957,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc_a = await asyncio.create_subprocess_exec(*cmd_a, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc_a = await asyncio.create_subprocess_exec(
+                    *cmd_a,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out_a, _ = await proc_a.communicate()
                 if proc_a.returncode == 0:
                     try:
@@ -693,7 +975,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc_f = await asyncio.create_subprocess_exec(*cmd_f, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc_f = await asyncio.create_subprocess_exec(
+                    *cmd_f,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out_f, _ = await proc_f.communicate()
                 if proc_f.returncode == 0:
                     try:
@@ -708,7 +995,12 @@ class VideoProcessor:
                     "-of", "default=nk=1:nw=1",
                     path,
                 ]
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
                 out, _ = await proc.communicate()
                 if proc.returncode == 0:
                     try:
@@ -719,7 +1011,17 @@ class VideoProcessor:
         except Exception:
             return None
 
-    async def replace_audio_with_narration(self, video_path: str, narration_path: str, output_path: str) -> bool:
+    async def replace_audio_with_narration(
+        self,
+        video_path: str,
+        narration_path: str,
+        output_path: str,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> bool:
         try:
             narr_used = narration_path
             vdur = await self._ffprobe_duration(video_path, "format") or 0.0
@@ -747,9 +1049,17 @@ class VideoProcessor:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
-                stdout, stderr = await process.communicate()
+                tracking = self._should_track(scope, project_id, task_id, cancel_event)
+                if tracking:
+                    self._register_proc(str(scope), str(project_id), str(task_id), process)
+                try:
+                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                finally:
+                    if tracking:
+                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 if process.returncode == 0:
                     vinfo, _ = await self._probe_stream_info(output_path)
                     if vinfo is not None:
@@ -768,9 +1078,17 @@ class VideoProcessor:
                     p2 = await asyncio.create_subprocess_exec(
                         *cmd_fb_direct,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
                     )
-                    _, e2 = await p2.communicate()
+                    tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
+                    if tracking2:
+                        self._register_proc(str(scope), str(project_id), str(task_id), p2)
+                    try:
+                        _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+                    finally:
+                        if tracking2:
+                            self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
                     if p2.returncode == 0:
                         return True
                     err = stderr.decode(errors="ignore")
@@ -815,9 +1133,17 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
-            stdout, stderr = await process.communicate()
+            tracking = self._should_track(scope, project_id, task_id, cancel_event)
+            if tracking:
+                self._register_proc(str(scope), str(project_id), str(task_id), process)
+            try:
+                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+            finally:
+                if tracking:
+                    self._unregister_proc(str(scope), str(project_id), str(task_id), process)
             if process.returncode == 0:
                 vinfo, _ = await self._probe_stream_info(output_path)
                 if vinfo is not None:
@@ -837,9 +1163,17 @@ class VideoProcessor:
                 p2 = await asyncio.create_subprocess_exec(
                     *cmd_fb,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
                 )
-                _, e2 = await p2.communicate()
+                tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
+                if tracking2:
+                    self._register_proc(str(scope), str(project_id), str(task_id), p2)
+                try:
+                    _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+                finally:
+                    if tracking2:
+                        self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
                 if p2.returncode == 0:
                     return True
                 err = stderr.decode(errors="ignore")
@@ -863,9 +1197,17 @@ class VideoProcessor:
                     p2 = await asyncio.create_subprocess_exec(
                         *cmd_fb,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
                     )
-                    _, e2 = await p2.communicate()
+                    tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
+                    if tracking2:
+                        self._register_proc(str(scope), str(project_id), str(task_id), p2)
+                    try:
+                        _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+                    finally:
+                        if tracking2:
+                            self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
                     if p2.returncode == 0:
                         return True
                     else:
@@ -894,7 +1236,8 @@ class VideoProcessor:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW
             )
             stdout, stderr = await process.communicate()
             if process.returncode == 0:

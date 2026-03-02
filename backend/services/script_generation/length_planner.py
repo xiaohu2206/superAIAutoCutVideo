@@ -10,6 +10,7 @@ from .constants import (
     CUSTOM_SCRIPT_LENGTH_MAX,
     DEFAULT_SCRIPT_LENGTH_SELECTION,
     SCRIPT_LENGTH_PRESETS,
+    SOFT_INPUT_FACTOR,
 )
 
 
@@ -56,7 +57,12 @@ def _normalize_custom_range(a: int, b: int) -> str:
 def _estimate_preferred_calls(target_max: int) -> int:
     if target_max <= 0:
         return 1
-    return max(1, int(math.ceil(int(target_max) / 20)))
+    base_per_call = 20.0
+    soft = float(SOFT_INPUT_FACTOR or 1.2)
+    if soft <= 0:
+        soft = 1.2
+    effective_per_call = base_per_call * soft
+    return max(1, int(math.ceil(float(target_max) / float(effective_per_call))))
 
 
 def normalize_script_length_selection(value: Optional[str]) -> Optional[str]:
@@ -65,6 +71,8 @@ def normalize_script_length_selection(value: Optional[str]) -> Optional[str]:
     v = str(value).strip()
     if not v:
         return None
+    if v.lower() == "auto" or v == "自动":
+        return "auto"
     v = _normalize_range_separators(v)
     if not v.endswith("条") and re.search(r"\d", v):
         v = v + "条"
@@ -93,8 +101,11 @@ def parse_script_length_selection(value: Optional[str]) -> ScriptTargetPlan:
         normalized = normalize_script_length_selection(value) or DEFAULT_SCRIPT_LENGTH_SELECTION
     except ValueError:
         normalized = DEFAULT_SCRIPT_LENGTH_SELECTION
+    if normalized == "auto":
+        normalized = DEFAULT_SCRIPT_LENGTH_SELECTION
     if normalized in SCRIPT_LENGTH_PRESETS:
-        target_min, target_max, calls = SCRIPT_LENGTH_PRESETS[normalized]
+        target_min, target_max, _calls = SCRIPT_LENGTH_PRESETS[normalized]
+        calls = _estimate_preferred_calls(int(target_max))
         final_target_count = int(target_max)
     else:
         m = re.search(r"(\d+)\D+(\d+)", normalized)
@@ -109,7 +120,7 @@ def parse_script_length_selection(value: Optional[str]) -> ScriptTargetPlan:
             target_min, target_max = target_max, target_min
         target_min = max(CUSTOM_SCRIPT_LENGTH_MIN, int(target_min))
         target_max = max(target_min, int(target_max))
-        calls = _estimate_preferred_calls(target_max)
+        calls = _estimate_preferred_calls(int(target_max))
         final_target_count = int(target_max)
     return ScriptTargetPlan(
         normalized_selection=normalized,
@@ -117,6 +128,23 @@ def parse_script_length_selection(value: Optional[str]) -> ScriptTargetPlan:
         target_max=int(target_max),
         preferred_calls=int(calls),
         final_target_count=final_target_count,
+    )
+
+
+def estimate_auto_script_length_plan(copywriting_text: str) -> ScriptTargetPlan:
+    text = str(copywriting_text or "")
+    non_ws_len = len(re.sub(r"\s+", "", text))
+    target = int(math.ceil((float(non_ws_len) / 500.0) * 20.0)) if non_ws_len > 0 else 0
+    if target <= 0:
+        target = int(CUSTOM_SCRIPT_LENGTH_MIN)
+    target = max(int(CUSTOM_SCRIPT_LENGTH_MIN), min(int(CUSTOM_SCRIPT_LENGTH_MAX), int(target)))
+    calls = _estimate_preferred_calls(target)
+    return ScriptTargetPlan(
+        normalized_selection="auto",
+        target_min=int(target),
+        target_max=int(target),
+        preferred_calls=int(calls),
+        final_target_count=int(target),
     )
 
 

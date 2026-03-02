@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors, Square } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
@@ -7,6 +7,10 @@ import { Dropdown } from "../ui/Dropdown";
 
 interface ProjectOperationsProps {
   project: Project;
+  isGeneratingCopywriting: boolean;
+  handleGenerateCopywriting: () => void;
+  copywritingGenProgress: number;
+  copywritingGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
   generateScriptDisabled: boolean;
@@ -15,10 +19,14 @@ interface ProjectOperationsProps {
   scriptGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingVideo: boolean;
   handleGenerateVideo: () => void;
+  handleStopGenerateVideo: () => void;
+  isStoppingVideo: boolean;
   videoGenProgress: number;
   videoGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingDraft: boolean;
   handleGenerateDraft: () => void;
+  handleStopGenerateDraft: () => void;
+  isStoppingDraft: boolean;
   draftGenProgress: number;
   draftGenLogs: { timestamp: string; message: string; type?: string }[];
   showMergedPreview: boolean;
@@ -27,6 +35,10 @@ interface ProjectOperationsProps {
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   project,
+  isGeneratingCopywriting,
+  handleGenerateCopywriting,
+  copywritingGenProgress,
+  copywritingGenLogs,
   isGeneratingScript,
   handleGenerateScript,
   generateScriptDisabled,
@@ -35,10 +47,14 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   scriptGenLogs,
   isGeneratingVideo,
   handleGenerateVideo,
+  handleStopGenerateVideo,
+  isStoppingVideo,
   videoGenProgress,
   videoGenLogs,
   isGeneratingDraft,
   handleGenerateDraft,
+  handleStopGenerateDraft,
+  isStoppingDraft,
   draftGenProgress,
   draftGenLogs,
   showMergedPreview,
@@ -49,6 +65,23 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const [opening, setOpening] = useState(false);
 
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
+  const isGeneratingAny = isGeneratingCopywriting || isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
+  const copywritingButtonDisabled =
+    !project?.video_path ||
+    !project?.subtitle_path ||
+    (project?.subtitle_status ? project.subtitle_status !== "ready" : false) ||
+    isGeneratingAny;
+  const scriptButtonDisabled =
+    generateScriptDisabled || isGeneratingCopywriting || isGeneratingVideo || isGeneratingDraft || isGeneratingScript;
+  const scriptButtonTitle = generateScriptDisabled
+    ? (generateScriptDisabledReason || "暂不可生成脚本")
+    : isGeneratingVideo
+    ? "视频生成中，暂不可生成脚本"
+    : isGeneratingDraft
+    ? "草稿生成中，暂不可生成脚本"
+    : isGeneratingCopywriting
+    ? "文案生成中，暂不可生成脚本"
+    : undefined;
 
   useEffect(() => {
     if (!isGeneratingVideo && project.output_video_path) {
@@ -108,9 +141,24 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   return (
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
       <button
+        onClick={handleGenerateCopywriting}
+        disabled={copywritingButtonDisabled}
+        className="mt-2 flex items-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isGeneratingCopywriting ? (
+          <>
+            <Loader className="h-5 w-5 mr-2 animate-spin" />
+            生成中...
+          </>
+        ) : (
+          <>生成解说文案</>
+        )}
+      </button>
+
+      <button
         onClick={handleGenerateScript}
-        disabled={generateScriptDisabled || isGeneratingScript}
-        title={generateScriptDisabled ? (generateScriptDisabledReason || "暂不可生成脚本") : undefined}
+        disabled={scriptButtonDisabled}
+        title={scriptButtonTitle}
         className="mt-2 flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGeneratingScript ? (
@@ -127,6 +175,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
 
        {project.script && project.video_path && 
        <Dropdown
+        disabled={isGeneratingAny}
         trigger={
           <button className="flex mt-2 items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
             视频操作
@@ -142,7 +191,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               </>
             ),
             onClick: handleGenerateDraft,
-            disabled: !project.script || !project.video_path || isGeneratingDraft,
+            disabled: !project.script || !project.video_path || isGeneratingAny,
           },
           {
             label: (
@@ -152,17 +201,62 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               </>
             ),
             onClick: handleGenerateVideo,
-            disabled: !project.script || !project.video_path || isGeneratingVideo,
+            disabled: !project.script || !project.video_path || isGeneratingAny,
           },
         ]}
       />
       }
       {/* 生成视频实时进度显示 */}
+      {(isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100)) && (
+        <div className="w-full ml-0 mt-3">
+          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+            <span>文案生成进度(预计1～2分钟)</span>
+            <span>{Math.round(copywritingGenProgress)}%</span>
+          </div>
+          <div className="w-full h-2 mb-2 bg-gray-200 rounded">
+            <div
+              className="h-2 bg-indigo-600 rounded transition-all"
+              style={{ width: `${Math.round(copywritingGenProgress)}%` }}
+            />
+          </div>
+          {copywritingGenLogs.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {copywritingGenLogs.slice(-1).map((log, idx) => (
+                <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
+                  {log.type === "error" ? (
+                    <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
+                  ) : (
+                    <Loader className="h-3 w-3 mr-1 text-indigo-600" />
+                  )}
+                  <span className="break-all">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 生成视频实时进度显示 */}
       {(isGeneratingVideo || (videoGenProgress > 0 && videoGenProgress < 100)) && (
         <div className="w-full mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>视频生成进度</span>
-            <span>{Math.round(videoGenProgress)}%</span>
+            <div className="flex items-center gap-2">
+              <span>{Math.round(videoGenProgress)}%</span>
+              <button
+                onClick={handleStopGenerateVideo}
+                disabled={isStoppingVideo}
+                title="停止生成"
+                className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStoppingVideo ? (
+                  <Loader className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+                <span className="text-xs font-medium">停止</span>
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
             <div
@@ -192,7 +286,22 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         <div className="w-full mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>剪映草稿生成进度</span>
-            <span>{Math.round(draftGenProgress)}%</span>
+            <div className="flex items-center gap-2">
+              <span>{Math.round(draftGenProgress)}%</span>
+              <button
+                onClick={handleStopGenerateDraft}
+                disabled={isStoppingDraft}
+                title="停止生成"
+                className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStoppingDraft ? (
+                  <Loader className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+                <span className="text-xs font-medium">停止</span>
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded">
             <div

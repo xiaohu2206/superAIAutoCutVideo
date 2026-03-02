@@ -11,6 +11,7 @@ interface CreateProjectModalProps {
     name: string;
     description?: string;
     narration_type: NarrationType;
+    project_type: "subtitle" | "visual";
   }) => Promise<void>;
 }
 
@@ -27,6 +28,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [narrationType, setNarrationType] = useState<NarrationType>(
     NarrationType.SHORT_DRAMA
   );
+  const [projectType, setProjectType] = useState<"subtitle" | "visual">("subtitle");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,12 +51,14 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         name: name.trim(),
         description: description.trim() || undefined,
         narration_type: narrationType,
+        project_type: projectType,
       });
 
       // 重置表单
       setName("");
       setDescription("");
       setNarrationType(NarrationType.SHORT_DRAMA);
+      setProjectType("subtitle");
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建项目失败");
@@ -136,31 +140,59 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               />
             </div>
 
-             {/* 推理模式 */}
+            {/* 推理模式 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 推理模式 <span className="text-red-500">*</span>
               </label>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* 快速推理 - 选中状态 */}
-                <div className="relative p-4 border-2 border-green-500 bg-green-50 rounded-lg cursor-pointer transition-all">
-                  <div className="absolute top-3 right-3 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
-                  <h4 className="text-lg font-bold text-green-700 mb-2">字幕推理</h4>
+                {/* 快速推理 */}
+                <div
+                  onClick={() => !loading && setProjectType("subtitle")}
+                  className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    projectType === "subtitle"
+                      ? "border-green-500 bg-green-50"
+                      : "border-gray-200 bg-white hover:border-green-300"
+                  }`}
+                >
+                  {projectType === "subtitle" && (
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
+                  )}
+                  <h4
+                    className={`text-lg font-bold mb-2 ${
+                      projectType === "subtitle" ? "text-green-700" : "text-gray-700"
+                    }`}
+                  >
+                    字幕推理
+                  </h4>
                   <div className="space-y-1">
                     <p className="text-xs text-gray-500">适用：适用于普通话视频</p>
                   </div>
                 </div>
 
-                {/* 深度推理 - 禁用状态 */}
-                <div className="relative p-4 border border-gray-200 bg-gray-50 rounded-lg opacity-60 cursor-not-allowed">
+                {/* 深度推理 */}
+                <div
+                  onClick={() => !loading && setProjectType("visual")}
+                  className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    projectType === "visual"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 bg-white hover:border-blue-300"
+                  }`}
+                >
+                  {projectType === "visual" && (
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-sm"></div>
+                  )}
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-lg font-bold text-gray-400">视觉推理</h4>
-                    <div className="flex flex-col items-end space-y-1">
-                      <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[10px] font-medium rounded border border-gray-300">未开始</span>
-                    </div>
+                    <h4
+                      className={`text-lg font-bold ${
+                        projectType === "visual" ? "text-blue-700" : "text-gray-700"
+                      }`}
+                    >
+                      视觉推理
+                    </h4>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-400">适用：适用所有类型的视频</p>
+                    <p className="text-xs text-gray-500">适用：适用所有类型的视频</p>
                   </div>
                 </div>
               </div>

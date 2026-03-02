@@ -39,7 +39,7 @@ const ScriptLengthSelector: React.FC<Props> = ({
         ) : saving ? (
           <span className="text-xs text-gray-500">保存中</span>
         ) : (
-          <span className="text-xs text-gray-500">条数越多，生成更慢且消耗更高</span>
+          <span className="text-xs text-gray-500">条数越多，生成更慢且消耗更高(不会强制限制模型生成条数，仅用于拆分文案)</span>
         )}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">

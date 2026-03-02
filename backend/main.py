@@ -8,20 +8,26 @@ AI智能视频剪辑桌面应用 - FastAPI后端服务
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import socket
 import sys
 import time
 import re
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+import tempfile
+import zipfile
+import shutil
+import urllib.request
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response, FileResponse
 from pydantic import BaseModel
 
 # 解决 PyInstaller 打包后 uvicorn 日志报错 "AttributeError: 'NoneType' object has no attribute 'isatty'"
@@ -48,9 +54,13 @@ from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
+from routes.qwen3_tts_routes import router as qwen3_tts_router
+from routes.fun_asr_routes import router as fun_asr_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
+from routes.generate_routes import router as generate_router
 from routes.storage_routes import router as settings_router
+from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import ensure_defaults_migrated, user_data_dir
@@ -62,6 +72,50 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+try:
+    _log_file = Path(tempfile.gettempdir()) / "super_auto_cut_backend_py.log"
+    _fh = logging.FileHandler(_log_file, encoding="utf-8")
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(_fh)
+except Exception:
+    pass
+
+
+class _UvicornAccessDenyFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        method = None
+        path = None
+
+        args = getattr(record, "args", None)
+        if isinstance(args, tuple) and len(args) >= 3:
+            try:
+                method = str(args[1]).upper() if args[1] is not None else None
+            except Exception:
+                method = None
+            try:
+                path = str(args[2]) if args[2] is not None else None
+            except Exception:
+                path = None
+        if not path:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = ""
+            m = re.search(r'"([A-Z]+)\s+([^ ]+)\s+HTTP/', msg)
+            if m:
+                method = m.group(1)
+                path = m.group(2)
+
+        if path and "/api/projects/" in path and "/tasks/latest" in path:
+            return False
+        return True
+
+
+_access_logger = logging.getLogger("uvicorn.access")
+if not any(isinstance(f, _UvicornAccessDenyFilter) for f in getattr(_access_logger, "filters", []) or []):
+    _access_logger.addFilter(_UvicornAccessDenyFilter())
 
 _single_instance_lock_handle = None
 
@@ -190,13 +244,64 @@ try:
 except Exception:
     pass
 
+def _ensure_ffmpeg_in_resources() -> None:
+    try:
+        root = Path(__file__).resolve().parents[1]
+        res = root / "src-tauri" / "resources"
+        res.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            f1 = res / "ffmpeg.exe"
+            f2 = res / "ffprobe.exe"
+        else:
+            f1 = res / "ffmpeg"
+            f2 = res / "ffprobe"
+        if f1.exists() and f2.exists():
+            return
+        if os.name == "nt":
+            urls = [
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-essentials.zip",
+            ]
+            tmpdir = Path(tempfile.mkdtemp())
+            try:
+                for u in urls:
+                    try:
+                        zip_path = tmpdir / "ffmpeg.zip"
+                        urllib.request.urlretrieve(u, str(zip_path))
+                        with zipfile.ZipFile(str(zip_path), "r") as zf:
+                            zf.extractall(str(tmpdir))
+                        ff = None
+                        fp = None
+                        for p in tmpdir.rglob("ffmpeg.exe"):
+                            ff = p
+                            break
+                        for p in tmpdir.rglob("ffprobe.exe"):
+                            fp = p
+                            break
+                        if ff and fp:
+                            shutil.copy2(str(ff), str(f1))
+                            shutil.copy2(str(fp), str(f2))
+                            break
+                    except Exception:
+                        continue
+            finally:
+                try:
+                    shutil.rmtree(str(tmpdir))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def _inject_ffmpeg_into_path() -> None:
     try:
         root = Path(__file__).resolve().parents[1]
+        exe_dir = Path(sys.executable).resolve().parent
         candidates = [
             root / "src-tauri" / "resources",
             root / "src-tauri" / "target" / "debug" / "resources",
             root / "src-tauri" / "target" / "release" / "resources",
+            exe_dir / "resources",
+            exe_dir,
         ]
         sep = ";" if os.name == "nt" else ":"
         orig = os.environ.get("PATH", "")
@@ -220,6 +325,16 @@ def _inject_ffmpeg_into_path() -> None:
             os.environ["PATH"] = sep.join(prepend + [orig]) if orig else sep.join(prepend)
     except Exception:
         pass
+
+async def _async_setup_ffmpeg() -> None:
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _ensure_ffmpeg_in_resources)
+        _inject_ffmpeg_into_path()
+    except Exception:
+        pass
+
+
 # 创建FastAPI应用
 app = FastAPI(
     title="AI智能视频剪辑后端",
@@ -244,9 +359,13 @@ app.include_router(video_model_router)
 app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
+app.include_router(qwen3_tts_router)
+app.include_router(fun_asr_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
+app.include_router(generate_router)
 app.include_router(settings_router)
+app.include_router(moondream_router)
 
 
 @app.exception_handler(HTTPException)
@@ -336,16 +455,33 @@ def get_app_paths():
             base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
         settings_dir = base_data / "SuperAutoCutVideo" / "config"
         settings_file = settings_dir / "app_settings.json"
-        uploads_dir_default = base_data / "SuperAutoCutVideo" / "uploads"
+        uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
+        install_dir_raw = str(os.environ.get("SACV_INSTALL_DIR") or "").strip()
+        if install_dir_raw:
+            install_dir = Path(install_dir_raw).expanduser()
+        else:
+            install_dir = exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir
+        uploads_dir_default = install_dir / "uploads"
         try:
+            used_default = True
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
                 cand = str(data.get("uploads_root") or "").strip()
-                uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
+                if cand:
+                    uploads_dir = Path(cand).expanduser()
+                    used_default = False
+                else:
+                    uploads_dir = uploads_dir_default
             else:
                 uploads_dir = uploads_dir_default
         except Exception:
             uploads_dir = uploads_dir_default
+            used_default = True
+        if used_default:
+            try:
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                uploads_dir = uploads_dir_default_fallback
     else:
         base_path = Path(__file__).resolve().parent
         project_root = base_path.parent
@@ -385,6 +521,125 @@ if not service_data_dir.exists():
     service_data_dir.mkdir(parents=True, exist_ok=True)
 
 uploads_dir.mkdir(parents=True, exist_ok=True)
+
+def _safe_join_uploads(rel_path: str) -> Path:
+    base = uploads_dir.resolve()
+    target = (uploads_dir / rel_path).resolve()
+    try:
+        target.relative_to(base)
+    except Exception:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return target
+
+
+def _parse_range_header(range_header: str, size: int) -> Optional[tuple[int, int]]:
+    if not range_header:
+        return None
+    h = range_header.strip().lower()
+    if not h.startswith("bytes="):
+        return None
+    spec = h[len("bytes="):].strip()
+    if "," in spec:
+        spec = spec.split(",", 1)[0].strip()
+    if "-" not in spec:
+        return None
+    start_s, end_s = spec.split("-", 1)
+    start_s = start_s.strip()
+    end_s = end_s.strip()
+    if size <= 0:
+        return None
+    if start_s == "":
+        try:
+            suffix = int(end_s)
+        except Exception:
+            return None
+        if suffix <= 0:
+            return None
+        start = max(0, size - suffix)
+        end = size - 1
+        return (start, end)
+    try:
+        start = int(start_s)
+    except Exception:
+        return None
+    if start < 0:
+        return None
+    if end_s == "":
+        end = size - 1
+        return (start, end) if start <= end else None
+    try:
+        end = int(end_s)
+    except Exception:
+        return None
+    if end < start:
+        return None
+    end = min(end, size - 1)
+    return (start, end) if start <= end else None
+
+
+@app.api_route("/uploads/{rel_path:path}", methods=["GET", "HEAD"])
+async def uploads_with_range(request: Request, rel_path: str):
+    abs_path = _safe_join_uploads(rel_path)
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        size = abs_path.stat().st_size
+    except Exception:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    media_type = mimetypes.guess_type(str(abs_path))[0] or "application/octet-stream"
+    range_header = request.headers.get("range") or request.headers.get("Range") or ""
+    rng = _parse_range_header(range_header, size)
+
+    headers = {
+        "Accept-Ranges": "bytes",
+    }
+
+    if rng is None:
+        if request.method.upper() == "HEAD":
+            headers.update(
+                {
+                    "Content-Type": media_type,
+                    "Content-Length": str(size),
+                }
+            )
+            return Response(status_code=200, headers=headers)
+        return FileResponse(path=str(abs_path), media_type=media_type, headers=headers)
+
+    start, end = rng
+    if start >= size:
+        return Response(
+            status_code=416,
+            headers={
+                "Content-Range": f"bytes */{size}",
+                "Accept-Ranges": "bytes",
+            },
+        )
+    length = end - start + 1
+    headers.update(
+        {
+            "Content-Type": media_type,
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(length),
+        }
+    )
+    if request.method.upper() == "HEAD":
+        return Response(status_code=206, headers=headers)
+
+    def iter_file():
+        with open(abs_path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            chunk_size = 1024 * 1024
+            while remaining > 0:
+                chunk = f.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(iter_file(), status_code=206, headers=headers, media_type=media_type)
 
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 # 注意：挂载路径 url 保持不变
@@ -678,6 +933,17 @@ async def startup_event():
         jianying_config_manager.ensure_default_draft_path()
     except Exception as e:
         logger.warning(f"默认查找剪映草稿路径失败: {e}")
+    try:
+        auto_raw = str(os.environ.get("SACV_FFMPEG_AUTO_DOWNLOAD") or "").strip().lower()
+        if os.name == "nt":
+            auto = auto_raw in {"1", "true", "yes"}
+            _inject_ffmpeg_into_path()
+            has_ffmpeg = bool(shutil.which("ffmpeg"))
+            has_ffprobe = bool(shutil.which("ffprobe"))
+            if auto and (not has_ffmpeg or not has_ffprobe):
+                await _async_setup_ffmpeg()
+    except Exception:
+        pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -686,6 +952,7 @@ async def shutdown_event():
     release_single_instance_lock()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     # 获取端口配置
     initial_port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "127.0.0.1")
@@ -707,13 +974,17 @@ if __name__ == "__main__":
         logger.info(f"启动FastAPI服务器: {host}:{port}")
         
         # 启动服务器：直接传递 app 对象，避免 PyInstaller 环境下字符串导入失败（ModuleNotFoundError: 'main'）
-        uvicorn.run(
-            app,
-            host=host,
-            port=port,
-            reload=False,  # 生产环境不使用reload
-            log_level="info"
-        )
+        try:
+            uvicorn.run(
+                app,
+                host=host,
+                port=port,
+                reload=False,
+                log_level="info"
+            )
+        except Exception as e:
+            logger.exception(f"uvicorn.run 失败: {e}")
+            raise
     except RuntimeError as e:
         logger.error(f"启动失败: {e}")
         sys.exit(1)

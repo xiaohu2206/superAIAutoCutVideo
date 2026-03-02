@@ -18,11 +18,12 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 import asyncio
 import logging
 import re
 import cv2
+import mimetypes
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request, Query
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -30,17 +31,26 @@ import json
 import uuid
 import subprocess
 import platform
+from threading import RLock
+import subprocess
 
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
+from services.generate_copywriting_service import generate_copywriting_service
 from services.extract_subtitle_service import extract_subtitle_service
+from services.extract_scene_service import extract_scene_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
 from modules.ws_manager import manager
 from modules.runtime_log_store import runtime_log_store
+from modules.task_progress_store import task_progress_store
+from modules.task_cancel_store import task_cancel_store
+from modules.task_scheduler import task_scheduler
+from modules.config.generate_concurrency_config import generate_concurrency_config_manager
+from modules.subtitle_utils import parse_srt, format_ts_srt
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -127,6 +137,101 @@ def resolve_any_path(path_str: str) -> Path:
     return resolve_abs_path(s)
 
 
+def _guess_video_media_type(path: Path) -> str:
+    mt, _ = mimetypes.guess_type(str(path))
+    if mt:
+        return mt
+    suffix = path.suffix.lower()
+    if suffix in {".mp4", ".m4v"}:
+        return "video/mp4"
+    if suffix in {".webm"}:
+        return "video/webm"
+    if suffix in {".mov"}:
+        return "video/quicktime"
+    if suffix in {".ogg", ".ogv"}:
+        return "video/ogg"
+    return "application/octet-stream"
+
+
+def _stream_file_range(abs_path: Path, request: Request) -> StreamingResponse:
+    file_size = abs_path.stat().st_size
+    media_type = _guess_video_media_type(abs_path)
+    headers: Dict[str, str] = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{abs_path.name}"',
+    }
+
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and range_header.strip().lower().startswith("bytes="):
+        spec = range_header.strip()[6:]
+        if "," in spec:
+            spec = spec.split(",", 1)[0]
+        start_s, end_s = (spec.split("-", 1) + [""])[:2]
+        try:
+            start = int(start_s) if start_s.strip() else None
+            end = int(end_s) if end_s.strip() else None
+        except Exception:
+            start = None
+            end = None
+
+        if start is None and end is not None:
+            start = max(0, file_size - end)
+            end = file_size - 1
+        if start is None:
+            start = 0
+        if end is None or end >= file_size:
+            end = file_size - 1
+        if start < 0:
+            start = 0
+        if end < start or file_size <= 0:
+            return StreamingResponse(
+                content=iter(()),
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+                media_type=media_type,
+            )
+
+        chunk_size = end - start + 1
+
+        def file_iter(path: Path, start_pos: int, count: int, block: int = 1024 * 1024):
+            with open(path, "rb") as f:
+                f.seek(start_pos)
+                remaining = count
+                while remaining > 0:
+                    read_size = min(block, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+
+        headers.update({
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(chunk_size),
+        })
+        return StreamingResponse(
+            file_iter(abs_path, start, chunk_size),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    def full_file_iter(path: Path, block: int = 1024 * 1024):
+        with open(path, "rb") as f:
+            while True:
+                data = f.read(block)
+                if not data:
+                    break
+                yield data
+
+    headers["Content-Length"] = str(file_size)
+    return StreamingResponse(
+        full_file_iter(abs_path),
+        media_type=media_type,
+        headers=headers,
+    )
+
+
 def remove_path(target: Path) -> bool:
     try:
         if not target:
@@ -183,7 +288,7 @@ def cleanup_project_assets(p) -> None:
     _add(getattr(p, "merged_video_path", None))
     _add(getattr(p, "subtitle_path", None))
     _add(getattr(p, "audio_path", None))
-    _add(getattr(p, "plot_analysis_path", None))
+    _add(getattr(p, "narration_copywriting_path", None))
     _add(getattr(p, "output_video_path", None))
     _add(getattr(p, "jianying_draft_last_dir", None))
     _add(getattr(p, "jianying_draft_last_dir_web", None))
@@ -211,12 +316,14 @@ def cleanup_project_assets(p) -> None:
     remove_matching_glob(up / "videos", f"{getattr(p, 'id', '')}_video_*")
     remove_matching_glob(up / "subtitles", f"{getattr(p, 'id', '')}_subtitle_*")
     remove_matching_glob(up / "audios", f"{getattr(p, 'id', '')}_audio_*")
+    remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_copywriting_*")
     remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_analysis_*")
 
 
 class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    project_type: Optional[str] = Field(default="subtitle")
     narration_type: Optional[str] = Field(default="短剧解说")
 
 
@@ -227,16 +334,22 @@ class UpdateProjectRequest(BaseModel):
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
     script_language: Optional[str] = None
+    copywriting_word_count: Optional[int] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     audio_path: Optional[str] = None
-    plot_analysis_path: Optional[str] = None
+    narration_copywriting: Optional[Dict[str, Any]] = None
+    narration_copywriting_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
 
 
 class DeleteVideoRequest(BaseModel):
     file_path: Optional[str] = None
+
+
+class PrepareVideoRequest(BaseModel):
+    file_path: str
 
 
 class MergeTaskStatus(BaseModel):
@@ -250,6 +363,36 @@ class MergeTaskStatus(BaseModel):
 MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
 
 DRAFT_TASKS: Dict[str, MergeTaskStatus] = {}
+VIDEO_TASKS: Dict[str, MergeTaskStatus] = {}
+
+DRAFT_TASK_HANDLES: Dict[str, asyncio.Task] = {}
+VIDEO_TASK_HANDLES: Dict[str, asyncio.Task] = {}
+
+
+class TrimTimeRange(BaseModel):
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+
+
+class TrimVideoRequest(BaseModel):
+    file_path: str
+    mode: Literal["keep", "delete"] = "keep"
+    ranges: List[TrimTimeRange] = Field(default_factory=list)
+
+
+class TrimTaskStatus(BaseModel):
+    task_id: str
+    status: str
+    progress: float
+    message: str
+    file_path: Optional[str] = None
+    output_version: Optional[str] = None
+
+
+TRIM_TASKS: Dict[str, TrimTaskStatus] = {}
+
+_trim_lock = RLock()
+_active_trim_keys: Dict[str, str] = {}
 
 
 class UpdateVideoOrderRequest(BaseModel):
@@ -263,8 +406,23 @@ class GenerateScriptRequest(BaseModel):
     narration_type: str
 
 
+class GenerateCopywritingRequest(BaseModel):
+    project_id: str
+    video_path: str
+    subtitle_path: Optional[str] = None
+    narration_type: str
+
+
 class ExtractSubtitleRequest(BaseModel):
     force: bool = False
+    task_id: Optional[str] = None
+    asr_provider: Optional[str] = None
+    asr_model_key: Optional[str] = None
+    asr_language: Optional[str] = None
+    itn: bool = True
+    hotwords: Optional[List[str]] = None
+    analyzeVision: bool = False
+    visionMode: str = "all"
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -277,19 +435,6 @@ class SubtitleSegmentInput(BaseModel):
 class SaveSubtitleRequest(BaseModel):
     segments: Optional[List[SubtitleSegmentInput]] = None
     content: Optional[str] = None
-
-
-def _format_ts(seconds: float) -> str:
-    if seconds < 0:
-        seconds = 0.0
-    ms_total = int(round(seconds * 1000))
-    ms = ms_total % 1000
-    s_total = ms_total // 1000
-    s = s_total % 60
-    m_total = s_total // 60
-    m = m_total % 60
-    h = m_total // 60
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
@@ -305,70 +450,9 @@ def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
         if not text:
             continue
         normalized_text = re.sub(r"\s+", " ", text)
-        out_lines.append(f"[{_format_ts(start)}-{_format_ts(end)}] {normalized_text}")
+        out_lines.append(f"[{format_ts_srt(start)}-{format_ts_srt(end)}] {normalized_text}")
     return ("\n".join(out_lines) + ("\n" if out_lines else ""))
 
-
-def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
-    """简易SRT解析，返回包含 start/end/text 的列表"""
-    def _parse_ts(ts: str) -> float:
-        # format: HH:MM:SS,mmm
-        h, m, rest = ts.split(":")
-        s, ms = rest.split(",")
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
-
-    segments: List[Dict[str, Any]] = []
-    try:
-        content = srt_path.read_text(encoding="utf-8", errors="ignore")
-        norm = content.replace("\r\n", "\n").replace("\r", "\n").strip()
-        lines = [ln.strip() for ln in norm.splitlines() if ln.strip()]
-        # 优先检测压缩后的行格式：[HH:MM:SS,mmm-HH:MM:SS,mmm] text
-        bracket_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2},\d{3})-(\d{2}:\d{2}:\d{2},\d{3})\]\s*(.+)$")
-        bracket_matches = [bracket_pattern.match(ln) for ln in lines]
-        if any(bracket_matches):
-            idx = 1
-            for m in bracket_matches:
-                if not m:
-                    continue
-                start_str, end_str, text = m.groups()
-                start_t = _parse_ts(start_str)
-                end_t = _parse_ts(end_str)
-                segments.append({
-                    "id": str(idx),
-                    "start_time": float(start_t),
-                    "end_time": float(end_t),
-                    "text": text,
-                    "subtitle": text,
-                })
-                idx += 1
-        else:
-            # 兼容标准SRT解析
-            blocks = [b.strip() for b in norm.split("\n\n") if b.strip()]
-            for idx, block in enumerate(blocks, start=1):
-                lines_in_block = [line for line in block.splitlines() if line.strip()]
-                if len(lines_in_block) < 2:
-                    continue
-                timing_line = lines_in_block[1] if "-->" in lines_in_block[1] else lines_in_block[0]
-                if "-->" not in timing_line:
-                    continue
-                start_str, end_str = [t.strip() for t in timing_line.split("-->")]
-                start_t = _parse_ts(start_str)
-                end_t = _parse_ts(end_str)
-                text_lines = lines_in_block[2:] if timing_line == lines_in_block[1] else lines_in_block[1:]
-                text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
-                if not text:
-                    text = f"字幕段{idx}"
-                segments.append({
-                    "id": str(idx),
-                    "start_time": float(start_t),
-                    "end_time": float(end_t),
-                    "text": text,
-                    "subtitle": text,
-                })
-    except Exception:
-        # 解析失败返回空
-        pass
-    return segments
 
 
 def compress_srt(content: str) -> str:
@@ -448,7 +532,7 @@ async def create_project(req: CreateProjectRequest):
     for existing in projects_store.list_projects():
         if (existing.name or "").strip() == name_clean:
             raise HTTPException(status_code=400, detail="项目名称已存在")
-    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说")
+    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说", req.project_type or "subtitle")
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),
@@ -516,10 +600,67 @@ async def generate_script(req: GenerateScriptRequest):
         raise HTTPException(status_code=500, detail=f"脚本生成失败: {str(e)}")
 
 
+@router.post("/generate-copywriting")
+async def generate_copywriting(req: GenerateCopywritingRequest):
+    try:
+        try:
+            logger.info(
+                "route generate-copywriting project_id=%s video_path=%s subtitle_path=%s narration_type=%s",
+                req.project_id,
+                req.video_path,
+                req.subtitle_path,
+                (req.narration_type or "")[:50],
+            )
+        except Exception:
+            pass
+        return await generate_copywriting_service.generate_copywriting(
+            project_id=req.project_id,
+            video_path=req.video_path,
+            subtitle_path=req.subtitle_path,
+            narration_type=req.narration_type,
+        )
+    except HTTPException as e:
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "文案生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        projects_store.update_project(req.project_id, {"status": "failed"})
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": f"文案生成失败: {str(e)}",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"文案生成失败: {str(e)}")
+
+
 @router.post("/{project_id}/extract-subtitle")
 async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
     try:
-        data = await extract_subtitle_service.extract_subtitle(project_id=project_id, force=bool(req.force))
+        data = await extract_subtitle_service.extract_subtitle(
+            project_id=project_id,
+            force=bool(req.force),
+            task_id=req.task_id,
+            asr_provider=req.asr_provider,
+            asr_model_key=req.asr_model_key,
+            asr_language=req.asr_language,
+            itn=bool(getattr(req, "itn", True)),
+            hotwords=req.hotwords,
+        )
         return {
             "message": "字幕提取成功",
             "data": data,
@@ -529,10 +670,75 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
         raise
     except Exception as e:
         try:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
+            p = projects_store.get_project(project_id)
+            cur = getattr(p, "subtitle_extract_run_id", None) if p else None
+            if not req.task_id or (cur and cur == req.task_id):
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"字幕提取失败: {str(e)}")
+
+
+@router.post("/{project_id}/extract-scene")
+async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
+    # 复用 ExtractSubtitleRequest 里的 force 和 task_id
+    try:
+        data = await extract_scene_service.extract_scenes(
+            project_id=project_id,
+            force=bool(req.force),
+            task_id=req.task_id,
+            analyze_vision=bool(req.analyzeVision),
+            vision_mode=req.visionMode,
+        )
+        return {
+            "message": "镜头提取任务已提交",
+            "data": data,
+            "timestamp": now_ts(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"镜头提取提交失败: {str(e)}")
+
+
+@router.get("/{project_id}/scenes")
+async def get_project_scenes(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.scenes_path:
+        raise HTTPException(status_code=404, detail="镜头数据未生成")
+        
+    # Read the file
+    # scenes_path is web path like /uploads/analyses/...
+    # need to resolve to absolute path
+    abs_path = resolve_abs_path(p.scenes_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="镜头数据文件丢失")
+        
+    import json
+    with open(abs_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        
+    return {
+        "message": "获取成功",
+        "data": data,
+        "timestamp": now_ts()
+    }
+
+
+@router.get("/{project_id}/scene-status/{task_id}")
+async def get_scene_status(project_id: str, task_id: str):
+    # 复用 task_progress_store
+    st = task_progress_store.get_state("extract_scene", project_id, task_id)
+    if not st:
+         raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "message": "获取进度成功",
+        "data": st,
+        "timestamp": now_ts(),
+    }
+
 
 
 @router.get("/{project_id}/subtitle")
@@ -648,13 +854,17 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     if "original_ratio" in updates:
-        try:
-            ratio_val = int(updates.get("original_ratio"))
-        except Exception:
-            raise HTTPException(status_code=400, detail="原片占比必须为整数")
-        if ratio_val < 10 or ratio_val > 90:
-            raise HTTPException(status_code=400, detail="原片占比范围为 10%~90%")
-        updates["original_ratio"] = ratio_val
+        ratio_raw = updates.get("original_ratio")
+        if ratio_raw is None:
+            updates["original_ratio"] = None
+        else:
+            try:
+                ratio_val = int(ratio_raw)
+            except Exception:
+                raise HTTPException(status_code=400, detail="原片占比必须为整数")
+            if ratio_val < 0 or ratio_val > 100:
+                raise HTTPException(status_code=400, detail="原片占比范围为 0%~100%")
+            updates["original_ratio"] = ratio_val
     if "script_language" in updates:
         try:
             lang_raw = (updates.get("script_language") or "").strip().lower()
@@ -766,9 +976,88 @@ async def stream_project_logs(
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=headers)
 
 
+@router.get("/{project_id}/video/stream")
+async def stream_project_video(project_id: str, request: Request):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    video_path = p.video_path
+    if not video_path:
+        raise HTTPException(status_code=404, detail="视频未上传")
+        
+    # Resolve path
+    abs_path = resolve_abs_path(video_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+        
+    return _stream_file_range(abs_path, request)
+
+
+@router.get("/{project_id}/merged-video")
+async def stream_project_merged_video(project_id: str, request: Request):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    video_path = p.merged_video_path
+    if not video_path:
+        raise HTTPException(status_code=404, detail="合并视频不存在")
+        
+    # Resolve path
+    abs_path = resolve_abs_path(video_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+        
+    return _stream_file_range(abs_path, request)
+
+
 # ========================= 文件上传 =========================
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
+FASTSTART_EXTS = {".mp4", ".mov"}
+
+
+async def remux_faststart(path: Path) -> bool:
+    try:
+        WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
+        if path.suffix.lower() not in FASTSTART_EXTS:
+            return False
+        tmp_path = path.with_name(f".{path.stem}.faststart{path.suffix}")
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", str(path),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            "-y",
+            str(tmp_path),
+        ]
+        kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
+        )
+        await process.communicate()
+        if process.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
+            os.replace(str(tmp_path), str(path))
+            return True
+    except Exception:
+        pass
+    try:
+        if tmp_path.exists():
+            tmp_path.unlink()
+    except Exception:
+        pass
+    return False
 
 
 @router.post("/{project_id}/upload/video")
@@ -803,6 +1092,12 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
+    await remux_faststart(out_path)
+    try:
+        size = out_path.stat().st_size
+    except Exception:
+        pass
+
     # 记录到项目的视频列表，并按规则更新生效路径
     web_path = to_web_path(out_path)
     # 记录路径与原始文件名
@@ -815,6 +1110,31 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
             "file_name": file.filename,
             "file_size": size,
             "upload_time": now_ts(),
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/video/prepare")
+async def prepare_video_preview(project_id: str, req: PrepareVideoRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    file_path = (req.file_path or "").strip()
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少 file_path")
+
+    abs_path = resolve_abs_path(file_path)
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+
+    prepared = await remux_faststart(abs_path)
+    return {
+        "message": "视频预处理完成",
+        "data": {
+            "file_path": to_web_path(abs_path),
+            "prepared": prepared,
         },
         "timestamp": now_ts(),
     }
@@ -1030,14 +1350,15 @@ async def merge_videos(project_id: str):
             ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
             if not ok:
                 MERGE_TASKS[task_id].status = "failed"
-                MERGE_TASKS[task_id].message = "合并失败"
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                MERGE_TASKS[task_id].message = ("合并失败: " + str(err).strip()[:400]) if err else "合并失败"
                 try:
                     await manager.broadcast(json.dumps({
                         "type": "error",
                         "scope": "merge_videos",
                         "project_id": project_id,
                         "task_id": task_id,
-                        "message": "合并失败",
+                        "message": MERGE_TASKS[task_id].message,
                         "progress": MERGE_TASKS[task_id].progress,
                         "timestamp": now_ts(),
                     }))
@@ -1110,6 +1431,361 @@ async def merge_videos_status(project_id: str, task_id: str):
     }
 
 
+def _merge_ranges(ranges: List[List[int]]) -> List[List[int]]:
+    if not ranges:
+        return []
+    ordered = sorted(ranges, key=lambda x: (x[0], x[1]))
+    merged: List[List[int]] = []
+    for s, e in ordered:
+        if not merged:
+            merged.append([s, e])
+            continue
+        last = merged[-1]
+        if s <= last[1]:
+            last[1] = max(last[1], e)
+        else:
+            merged.append([s, e])
+    return merged
+
+
+def _normalize_ranges_ms(ranges: List[TrimTimeRange], duration_ms: int) -> List[List[int]]:
+    if duration_ms <= 0:
+        return []
+    norm: List[List[int]] = []
+    for r in ranges or []:
+        try:
+            s = int(r.start_ms)
+            e = int(r.end_ms)
+        except Exception:
+            continue
+        if s < 0:
+            s = 0
+        if e < 0:
+            e = 0
+        if s > duration_ms:
+            s = duration_ms
+        if e > duration_ms:
+            e = duration_ms
+        if e <= s:
+            continue
+        norm.append([s, e])
+    return _merge_ranges(norm)
+
+
+def _invert_ranges_ms(ranges: List[List[int]], duration_ms: int) -> List[List[int]]:
+    if duration_ms <= 0:
+        return []
+    if not ranges:
+        return [[0, duration_ms]]
+    keep: List[List[int]] = []
+    cur = 0
+    for s, e in ranges:
+        if s > cur:
+            keep.append([cur, s])
+        cur = max(cur, e)
+        if cur >= duration_ms:
+            break
+    if cur < duration_ms:
+        keep.append([cur, duration_ms])
+    return keep
+
+
+@router.post("/{project_id}/trim/video")
+async def trim_video(project_id: str, req: TrimVideoRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    file_path = (req.file_path or "").strip()
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少 file_path")
+
+    mode = (req.mode or "keep").strip().lower()
+    if mode not in {"keep", "delete"}:
+        raise HTTPException(status_code=400, detail="mode 必须为 keep 或 delete")
+
+    try:
+        abs_in = resolve_abs_path(file_path)
+    except Exception:
+        abs_in = Path("")
+    if not abs_in or not abs_in.exists() or not abs_in.is_file():
+        raise HTTPException(status_code=404, detail="源视频不存在")
+
+    try:
+        duration_sec = await video_processor._ffprobe_video_duration(str(abs_in))
+    except Exception:
+        duration_sec = None
+    duration_ms = int(float(duration_sec or 0.0) * 1000.0)
+    if duration_ms <= 0:
+        raise HTTPException(status_code=400, detail="无法获取视频时长")
+
+    norm_ranges = _normalize_ranges_ms(req.ranges or [], duration_ms)
+    if not norm_ranges:
+        raise HTTPException(status_code=400, detail="请先在时间轴选择至少一个区间")
+    if mode == "keep":
+        keep_ranges = norm_ranges
+    else:
+        keep_ranges = _invert_ranges_ms(norm_ranges, duration_ms)
+
+    keep_ranges = [r for r in keep_ranges if (r[1] - r[0]) >= 200]
+    if not keep_ranges:
+        raise HTTPException(status_code=400, detail="裁剪区间为空或过短")
+    if len(keep_ranges) > 60:
+        raise HTTPException(status_code=400, detail="区间过多（最多 60 段）")
+
+    trim_key = f"{project_id}::{file_path}"
+    with _trim_lock:
+        active = _active_trim_keys.get(trim_key)
+        if active:
+            t = TRIM_TASKS.get(active)
+            status = (t.status if t else "").strip().lower()
+            if status in {"pending", "processing", "running"}:
+                raise HTTPException(status_code=409, detail="该视频正在裁剪处理中，请稍后")
+        task_id = f"trim_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+        _active_trim_keys[trim_key] = task_id
+        TRIM_TASKS[task_id] = TrimTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备裁剪")
+
+    async def _broadcast(payload: Dict[str, Any]):
+        try:
+            await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass
+
+    async def _run():
+        seg_paths: List[Path] = []
+        out_tmp: Optional[Path] = None
+        try:
+            TRIM_TASKS[task_id].status = "processing"
+            TRIM_TASKS[task_id].message = "正在裁剪"
+            await _broadcast(
+                {
+                    "type": "progress",
+                    "scope": "trim_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": "开始裁剪",
+                    "progress": 0,
+                    "timestamp": now_ts(),
+                }
+            )
+
+            tmp_dir = uploads_dir() / "videos" / "tmp"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+
+            total_segments = len(keep_ranges)
+            for idx, (s_ms, e_ms) in enumerate(keep_ranges):
+                seg_out = tmp_dir / f"{project_id}_trim_{task_id}_{idx}.mp4"
+                seg_paths.append(seg_out)
+                start_sec = float(s_ms) / 1000.0
+                dur_sec = float(e_ms - s_ms) / 1000.0
+                ok = await video_processor.cut_video_segment(str(abs_in), str(seg_out), start_sec, dur_sec)
+                if not ok:
+                    raise RuntimeError(f"剪切第 {idx + 1} 段失败")
+                pct = 10.0 + (40.0 * float(idx + 1) / float(max(total_segments, 1)))
+                TRIM_TASKS[task_id].progress = float(f"{pct:.2f}")
+                TRIM_TASKS[task_id].message = f"已剪切 {idx + 1}/{total_segments} 段"
+                await _broadcast(
+                    {
+                        "type": "progress",
+                        "scope": "trim_video",
+                        "project_id": project_id,
+                        "task_id": task_id,
+                        "message": TRIM_TASKS[task_id].message,
+                        "progress": TRIM_TASKS[task_id].progress,
+                        "timestamp": now_ts(),
+                    }
+                )
+
+            out_tmp = abs_in.parent / f".trim_{task_id}.tmp{abs_in.suffix}"
+            if out_tmp.exists():
+                try:
+                    out_tmp.unlink()
+                except Exception:
+                    pass
+
+            async def _on_concat_progress(pct: float):
+                mapped = 60.0 + (float(pct) * 0.35)
+                if mapped > 95.0:
+                    mapped = 95.0
+                if mapped < 60.0:
+                    mapped = 60.0
+                TRIM_TASKS[task_id].progress = float(f"{mapped:.2f}")
+                TRIM_TASKS[task_id].message = "正在拼接"
+                await _broadcast(
+                    {
+                        "type": "progress",
+                        "scope": "trim_video",
+                        "project_id": project_id,
+                        "task_id": task_id,
+                        "message": "正在拼接",
+                        "progress": TRIM_TASKS[task_id].progress,
+                        "timestamp": now_ts(),
+                    }
+                )
+
+            ok = await video_processor.concat_videos([str(x) for x in seg_paths], str(out_tmp), _on_concat_progress)
+            if not ok or not out_tmp.exists():
+                err = getattr(video_processor, "last_concat_error", None) or ""
+                if err:
+                    raise RuntimeError(f"拼接失败: {str(err).strip()[:400]}")
+                raise RuntimeError("拼接失败")
+
+            out_web_path = file_path
+            replaced = False
+            last_err: Optional[Exception] = None
+            for i in range(20):
+                try:
+                    os.replace(str(out_tmp), str(abs_in))
+                    replaced = True
+                    break
+                except PermissionError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+                except OSError as e:
+                    last_err = e
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr in (5, 32):
+                        await asyncio.sleep(0.15 + 0.05 * float(i))
+                        continue
+                    raise
+
+            if not replaced:
+                try:
+                    fallback_out = abs_in.parent / f"{project_id}_trimmed_{task_id}{abs_in.suffix}"
+                    if fallback_out.exists():
+                        try:
+                            fallback_out.unlink()
+                        except Exception:
+                            pass
+                    os.replace(str(out_tmp), str(fallback_out))
+                    out_web_path = to_web_path(fallback_out)
+                    try:
+                        cur_paths = list(p.video_paths or [])
+                        cur_names = dict(p.video_names or {})
+                        if file_path in cur_paths:
+                            cur_paths = [out_web_path if x == file_path else x for x in cur_paths]
+                        else:
+                            cur_paths.append(out_web_path)
+                        if out_web_path != file_path:
+                            cur_names[out_web_path] = cur_names.get(file_path) or Path(out_web_path).name
+                            if file_path in cur_names:
+                                try:
+                                    del cur_names[file_path]
+                                except Exception:
+                                    pass
+                        projects_store.update_project(
+                            project_id,
+                            {
+                                "video_paths": cur_paths,
+                                "video_names": cur_names,
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    if last_err:
+                        raise last_err
+                    raise
+
+            for sp in seg_paths:
+                try:
+                    if sp.exists():
+                        sp.unlink()
+                except Exception:
+                    pass
+
+            if out_web_path == file_path:
+                try:
+                    projects_store.update_project(
+                        project_id,
+                        {
+                            "video_paths": list(p.video_paths or []),
+                            "video_names": dict(p.video_names or {}),
+                        },
+                    )
+                except Exception:
+                    pass
+
+            out_ver = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            TRIM_TASKS[task_id].status = "completed"
+            TRIM_TASKS[task_id].progress = 100.0
+            TRIM_TASKS[task_id].message = "裁剪完成"
+            TRIM_TASKS[task_id].file_path = out_web_path
+            TRIM_TASKS[task_id].output_version = out_ver
+            await _broadcast(
+                {
+                    "type": "completed",
+                    "scope": "trim_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": "裁剪完成",
+                    "progress": 100,
+                    "file_path": out_web_path,
+                    "output_version": out_ver,
+                    "timestamp": now_ts(),
+                }
+            )
+        except Exception as e:
+            TRIM_TASKS[task_id].status = "failed"
+            TRIM_TASKS[task_id].message = str(e) or "裁剪失败"
+            if out_tmp:
+                try:
+                    if out_tmp.exists():
+                        out_tmp.unlink()
+                except Exception:
+                    pass
+            for sp in seg_paths:
+                try:
+                    if sp.exists():
+                        sp.unlink()
+                except Exception:
+                    pass
+            await _broadcast(
+                {
+                    "type": "error",
+                    "scope": "trim_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": TRIM_TASKS[task_id].message,
+                    "progress": float(TRIM_TASKS[task_id].progress or 0.0),
+                    "timestamp": now_ts(),
+                }
+            )
+        finally:
+            with _trim_lock:
+                cur = _active_trim_keys.get(trim_key)
+                if cur == task_id:
+                    try:
+                        del _active_trim_keys[trim_key]
+                    except Exception:
+                        pass
+
+    asyncio.create_task(_run())
+    return {
+        "message": "开始裁剪",
+        "data": {
+            "task_id": task_id,
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/trim/video/status/{task_id}")
+async def trim_video_status(project_id: str, task_id: str):
+    t = TRIM_TASKS.get(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "message": "获取裁剪进度",
+        "data": t.model_dump(),
+        "timestamp": now_ts(),
+    }
+
+
 # 更新项目的视频排序（按用户顺序）
 @router.post("/{project_id}/videos/order")
 async def update_video_order(project_id: str, req: UpdateVideoOrderRequest):
@@ -1174,6 +1850,10 @@ class SaveScriptRequest(BaseModel):
     script: Dict[str, Any]
 
 
+class SaveCopywritingRequest(BaseModel):
+    copywriting: Dict[str, Any]
+
+
 @router.post("/{project_id}/script")
 async def save_script(project_id: str, req: SaveScriptRequest):
     p = projects_store.get_project(project_id)
@@ -1195,6 +1875,44 @@ async def save_script(project_id: str, req: SaveScriptRequest):
     }
 
 
+@router.post("/{project_id}/copywriting")
+async def save_copywriting(project_id: str, req: SaveCopywritingRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    copywriting = req.copywriting
+    if not isinstance(copywriting, dict):
+        raise HTTPException(status_code=400, detail="文案格式错误")
+    if not str(copywriting.get("content", "")).strip():
+        raise HTTPException(status_code=400, detail="文案内容不能为空")
+
+    try:
+        out_dir = uploads_dir() / "analyses"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = out_dir / f"{project_id}_copywriting_{ts}.json"
+        out_path.write_text(
+            json.dumps(copywriting, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        web_path = to_web_path(out_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文案保存失败: {str(e)}")
+
+    p2 = projects_store.update_project(project_id, {
+        "narration_copywriting": copywriting,
+        "narration_copywriting_path": web_path,
+    })
+    if not p2:
+        raise HTTPException(status_code=500, detail="服务器错误")
+
+    return {
+        "message": "文案保存成功",
+        "data": copywriting,
+        "timestamp": now_ts(),
+    }
+
+
 # ========================= 视频生成与下载 =========================
 
 @router.post("/{project_id}/generate-video")
@@ -1208,31 +1926,176 @@ async def generate_video(project_id: str):
     if not p.video_path:
         raise HTTPException(status_code=400, detail="请先上传原始视频文件")
 
-    # 状态置为 processing
-    projects_store.update_project(project_id, {"status": "processing"})
+    candidate_task_id = f"video_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    max_workers, _src = generate_concurrency_config_manager.get_effective("generate_video")
+    logger.info(
+        "生成视频入队请求: project_id=%s candidate_task_id=%s concurrency=%s",
+        project_id,
+        candidate_task_id,
+        int(max_workers or 2),
+    )
 
+    def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
+        t = VIDEO_TASKS.get(task_id)
+        if not t:
+            t = MergeTaskStatus(task_id=task_id, status=status, progress=progress, message=message)
+            VIDEO_TASKS[task_id] = t
+        t.status = status
+        t.progress = progress
+        if status == "queued":
+            t.message = "进入队列"
+        elif status == "processing":
+            t.message = "生成中"
+        elif status == "completed":
+            t.message = "生成完成"
+        elif status == "cancelled":
+            t.message = "已停止"
+        elif status == "failed":
+            t.message = message or "生成失败"
+        else:
+            t.message = message
+        if file_path:
+            t.file_path = file_path
+
+        if status == "processing":
+            projects_store.update_project(project_id, {"status": "processing"})
+        elif status == "cancelled":
+            projects_store.update_project(project_id, {"status": "cancelled"})
+        elif status == "failed":
+            projects_store.update_project(project_id, {"status": "failed"})
+
+    def _handle_update(task_id: str, task: Optional[asyncio.Task]) -> None:
+        if task is None:
+            VIDEO_TASK_HANDLES.pop(task_id, None)
+        else:
+            VIDEO_TASK_HANDLES[task_id] = task
+
+    async def _run(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
+        result = await video_generation_service.generate_from_script(project_id, task_id=task_id, cancel_event=cancel_event)
+        return result if isinstance(result, dict) else {}
+
+    task_id = await task_scheduler.enqueue(
+        scope="generate_video",
+        project_id=project_id,
+        run_fn=_run,
+        task_id=candidate_task_id,
+        concurrency=int(max_workers or 2),
+        dedup=True,
+        local_update=_local_update,
+        handle_update=_handle_update,
+    )
+    logger.info(
+        "生成视频入队结果: project_id=%s task_id=%s dedup_hit=%s",
+        project_id,
+        task_id,
+        task_id != candidate_task_id,
+    )
+
+    return {
+        "message": "开始生成视频" if task_id == candidate_task_id else "任务已存在",
+        "data": {
+            "task_id": task_id,
+            "scope": "generate_video",
+        },
+        "timestamp": now_ts(),
+    }
+
+
+class CancelTaskRequest(BaseModel):
+    scope: str
+    task_id: Optional[str] = None
+
+
+@router.post("/{project_id}/tasks/cancel")
+async def cancel_project_task(project_id: str, req: CancelTaskRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    scope = str(req.scope or "").strip()
+    if not scope:
+        raise HTTPException(status_code=400, detail="缺少 scope")
+    task_id = str(req.task_id or "").strip()
+    if not task_id:
+        st = task_progress_store.get_state(scope, project_id)
+        if st and st.get("task_id"):
+            task_id = str(st.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="未找到可停止的任务")
+
+    stopped_procs = await task_cancel_store.cancel(scope, project_id, task_id)
+    cancelled = False
     try:
-        result = await video_generation_service.generate_from_script(project_id)
-        return {
-            "message": "视频生成成功",
-            "data": result,
-            "timestamp": now_ts(),
-        }
-    except Exception as e:
-        projects_store.update_project(project_id, {"status": "failed"})
-        # 广播错误事件
+        cancelled = await task_scheduler.cancel(scope, project_id, task_id)
+    except Exception:
+        pass
+    t = VIDEO_TASK_HANDLES.get(task_id) or DRAFT_TASK_HANDLES.get(task_id) or MERGE_TASKS.get(task_id)
+    if hasattr(t, "cancel"):
         try:
-            await manager.broadcast(json.dumps({
-                "type": "error",
-                "scope": "generate_video",
-                "project_id": project_id,
-                "phase": "failed",
-                "message": f"生成视频失败: {str(e)}",
-                "timestamp": now_ts(),
-            }))
+            t.cancel()
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"生成视频失败: {str(e)}")
+    logger.info(
+        "停止任务请求: project_id=%s scope=%s task_id=%s processes_stopped=%s scheduler_cancelled=%s",
+        project_id,
+        scope,
+        task_id,
+        stopped_procs,
+        cancelled,
+    )
+
+    return {
+        "message": "已请求停止任务",
+        "data": {
+            "scope": scope,
+            "task_id": task_id,
+            "processes_stopped": stopped_procs,
+        },
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/tasks/running")
+async def get_project_running_tasks(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    data = {
+        "generate_copywriting": task_progress_store.get_latest_running("generate_copywriting", project_id),
+        "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
+        "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
+        "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
+    }
+    return {
+        "message": "获取任务进度",
+        "data": data,
+        "timestamp": now_ts(),
+    }
+
+
+@router.get("/{project_id}/tasks/latest")
+async def get_project_latest_tasks(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        return {
+            "message": "项目不存在",
+            "data": {
+                "generate_copywriting": None,
+                "generate_script": None,
+                "generate_video": None,
+                "generate_jianying_draft": None,
+            },
+            "timestamp": now_ts(),
+        }
+    return {
+        "message": "获取任务进度",
+        "data": {
+            "generate_copywriting": task_progress_store.get_state("generate_copywriting", project_id),
+            "generate_script": task_progress_store.get_state("generate_script", project_id),
+            "generate_video": task_progress_store.get_state("generate_video", project_id),
+            "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
+        },
+        "timestamp": now_ts(),
+    }
 
 
 @router.get("/{project_id}/output-video")
@@ -1293,7 +2156,7 @@ async def download_output_video_attachment(project_id: str):
 
 
 @router.get("/{project_id}/merged-video")
-async def get_merged_video(project_id: str):
+async def get_merged_video(project_id: str, request: Request):
     """获取已合并视频文件用于播放。如果不存在则返回404。"""
     p = projects_store.get_project(project_id)
     if not p:
@@ -1306,20 +2169,7 @@ async def get_merged_video(project_id: str):
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="合并视频文件不存在")
 
-    filename = abs_path.name
-    # 合并输出目前固定为 mp4
-    headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "Content-Disposition": f"inline; filename=\"{filename}\"",
-    }
-    return FileResponse(
-        path=str(abs_path),
-        filename=filename,
-        media_type="video/mp4",
-        headers=headers,
-    )
+    return _stream_file_range(abs_path, request)
 
 
 # ========================= 剪映草稿生成 =========================
@@ -1335,50 +2185,79 @@ async def generate_jianying_draft(project_id: str):
     if not cfg_path or not cfg_path.exists():
         raise HTTPException(status_code=400, detail="未设置剪映草稿路径，无法生成")
 
-    task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-    DRAFT_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备生成")
+    candidate_task_id = f"draft_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    max_workers, _src = generate_concurrency_config_manager.get_effective("generate_jianying_draft")
+    logger.info(
+        "生成剪映草稿入队请求: project_id=%s candidate_task_id=%s concurrency=%s",
+        project_id,
+        candidate_task_id,
+        int(max_workers or 4),
+    )
 
-    async def _run():
+    def _local_update(task_id: str, status: str, progress: float, message: str, file_path: Optional[str]) -> None:
+        t = DRAFT_TASKS.get(task_id)
+        if not t:
+            t = MergeTaskStatus(task_id=task_id, status=status, progress=progress, message=message)
+            DRAFT_TASKS[task_id] = t
+        t.status = status
+        t.progress = progress
+        if status == "queued":
+            t.message = "进入队列"
+        elif status == "processing":
+            t.message = "生成中"
+        elif status == "completed":
+            t.message = "生成完成"
+        elif status == "cancelled":
+            t.message = "已停止"
+        elif status == "failed":
+            t.message = message or "生成失败"
+        else:
+            t.message = message
+        if file_path:
+            t.file_path = file_path
+
+    def _handle_update(task_id: str, task: Optional[asyncio.Task]) -> None:
+        if task is None:
+            DRAFT_TASK_HANDLES.pop(task_id, None)
+        else:
+            DRAFT_TASK_HANDLES[task_id] = task
+
+    async def _run(project_id: str, task_id: str, cancel_event: asyncio.Event) -> Dict[str, Any]:
+        r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id, cancel_event=cancel_event)
         try:
-            DRAFT_TASKS[task_id].status = "processing"
-            DRAFT_TASKS[task_id].message = "生成中"
-            DRAFT_TASKS[task_id].progress = 1.0
-            r = await jianying_draft_manager.generate_draft_folder(project_id=project_id, task_id=task_id)
-            DRAFT_TASKS[task_id].file_path = r.dir_web
-            DRAFT_TASKS[task_id].status = "completed"
-            DRAFT_TASKS[task_id].message = "生成完成"
-            DRAFT_TASKS[task_id].progress = 100.0
-            try:
-                # 写入项目草稿信息
-                projects_store.update_project(project_id, {
+            projects_store.update_project(
+                project_id,
+                {
                     "jianying_draft_last_dir": str(r.dir_abs),
                     "jianying_draft_last_dir_web": r.dir_web,
-                    "jianying_draft_dirs": list(set((projects_store.get_project(project_id).model_dump().get("jianying_draft_dirs") or []) + [r.dir_web])),
-                })
-            except Exception:
-                pass
-        except Exception as e:
-            DRAFT_TASKS[task_id].status = "failed"
-            DRAFT_TASKS[task_id].message = str(e) or "生成失败"
-            DRAFT_TASKS[task_id].progress = 0.0
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": JianyingDraftManager.SCOPE,
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "failed",
-                    "message": f"剪映草稿生成失败: {str(e)}",
-                    "progress": DRAFT_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
+                    "jianying_draft_dirs": list(
+                        set((projects_store.get_project(project_id).model_dump().get("jianying_draft_dirs") or []) + [r.dir_web])
+                    ),
+                },
+            )
+        except Exception:
+            pass
+        return {"file_path": r.dir_web}
 
-    asyncio.create_task(_run())
+    task_id = await task_scheduler.enqueue(
+        scope=JianyingDraftManager.SCOPE,
+        project_id=project_id,
+        run_fn=_run,
+        task_id=candidate_task_id,
+        concurrency=int(max_workers or 4),
+        dedup=True,
+        local_update=_local_update,
+        handle_update=_handle_update,
+    )
+    logger.info(
+        "生成剪映草稿入队结果: project_id=%s task_id=%s dedup_hit=%s",
+        project_id,
+        task_id,
+        task_id != candidate_task_id,
+    )
 
     return {
-        "message": "开始生成剪映草稿",
+        "message": "开始生成剪映草稿" if task_id == candidate_task_id else "任务已存在",
         "data": {
             "task_id": task_id,
             "scope": JianyingDraftManager.SCOPE,
@@ -1420,14 +2299,14 @@ async def open_in_explorer(project_id: str, path: Optional[str] = None):
             sysname = platform.system().lower()
             if abs_path.is_file():
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", "/select,", str(abs_path)])
+                    subprocess.Popen(["explorer", "/select,", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", "-R", str(abs_path)])
                 else:
                     subprocess.Popen(["xdg-open", str(abs_path.parent)])
             else:
                 if "windows" in sysname:
-                    subprocess.Popen(["explorer", str(abs_path)])
+                    subprocess.Popen(["explorer", str(abs_path)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 elif "darwin" in sysname:
                     subprocess.Popen(["open", str(abs_path)])
                 else:

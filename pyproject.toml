@@ -62,7 +62,7 @@ dependencies = [
     "httpx>=0.25.0",
     "asyncio-mqtt>=0.16.1",
     "aiohttp>=3.8.0",
-    "edge-tts>=6.1.0",
+"edge-tts==7.2.6",
 ]
 
 [project.optional-dependencies]
@@ -156,12 +156,18 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+exclude = '(\.venv|\.venv_pack_cpu)'
 
 [[tool.mypy.overrides]]
 module = [
     "cv2.*",
     "numpy.*",
     "PIL.*",
+    "torch.*",
+    "transformers.*",
+    "huggingface_hub.*",
+    "soundfile.*",
+    "modelscope.*",
 ]
 ignore_missing_imports = true
 

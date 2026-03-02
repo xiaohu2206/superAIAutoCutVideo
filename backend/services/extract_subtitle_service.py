@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 from modules.projects_store import projects_store, Project
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
+from modules.fun_asr_service import fun_asr_service
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
 
@@ -148,11 +150,19 @@ async def _run_in_thread(func, *args, **kwargs):
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-async def _ws(project_id: str, type_: str, phase: str, message: str, progress: Optional[int] = None) -> None:
+async def _ws(
+    project_id: str,
+    type_: str,
+    phase: str,
+    message: str,
+    progress: Optional[int] = None,
+    task_id: Optional[str] = None,
+) -> None:
     payload: Dict[str, Any] = {
         "type": type_,
         "scope": "extract_subtitle",
         "project_id": project_id,
+        "task_id": task_id,
         "phase": phase,
         "message": message,
         "timestamp": _now_ts(),
@@ -163,8 +173,9 @@ async def _ws(project_id: str, type_: str, phase: str, message: str, progress: O
         payload["progress"] = progress
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"WS broadcast failed: {e}")
+
 
 
 def _subtitle_meta(p: Project) -> Dict[str, Any]:
@@ -178,49 +189,113 @@ def _subtitle_meta(p: Project) -> Dict[str, Any]:
     }
 
 
+def _is_latest_subtitle_run(project_id: str, run_id: str) -> bool:
+    try:
+        p = projects_store.get_project(project_id)
+        if not p:
+            return False
+        cur = str(getattr(p, "subtitle_extract_run_id", "") or "")
+        return cur == str(run_id or "")
+    except Exception:
+        return False
+
+
+def _update_project_if_latest(project_id: str, run_id: str, updates: Dict[str, Any]) -> bool:
+    if not _is_latest_subtitle_run(project_id, run_id):
+        return False
+    try:
+        projects_store.update_project(project_id, updates)
+        return True
+    except Exception:
+        return False
+
+
 class ExtractSubtitleService:
     @staticmethod
-    async def extract_subtitle(project_id: str, force: bool = False) -> Dict[str, Any]:
+    async def extract_subtitle(
+        project_id: str,
+        force: bool = False,
+        task_id: Optional[str] = None,
+        asr_provider: Optional[str] = None,
+        asr_model_key: Optional[str] = None,
+        asr_language: Optional[str] = None,
+        itn: bool = True,
+        hotwords: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         p: Optional[Project] = projects_store.get_project(project_id)
         if not p:
             await _ws(project_id, "error", "project_not_found", "项目不存在")
             raise HTTPException(status_code=404, detail="项目不存在")
+
+        provider = (asr_provider or getattr(p, "asr_provider", None) or "bcut").strip().lower()
+        if provider not in {"bcut", "fun_asr"}:
+            provider = "bcut"
+        model_key = (asr_model_key or getattr(p, "asr_model_key", None) or "fun_asr_nano_2512").strip() or "fun_asr_nano_2512"
+        lang = (asr_language or getattr(p, "asr_language", None) or "中文").strip() or "中文"
+        hotwords_list = [str(x).strip() for x in (hotwords or []) if isinstance(x, (str, int, float)) and str(x).strip()]
 
         subtitle_source = getattr(p, "subtitle_source", None)
         subtitle_status = getattr(p, "subtitle_status", None)
         subtitle_updated_by_user = bool(getattr(p, "subtitle_updated_by_user", False))
         if subtitle_source == "user" and getattr(p, "subtitle_path", None):
             raise HTTPException(status_code=409, detail="已上传字幕，无法提取；请先删除字幕")
-        if subtitle_status == "extracting":
+        if subtitle_status == "extracting" and not force:
             raise HTTPException(status_code=409, detail="正在提取中")
         if subtitle_updated_by_user and not force:
             raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
         if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
             raise HTTPException(status_code=409, detail="已存在提取字幕，若需重提请传 force=true")
 
+        run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
+
         video_path = (getattr(p, "video_path", None) or "").strip()
         if not video_path:
-            await _ws(project_id, "error", "video_missing", "未找到可用的视频文件")
+            await _ws(project_id, "error", "video_missing", "未找到可用的视频文件", task_id=run_id)
             raise HTTPException(status_code=400, detail="未找到可用的视频文件")
         video_abs = _resolve_path(video_path)
         if not video_abs.exists():
-            await _ws(project_id, "error", "video_missing", "视频文件不存在")
+            await _ws(project_id, "error", "video_missing", "视频文件不存在", task_id=run_id)
             raise HTTPException(status_code=400, detail="视频文件不存在")
 
         projects_store.update_project(project_id, {
             "subtitle_status": "extracting",
             "subtitle_source": "extracted" if subtitle_source != "user" else subtitle_source,
             "subtitle_updated_at": _now_ts(),
+            "subtitle_extract_run_id": run_id,
+            "asr_provider": provider,
+            "asr_model_key": model_key if provider == "fun_asr" else None,
+            "asr_language": lang if provider == "fun_asr" else None,
+            "chunk_audio_paths": [],
+            "chunk_results": [],
         })
 
-        await _ws(project_id, "progress", "start", "开始提取字幕", 1)
+        old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
+        if isinstance(old_chunk_paths, list):
+            for wp in old_chunk_paths:
+                try:
+                    f = _resolve_path(str(wp))
+                    if f.exists():
+                        f.unlink()
+                except Exception:
+                    pass
 
-        await _ws(project_id, "progress", "validating_asr", "验证 ASR 服务可用性", 10)
-        asr_check = await _run_in_thread(BcutASR.test_connection)
-        if not asr_check.get("success", False):
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "asr_unavailable", asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
-            raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
+        await _ws(project_id, "progress", "start", "开始提取字幕", 1, task_id=run_id)
+
+        if provider == "bcut":
+            await _ws(project_id, "progress", "validating_asr", "验证 ASR 服务可用性", 10, task_id=run_id)
+            asr_check = await _run_in_thread(BcutASR.test_connection)
+            if not asr_check.get("success", False):
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(
+                    project_id,
+                    "error",
+                    "asr_unavailable",
+                    asr_check.get("error") or asr_check.get("message") or "ASR服务不可用",
+                    task_id=run_id,
+                )
+                raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
+        else:
+            await _ws(project_id, "progress", "validating_funasr", "验证 FunASR 模型可用性", 10, task_id=run_id)
 
         audio_abs: Optional[Path] = None
         audio_web: Optional[str] = None
@@ -248,44 +323,80 @@ class ExtractSubtitleService:
             await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)
             ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
             if not ok_audio:
-                projects_store.update_project(project_id, {"subtitle_status": "failed"})
-                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败")
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败", task_id=run_id)
                 raise HTTPException(status_code=500, detail="音频提取失败")
             audio_abs = audio_out
             audio_web = _to_web_path(audio_out)
-            projects_store.update_project(project_id, {"audio_path": audio_web})
-            await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45)
+            _update_project_if_latest(project_id, run_id, {"audio_path": audio_web})
+            await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45, task_id=run_id)
 
-        await _ws(project_id, "progress", "asr_start", "ASR 识别中", 55)
-        asr = BcutASR(str(audio_abs))
-        try:
-            data = await _run_in_thread(asr.run)
-        except Exception as e:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}")
-            raise HTTPException(status_code=500, detail="语音识别失败")
+        utterances: Optional[List[Dict[str, Any]]] = None
+        if provider == "bcut":
+            await _ws(project_id, "progress", "asr_start", "ASR 识别中", 55, task_id=run_id)
+            asr = BcutASR(str(audio_abs))
+            try:
+                data = await _run_in_thread(asr.run)
+            except Exception as e:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="语音识别失败")
 
-        utterances = data.get("utterances") if isinstance(data, dict) else None
+            u = data.get("utterances") if isinstance(data, dict) else None
+            utterances = u if isinstance(u, list) else None
+        else:
+            await _ws(project_id, "progress", "funasr_start", "FunASR 识别中", 55, task_id=run_id)
+
+            def _on_progress(pct: int, msg: str) -> None:
+                try:
+                    asyncio.create_task(_ws(project_id, "progress", "funasr_progress", msg, int(pct), task_id=run_id))
+                except Exception:
+                    pass
+
+            try:
+                utterances = await fun_asr_service.transcribe_to_utterances(
+                    audio_path=audio_abs,
+                    model_key=model_key,
+                    language=lang,
+                    itn=bool(itn),
+                    hotwords=hotwords_list,
+                    device=None,
+                    on_progress=_on_progress,
+                )
+            except Exception as e:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="语音识别失败")
+
         if not isinstance(utterances, list) or not utterances:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "asr_failed", "语音识别失败")
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "asr_failed", "语音识别失败", task_id=run_id)
             raise HTTPException(status_code=500, detail="语音识别失败")
 
-        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 75)
+        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90, task_id=run_id)
         srt_text = utterances_to_srt(utterances)
         compressed = _compress_srt(srt_text)
+
+        if not _is_latest_subtitle_run(project_id, run_id):
+            await _ws(project_id, "cancelled", "stale", "检测到新的字幕提取任务，本次结果已丢弃", 100, task_id=run_id)
+            p2 = projects_store.get_project(project_id) or p
+            return {
+                "segments": [],
+                "subtitle_meta": _subtitle_meta(p2),
+                "task_id": run_id,
+            }
 
         ts2 = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt"
         try:
             srt_out.write_text(compressed, encoding="utf-8")
         except Exception:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
-            await _ws(project_id, "error", "subtitle_saved_failed", "字幕写入失败")
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "subtitle_saved_failed", "字幕写入失败", task_id=run_id)
             raise HTTPException(status_code=500, detail="字幕写入失败")
 
         web_path = _to_web_path(srt_out)
-        projects_store.update_project(project_id, {
+        _update_project_if_latest(project_id, run_id, {
             "subtitle_path": web_path,
             "subtitle_source": "extracted",
             "subtitle_status": "ready",
@@ -293,16 +404,17 @@ class ExtractSubtitleService:
             "subtitle_updated_at": _now_ts(),
             "subtitle_format": "compressed_srt_v1",
         })
-        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 85)
+        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 95, task_id=run_id)
 
         segments = _parse_srt_content(compressed)
-        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 95)
-        await _ws(project_id, "completed", "done", "提取字幕成功", 100)
+        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 98, task_id=run_id)
+        await _ws(project_id, "completed", "done", "提取字幕成功", 100, task_id=run_id)
 
         p2 = projects_store.get_project(project_id) or p
         return {
             "segments": segments,
             "subtitle_meta": _subtitle_meta(p2),
+            "task_id": run_id,
         }
 
 

@@ -3,12 +3,49 @@ import base64
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Dict, Any
+import subprocess
 
+from modules.config.generate_concurrency_config import generate_concurrency_config_manager
 from modules.config.tts_config import tts_engine_config_manager
+from modules.audio_speed_processor import apply_audio_speed
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+_tts_semaphore: Optional[asyncio.Semaphore] = None
+_tts_semaphore_concurrency: int = 0
+_tts_semaphore_lock = asyncio.Lock()
+
+
+async def _get_tts_semaphore() -> asyncio.Semaphore:
+    global _tts_semaphore, _tts_semaphore_concurrency
+    max_workers, _src = generate_concurrency_config_manager.get_effective("tts")
+    target = max(1, int(max_workers or 1))
+    if _tts_semaphore is not None and _tts_semaphore_concurrency == target:
+        return _tts_semaphore
+    async with _tts_semaphore_lock:
+        max_workers2, _src2 = generate_concurrency_config_manager.get_effective("tts")
+        target2 = max(1, int(max_workers2 or 1))
+        if _tts_semaphore is None or _tts_semaphore_concurrency != target2:
+            _tts_semaphore = asyncio.Semaphore(target2)
+            _tts_semaphore_concurrency = target2
+        return _tts_semaphore
+
+
+@asynccontextmanager
+async def _tts_slot():
+    sem = await _get_tts_semaphore()
+    await sem.acquire()
+    try:
+        yield
+    finally:
+        try:
+            sem.release()
+        except Exception:
+            pass
 
 
 async def _ensure_dir(path: Path) -> None:
@@ -25,7 +62,19 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        if os.name == "nt":
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         out, _ = await proc.communicate()
         if proc.returncode == 0:
             try:
@@ -39,7 +88,19 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        proc2 = await asyncio.create_subprocess_exec(*cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        if os.name == "nt":
+            proc2 = await asyncio.create_subprocess_exec(
+                *cmd2,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+        else:
+            proc2 = await asyncio.create_subprocess_exec(
+                *cmd2,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         out2, _ = await proc2.communicate()
         if proc2.returncode == 0:
             try:
@@ -52,41 +113,151 @@ async def _ffprobe_duration(path: str) -> Optional[float]:
 
 
 class TencentTtsService:
+    async def _postprocess_qwen_audio(self, res: Dict[str, Any], out: Path, cfg) -> Dict[str, Any]:
+        speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
+        if speed_ratio is None:
+            return res
+        try:
+            sr = float(speed_ratio)
+        except Exception:
+            return res
+        if abs(sr - 1.0) < 0.0001:
+            return res
+        sp = await apply_audio_speed(str(out), sr)
+        if not sp.get("success"):
+            return {"success": False, "error": sp.get("error") or "speed_process_failed"}
+        dur = await _ffprobe_duration(str(out))
+        if dur:
+            res["duration"] = dur
+        return res
+
     async def synthesize(self, text: str, out_path: str, voice_id: Optional[str] = None) -> Dict[str, Any]:
-        cfg = tts_engine_config_manager.get_active_config()
-        provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
+        async with _tts_slot():
+            cfg = tts_engine_config_manager.get_active_config()
+            provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
-        # Edge TTS 合成路径（免凭据）
-        if provider == "edge_tts":
-            try:
-                from modules.edge_tts_service import edge_tts_service
-            except Exception as e:
-                return {"success": False, "error": f"edge_service_import_failed: {e}"}
+            # Edge TTS 合成路径（免凭据）
+            if provider == "edge_tts":
+                try:
+                    from modules.edge_tts_service import edge_tts_service
+                except Exception as e:
+                    return {"success": False, "error": f"edge_service_import_failed: {e}"}
 
-            vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
-            speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
-            out = Path(out_path)
-            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-            override = None
-            try:
-                pv = ep.get("ProxyUrl")
-                if isinstance(pv, str) and pv.strip():
-                    override = pv.strip()
-            except Exception:
+                vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
+                speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
+                out = Path(out_path)
+                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
                 override = None
-            try:
-                logger.info(f"配音角色： edge_tts_synthesize voice={vid} speed={speed_ratio} text_len={len(text)}")
-                res = await edge_tts_service.synthesize(
-                    text=text,
-                    voice_id=vid,
-                    speed_ratio=speed_ratio,
-                    out_path=out,
-                    proxy_override=override,
-                )
-                return res
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+                try:
+                    pv = ep.get("ProxyUrl")
+                    if isinstance(pv, str) and pv.strip():
+                        override = pv.strip()
+                except Exception:
+                    override = None
+                try:
+                    logger.info(f"配音角色： edge_tts_synthesize voice={vid} speed={speed_ratio} text_len={len(text)}")
+                    res = await edge_tts_service.synthesize(
+                        text=text,
+                        voice_id=vid,
+                        speed_ratio=speed_ratio,
+                        out_path=out,
+                        proxy_override=override,
+                    )
+                    return res
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
 
+            if provider == "qwen3_tts":
+                try:
+                    from modules.qwen3_tts_service import qwen3_tts_service
+                except Exception as e:
+                    return {"success": False, "error": f"qwen3_tts_import_failed:{e}"}
+
+                out = Path(out_path)
+                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+                device = ep.get("Device")
+                device_s = str(device).strip() if isinstance(device, str) else None
+
+                qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+
+                if qwen_voice_id:
+                    try:
+                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+
+                        vv = qwen3_tts_voice_store.get(qwen_voice_id)
+                        if vv:
+                            try:
+                                res = await qwen3_tts_service.synthesize_by_voice_asset(
+                                    text=text,
+                                    out_path=out,
+                                    voice_asset=vv,
+                                    device=device_s,
+                                )
+                                if res and res.get("success"):
+                                    return await self._postprocess_qwen_audio(res, out, cfg)
+                                return res
+                            except Exception as e:
+                                return {"success": False, "error": str(e)}
+                    except Exception:
+                        pass
+
+                # Legacy / Config-only Fallback
+                model_key = str(ep.get("ModelKey") or "custom_0_6b")
+                language = str(ep.get("Language") or "Auto")
+                instruct = str(ep.get("Instruct") or "").strip() or None
+
+                try:
+                    if model_key.startswith("custom_"):
+                        speaker = str(ep.get("Speaker") or (qwen_voice_id or "")).strip() or None
+                        if not speaker:
+                            try:
+                                supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
+                                if supported:
+                                    speaker = str(supported[0]).strip() or speaker
+                            except Exception:
+                                pass
+                        if not speaker:
+                            return {"success": False, "error": "speaker_required_for_custom_voice"}
+
+                        res = await qwen3_tts_service.synthesize_custom_voice_to_wav(
+                            text=text,
+                            out_path=out,
+                            model_key=model_key,
+                            language=language,
+                            speaker=speaker,
+                            instruct=instruct,
+                            device=device_s,
+                        )
+                        if res and res.get("success"):
+                            return await self._postprocess_qwen_audio(res, out, cfg)
+                        return res
+                    else:
+                        ref_audio = str(ep.get("RefAudio") or "").strip() or None
+                        ref_text = str(ep.get("RefText") or "").strip() or None
+                        xvec_in = ep.get("XVectorOnly", None)
+                        x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
+
+                        if not ref_audio:
+                            return {"success": False, "error": "ref_audio_required_for_voice_clone"}
+
+                        res = await qwen3_tts_service.synthesize_voice_clone_to_wav(
+                            text=text,
+                            out_path=out,
+                            model_key=model_key,
+                            language=language,
+                            ref_audio=ref_audio,
+                            ref_text=ref_text,
+                            x_vector_only_mode=x_vector_only_mode,
+                            device=device_s,
+                        )
+                        if res and res.get("success"):
+                            return await self._postprocess_qwen_audio(res, out, cfg)
+                        return res
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            return await self._synthesize_tencent(text=text, out_path=out_path, cfg=cfg, voice_id=voice_id)
+    async def _synthesize_tencent(self, text: str, out_path: str, cfg, voice_id: Optional[str]) -> Dict[str, Any]:
         # 腾讯云 TTS 合成路径（需凭据）
         env_sid = (os.getenv("TENCENTCLOUD_SECRET_ID") or "").strip()
         env_skey = (os.getenv("TENCENTCLOUD_SECRET_KEY") or "").strip()
@@ -112,8 +283,9 @@ class TencentTtsService:
             client = tts_client.TtsClient(cred, region, client_profile)
 
             req = models.TextToVoiceRequest()
-            import json, uuid
-            vid = voice_id or (cfg.active_voice_id if cfg else None)
+            import json
+            import uuid
+            tencent_voice_id = voice_id or (cfg.active_voice_id if cfg else None)
             params: Dict[str, Any] = {
                 "Text": text,
                 "SessionId": f"{uuid.uuid4()}",
@@ -137,25 +309,36 @@ class TencentTtsService:
                 volume = 10.0
             params["Volume"] = volume
 
-            vt = extra.get("VoiceType", None)
-            if vt is not None:
-                try:
-                    params["VoiceType"] = int(vt)
-                except Exception:
-                    pass
-            else:
-                if isinstance(vid, int) or (isinstance(vid, str) and str(vid).isdigit()):
-                    params["VoiceType"] = int(vid)
+            vt_from_vid = None
+            try:
+                if isinstance(tencent_voice_id, int) or (isinstance(tencent_voice_id, str) and str(tencent_voice_id).isdigit()):
+                    vt_from_vid = int(tencent_voice_id)
                 else:
                     try:
-                        provider = (cfg.provider if cfg else "tencent_tts")
-                        voices = tts_engine_config_manager.get_voices(provider)
-                        sid = str(vid) if vid is not None else ""
+                        provider2 = (cfg.provider if cfg else "tencent_tts")
+                        voices = tts_engine_config_manager.get_voices(provider2)
+                        sid = str(tencent_voice_id) if tencent_voice_id is not None else ""
                         m = next((v for v in voices if v.id == sid or v.name == sid), None)
                         if m and isinstance(m.voice_type, int):
-                            params["VoiceType"] = int(m.voice_type)
+                            vt_from_vid = int(m.voice_type)
                     except Exception:
-                        pass
+                        vt_from_vid = None
+            except Exception:
+                vt_from_vid = None
+
+            vt_from_extra = None
+            try:
+                vt_val = extra.get("VoiceType", None)
+                if vt_val is not None:
+                    vt_from_extra = int(vt_val)
+            except Exception:
+                vt_from_extra = None
+
+            final_vt = vt_from_vid if vt_from_vid is not None else vt_from_extra
+            if vt_from_vid is not None and vt_from_extra is not None and vt_from_vid != vt_from_extra:
+                logger.info(f"VoiceType mismatch resolved: voice_id={tencent_voice_id} extra={vt_from_extra} use={final_vt}")
+            if final_vt is not None:
+                params["VoiceType"] = final_vt
 
             req.from_json_string(json.dumps(params))
 

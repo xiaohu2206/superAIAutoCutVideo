@@ -24,13 +24,31 @@ export interface UseProjectEditUploadStepOptions {
   uploadVideos: UploadVideosFn;
   uploadSubtitle: UploadSubtitleFn;
   deleteSubtitle: () => Promise<void>;
-  extractSubtitle: (force?: boolean) => Promise<void>;
+  extractSubtitle: (
+    options?:
+      | boolean
+      | {
+          force?: boolean;
+          task_id?: string | null;
+          asr_provider?: "bcut" | "fun_asr";
+          asr_model_key?: string | null;
+          asr_language?: string | null;
+          itn?: boolean;
+          hotwords?: string[];
+        }
+  ) => Promise<void>;
   fetchSubtitle: () => Promise<any>;
   saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
   deleteVideoItem: (path: string) => Promise<void>;
   reorderVideos: (videoPaths: string[]) => Promise<void>;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null; analyzeVision?: boolean; visionMode?: string }) => Promise<void>;
+  sceneResult: any | null;
+  extractingScene: boolean;
+  sceneExtractProgress: number;
+  sceneExtractMessage: string;
+  sceneExtractPhase: string | null;
   showSuccess: (text: string, durationSec?: number) => void;
   showErrorText: (text: string, durationSec?: number) => void;
   showError: (err: unknown, fallback: string) => void | Promise<void>;
@@ -66,11 +84,19 @@ export interface UseProjectEditUploadStepReturn {
   subtitleExtractProgress: number;
   subtitleExtractLogs: WsProgressLog[];
   onExtractSubtitle: () => void;
+  subtitleAsr: { provider: "bcut" | "fun_asr"; modelKey: string; language: string };
+  onSubtitleAsrChange: (next: { provider: "bcut" | "fun_asr"; modelKey: string; language: string }) => void;
   subtitleDraft: SubtitleSegment[];
   subtitleSaving: boolean;
   onReloadSubtitle: () => void;
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string }) => void;
+  extractingScene: boolean;
+  sceneExtractProgress: number;
+  sceneResult: any | null;
+  sceneExtractMessage: string;
+  sceneExtractPhase: string | null;
 }
 
 export function useProjectEditUploadStep(
@@ -91,10 +117,30 @@ export function useProjectEditUploadStep(
   const [subtitleExtractLogs, setSubtitleExtractLogs] = useState<WsProgressLog[]>([]);
   const [subtitleDraft, setSubtitleDraft] = useState<SubtitleSegment[]>([]);
   const [subtitleSaving, setSubtitleSaving] = useState(false);
+  const [subtitleAsr, setSubtitleAsr] = useState<{ provider: "bcut" | "fun_asr"; modelKey: string; language: string }>({
+    provider: "bcut",
+    modelKey: "fun_asr_nano_2512",
+    language: "中文",
+  });
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const uploadingVideoRef = useRef(false);
   const subtitleSegmentsSerializedRef = useRef<string | null>(null);
+  const lastAsrSnapshotRef = useRef<string>("");
+
+  useEffect(() => {
+    const p = options.project;
+    if (!p) return;
+    const snap = `${p.id}|${String((p as any).asr_provider || "")}|${String((p as any).asr_model_key || "")}|${String((p as any).asr_language || "")}`;
+    if (snap === lastAsrSnapshotRef.current) return;
+    lastAsrSnapshotRef.current = snap;
+    const provider = (String((p as any).asr_provider || "bcut").trim().toLowerCase() === "fun_asr" ? "fun_asr" : "bcut") as
+      | "bcut"
+      | "fun_asr";
+    const modelKey = String((p as any).asr_model_key || "fun_asr_nano_2512").trim() || "fun_asr_nano_2512";
+    const language = String((p as any).asr_language || "中文").trim() || "中文";
+    setSubtitleAsr({ provider, modelKey, language });
+  }, [options.project?.id, (options.project as any)?.asr_provider, (options.project as any)?.asr_model_key, (options.project as any)?.asr_language]);
 
   useEffect(() => {
     uploadingVideoRef.current = uploadingVideo;
@@ -337,10 +383,6 @@ export function useProjectEditUploadStep(
       options.showErrorText("已上传字幕，需先删除才能提取");
       return;
     }
-    if (project.subtitle_status === "extracting") {
-      options.showErrorText("正在提取中");
-      return;
-    }
     // 每次都强制重新提取，不使用缓存的音频
     let force = true;
     if (project.subtitle_updated_by_user) {
@@ -352,13 +394,32 @@ export function useProjectEditUploadStep(
     setSubtitleExtractProgress(0);
     setSubtitleExtractLogs([]);
     try {
-      await options.extractSubtitle(force);
+      const isFun = subtitleAsr.provider === "fun_asr";
+      const taskId =
+        globalThis.crypto &&
+        "randomUUID" in globalThis.crypto &&
+        typeof (globalThis.crypto as any).randomUUID === "function"
+          ? (globalThis.crypto as any).randomUUID()
+          : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      await options.extractSubtitle({
+        force,
+        task_id: taskId,
+        asr_provider: subtitleAsr.provider,
+        asr_model_key: isFun ? subtitleAsr.modelKey : null,
+        asr_language: isFun ? subtitleAsr.language : "中文",
+      });
+      // HTTP 请求成功，确保状态更新
+      setSubtitleExtractProgress(100);
+      setExtractingSubtitle(false);
       options.showSuccess("字幕提取成功！");
+      void options.refreshProject();
+      void options.fetchSubtitle().catch(() => void 0);
     } catch (err) {
       options.showError(err, "提取字幕失败");
       setExtractingSubtitle(false);
+      setSubtitleExtractProgress(0);
     }
-  }, [options]);
+  }, [options, subtitleAsr]);
 
   useWsTaskProgress({
     scope: "extract_subtitle",
@@ -366,6 +427,7 @@ export function useProjectEditUploadStep(
     onProgress: setSubtitleExtractProgress,
     onLog: (log) => setSubtitleExtractLogs((prev) => [...prev, log]),
     onCompleted: () => {
+      setSubtitleExtractProgress(100);
       setExtractingSubtitle(false);
       options.showSuccess("字幕提取成功！");
       void options.refreshProject();
@@ -373,6 +435,7 @@ export function useProjectEditUploadStep(
     },
     onError: (m) => {
       setExtractingSubtitle(false);
+      setSubtitleExtractProgress(0);
       options.showErrorText(m.message || "字幕提取失败");
     },
   });
@@ -419,6 +482,23 @@ export function useProjectEditUploadStep(
     }
   }, [options, subtitleDraft]);
 
+  const onExtractScenes = useCallback(
+    async (opts?: { analyzeVision: boolean; visionMode: string }) => {
+      if (!options.project) return;
+      if (!options.project.video_path) {
+        options.showErrorText("请先上传视频文件");
+        return;
+      }
+      try {
+        await options.extractScenes({ force: true, ...(opts || {}) });
+        options.showSuccess("镜头提取任务已提交");
+      } catch (err) {
+        options.showError(err, "镜头提取失败");
+      }
+    },
+    [options]
+  );
+
   return {
     showAdvancedConfig,
     setShowAdvancedConfig,
@@ -449,10 +529,18 @@ export function useProjectEditUploadStep(
     subtitleExtractProgress,
     subtitleExtractLogs,
     onExtractSubtitle,
+    subtitleAsr,
+    onSubtitleAsrChange: setSubtitleAsr,
     subtitleDraft,
     subtitleSaving,
     onReloadSubtitle,
     onSaveSubtitle,
     onSubtitleDraftChange: setSubtitleDraft,
+    onExtractScenes,
+    extractingScene: options.extractingScene,
+    sceneExtractProgress: options.sceneExtractProgress,
+    sceneResult: options.sceneResult,
+    sceneExtractMessage: options.sceneExtractMessage,
+    sceneExtractPhase: options.sceneExtractPhase,
   };
 }

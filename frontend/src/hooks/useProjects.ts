@@ -5,7 +5,9 @@ import { projectService } from "../services/projectService";
 import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
 import type {
   CreateProjectRequest,
+  GenerateCopywritingRequest,
   GenerateScriptRequest,
+  NarrationCopywriting,
   Project,
   SubtitleMeta,
   SubtitleSegment,
@@ -151,7 +153,18 @@ export interface UseProjectDetailReturn {
   uploadVideos: (files: FileList | File[], onProgress?: (percent: number) => void) => Promise<void>;
   uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   deleteSubtitle: () => Promise<void>;
-  extractSubtitle: (force?: boolean) => Promise<void>;
+  extractSubtitle: (
+    options?:
+      | boolean
+      | {
+          force?: boolean;
+          asr_provider?: "bcut" | "fun_asr";
+          asr_model_key?: string | null;
+          asr_language?: string | null;
+          itn?: boolean;
+          hotwords?: string[];
+        }
+  ) => Promise<void>;
   fetchSubtitle: () => Promise<{ segments: SubtitleSegment[]; subtitle_meta: SubtitleMeta } | null>;
   saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
   subtitleSegments: SubtitleSegment[] | null;
@@ -160,14 +173,22 @@ export interface UseProjectDetailReturn {
   deleteVideo: () => Promise<void>;
   deleteVideoItem: (filePath: string) => Promise<void>;
   reorderVideos: (orderedPaths: string[]) => Promise<void>;
+  generateCopywriting: (data: GenerateCopywritingRequest) => Promise<NarrationCopywriting>;
+  saveCopywriting: (copywriting: NarrationCopywriting) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
-  generateVideo: () => Promise<string | null>;
+  generateVideo: () => Promise<{ task_id: string; scope?: string } | null>;
   downloadVideo: () => void;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
   mergeProgress: number;
   merging: boolean;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  sceneResult: any | null; // using any for now or define SceneResult
+  extractingScene: boolean;
+  sceneExtractProgress: number;
+  sceneExtractMessage: string;
+  sceneExtractPhase: string | null;
 }
 
 /**
@@ -184,6 +205,12 @@ export const useProjectDetail = (
   const [subtitleSegments, setSubtitleSegments] = useState<SubtitleSegment[] | null>(null);
   const [subtitleMeta, setSubtitleMeta] = useState<SubtitleMeta | null>(null);
   const [subtitleLoading, setSubtitleLoading] = useState(false);
+  
+  const [sceneResult, setSceneResult] = useState<any | null>(null);
+  const [extractingScene, setExtractingScene] = useState(false);
+  const [sceneExtractProgress, setSceneExtractProgress] = useState(0);
+  const [sceneExtractMessage, setSceneExtractMessage] = useState<string>("");
+  const [sceneExtractPhase, setSceneExtractPhase] = useState<string | null>(null);
 
   /**
    * 获取项目详情
@@ -368,12 +395,24 @@ export const useProjectDetail = (
   );
 
   const extractSubtitle = useCallback(
-    async (force?: boolean) => {
+    async (
+      options?:
+        | boolean
+        | {
+            force?: boolean;
+            task_id?: string | null;
+            asr_provider?: "bcut" | "fun_asr";
+            asr_model_key?: string | null;
+            asr_language?: string | null;
+            itn?: boolean;
+            hotwords?: string[];
+          }
+    ) => {
       if (!project) return;
       setError(null);
       setSubtitleLoading(true);
       try {
-        const res = await projectService.extractSubtitle(project.id, force);
+        const res = await projectService.extractSubtitle(project.id, options as any);
         setSubtitleSegments(res.segments || []);
         setSubtitleMeta(res.subtitle_meta || null);
         await fetchProject(project.id);
@@ -451,6 +490,50 @@ export const useProjectDetail = (
   }, [project]);
 
   /**
+   * 生成解说文案
+   */
+  const generateCopywriting = useCallback(
+    async (data: GenerateCopywritingRequest): Promise<NarrationCopywriting> => {
+      if (!project) {
+        throw new Error("项目不存在或未加载");
+      }
+      setError(null);
+      setLoading(true);
+      try {
+        const copywriting = await projectService.generateCopywriting(data);
+        setProject((prev) => (prev ? { ...prev, narration_copywriting: copywriting } : null));
+        return copywriting;
+      } catch (err) {
+        setError(getErrorMessage(err, "生成解说文案失败"));
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [project]
+  );
+
+  /**
+   * 保存解说文案
+   */
+  const saveCopywriting = useCallback(
+    async (copywriting: NarrationCopywriting) => {
+      if (!project) return;
+      setError(null);
+      try {
+        const savedCopywriting = await projectService.saveCopywriting(project.id, copywriting);
+        setProject((prev) =>
+          prev ? { ...prev, narration_copywriting: savedCopywriting } : null
+        );
+      } catch (err) {
+        setError(getErrorMessage(err, "保存解说文案失败"));
+        throw err;
+      }
+    },
+    [project]
+  );
+
+  /**
    * 生成解说脚本
    */
   const generateScript = useCallback(
@@ -495,17 +578,13 @@ export const useProjectDetail = (
   /**
    * 根据脚本生成视频
    */
-  const generateVideo = useCallback(async (): Promise<string | null> => {
+  const generateVideo = useCallback(async (): Promise<{ task_id: string; scope?: string } | null> => {
     if (!project) return null;
     setError(null);
     setLoading(true);
     try {
-      const result = await projectService.generateVideo(project.id);
-      const outputPath = result?.output_path ?? null;
-      if (outputPath) {
-        setProject((prev) => (prev ? { ...prev, output_video_path: outputPath, status: "completed" as any } : null));
-      }
-      return outputPath;
+      const result = await projectService.startGenerateVideo(project.id);
+      return result ?? null;
     } catch (err) {
       setError(getErrorMessage(err, "生成视频失败"));
       throw err;
@@ -640,6 +719,67 @@ export const useProjectDetail = (
     }
   }, [projectId, fetchProject]);
 
+  const extractScenes = useCallback(async (options?: { force?: boolean; task_id?: string | null; analyzeVision?: boolean; visionMode?: string }) => {
+    if (!project) return;
+    setError(null);
+    setExtractingScene(true);
+    setSceneExtractProgress(0);
+    setSceneExtractMessage("");
+    setSceneExtractPhase(null);
+    try {
+        const res = await projectService.extractScenes(project.id, options);
+        // Start polling for progress
+        const taskId = res.task_id;
+        
+        // Simple polling
+        const poll = async () => {
+            try {
+                const status = await projectService.getSceneStatus(project.id, taskId);
+                if (status.status === "completed") {
+                    setExtractingScene(false);
+                    setSceneExtractProgress(100);
+                    setSceneExtractMessage(status.message || "镜头提取完成");
+                    setSceneExtractPhase(status.phase || null);
+                    // Fetch result
+                    const scenes = await projectService.getScenes(project.id);
+                    setSceneResult(scenes);
+                    // Refresh project
+                    fetchProject(project.id);
+                } else if (status.status === "failed" || status.status === "cancelled") {
+                    setExtractingScene(false);
+                    setError(status.message || "镜头提取失败");
+                    setSceneExtractMessage(status.message || "镜头提取失败");
+                    setSceneExtractPhase(status.phase || null);
+                } else {
+                    // processing
+                    setSceneExtractProgress(status.progress || 0);
+                    setSceneExtractMessage(status.message || "");
+                    setSceneExtractPhase(status.phase || null);
+                    setTimeout(poll, 1000);
+                }
+            } catch (e) {
+                console.error(e);
+                setExtractingScene(false);
+            }
+        };
+        poll();
+        
+    } catch (err) {
+        setError(getErrorMessage(err, "镜头提取失败"));
+        setExtractingScene(false);
+        setSceneExtractMessage(getErrorMessage(err, "镜头提取失败"));
+        setSceneExtractPhase(null);
+        throw err;
+    }
+  }, [project, fetchProject]);
+
+  // Load scenes if exist
+  useEffect(() => {
+    if (project && project.scenes_path && !sceneResult) {
+        projectService.getScenes(project.id).then(setSceneResult).catch(console.error);
+    }
+  }, [project?.scenes_path]);
+
   return {
     project,
     loading,
@@ -659,6 +799,8 @@ export const useProjectDetail = (
     deleteVideo,
     deleteVideoItem,
     reorderVideos,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,
@@ -667,5 +809,11 @@ export const useProjectDetail = (
     mergeProgress,
     refreshProject,
     merging,
+    extractScenes,
+    sceneResult,
+    extractingScene,
+    sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
   };
 };
