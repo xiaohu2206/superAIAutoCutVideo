@@ -9,6 +9,7 @@ export enum NarrationType {
 }
 
 export type ScriptLengthOption =
+  | "auto"
   | "15～20条"
   | "30～40条"
   | "40～60条"
@@ -57,6 +58,15 @@ export interface VideoScript {
   };
 }
 
+export interface NarrationCopywriting {
+  version: string;
+  title?: string;
+  narration_type?: string;
+  content: string;
+  generated_at?: string;
+  metadata?: Record<string, any>;
+}
+
 export type SubtitleSource = null | "user" | "extracted";
 export type SubtitleStatus = null | "none" | "extracting" | "ready" | "failed";
 
@@ -88,10 +98,12 @@ export interface Project {
   id: string; // 项目ID
   name: string; // 项目名称
   description?: string; // 项目描述
+  project_type?: "subtitle" | "visual";
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
-  original_ratio?: number;
+  original_ratio?: number | null;
   script_language?: ScriptLanguage;
+  copywriting_word_count?: number | null;
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -105,7 +117,14 @@ export interface Project {
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;
+  asr_provider?: "bcut" | "fun_asr";
+  asr_model_key?: string | null;
+  asr_language?: string | null;
+  narration_copywriting?: NarrationCopywriting;
+  narration_copywriting_path?: string;
   output_video_path?: string; // 输出视频文件路径
+  scenes_path?: string; // 镜头分割结果路径
+  scenes_updated_at?: string; // 镜头更新时间
   // 剪映草稿相关
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径
   jianying_draft_last_dir_web?: string; // 最新草稿目录Web路径
@@ -128,12 +147,14 @@ export interface TaskProgressState {
 }
 
 export interface ProjectRunningTasks {
+  generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
+  generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
@@ -145,6 +166,7 @@ export interface ProjectLatestTasks {
 export interface CreateProjectRequest {
   name: string;
   description?: string;
+  project_type?: "subtitle" | "visual";
   narration_type?: NarrationType;
 }
 
@@ -154,10 +176,12 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
+  project_type?: "subtitle" | "visual";
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
-  original_ratio?: number;
+  original_ratio?: number | null;
   script_language?: ScriptLanguage;
+  copywriting_word_count?: number | null;
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];
@@ -168,6 +192,8 @@ export interface UpdateProjectRequest {
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;
+  narration_copywriting?: NarrationCopywriting;
+  narration_copywriting_path?: string;
   output_video_path?: string;
   script?: VideoScript;
 }
@@ -176,6 +202,13 @@ export interface UpdateProjectRequest {
  * 生成解说脚本请求接口
  */
 export interface GenerateScriptRequest {
+  project_id: string;
+  video_path: string;
+  subtitle_path?: string;
+  narration_type: NarrationType;
+}
+
+export interface GenerateCopywritingRequest {
   project_id: string;
   video_path: string;
   subtitle_path?: string;

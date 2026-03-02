@@ -30,6 +30,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     subtitleLoading,
     deleteVideoItem,
     reorderVideos,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,
@@ -37,6 +39,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     mergeProgress,
     merging,
     refreshProject,
+    extractScenes,
+    sceneResult,
+    extractingScene,
+    sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
   } = useProjectDetail(projectId);
 
   const [currentStep, setCurrentStep] = useState<"upload" | "generate">("upload");
@@ -44,7 +52,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
 
   useEffect(() => {
     if (!loading && project && !hasInitializedStep) {
-      if (project.subtitle_status === "ready") {
+      const isReady =
+        project.project_type === "visual"
+          ? !!project.scenes_path
+          : project.subtitle_status === "ready";
+
+      if (isReady) {
         setCurrentStep("generate");
       }
       setHasInitializedStep(true);
@@ -98,6 +111,12 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     reorderVideos,
     mergeVideos,
     refreshProject,
+    extractScenes,
+    sceneResult,
+    extractingScene,
+    sceneExtractProgress,
+    sceneExtractMessage,
+    sceneExtractPhase,
     showSuccess,
     showErrorText,
     showError,
@@ -106,6 +125,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
   const generateStep = useProjectEditGenerateStep({
     project,
     extractingSubtitle: uploadStep.extractingSubtitle,
+    generateCopywriting,
+    saveCopywriting,
     generateScript,
     saveScript,
     generateVideo,
@@ -163,16 +184,29 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
             </button>
             <button
               onClick={() => {
-                if (project?.subtitle_status === "ready") {
+                const isReady =
+                  project?.project_type === "visual"
+                    ? !!project?.scenes_path
+                    : project?.subtitle_status === "ready";
+
+                if (isReady) {
                   setCurrentStep("generate");
                 } else {
-                  message.warning("请先提取或上传字幕");
+                  message.warning(
+                    project?.project_type === "visual"
+                      ? "请先提取镜头"
+                      : "请先提取或上传字幕"
+                  );
                 }
               }}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
                 currentStep === "generate"
                   ? "bg-white text-gray-900 shadow-sm"
-                  : project?.subtitle_status !== "ready"
+                  : !(
+                      project?.project_type === "visual"
+                        ? !!project?.scenes_path
+                        : project?.subtitle_status === "ready"
+                    )
                   ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-500 hover:text-gray-700"
               }`}
@@ -193,10 +227,19 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
           subtitleLoading={subtitleLoading}
           subtitleMeta={subtitleMeta}
           onNextStep={() => {
-            if (project?.subtitle_status === "ready") {
+            const isReady =
+              project?.project_type === "visual"
+                ? !!project?.scenes_path
+                : project?.subtitle_status === "ready";
+
+            if (isReady) {
               setCurrentStep("generate");
             } else {
-              message.warning("请先提取或上传字幕");
+              message.warning(
+                project?.project_type === "visual"
+                  ? "请先提取镜头"
+                  : "请先提取或上传字幕"
+              );
             }
           }}
           {...uploadStep}
@@ -214,4 +257,3 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
 };
 
 export default ProjectEditPage;
-

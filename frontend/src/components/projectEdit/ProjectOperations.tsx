@@ -7,6 +7,10 @@ import { Dropdown } from "../ui/Dropdown";
 
 interface ProjectOperationsProps {
   project: Project;
+  isGeneratingCopywriting: boolean;
+  handleGenerateCopywriting: () => void;
+  copywritingGenProgress: number;
+  copywritingGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
   generateScriptDisabled: boolean;
@@ -31,6 +35,10 @@ interface ProjectOperationsProps {
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   project,
+  isGeneratingCopywriting,
+  handleGenerateCopywriting,
+  copywritingGenProgress,
+  copywritingGenLogs,
   isGeneratingScript,
   handleGenerateScript,
   generateScriptDisabled,
@@ -57,14 +65,22 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const [opening, setOpening] = useState(false);
 
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
-  const isGeneratingAny = isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
-  const scriptButtonDisabled = generateScriptDisabled || isGeneratingVideo || isGeneratingDraft || isGeneratingScript;
+  const isGeneratingAny = isGeneratingCopywriting || isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
+  const copywritingButtonDisabled =
+    !project?.video_path ||
+    !project?.subtitle_path ||
+    (project?.subtitle_status ? project.subtitle_status !== "ready" : false) ||
+    isGeneratingAny;
+  const scriptButtonDisabled =
+    generateScriptDisabled || isGeneratingCopywriting || isGeneratingVideo || isGeneratingDraft || isGeneratingScript;
   const scriptButtonTitle = generateScriptDisabled
     ? (generateScriptDisabledReason || "暂不可生成脚本")
     : isGeneratingVideo
     ? "视频生成中，暂不可生成脚本"
     : isGeneratingDraft
     ? "草稿生成中，暂不可生成脚本"
+    : isGeneratingCopywriting
+    ? "文案生成中，暂不可生成脚本"
     : undefined;
 
   useEffect(() => {
@@ -125,6 +141,21 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   return (
     <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
       <button
+        onClick={handleGenerateCopywriting}
+        disabled={copywritingButtonDisabled}
+        className="mt-2 flex items-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isGeneratingCopywriting ? (
+          <>
+            <Loader className="h-5 w-5 mr-2 animate-spin" />
+            生成中...
+          </>
+        ) : (
+          <>生成解说文案</>
+        )}
+      </button>
+
+      <button
         onClick={handleGenerateScript}
         disabled={scriptButtonDisabled}
         title={scriptButtonTitle}
@@ -175,6 +206,36 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         ]}
       />
       }
+      {/* 生成视频实时进度显示 */}
+      {(isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100)) && (
+        <div className="w-full ml-0 mt-3">
+          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+            <span>文案生成进度(预计1～2分钟)</span>
+            <span>{Math.round(copywritingGenProgress)}%</span>
+          </div>
+          <div className="w-full h-2 mb-2 bg-gray-200 rounded">
+            <div
+              className="h-2 bg-indigo-600 rounded transition-all"
+              style={{ width: `${Math.round(copywritingGenProgress)}%` }}
+            />
+          </div>
+          {copywritingGenLogs.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {copywritingGenLogs.slice(-1).map((log, idx) => (
+                <div key={`${log.timestamp}-${idx}`} className="text-xs text-gray-700 flex items-center">
+                  {log.type === "error" ? (
+                    <AlertCircle className="h-3 w-3 mr-1 text-red-600" />
+                  ) : (
+                    <Loader className="h-3 w-3 mr-1 text-indigo-600" />
+                  )}
+                  <span className="break-all">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 生成视频实时进度显示 */}
       {(isGeneratingVideo || (videoGenProgress > 0 && videoGenProgress < 100)) && (
         <div className="w-full mt-3">

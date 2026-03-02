@@ -1,9 +1,52 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-def short_drama(language: str = "zh") -> str:
+import json
+from typing import Optional
+
+
+def _safe_ratio(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        v = int(value)
+    except Exception:
+        return None
+    if v < 0:
+        return 0
+    if v > 100:
+        return 100
+    return v
+
+
+def short_drama(language: str = "zh", original_ratio: Optional[int] = None) -> str:
+    ratio = _safe_ratio(original_ratio)
+    allow_ost_1 = ratio is None or ratio > 0
+    allow_ost_0 = ratio is None or ratio < 100
+
+    items = []
+    if allow_ost_0 and allow_ost_1:
+        items = [
+            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
+            {"_id": 2, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
+            {"_id": 3, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
+        ]
+    elif allow_ost_0 and not allow_ost_1:
+        items = [
+            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
+            {"_id": 2, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
+        ]
+    elif allow_ost_1 and not allow_ost_0:
+        items = [
+            {"_id": 1, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
+            {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+        ]
+
+    example = json.dumps({"items": items}, ensure_ascii=False, indent=2)
+
     if language.lower() == "en":
-        return """## 原声片段格式要求
+        original_section = (
+            """## 原声片段格式要求
 原声片段必须严格按照以下JSON格式：
 ```json
 {
@@ -14,32 +57,20 @@ def short_drama(language: str = "zh") -> str:
 }
 ```
 
-## 输出格式要求
-请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
-{
-  "items": [
-    {
-      "_id": 1,
-      "timestamp": "00:00:0x,000-00:00:0x,x00",
-      "narration": "The fate of an ordinary girl is about to be completely changed by a cup of coffee! The man she bumped into is actually...",
-      "OST": 0
-    },
-    {
-      "_id": 2,
-      "timestamp": "00:00:0x,x00-00:00:0x,000",
-      "narration": "播放原片2",
-      "OST": 1
-    },
-    {
-      "_id": 3,
-      "timestamp": "00:00:0x,000-00:00:xx,000",
-      "narration": "A classic opening of a domineering president! A love story triggered by a cup of coffee begins just like this...",
-      "OST": 0
-    }
-  ]
-}
 """
-    return """## 原声片段格式要求
+            if allow_ost_1
+            else ""
+        )
+        return (
+            original_section
+            + "## 输出格式要求示例\n"
+            + "请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：\n"
+            + example
+            + "\n"
+        )
+
+    original_section = (
+        """## 原声片段格式要求
 原声片段必须严格按照以下JSON格式：
 ```json
 {
@@ -50,36 +81,53 @@ def short_drama(language: str = "zh") -> str:
 }
 ```
 
-## 输出格式要求
-请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
-{
-  "items": [
-    {
-      "_id": 1,
-      "timestamp": "00:00:0x,000-00:00:0x,x00",
-      "narration": "一杯咖啡改变命运的瞬间，她撞上的男人竟是……",
-      "OST": 0
-    },
-    {
-      "_id": 2,
-      "timestamp": "00:00:0x,x00-00:00:0x,000",
-      "narration": "播放原片1",
-      "OST": 1
-    },
-    {
-      "_id": 3,
-      "timestamp": "00:00:0x,000-00:00:xx,000",
-      "narration": "霸总经典开场，一场因咖啡而起的爱情，就此开幕……",
-      "OST": 0
-    }
-  ]
-}
 """
+        if allow_ost_1
+        else ""
+    )
+    return (
+        original_section
+        + "## 输出格式要求示例\n"
+        + "请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：\n"
+        + example
+        + "\n"
+    )
 
 
-def movie(language: str = "zh") -> str:
+def movie(language: str = "zh", original_ratio: Optional[int] = None) -> str:
+    ratio = _safe_ratio(original_ratio)
+    allow_ost_1 = ratio is None or ratio > 0
+    allow_ost_0 = ratio is None or ratio < 100
+
+    def _n0() -> str:
+        return "..." if language.lower() == "en" else "……"
+
+    def _n1() -> str:
+        return "..." if language.lower() == "en" else "xxx"
+
+    items = []
+    if allow_ost_0 and allow_ost_1:
+        items = [
+            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
+            {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+            {"_id": 3, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
+        ]
+    elif allow_ost_0 and not allow_ost_1:
+        items = [
+            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
+            {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
+        ]
+    elif allow_ost_1 and not allow_ost_0:
+        items = [
+            {"_id": 1, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+            {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+        ]
+
+    example = json.dumps({"items": items}, ensure_ascii=False, indent=2)
+
     if language.lower() == "en":
-        return """## 原声片段格式要求
+        original_section = (
+            """## 原声片段格式要求
 原声片段必须严格按照以下JSON格式：
 ```json
 {
@@ -90,32 +138,20 @@ def movie(language: str = "zh") -> str:
 }
 ```
 
-## 输出格式要求
-请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
-{
-  "items": [
-    {
-        "_id": 1,
-        "timestamp": "00:00:0x,000-00:00:0x,x00",
-        "narration": "A fatal dilemma appears right at the start — this moment rewrites his destiny...",
-        "OST": 0
-    },
-    {
-        "_id": 2,
-        "timestamp": "00:00:xx,x00-00:00:xx,000",
-        "narration": "播放原片1",
-        "OST": 1
-    },
-    {
-        "_id": 3,
-        "timestamp": "00:00:xx,000-00:00:xx,000",
-        "narration": "And at this moment, the gears of fate begin to turn — the truth draws near...",
-        "OST": 0
-    }
-  ]
-}
 """
-    return """## 原声片段格式要求
+            if allow_ost_1
+            else ""
+        )
+        return (
+            original_section
+            + "## 输出格式要求示例\n"
+            + "请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：\n"
+            + example
+            + "\n"
+        )
+
+    original_section = (
+        """## 原声片段格式要求
 原声片段必须严格按照以下JSON格式：
 ```json
 {
@@ -126,29 +162,14 @@ def movie(language: str = "zh") -> str:
 }
 ```
 
-## 输出格式要求
-请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
-{
-  "items": [
-    {
-        "_id": 1,
-        "timestamp": "00:00:0x,000-00:00:0x,x00",
-        "narration": "开场就抛出致命难题，这一刻改变了他的人生轨迹……",
-        "OST": 0
-    },
-    {
-        "_id": 2,
-        "timestamp": "00:00:0x,x00-00:00:0x,000",
-        "narration": "播放原片1",
-        "OST": 1
-    },
-    {
-        "_id": 3,
-        "timestamp": "00:00:0x,000-00:00:xx,000",
-        "narration": "而这时，命运的齿轮开始转动，真相正在逼近……",
-        "OST": 0
-    }
-  ]
-}
 """
-
+        if allow_ost_1
+        else ""
+    )
+    return (
+        original_section
+        + "## 输出格式要求示例\n"
+        + "请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：\n"
+        + example
+        + "\n"
+    )

@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WebSocketMessage } from "../services/clients";
 import { projectService } from "../services/projectService";
-import type { GenerateScriptRequest, Project, ProjectLatestTasks, ProjectRunningTasks, TaskProgressState, VideoScript } from "../types/project";
+import type {
+  GenerateCopywritingRequest,
+  GenerateScriptRequest,
+  NarrationCopywriting,
+  Project,
+  ProjectLatestTasks,
+  ProjectRunningTasks,
+  TaskProgressState,
+  VideoScript,
+} from "../types/project";
 import { useWsTaskProgress, type WsProgressLog } from "./useWsTaskProgress";
 
 export interface UseProjectEditGenerateStepOptions {
   project?: Project | null;
   extractingSubtitle: boolean;
+  generateCopywriting: (data: GenerateCopywritingRequest) => Promise<NarrationCopywriting>;
+  saveCopywriting: (copywriting: NarrationCopywriting) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
   saveScript: (script: VideoScript) => Promise<void>;
   generateVideo: () => Promise<{ task_id: string; scope?: string } | null>;
@@ -17,6 +28,14 @@ export interface UseProjectEditGenerateStepOptions {
 }
 
 export interface UseProjectEditGenerateStepReturn {
+  isGeneratingCopywriting: boolean;
+  handleGenerateCopywriting: () => void;
+  copywritingGenProgress: number;
+  copywritingGenLogs: WsProgressLog[];
+  editedCopywriting: string;
+  setEditedCopywriting: (copywriting: string) => void;
+  isSavingCopywriting: boolean;
+  handleSaveCopywriting: (content?: string) => void;
   isGeneratingScript: boolean;
   handleGenerateScript: () => void;
   generateScriptDisabled: boolean;
@@ -48,6 +67,12 @@ export function useProjectEditGenerateStep(
 ): UseProjectEditGenerateStepReturn {
   const project = options.project;
 
+  const [editedCopywriting, setEditedCopywriting] = useState<string>("");
+  const [hasInitializedCopywriting, setHasInitializedCopywriting] = useState(false);
+  const [copywritingDirty, setCopywritingDirty] = useState(false);
+  const [isGeneratingCopywriting, setIsGeneratingCopywriting] = useState(false);
+  const [isSavingCopywriting, setIsSavingCopywriting] = useState(false);
+
   const [editedScript, setEditedScript] = useState<string>("");
   const [hasInitializedScript, setHasInitializedScript] = useState(false);
   const [scriptDirty, setScriptDirty] = useState(false);
@@ -61,6 +86,8 @@ export function useProjectEditGenerateStep(
   const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
   const [showMergedPreview, setShowMergedPreview] = useState(false);
 
+  const [copywritingGenProgress, setCopywritingGenProgress] = useState<number>(0);
+  const [copywritingGenLogs, setCopywritingGenLogs] = useState<WsProgressLog[]>([]);
   const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
   const [scriptGenLogs, setScriptGenLogs] = useState<WsProgressLog[]>([]);
   const [videoGenProgress, setVideoGenProgress] = useState<number>(0);
@@ -89,6 +116,18 @@ export function useProjectEditGenerateStep(
     return type === "completed" || status === "completed" || status === "failed" || type === "error" || status === "cancelled" || type === "cancelled";
   }, []);
 
+  const setEditedCopywritingSafe = useCallback((copywriting: string) => {
+    setEditedCopywriting(copywriting);
+    setHasInitializedCopywriting(true);
+    setCopywritingDirty(false);
+  }, []);
+
+  const setEditedCopywritingUser = useCallback((copywriting: string) => {
+    setEditedCopywriting(copywriting);
+    setHasInitializedCopywriting(true);
+    setCopywritingDirty(true);
+  }, []);
+
   const setEditedScriptSafe = useCallback((script: string) => {
     setEditedScript(script);
     setHasInitializedScript(true);
@@ -100,6 +139,20 @@ export function useProjectEditGenerateStep(
     setHasInitializedScript(true);
     setScriptDirty(true);
   }, []);
+
+  useEffect(() => {
+    if (!project?.narration_copywriting) return;
+    const next = String(project.narration_copywriting.content || "");
+    if (!hasInitializedCopywriting || (!copywritingDirty && next !== editedCopywriting)) {
+      setEditedCopywritingSafe(next);
+    }
+  }, [
+    copywritingDirty,
+    editedCopywriting,
+    hasInitializedCopywriting,
+    project?.narration_copywriting,
+    setEditedCopywritingSafe,
+  ]);
 
   useEffect(() => {
     if (!project?.script) return;
@@ -116,8 +169,15 @@ export function useProjectEditGenerateStep(
     if (!project?.video_path) return "请先上传视频";
     if (options.extractingSubtitle || project?.subtitle_status === "extracting") return "字幕提取中";
     if (!subtitleReady) return "请先提取字幕或上传字幕";
+    if (!project?.narration_copywriting?.content) return "请先生成解说文案";
     return undefined;
-  }, [options.extractingSubtitle, project?.subtitle_status, project?.video_path, subtitleReady]);
+  }, [
+    options.extractingSubtitle,
+    project?.narration_copywriting?.content,
+    project?.subtitle_status,
+    project?.video_path,
+    subtitleReady,
+  ]);
 
   const generateScriptDisabled = Boolean(generateScriptDisabledReason);
 
@@ -128,6 +188,13 @@ export function useProjectEditGenerateStep(
       try {
         const res: ProjectRunningTasks | null = await projectService.getProjectRunningTasks(project.id);
         if (cancelled || !res) return;
+        applyRunningTask(res.generate_copywriting, (task) => {
+          setIsGeneratingCopywriting(true);
+          setCopywritingGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          if (task.message) {
+            setCopywritingGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
+          }
+        });
         applyRunningTask(res.generate_script, (task) => {
           setIsGeneratingScript(true);
           setScriptGenProgress(typeof task.progress === "number" ? task.progress : 1);
@@ -163,12 +230,21 @@ export function useProjectEditGenerateStep(
 
   useEffect(() => {
     if (!project?.id) return;
-    if (!isGeneratingScript && !isGeneratingDraft && !isGeneratingVideo) return;
+    if (!isGeneratingCopywriting && !isGeneratingScript && !isGeneratingDraft && !isGeneratingVideo) return;
     let stopped = false;
     const tick = async () => {
       try {
         const latest: ProjectLatestTasks | null = await projectService.getProjectLatestTasks(project.id);
         if (stopped || !latest) return;
+
+        if (isGeneratingCopywriting) {
+          const t = latest.generate_copywriting;
+          if (isTaskFinished(t)) {
+            setIsGeneratingCopywriting(false);
+            setCopywritingGenProgress(100);
+            void options.refreshProject();
+          }
+        }
 
         if (isGeneratingScript) {
           const t = latest.generate_script;
@@ -213,7 +289,54 @@ export function useProjectEditGenerateStep(
       stopped = true;
       window.clearInterval(id);
     };
-  }, [draftTaskId, isGeneratingDraft, isGeneratingScript, isGeneratingVideo, isTaskFinished, options, project?.id, videoTaskId]);
+  }, [
+    draftTaskId,
+    isGeneratingCopywriting,
+    isGeneratingDraft,
+    isGeneratingScript,
+    isGeneratingVideo,
+    isTaskFinished,
+    options,
+    project?.id,
+    videoTaskId,
+  ]);
+
+  const handleGenerateCopywriting = useCallback(async () => {
+    if (!project) return;
+    if (!project?.video_path) {
+      options.showErrorText("请先上传视频文件");
+      return;
+    }
+    if (!project.subtitle_path) {
+      options.showErrorText("请先提取字幕或上传字幕");
+      return;
+    }
+    if (project.subtitle_status && project.subtitle_status !== "ready") {
+      options.showErrorText("请先提取字幕或上传字幕");
+      return;
+    }
+    setIsGeneratingCopywriting(true);
+    setCopywritingGenProgress(0);
+    setCopywritingGenLogs([]);
+
+    try {
+      await projectService.flushPendingUpdates(project.id);
+      const copywriting = await options.generateCopywriting({
+        project_id: project.id,
+        video_path: project.video_path,
+        subtitle_path: project.subtitle_path,
+        narration_type: project.narration_type,
+      });
+      if (copywriting) {
+        setEditedCopywritingSafe(String(copywriting.content || ""));
+      }
+      options.showSuccess("解说文案生成成功！");
+    } catch (err) {
+      options.showError(err, "生成解说文案失败");
+    } finally {
+      setIsGeneratingCopywriting(false);
+    }
+  }, [options, project, setEditedCopywritingSafe]);
 
   const handleGenerateScript = useCallback(async () => {
     if (!project) return;
@@ -231,6 +354,10 @@ export function useProjectEditGenerateStep(
       //   return;
       // }
       options.showErrorText("请先提取字幕或上传字幕");
+      return;
+    }
+    if (!project.narration_copywriting?.content) {
+      options.showErrorText("请先生成解说文案");
       return;
     }
 
@@ -282,6 +409,39 @@ export function useProjectEditGenerateStep(
       setIsSaving(false);
     }
   }, [editedScript, options]);
+
+  const handleSaveCopywriting = useCallback(async (content?: string) => {
+    const contentToSave = typeof content === "string" ? content : editedCopywriting;
+
+    if (!contentToSave.trim()) {
+      options.showErrorText("文案内容不能为空");
+      return;
+    }
+
+    try {
+      const base: NarrationCopywriting = project?.narration_copywriting
+        ? project.narration_copywriting
+        : { version: "1.0", content: "" };
+      const copywritingData: NarrationCopywriting = {
+        ...base,
+        content: contentToSave.trim(),
+      };
+      setIsSavingCopywriting(true);
+      await options.saveCopywriting(copywritingData);
+      
+      // If content was passed, we should also update the local state to match
+      if (typeof content === "string") {
+        setEditedCopywritingSafe(content);
+      }
+      
+      setCopywritingDirty(false);
+      options.showSuccess("文案保存成功！");
+    } catch (err) {
+      options.showError(err, "保存文案失败");
+    } finally {
+      setIsSavingCopywriting(false);
+    }
+  }, [editedCopywriting, options, project?.narration_copywriting, setEditedCopywritingSafe]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!project) return;
@@ -364,6 +524,24 @@ export function useProjectEditGenerateStep(
   }, [draftTaskId, options, project?.id]);
 
   useWsTaskProgress({
+    scope: "generate_copywriting",
+    projectId: project?.id,
+    onProgress: setCopywritingGenProgress,
+    onLog: (log) => setCopywritingGenLogs((prev) => [...prev, log]),
+    onCompleted: () => {
+      setIsGeneratingCopywriting(false);
+      setCopywritingGenProgress(100);
+      options.showSuccess("解说文案生成成功！");
+      void options.refreshProject();
+    },
+    onError: (m: WebSocketMessage) => {
+      setIsGeneratingCopywriting(false);
+      setCopywritingGenProgress(0);
+      options.showErrorText(m.message || "生成文案失败");
+    },
+  });
+
+  useWsTaskProgress({
     scope: "generate_script",
     projectId: project?.id,
     onProgress: setScriptGenProgress,
@@ -430,6 +608,14 @@ export function useProjectEditGenerateStep(
   });
 
   return {
+    isGeneratingCopywriting,
+    handleGenerateCopywriting,
+    copywritingGenProgress,
+    copywritingGenLogs,
+    editedCopywriting,
+    setEditedCopywriting: setEditedCopywritingUser,
+    isSavingCopywriting,
+    handleSaveCopywriting,
     isGeneratingScript,
     handleGenerateScript,
     generateScriptDisabled,

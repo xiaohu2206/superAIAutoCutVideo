@@ -4,7 +4,8 @@ import { NarrationType } from "../../types/project";
 import type { CreatePromptPayload } from "../../types/prompts";
 import CustomScriptLengthModal from "./advancedConfig/CustomScriptLengthModal";
 import DeleteConfirmModal from "./advancedConfig/DeleteConfirmModal";
-import { useProjectOriginalRatio, useProjectScriptLength, useProjectScriptLanguage } from "./advancedConfig/hooks";
+import { useProjectOriginalRatio, useProjectScriptLength, useProjectScriptLanguage, useProjectCopywritingWordCount } from "./advancedConfig/hooks";
+import CopywritingWordCountSelector from "./advancedConfig/CopywritingWordCountSelector";
 import OriginalRatioSlider from "./advancedConfig/OriginalRatioSlider";
 import PreviewModal from "./advancedConfig/PreviewModal";
 import PromptTemplateList from "./advancedConfig/PromptTemplateList";
@@ -64,6 +65,12 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
     saving: scriptLanguageSaving,
     setScriptLanguageAndPersist,
   } = useProjectScriptLanguage(projectId);
+  const {
+    copywritingWordCount,
+    loading: copywritingWordCountLoading,
+    saving: copywritingWordCountSaving,
+    setCopywritingWordCountAndPersist,
+  } = useProjectCopywritingWordCount(projectId);
 
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
@@ -201,6 +208,12 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
 
   return (
     <div className="border-gray-200 pt-4 space-y-3">
+      <CopywritingWordCountSelector
+        copywritingWordCount={copywritingWordCount}
+        loading={copywritingWordCountLoading}
+        saving={copywritingWordCountSaving}
+        setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
+      />
       <ScriptLengthSelector
         scriptLength={scriptLength}
         loading={scriptLengthLoading}

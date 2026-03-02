@@ -1,6 +1,7 @@
-import { AlertCircle, CheckCircle, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, CheckCircle, Eye, EyeOff, ExternalLink } from "lucide-react";
 import React from "react";
 import type { ContentModelConfig, TestResult } from "../../../types";
+import { TauriCommands } from "@/services/clients";
 
 interface ContentModelSettingsProps {
   contentSelectedProvider: string;
@@ -34,6 +35,12 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
   updateCurrentContentConfig,
   testContentModelConnection,
 }) => {
+  const providerLinks: Record<string, string> = {
+    qwen: "https://bailian.console.aliyun.com/cn-beijing/?spm=5176.28197619.console-base_search-panel.dvisited_sfm.20d53ae4f6I5R3&tab=model#/api-key",
+    doubao: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
+    openrouter: "https://openrouter.ai/settings/keys",
+  };
+  const providerLink = providerLinks[contentSelectedProvider];
   return (
     <div className="space-y-6">
       {/* 模型选择 */}
@@ -54,6 +61,16 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         <p className="text-xs text-gray-500 mt-1">
           选择用于文案生成的AI模型提供商
         </p>
+        {providerLink && (
+          <button
+            type="button"
+            onClick={() => TauriCommands.openExternalLink(providerLink)}
+            className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            <ExternalLink className="h-3 w-3 mr-1" />
+            前往获取API密钥
+          </button>
+        )}
       </div>
 
       {/* API密钥 */}
@@ -89,7 +106,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
             )}
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-1">从模型提供商获取的API密钥</p>
+        <p className="text-xs text-gray-500 mt-1">从模型提供商获取的API密钥（需自己获取）</p>
       </div>
 
       {/* 接口地址 */}
@@ -177,4 +194,3 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
     </div>
   );
 };
-

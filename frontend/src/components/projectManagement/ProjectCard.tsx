@@ -9,6 +9,7 @@ import {
   Folder,
   Trash2,
   XCircle,
+  Eye,
 } from "lucide-react";
 import React from "react";
 import type { Project } from "../../types/project";
@@ -65,6 +66,28 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   const StatusIcon = statusConfig.icon;
 
   /**
+   * 项目类型标签
+   */
+  const getTypeConfig = (type?: string) => {
+    if (type === "visual") {
+      return {
+        icon: Eye,
+        label: "视觉推理",
+        color: "text-purple-600",
+        bg: "bg-purple-100",
+      };
+    }
+    return {
+      icon: FileText,
+      label: "字幕推理",
+      color: "text-amber-600",
+      bg: "bg-amber-100",
+    };
+  };
+  const typeConfig = getTypeConfig(project.project_type);
+  const TypeIcon = typeConfig.icon;
+
+  /**
    * 格式化日期
    */
   const formatDate = (dateString: string) => {
@@ -92,12 +115,14 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                 <h3 className="text-base font-semibold text-gray-900 truncate mr-2">
                   {project.name}
                 </h3>
-                <span
-                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${statusConfig.bg} ${statusConfig.color}`}
-                >
-                  <StatusIcon className="h-3 w-3 mr-1" />
-                  {statusConfig.label}
-                </span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span
+                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${statusConfig.bg} ${statusConfig.color}`}
+                  >
+                    <StatusIcon className="h-3 w-3 mr-1" />
+                    {statusConfig.label}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center mt-1 text-xs text-gray-500">
                 <Calendar className="h-3 w-3 mr-1 text-gray-400" />
@@ -115,11 +140,21 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         )}
 
         {/* 项目信息 */}
-        <div className="space-y-1">
-          {/* 解说类型 */}
-          <div className="flex items-center text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
-            <FileText className="h-3 w-3 mr-2 text-gray-400" />
-            <span className="truncate">{project.narration_type}</span>
+        <div className="space-y-2 mt-auto">
+          <div className="flex flex-wrap gap-2">
+            {/* 项目类型 */}
+            <div
+              className={`flex items-center text-xs rounded px-2 py-1 ${typeConfig.bg} ${typeConfig.color}`}
+            >
+              <TypeIcon className="h-3 w-3 mr-1.5" />
+              <span className="truncate">{typeConfig.label}</span>
+            </div>
+
+            {/* 解说类型 */}
+            <div className="flex items-center text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+              <FileText className="h-3 w-3 mr-1.5 text-gray-400" />
+              <span className="truncate">{project.narration_type}</span>
+            </div>
           </div>
         </div>
       </div>

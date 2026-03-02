@@ -394,34 +394,6 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h4 className="text-md font-semibold text-gray-900">Qwen3-TTS 音色库</h4>
-            {error ? <div className="text-xs text-red-600 mt-1">{error}</div> : null}
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setAccelerationDebugOpen((prev) => !prev)}
-                className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
-                title={accelerationView.title}
-                aria-expanded={accelerationDebugOpen}
-              >
-                {accelerationView.text}
-              </button>
-              <button
-                onClick={() => refreshAcceleration()}
-                disabled={accelerationLoading}
-                className={`p-1 rounded-md transition-all ${accelerationLoading ? "text-gray-300" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"}`}
-                title="刷新加速状态"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${accelerationLoading ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-            {accelerationDebugOpen ? (
-              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="text-[11px] text-gray-500 mb-1">/api/tts/qwen3/acceleration-status</div>
-                <pre className="text-[11px] leading-4 whitespace-pre-wrap break-words text-gray-800 max-h-56 overflow-auto">
-                  {JSON.stringify(accelerationRaw ?? { success: true, data: accelerationStatus, message: "ok" }, null, 2)}
-                </pre>
-              </div>
-            ) : null}
           </div>
           
           <div className="flex bg-gray-100/80 p-1 rounded-lg">
@@ -454,7 +426,36 @@ export const Qwen3VoiceSection: React.FC<Qwen3VoiceSectionProps> = ({ configId, 
             </button>
           </div>
         </div>
-
+              <div>
+              {error ? <div className="text-xs text-red-600">{error}</div> : null}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAccelerationDebugOpen((prev) => !prev)}
+                className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
+                title={accelerationView.title}
+                aria-expanded={accelerationDebugOpen}
+              >
+                {accelerationView.text}
+              </button>
+              <button
+                onClick={() => refreshAcceleration()}
+                disabled={accelerationLoading}
+                className={`p-1 rounded-md transition-all ${accelerationLoading ? "text-gray-300" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"}`}
+                title="刷新加速状态"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${accelerationLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+            {accelerationDebugOpen ? (
+              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="text-[11px] text-gray-500 mb-1">/api/tts/qwen3/acceleration-status</div>
+                <pre className="text-[11px] leading-4 whitespace-pre-wrap break-words text-gray-800 max-h-56 overflow-auto">
+                  {JSON.stringify(accelerationRaw ?? { success: true, data: accelerationStatus, message: "ok" }, null, 2)}
+                </pre>
+              </div>
+            ) : null}
+            </div>
         <div className="bg-gray-50/50 p-3 rounded-lg border border-gray-100 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="text-xs text-gray-600 leading-5">

@@ -1,12 +1,13 @@
 import type { ScriptLengthOption } from "../../../types/project";
 
-export const DEFAULT_SCRIPT_LENGTH: ScriptLengthOption = "30～40条";
+export const DEFAULT_SCRIPT_LENGTH: ScriptLengthOption = "auto";
 
 export const SCRIPT_LENGTH_OPTIONS: Array<{
   value: ScriptLengthOption;
   title: string;
   subtitle: string;
 }> = [
+  { value: "auto", title: "自动", subtitle: "根据文案字数自动: 500字\\模型" },
   { value: "15～20条", title: "15～20 条", subtitle: "预计最少 2 次模型调用" },
   { value: "30～40条", title: "30～40 条", subtitle: "预计最少 4 次模型调用" },
   { value: "40～60条", title: "40～60 条", subtitle: "预计最少 5 次模型调用" },
@@ -16,8 +17,8 @@ export const SCRIPT_LENGTH_OPTIONS: Array<{
 
 export const CUSTOM_SCRIPT_LENGTH_MIN = 5;
 export const CUSTOM_SCRIPT_LENGTH_MAX = 200;
-export const ORIGINAL_RATIO_MIN = 10;
-export const ORIGINAL_RATIO_MAX = 90;
+export const ORIGINAL_RATIO_MIN = 0;
+export const ORIGINAL_RATIO_MAX = 100;
 export const DEFAULT_ORIGINAL_RATIO = 70;
 
 export const normalizeRangeSeparators = (value: string) =>
@@ -67,6 +68,7 @@ export const estimateCallsForDisplay = (maxCount: number) => {
 export const normalizeScriptLengthString = (value: string): ScriptLengthOption | null => {
   const cleaned = normalizeRangeSeparators(value);
   if (!cleaned) return null;
+  if (cleaned.toLowerCase() === "auto" || cleaned === "自动") return "auto";
   const presetRange = parseRangeFromString(cleaned);
   if (presetRange) return formatRangeValue(presetRange);
   const numMatch = cleaned.match(/(\d+)/);
@@ -80,6 +82,7 @@ export const normalizeScriptLengthString = (value: string): ScriptLengthOption |
 export const normalizeScriptLength = (value: unknown): ScriptLengthOption => {
   const v = typeof value === "string" ? value : "";
   const allowed = new Set<ScriptLengthOption>([
+    "auto",
     "15～20条",
     "30～40条",
     "40～60条",
@@ -100,4 +103,9 @@ export const normalizeOriginalRatio = (value: unknown): number => {
   if (!Number.isFinite(num)) return DEFAULT_ORIGINAL_RATIO;
   const rounded = Math.round(num);
   return Math.min(ORIGINAL_RATIO_MAX, Math.max(ORIGINAL_RATIO_MIN, rounded));
+};
+
+export const normalizeOriginalRatioSelection = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  return normalizeOriginalRatio(value);
 };

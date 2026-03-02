@@ -24,10 +24,12 @@ class Project(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    project_type: str = Field(default="subtitle") # subtitle | visual
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
-    original_ratio: int = Field(default=70)
+    original_ratio: Optional[int] = None
     script_language: str = Field(default="zh")
+    copywriting_word_count: Optional[int] = None
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -42,11 +44,20 @@ class Project(BaseModel):
     subtitle_updated_by_user: bool = Field(default=False)
     subtitle_updated_at: Optional[str] = None
     subtitle_format: Optional[str] = None
+    subtitle_extract_run_id: Optional[str] = None
+    asr_provider: str = Field(default="bcut")
+    asr_model_key: Optional[str] = None
+    asr_language: Optional[str] = None
     audio_path: Optional[str] = None
     chunk_audio_paths: List[str] = Field(default_factory=list)
     chunk_results: List[Dict[str, Any]] = Field(default_factory=list)
-    plot_analysis_path: Optional[str] = None
+    narration_copywriting: Optional[Dict[str, Any]] = None
+    narration_copywriting_path: Optional[str] = None
     output_video_path: Optional[str] = None
+    scenes_path: Optional[str] = None
+    scenes_updated_at: Optional[str] = None
+    scenes_raw_path: Optional[str] = None
+    scenes_raw_updated_at: Optional[str] = None
     # 剪映草稿相关字段
     jianying_draft_last_dir: Optional[str] = None
     jianying_draft_last_dir_web: Optional[str] = None
@@ -107,14 +118,36 @@ class ProjectsStore:
                                 p["subtitle_updated_at"] = p.get("updated_at") or None
                             if "subtitle_format" not in p:
                                 p["subtitle_format"] = "compressed_srt_v1" if p.get("subtitle_path") else None
+                            if "subtitle_extract_run_id" not in p:
+                                p["subtitle_extract_run_id"] = None
+                            if "asr_provider" not in p:
+                                p["asr_provider"] = "bcut"
+                            if "asr_model_key" not in p:
+                                p["asr_model_key"] = None
+                            if "asr_language" not in p:
+                                p["asr_language"] = None
                             if "original_ratio" not in p:
-                                p["original_ratio"] = 70
+                                p["original_ratio"] = None
                             if "script_language" not in p:
                                 p["script_language"] = "zh"
                             if "chunk_audio_paths" not in p:
                                 p["chunk_audio_paths"] = []
                             if "chunk_results" not in p:
                                 p["chunk_results"] = []
+                            if "narration_copywriting" not in p:
+                                p["narration_copywriting"] = None
+                            if "narration_copywriting_path" not in p:
+                                p["narration_copywriting_path"] = None
+                            if "project_type" not in p:
+                                p["project_type"] = "subtitle"
+                            if "scenes_path" not in p:
+                                p["scenes_path"] = None
+                            if "scenes_updated_at" not in p:
+                                p["scenes_updated_at"] = None
+                            if "scenes_raw_path" not in p:
+                                p["scenes_raw_path"] = None
+                            if "scenes_raw_updated_at" not in p:
+                                p["scenes_raw_updated_at"] = None
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -151,7 +184,7 @@ class ProjectsStore:
         with self._lock:
             return self._projects.get(project_id)
 
-    def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说") -> Project:
+    def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说", project_type: str = "subtitle") -> Project:
         now = datetime.now().isoformat()
         new_id = str(uuid.uuid4())
         effective_narration_type = narration_type or "短剧解说"
@@ -159,8 +192,9 @@ class ProjectsStore:
             id=new_id,
             name=name,
             description=description,
+            project_type=project_type,
             narration_type=effective_narration_type,
-            script_length=self._get_default_script_length(effective_narration_type),
+            script_length="auto",
             script_language="zh",
             status="draft",
             video_path=None,
@@ -172,10 +206,14 @@ class ProjectsStore:
             subtitle_updated_by_user=False,
             subtitle_updated_at=None,
             subtitle_format=None,
+            asr_provider="bcut",
+            asr_model_key=None,
+            asr_language=None,
             audio_path=None,
             chunk_audio_paths=[],
             chunk_results=[],
-            plot_analysis_path=None,
+            narration_copywriting=None,
+            narration_copywriting_path=None,
             output_video_path=None,
             script=None,
             created_at=now,
@@ -196,10 +234,12 @@ class ProjectsStore:
             for key in [
                 "name",
                 "description",
+                "project_type",
                 "narration_type",
                 "script_length",
                 "original_ratio",
                 "script_language",
+                "copywriting_word_count",
                 "status",
                 "video_path",
                 "video_paths",
@@ -212,17 +252,32 @@ class ProjectsStore:
                 "subtitle_updated_by_user",
                 "subtitle_updated_at",
                 "subtitle_format",
+                "subtitle_extract_run_id",
+                "asr_provider",
+                "asr_model_key",
+                "asr_language",
                 "audio_path",
                 "chunk_audio_paths",
                 "chunk_results",
-                "plot_analysis_path",
+                "narration_copywriting",
+                "narration_copywriting_path",
                 "output_video_path",
+                "scenes_path",
+                "scenes_updated_at",
+                "scenes_raw_path",
+                "scenes_raw_updated_at",
                 "jianying_draft_last_dir",
                 "jianying_draft_last_dir_web",
                 "jianying_draft_dirs",
                 "script",
             ]:
-                if key in updates and updates[key] is not None:
+                if key not in updates:
+                    continue
+                if key == "copywriting_word_count":
+                    data[key] = updates[key]
+                elif updates[key] is not None:
+                    data[key] = updates[key]
+                elif key in {"script_length", "original_ratio"}:
                     data[key] = updates[key]
             data["updated_at"] = datetime.now().isoformat()
             try:
@@ -287,6 +342,7 @@ class ProjectsStore:
             data["subtitle_updated_by_user"] = False
             data["subtitle_updated_at"] = datetime.now().isoformat()
             data["subtitle_format"] = None
+            data["subtitle_extract_run_id"] = None
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)

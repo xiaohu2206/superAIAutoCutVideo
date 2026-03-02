@@ -4,11 +4,9 @@ from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
-from modules.prompts.prompt_manager import prompt_manager
 from services.ai_service import ai_service
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
-from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
 from modules.prompts.common.output_format_blocks import short_drama, movie
 
@@ -20,11 +18,113 @@ def _normalize_original_ratio(value: Optional[int]) -> int:
         num = int(value)
     except Exception:
         return 70
-    if num < 10:
-        return 10
-    if num > 90:
-        return 90
+    if num < 0:
+        return 0
+    if num > 100:
+        return 100
     return num
+
+
+def _build_ost_system_hint(original_ratio: Optional[int]) -> str:
+    if original_ratio is None:
+        return "原声片段标识：OST=1表示原声，OST=0表示解说。"
+    ratio_val = _normalize_original_ratio(original_ratio)
+    if ratio_val <= 0:
+        return "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
+    if ratio_val >= 100:
+        return "本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“播放原片+序号”格式；不得输出解说文案。"
+    return (
+        f"原片占比范围：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
+        "原声片段标识：OST=1表示原声，OST=0表示解说。"
+    )
+
+
+def _detect_narration_type(project_id: Optional[str]) -> str:
+    if not project_id:
+        return "short_drama_narration"
+    try:
+        from modules.projects_store import projects_store
+        p = projects_store.get_project(project_id)
+        if p:
+            t = str(getattr(p, "narration_type", "") or "")
+            if t == "电影解说":
+                return "movie_narration"
+    except Exception:
+        pass
+    return "short_drama_narration"
+
+
+def _build_fixed_script_prompt(
+    drama_name: str,
+    copywriting_text: str,
+    subs_text: str,
+    narration_type: str,
+    script_language: Optional[str],
+    original_ratio: Optional[int] = None,
+) -> str:
+    """构建固定的脚本生成提示词（不使用提示词模板系统）。"""
+    lang = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
+    ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+
+    requirements_extra = ""
+    ost_rules = ""
+    if ratio_val is None:
+        requirements_extra = "- 合理分配原声片段（OST=1）和解说片段（OST=0）\n"
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+            "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
+        )
+    elif ratio_val <= 0:
+        requirements_extra = "- 本次只生成解说片段（OST 必须为 0），不得输出原声片段\n"
+        ost_rules = (
+            "## 解说片段规则\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+        )
+    elif ratio_val >= 100:
+        requirements_extra = "- 本次只生成原声片段（OST 必须为 1），不得输出解说片段\n"
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+        )
+    else:
+        requirements_extra = (
+            f"- 合理分配原声片段（OST=1）和解说片段（OST=0），原片占比约 {ratio_val}%\n"
+        )
+        ost_rules = (
+            "## 原声片段规则\n"
+            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+            "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
+        )
+
+    prompt = f"""# 解说脚本生成任务
+
+## 任务目标
+从整部视频中挑选“值得解说的精彩片段”，将解说文案的关键内容对齐到字幕时间戳，生成带时间轴的解说脚本。
+尽量保留“解说文案”完整拆分并全部对齐到字幕时间轴中对应的时间段，生成带时间轴的解说脚本；尽量不遗漏任何文案内容。允许必要压缩但不得改变原意。
+
+## 输入说明
+1. **解说文案**：一段完整的叙述文本，这是要使用的解说内容
+2. **字幕内容**：带有精确时间戳的原始字幕，用于确定每段解说对应的时间范围
+
+## 任务要求
+- 不需要按时间顺序抽取字幕（时间戳可以大幅跳跃，不要求连续覆盖全片），但尽量覆盖完整“解说文案”内容；
+- 只输出需要解说的精彩片段；允许时间戳不连续
+- narration 必须严格从“解说文案”拆分/压缩而来；不得新增未出现的信息
+{requirements_extra}- 时间戳格式必须与字幕中的格式一致
+{ost_rules}
+
+## 原始字幕（含精确时间戳）
+<subtitles>
+{subs_text}
+</subtitles>
+
+## 剧名
+《{drama_name}》
+"""
+    return prompt
 
 
 async def _generate_script_chunk(
@@ -33,7 +133,7 @@ async def _generate_script_chunk(
     start_time: float,
     end_time: float,
     subtitles: List[Dict[str, Any]],
-    plot_analysis_snippet: str,
+    copywriting_text: str,
     drama_name: str,
     project_id: Optional[str] = None,
     target_items_count: Optional[int] = None,
@@ -45,73 +145,53 @@ async def _generate_script_chunk(
         ts = _format_timestamp_range(float(s["start"]), float(s["end"]))
         subs_text_lines.append(f"[{ts}] {s['text']}")
     subs_text = "\n".join(subs_text_lines)
-    if len(subs_text) > MAX_SUBTITLE_CHARS_PER_CALL:
-        subs_text = subs_text[:MAX_SUBTITLE_CHARS_PER_CALL]
-    default_key = _default_prompt_key_for_project(project_id)
-    key = _resolve_prompt_key(project_id, default_key)
-    if script_language and ":" in key:
-        lang = str(script_language).strip().lower()
-        cat, name = key.split(":", 1)
-        if lang in {"en", "en-us", "英文", "english"}:
-            if name != "script_generation_en":
-                candidate = f"{cat}:script_generation_en"
-                try:
-                    if prompt_manager.get_prompt(candidate):
-                        key = candidate
-                except Exception:
-                    pass
-        elif lang in {"zh", "zh-cn", "中文", "chinese"}:
-            if name != "script_generation":
-                candidate = f"{cat}:script_generation"
-                try:
-                    if prompt_manager.get_prompt(candidate):
-                        key = candidate
-                except Exception:
-                    pass
-    variables = {
-        "drama_name": drama_name,
-        "plot_analysis": plot_analysis_snippet or "",
-        "subtitle_content": subs_text,
-    }
-    try:
-        messages_dicts = prompt_manager.build_chat_messages(key, variables)
-    except KeyError:
-        try:
-            cat = (key.split(":", 1)[0] if ":" in key else "short_drama_narration")
-            if cat == "movie_narration":
-                from modules.prompts.movie_narration import register_prompts
-            else:
-                from modules.prompts.short_drama_narration import register_prompts
-            register_prompts()
-            messages_dicts = prompt_manager.build_chat_messages(key, variables)
-        except Exception:
-            key = default_key
-            messages_dicts = prompt_manager.build_chat_messages(key, variables)
-    messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
 
-    # 如果是用户自定义提示词（或提示词中缺少格式要求），需要根据语言拼接 output_format_blocks
-    sys_msgs_content = "".join([m.content for m in messages if m.role == "system" and m.content])
-    if "## 原声片段格式要求" not in sys_msgs_content:
-        current_lang = "zh"
-        if script_language:
-            l = str(script_language).strip().lower()
-            if l in {"en", "en-us", "英文", "english"}:
-                current_lang = "en"
+    narration_type = _detect_narration_type(project_id)
+    lang_key = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
 
-        prompt_cat = "short_drama_narration"
-        if ":" in key:
-            prompt_cat = key.split(":", 1)[0]
+    user_prompt = _build_fixed_script_prompt(
+        drama_name=drama_name,
+        copywriting_text=copywriting_text,
+        subs_text=subs_text,
+        narration_type=narration_type,
+        script_language=script_language,
+        original_ratio=original_ratio,
+    )
 
-        if prompt_cat == "movie_narration":
-            format_block = movie(current_lang)
-        else:
-            format_block = short_drama(current_lang)
+    system_prompt = (
+        "你是一位专业的视频脚本时间轴编辑器。"
+        "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。\n\n"
+    )
+    ratio_for_blocks = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+    if narration_type == "movie_narration":
+        system_prompt += movie(lang_key, ratio_for_blocks)
+    else:
+        system_prompt += short_drama(lang_key, ratio_for_blocks)
 
-        messages.append(ChatMessage(role="system", content=format_block))
+    messages: List[ChatMessage] = [
+        ChatMessage(role="system", content=system_prompt),
+        ChatMessage(
+            role="user",
+            content=(
+                "## 解说文案\n"
+                "<copywriting>\n"
+                f"{copywriting_text}\n"
+                "</copywriting>"
+            ),
+        ),
+        ChatMessage(role="user", content=user_prompt),
+    ]
 
-    logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
-
-    ratio_val = _normalize_original_ratio(original_ratio)
+    messages.insert(
+        0,
+        ChatMessage(
+            role="system",
+            content=(
+                "以下为必须严格使用的解说文案文本：所有条目的'narration'必须仅基于该文案进行时间轴拆分；"
+                "不得编造或新增任何未出现的内容；允许必要压缩但不得改变含义，但尽量不修改文案；禁止用字幕原文替代解说文案。"
+            ),
+        ),
+    )
     if int(chunk_total or 0) > 0:
         total = int(chunk_total)
         idx = int(chunk_idx)
@@ -127,7 +207,8 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"这是分段生成脚本的第{idx + 1}段/共{total}段，位置为{pos_label}。"
-                    "开始（1）段可引入剧情，中间段不要重复开场或收尾（因为需要合并其它段进来），末尾段需要收束剧情并避免新开头。"
+                    "本段不得输出0条（items 不可为空），并将本时间段内的解说文案对齐到字幕时间轴。"
+                    "避免重复的开场白/总结句等套话。"
                 ),
             ),
         )
@@ -139,10 +220,10 @@ async def _generate_script_chunk(
                 role="system",
                 content=(
                     f"你必须仅输出一个JSON对象，键为'items'。"
-                    f"items数组长度必须严格等于{n}，不能多不能少。"
-                    f"start_time和end_time时间间隔不能低于1s"
-                    f"每条必须包含'_id','timestamp','picture','narration','OST'。"
-                    f"不得输出除JSON以外的任何文字。"
+                    # f"items数组长度大约控制为{n}条"
+                    "每条时间段长度不能低于1秒。"
+                    "每条必须包含'_id','timestamp','picture','narration','OST'。"
+                    "不得输出除JSON以外的任何文字。"
                 ),
             ),
         )
@@ -150,10 +231,7 @@ async def _generate_script_chunk(
         0,
         ChatMessage(
             role="system",
-            content=(
-                f"原片占比范围：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
-                "原声片段标识：OST=1表示原声，OST=0表示解说。"
-            ),
+            content=_build_ost_system_hint(original_ratio),
         ),
     )
     if script_language:
@@ -178,6 +256,7 @@ async def _generate_script_chunk(
                     ),
                 ),
             )
+
     system_contents: List[str] = []
     non_system_messages: List[ChatMessage] = []
     for message in messages:
@@ -191,6 +270,9 @@ async def _generate_script_chunk(
         messages = [ChatMessage(role="system", content=merged_system), *non_system_messages]
     else:
         messages = non_system_messages
+
+    logger.info(f"⚡ 正在生成分段 {int(chunk_idx)+1}/{chunk_total}...")
+
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
@@ -224,20 +306,6 @@ async def _generate_script_chunk(
                     if len(out) >= n:
                         break
                     out.append(it)
-                if len(out) < n:
-                    for it in items:
-                        if len(out) >= n:
-                            break
-                        out.append(
-                            {
-                                "_id": it.get("_id"),
-                                "timestamp": str(it.get("timestamp")),
-                                "picture": it.get("picture"),
-                                "narration": str(it.get("narration", "")),
-                                "OST": 1 if it.get("OST") == 1 else 0,
-                                "_chunk_idx": chunk_idx,
-                            }
-                        )
                 return out
             return valid_items
         except Exception as e:
@@ -296,7 +364,7 @@ def _merge_items(all_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def _refine_full_script(
     segments: List[Dict[str, Any]],
     drama_name: str,
-    plot_analysis: str,
+    copywriting_text: str,
     length_mode: Optional[str] = None,
     target_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
@@ -321,13 +389,25 @@ async def _refine_full_script(
             f"返回的 'items' 长度必须为 {target}，不得新增条目，仅在已有 '_id' 中选择，但一定要确保不能烂尾。"
         )
 
-    ratio_val = _normalize_original_ratio(original_ratio)
+    ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+    if ratio_val is None:
+        ratio_hint = "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+    elif ratio_val <= 0:
+        ratio_hint = "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
+    elif ratio_val >= 100:
+        ratio_hint = "本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“播放原片+序号”格式；不得输出解说文案。"
+    else:
+        ratio_hint = (
+            f"**原片占比范围**：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
+            "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+        )
     system_prompt = (
         "你是一位分块脚本合并助手。你的任务是将已按时间分块生成的解说脚本进行轻量合并与顺畅衔接。"
-        + retain_desc +
-        f"**原片占比范围**：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
-        "**原声片段标识**：OST=1表示原声，OST=0表示解说"
-        "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
+        + retain_desc
+        + ratio_hint
+        + "本次输出目标是“精彩片段解说”，不要求覆盖整部影片时间轴，允许大段跳过。"
+        + "当需要删减时，优先删除那些时间上紧贴上一条/下一条、信息密度低、重复、过渡或铺垫过长的条目；避免出现大量连续衔接的时间戳导致覆盖整片。"
+        + "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
         "对于所有脚本内容，是通过多个模型生成的，每个模型生成的脚本段容易出现开头语和结尾语，但可能是中间段，如果是中间段应该把开头语或结尾语条目删除"
         "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
         "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"

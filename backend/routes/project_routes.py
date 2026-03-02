@@ -23,6 +23,7 @@ import asyncio
 import logging
 import re
 import cv2
+import mimetypes
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request, Query
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -37,7 +38,9 @@ from modules.projects_store import projects_store
 from modules.video_processor import video_processor
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
+from services.generate_copywriting_service import generate_copywriting_service
 from services.extract_subtitle_service import extract_subtitle_service
+from services.extract_scene_service import extract_scene_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
@@ -47,6 +50,7 @@ from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_scheduler import task_scheduler
 from modules.config.generate_concurrency_config import generate_concurrency_config_manager
+from modules.subtitle_utils import parse_srt, format_ts_srt
 
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
@@ -133,6 +137,101 @@ def resolve_any_path(path_str: str) -> Path:
     return resolve_abs_path(s)
 
 
+def _guess_video_media_type(path: Path) -> str:
+    mt, _ = mimetypes.guess_type(str(path))
+    if mt:
+        return mt
+    suffix = path.suffix.lower()
+    if suffix in {".mp4", ".m4v"}:
+        return "video/mp4"
+    if suffix in {".webm"}:
+        return "video/webm"
+    if suffix in {".mov"}:
+        return "video/quicktime"
+    if suffix in {".ogg", ".ogv"}:
+        return "video/ogg"
+    return "application/octet-stream"
+
+
+def _stream_file_range(abs_path: Path, request: Request) -> StreamingResponse:
+    file_size = abs_path.stat().st_size
+    media_type = _guess_video_media_type(abs_path)
+    headers: Dict[str, str] = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{abs_path.name}"',
+    }
+
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and range_header.strip().lower().startswith("bytes="):
+        spec = range_header.strip()[6:]
+        if "," in spec:
+            spec = spec.split(",", 1)[0]
+        start_s, end_s = (spec.split("-", 1) + [""])[:2]
+        try:
+            start = int(start_s) if start_s.strip() else None
+            end = int(end_s) if end_s.strip() else None
+        except Exception:
+            start = None
+            end = None
+
+        if start is None and end is not None:
+            start = max(0, file_size - end)
+            end = file_size - 1
+        if start is None:
+            start = 0
+        if end is None or end >= file_size:
+            end = file_size - 1
+        if start < 0:
+            start = 0
+        if end < start or file_size <= 0:
+            return StreamingResponse(
+                content=iter(()),
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+                media_type=media_type,
+            )
+
+        chunk_size = end - start + 1
+
+        def file_iter(path: Path, start_pos: int, count: int, block: int = 1024 * 1024):
+            with open(path, "rb") as f:
+                f.seek(start_pos)
+                remaining = count
+                while remaining > 0:
+                    read_size = min(block, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+
+        headers.update({
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(chunk_size),
+        })
+        return StreamingResponse(
+            file_iter(abs_path, start, chunk_size),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    def full_file_iter(path: Path, block: int = 1024 * 1024):
+        with open(path, "rb") as f:
+            while True:
+                data = f.read(block)
+                if not data:
+                    break
+                yield data
+
+    headers["Content-Length"] = str(file_size)
+    return StreamingResponse(
+        full_file_iter(abs_path),
+        media_type=media_type,
+        headers=headers,
+    )
+
+
 def remove_path(target: Path) -> bool:
     try:
         if not target:
@@ -189,7 +288,7 @@ def cleanup_project_assets(p) -> None:
     _add(getattr(p, "merged_video_path", None))
     _add(getattr(p, "subtitle_path", None))
     _add(getattr(p, "audio_path", None))
-    _add(getattr(p, "plot_analysis_path", None))
+    _add(getattr(p, "narration_copywriting_path", None))
     _add(getattr(p, "output_video_path", None))
     _add(getattr(p, "jianying_draft_last_dir", None))
     _add(getattr(p, "jianying_draft_last_dir_web", None))
@@ -217,12 +316,14 @@ def cleanup_project_assets(p) -> None:
     remove_matching_glob(up / "videos", f"{getattr(p, 'id', '')}_video_*")
     remove_matching_glob(up / "subtitles", f"{getattr(p, 'id', '')}_subtitle_*")
     remove_matching_glob(up / "audios", f"{getattr(p, 'id', '')}_audio_*")
+    remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_copywriting_*")
     remove_matching_glob(up / "analyses", f"{getattr(p, 'id', '')}_analysis_*")
 
 
 class CreateProjectRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    project_type: Optional[str] = Field(default="subtitle")
     narration_type: Optional[str] = Field(default="短剧解说")
 
 
@@ -233,11 +334,13 @@ class UpdateProjectRequest(BaseModel):
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
     script_language: Optional[str] = None
+    copywriting_word_count: Optional[int] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     audio_path: Optional[str] = None
-    plot_analysis_path: Optional[str] = None
+    narration_copywriting: Optional[Dict[str, Any]] = None
+    narration_copywriting_path: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
 
 
@@ -303,8 +406,23 @@ class GenerateScriptRequest(BaseModel):
     narration_type: str
 
 
+class GenerateCopywritingRequest(BaseModel):
+    project_id: str
+    video_path: str
+    subtitle_path: Optional[str] = None
+    narration_type: str
+
+
 class ExtractSubtitleRequest(BaseModel):
     force: bool = False
+    task_id: Optional[str] = None
+    asr_provider: Optional[str] = None
+    asr_model_key: Optional[str] = None
+    asr_language: Optional[str] = None
+    itn: bool = True
+    hotwords: Optional[List[str]] = None
+    analyzeVision: bool = False
+    visionMode: str = "all"
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -317,19 +435,6 @@ class SubtitleSegmentInput(BaseModel):
 class SaveSubtitleRequest(BaseModel):
     segments: Optional[List[SubtitleSegmentInput]] = None
     content: Optional[str] = None
-
-
-def _format_ts(seconds: float) -> str:
-    if seconds < 0:
-        seconds = 0.0
-    ms_total = int(round(seconds * 1000))
-    ms = ms_total % 1000
-    s_total = ms_total // 1000
-    s = s_total % 60
-    m_total = s_total // 60
-    m = m_total % 60
-    h = m_total // 60
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
@@ -345,70 +450,9 @@ def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
         if not text:
             continue
         normalized_text = re.sub(r"\s+", " ", text)
-        out_lines.append(f"[{_format_ts(start)}-{_format_ts(end)}] {normalized_text}")
+        out_lines.append(f"[{format_ts_srt(start)}-{format_ts_srt(end)}] {normalized_text}")
     return ("\n".join(out_lines) + ("\n" if out_lines else ""))
 
-
-def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
-    """简易SRT解析，返回包含 start/end/text 的列表"""
-    def _parse_ts(ts: str) -> float:
-        # format: HH:MM:SS,mmm
-        h, m, rest = ts.split(":")
-        s, ms = rest.split(",")
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
-
-    segments: List[Dict[str, Any]] = []
-    try:
-        content = srt_path.read_text(encoding="utf-8", errors="ignore")
-        norm = content.replace("\r\n", "\n").replace("\r", "\n").strip()
-        lines = [ln.strip() for ln in norm.splitlines() if ln.strip()]
-        # 优先检测压缩后的行格式：[HH:MM:SS,mmm-HH:MM:SS,mmm] text
-        bracket_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2},\d{3})-(\d{2}:\d{2}:\d{2},\d{3})\]\s*(.+)$")
-        bracket_matches = [bracket_pattern.match(ln) for ln in lines]
-        if any(bracket_matches):
-            idx = 1
-            for m in bracket_matches:
-                if not m:
-                    continue
-                start_str, end_str, text = m.groups()
-                start_t = _parse_ts(start_str)
-                end_t = _parse_ts(end_str)
-                segments.append({
-                    "id": str(idx),
-                    "start_time": float(start_t),
-                    "end_time": float(end_t),
-                    "text": text,
-                    "subtitle": text,
-                })
-                idx += 1
-        else:
-            # 兼容标准SRT解析
-            blocks = [b.strip() for b in norm.split("\n\n") if b.strip()]
-            for idx, block in enumerate(blocks, start=1):
-                lines_in_block = [line for line in block.splitlines() if line.strip()]
-                if len(lines_in_block) < 2:
-                    continue
-                timing_line = lines_in_block[1] if "-->" in lines_in_block[1] else lines_in_block[0]
-                if "-->" not in timing_line:
-                    continue
-                start_str, end_str = [t.strip() for t in timing_line.split("-->")]
-                start_t = _parse_ts(start_str)
-                end_t = _parse_ts(end_str)
-                text_lines = lines_in_block[2:] if timing_line == lines_in_block[1] else lines_in_block[1:]
-                text = " ".join([ln.strip() for ln in text_lines if ln.strip()])
-                if not text:
-                    text = f"字幕段{idx}"
-                segments.append({
-                    "id": str(idx),
-                    "start_time": float(start_t),
-                    "end_time": float(end_t),
-                    "text": text,
-                    "subtitle": text,
-                })
-    except Exception:
-        # 解析失败返回空
-        pass
-    return segments
 
 
 def compress_srt(content: str) -> str:
@@ -488,7 +532,7 @@ async def create_project(req: CreateProjectRequest):
     for existing in projects_store.list_projects():
         if (existing.name or "").strip() == name_clean:
             raise HTTPException(status_code=400, detail="项目名称已存在")
-    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说")
+    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说", req.project_type or "subtitle")
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),
@@ -556,10 +600,67 @@ async def generate_script(req: GenerateScriptRequest):
         raise HTTPException(status_code=500, detail=f"脚本生成失败: {str(e)}")
 
 
+@router.post("/generate-copywriting")
+async def generate_copywriting(req: GenerateCopywritingRequest):
+    try:
+        try:
+            logger.info(
+                "route generate-copywriting project_id=%s video_path=%s subtitle_path=%s narration_type=%s",
+                req.project_id,
+                req.video_path,
+                req.subtitle_path,
+                (req.narration_type or "")[:50],
+            )
+        except Exception:
+            pass
+        return await generate_copywriting_service.generate_copywriting(
+            project_id=req.project_id,
+            video_path=req.video_path,
+            subtitle_path=req.subtitle_path,
+            narration_type=req.narration_type,
+        )
+    except HTTPException as e:
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": str(getattr(e, "detail", "")) or "文案生成失败",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        projects_store.update_project(req.project_id, {"status": "failed"})
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "error",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "phase": "failed",
+                "message": f"文案生成失败: {str(e)}",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"文案生成失败: {str(e)}")
+
+
 @router.post("/{project_id}/extract-subtitle")
 async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
     try:
-        data = await extract_subtitle_service.extract_subtitle(project_id=project_id, force=bool(req.force))
+        data = await extract_subtitle_service.extract_subtitle(
+            project_id=project_id,
+            force=bool(req.force),
+            task_id=req.task_id,
+            asr_provider=req.asr_provider,
+            asr_model_key=req.asr_model_key,
+            asr_language=req.asr_language,
+            itn=bool(getattr(req, "itn", True)),
+            hotwords=req.hotwords,
+        )
         return {
             "message": "字幕提取成功",
             "data": data,
@@ -569,10 +670,75 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
         raise
     except Exception as e:
         try:
-            projects_store.update_project(project_id, {"subtitle_status": "failed"})
+            p = projects_store.get_project(project_id)
+            cur = getattr(p, "subtitle_extract_run_id", None) if p else None
+            if not req.task_id or (cur and cur == req.task_id):
+                projects_store.update_project(project_id, {"subtitle_status": "failed"})
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"字幕提取失败: {str(e)}")
+
+
+@router.post("/{project_id}/extract-scene")
+async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(default=ExtractSubtitleRequest())):
+    # 复用 ExtractSubtitleRequest 里的 force 和 task_id
+    try:
+        data = await extract_scene_service.extract_scenes(
+            project_id=project_id,
+            force=bool(req.force),
+            task_id=req.task_id,
+            analyze_vision=bool(req.analyzeVision),
+            vision_mode=req.visionMode,
+        )
+        return {
+            "message": "镜头提取任务已提交",
+            "data": data,
+            "timestamp": now_ts(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"镜头提取提交失败: {str(e)}")
+
+
+@router.get("/{project_id}/scenes")
+async def get_project_scenes(project_id: str):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not p.scenes_path:
+        raise HTTPException(status_code=404, detail="镜头数据未生成")
+        
+    # Read the file
+    # scenes_path is web path like /uploads/analyses/...
+    # need to resolve to absolute path
+    abs_path = resolve_abs_path(p.scenes_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="镜头数据文件丢失")
+        
+    import json
+    with open(abs_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        
+    return {
+        "message": "获取成功",
+        "data": data,
+        "timestamp": now_ts()
+    }
+
+
+@router.get("/{project_id}/scene-status/{task_id}")
+async def get_scene_status(project_id: str, task_id: str):
+    # 复用 task_progress_store
+    st = task_progress_store.get_state("extract_scene", project_id, task_id)
+    if not st:
+         raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "message": "获取进度成功",
+        "data": st,
+        "timestamp": now_ts(),
+    }
+
 
 
 @router.get("/{project_id}/subtitle")
@@ -688,13 +854,17 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     if "original_ratio" in updates:
-        try:
-            ratio_val = int(updates.get("original_ratio"))
-        except Exception:
-            raise HTTPException(status_code=400, detail="原片占比必须为整数")
-        if ratio_val < 10 or ratio_val > 90:
-            raise HTTPException(status_code=400, detail="原片占比范围为 10%~90%")
-        updates["original_ratio"] = ratio_val
+        ratio_raw = updates.get("original_ratio")
+        if ratio_raw is None:
+            updates["original_ratio"] = None
+        else:
+            try:
+                ratio_val = int(ratio_raw)
+            except Exception:
+                raise HTTPException(status_code=400, detail="原片占比必须为整数")
+            if ratio_val < 0 or ratio_val > 100:
+                raise HTTPException(status_code=400, detail="原片占比范围为 0%~100%")
+            updates["original_ratio"] = ratio_val
     if "script_language" in updates:
         try:
             lang_raw = (updates.get("script_language") or "").strip().lower()
@@ -804,6 +974,42 @@ async def stream_project_logs(
         "Connection": "keep-alive",
     }
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=headers)
+
+
+@router.get("/{project_id}/video/stream")
+async def stream_project_video(project_id: str, request: Request):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    video_path = p.video_path
+    if not video_path:
+        raise HTTPException(status_code=404, detail="视频未上传")
+        
+    # Resolve path
+    abs_path = resolve_abs_path(video_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+        
+    return _stream_file_range(abs_path, request)
+
+
+@router.get("/{project_id}/merged-video")
+async def stream_project_merged_video(project_id: str, request: Request):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    video_path = p.merged_video_path
+    if not video_path:
+        raise HTTPException(status_code=404, detail="合并视频不存在")
+        
+    # Resolve path
+    abs_path = resolve_abs_path(video_path)
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+        
+    return _stream_file_range(abs_path, request)
 
 
 # ========================= 文件上传 =========================
@@ -1644,6 +1850,10 @@ class SaveScriptRequest(BaseModel):
     script: Dict[str, Any]
 
 
+class SaveCopywritingRequest(BaseModel):
+    copywriting: Dict[str, Any]
+
+
 @router.post("/{project_id}/script")
 async def save_script(project_id: str, req: SaveScriptRequest):
     p = projects_store.get_project(project_id)
@@ -1661,6 +1871,44 @@ async def save_script(project_id: str, req: SaveScriptRequest):
     return {
         "message": "脚本保存成功",
         "data": script,
+        "timestamp": now_ts(),
+    }
+
+
+@router.post("/{project_id}/copywriting")
+async def save_copywriting(project_id: str, req: SaveCopywritingRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    copywriting = req.copywriting
+    if not isinstance(copywriting, dict):
+        raise HTTPException(status_code=400, detail="文案格式错误")
+    if not str(copywriting.get("content", "")).strip():
+        raise HTTPException(status_code=400, detail="文案内容不能为空")
+
+    try:
+        out_dir = uploads_dir() / "analyses"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = out_dir / f"{project_id}_copywriting_{ts}.json"
+        out_path.write_text(
+            json.dumps(copywriting, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        web_path = to_web_path(out_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文案保存失败: {str(e)}")
+
+    p2 = projects_store.update_project(project_id, {
+        "narration_copywriting": copywriting,
+        "narration_copywriting_path": web_path,
+    })
+    if not p2:
+        raise HTTPException(status_code=500, detail="服务器错误")
+
+    return {
+        "message": "文案保存成功",
+        "data": copywriting,
         "timestamp": now_ts(),
     }
 
@@ -1812,6 +2060,7 @@ async def get_project_running_tasks(project_id: str):
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = {
+        "generate_copywriting": task_progress_store.get_latest_running("generate_copywriting", project_id),
         "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
@@ -1830,6 +2079,7 @@ async def get_project_latest_tasks(project_id: str):
         return {
             "message": "项目不存在",
             "data": {
+                "generate_copywriting": None,
                 "generate_script": None,
                 "generate_video": None,
                 "generate_jianying_draft": None,
@@ -1839,6 +2089,7 @@ async def get_project_latest_tasks(project_id: str):
     return {
         "message": "获取任务进度",
         "data": {
+            "generate_copywriting": task_progress_store.get_state("generate_copywriting", project_id),
             "generate_script": task_progress_store.get_state("generate_script", project_id),
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
@@ -1905,7 +2156,7 @@ async def download_output_video_attachment(project_id: str):
 
 
 @router.get("/{project_id}/merged-video")
-async def get_merged_video(project_id: str):
+async def get_merged_video(project_id: str, request: Request):
     """获取已合并视频文件用于播放。如果不存在则返回404。"""
     p = projects_store.get_project(project_id)
     if not p:
@@ -1918,20 +2169,7 @@ async def get_merged_video(project_id: str):
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="合并视频文件不存在")
 
-    filename = abs_path.name
-    # 合并输出目前固定为 mp4
-    headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "Content-Disposition": f"inline; filename=\"{filename}\"",
-    }
-    return FileResponse(
-        path=str(abs_path),
-        filename=filename,
-        media_type="video/mp4",
-        headers=headers,
-    )
+    return _stream_file_range(abs_path, request)
 
 
 # ========================= 剪映草稿生成 =========================

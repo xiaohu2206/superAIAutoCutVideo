@@ -97,8 +97,9 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
    */
   const handleCreateProject = async (data: CreateProjectRequest) => {
     try {
-      await createProject(data);
-      showSuccess("项目创建成功！");
+      const newProject = await createProject(data);
+      message.success("项目创建成功！");
+      onEditProject(newProject.id);
     } catch (err) {
       await showError(err, "创建项目失败");
       throw err;

@@ -55,10 +55,12 @@ from routes.content_model_routes import router as content_model_router
 from routes.project_routes import router as project_router
 from routes.tts_routes import router as tts_router
 from routes.qwen3_tts_routes import router as qwen3_tts_router
+from routes.fun_asr_routes import router as fun_asr_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
 from routes.generate_routes import router as generate_router
 from routes.storage_routes import router as settings_router
+from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import ensure_defaults_migrated, user_data_dir
@@ -79,6 +81,41 @@ try:
     root_logger.addHandler(_fh)
 except Exception:
     pass
+
+
+class _UvicornAccessDenyFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        method = None
+        path = None
+
+        args = getattr(record, "args", None)
+        if isinstance(args, tuple) and len(args) >= 3:
+            try:
+                method = str(args[1]).upper() if args[1] is not None else None
+            except Exception:
+                method = None
+            try:
+                path = str(args[2]) if args[2] is not None else None
+            except Exception:
+                path = None
+        if not path:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = ""
+            m = re.search(r'"([A-Z]+)\s+([^ ]+)\s+HTTP/', msg)
+            if m:
+                method = m.group(1)
+                path = m.group(2)
+
+        if path and "/api/projects/" in path and "/tasks/latest" in path:
+            return False
+        return True
+
+
+_access_logger = logging.getLogger("uvicorn.access")
+if not any(isinstance(f, _UvicornAccessDenyFilter) for f in getattr(_access_logger, "filters", []) or []):
+    _access_logger.addFilter(_UvicornAccessDenyFilter())
 
 _single_instance_lock_handle = None
 
@@ -323,10 +360,12 @@ app.include_router(content_model_router)
 app.include_router(project_router)
 app.include_router(tts_router)
 app.include_router(qwen3_tts_router)
+app.include_router(fun_asr_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
 app.include_router(generate_router)
 app.include_router(settings_router)
+app.include_router(moondream_router)
 
 
 @app.exception_handler(HTTPException)
