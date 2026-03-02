@@ -15,7 +15,11 @@
 Thumbs.db
 desktop.ini
 .vscode/
-
+.build_tmp
+.venv_pack_gpu
+.venv_pack_cpu
+src-tauri/resources/superAutoCutVideoBackend
+src-tauri/resources/superAutoCutVideoBackend/*
 # ========================================
 # Node.js / Frontend
 # ========================================
