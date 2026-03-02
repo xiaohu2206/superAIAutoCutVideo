@@ -1,19 +1,24 @@
 <img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
 
 # SuperAI·AutoCutVideo · AI智能视频剪辑
-轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，目前只支持通过字幕自动剪辑。（免费）
-
+- 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，支持通过字幕、视觉分析自动剪辑。（免费）
+- 2026-03-02视觉推理代码已经更新（v1.2.0版本
+<img src="docs/image/支持视觉推理.png" alt="支持视觉推理" width="300" />
 
 ## 软件版本
-- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/tag/v1.0.4">SuperAI-v1.0.4</a>
-- <a href="https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc?from=from_copylink">GPU版下载</a>
+- 难产中。。。
 
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
 <img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
+
+
 ## 亮点特性
+- 2026-03-02: 视觉推理视频功能（moondream分析帧）
+- 2026-02-20: 本地ASR识别字幕
 - 2026-02-09: Qwen-tts配音、添加手动剪辑片头片尾
+- 2026-01-22：edge-tts支持英文、错误日志、可配置（生成脚本条数、解说和原片的占比、生成脚本语言
 - 2026-01-14: 打包成 Windows 版本
 - 2026-01-07：支持导出为剪映草稿
 - 2025-12-14：添加电影解说控制输出篇幅（短篇、中篇、长偏 - 高级配置）
@@ -27,16 +32,19 @@
 - 多项目管理：支持创建、切换与独立配置
 
 
-### 添加功能
-1. 2026-01-22：edge-tts支持英文、错误日志
-2. 2026-01-22：可配置（生成脚本条数、解说和原片的占比、生成脚本语言
-
+## 小功能
+1. 生成视频支持停止生成
+2. 添加解说文案
 
 ## 联系方式
 <img src="docs/image/weixinqun.png" alt="微信码" width="300" />
-- 微信群
 
+- 微信群
+  
+- <a href="https://space.bilibili.com/277405631?spm_id_from=333.1007.0.0" target="_blank">哔哩哔哩空间</a>
+  
 <img src="docs/image/douyin.png" alt="抖音码" width="160" />
+
 - 抖音号：`xiaohu_111`
 
 - 微信号：`interest_dog`
@@ -45,24 +53,19 @@
 
 
 ### 解决问题
-1. 对uploads的垃圾数据进行清理
-2. 缓存目录uploads更新无效的问题
-3. 打开应用启动了两个后端服务，导致更改uploads目录失败问题
-4. 添加可以看到解析的字幕
-5. 添加生成时间
-6. 有时候生成的脚本不更新，一直是初次生成的脚本。
-7. edge-tts试音添加loading
-8. PC版本不会保存记录，间隔几个小时，打开需要重新配置
+3. 对uploads的垃圾数据进行清理
+4. 缓存目录uploads更新无效的问题
+5. 打开应用启动了两个后端服务，导致更改uploads目录失败问题
+6. 添加可以看到解析的字幕
+7. 添加生成时间
+8. 有时候生成的脚本不更新，一直是初次生成的脚本。
+9. edge-tts试音添加loading
+10. PC版本不会保存记录，间隔几个小时，打开需要重新配置
 等等若干问题....
 
 
 ## 更新计划（持续更新优化中....
-- 本地ASR识别字幕、多类型脚本风格
-- 添加index tts
-- 添加影视解说功能
-- 添加 OCR 识别字幕
-- 添加whisper提取字幕
-- 添加视觉分析视频功能
+- 优化生成效果
 
 ## 文档与支持
 - 打包说明：`docs/打包说明.md`
