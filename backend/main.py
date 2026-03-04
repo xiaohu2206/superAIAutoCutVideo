@@ -145,7 +145,11 @@ def acquire_single_instance_lock() -> None:
 
     scope = _get_runtime_scope()
     lock_path = _get_single_instance_lock_path()
-    f = lock_path.open("a+", encoding="utf-8")
+    try:
+        f = lock_path.open("a+", encoding="utf-8")
+    except PermissionError as e:
+        logger.warning(f"single_instance_lock_open_denied: scope={scope} path={lock_path} err={e}")
+        return
 
     try:
         if os.name == "nt":
@@ -164,19 +168,27 @@ def acquire_single_instance_lock() -> None:
             except BlockingIOError:
                 raise RuntimeError(f"后端服务已在 {scope} 环境运行中，无法重复启动")
 
-        f.seek(0)
-        f.truncate()
-        f.write(
-            json.dumps(
-                {
-                    "pid": os.getpid(),
-                    "scope": scope,
-                    "started_at": datetime.now().isoformat(),
-                },
-                ensure_ascii=False,
+        try:
+            f.seek(0)
+            f.truncate()
+            f.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "scope": scope,
+                        "started_at": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                )
             )
-        )
-        f.flush()
+            f.flush()
+        except PermissionError as e:
+            logger.warning(f"single_instance_lock_write_denied: scope={scope} path={lock_path} err={e}")
+            try:
+                f.close()
+            except Exception:
+                pass
+            return
 
         _single_instance_lock_handle = f
     except Exception:

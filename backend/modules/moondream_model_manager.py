@@ -100,8 +100,8 @@ def download_model_snapshot(target_dir: Path, provider: str = "modelscope") -> D
         model_id = "moondream/moondream2-gguf"
         try:
             from modelscope.hub.snapshot_download import snapshot_download as ms_snapshot_download
-        except ImportError:
-            raise RuntimeError("missing_dependency:modelscope")
+        except Exception as e:
+            raise RuntimeError(f"missing_dependency:modelscope:{type(e).__name__}:{e}")
             
         ms_cache_dir = target_dir / ".modelscope_cache"
         ms_cache_dir.mkdir(parents=True, exist_ok=True)

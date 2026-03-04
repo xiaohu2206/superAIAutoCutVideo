@@ -2,6 +2,7 @@ import math
 import os
 import sys
 import time
+import subprocess
 from typing import Callable, Optional
 
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -123,27 +124,52 @@ class TransNetV2:
         start_time: Optional[float] = None,
         duration: Optional[float] = None,
     ):
-        try:
-            import ffmpeg
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError("For `predict_video` function `ffmpeg` needs to be installed in order to extract "
-                                      "individual frames from video file. Install `ffmpeg` command line tool and then "
-                                      "install python wrapper by `pip install ffmpeg-python`.")
-
-        # print("[TransNetV2] Extracting frames from {}".format(video_fn))
         start_ts = time.time()
         
         # We can't easily get progress from ffmpeg stdout capture this way without complex parsing
         # So we report 0-10% for ffmpeg extraction, 10-100% for prediction
         if progress_callback:
             progress_callback(1.0)
-        inp = ffmpeg.input(video_fn, ss=start_time, t=duration) if (start_time is not None or duration is not None) else ffmpeg.input(video_fn)
-        video_stream, err = inp.output(
-            "pipe:", format="rawvideo", pix_fmt="rgb24", s="48x27"
-        ).run(capture_stdout=True, capture_stderr=True)
-        # print("[TransNetV2] Done in {:.2f}s".format(time.time() - start_ts))
 
-        video = np.frombuffer(video_stream, np.uint8).reshape([-1, 27, 48, 3])
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        if start_time is not None:
+            cmd += ["-ss", f"{float(start_time):.6f}"]
+        if duration is not None:
+            cmd += ["-t", f"{float(duration):.6f}"]
+        cmd += [
+            "-i", video_fn,
+            "-an", "-sn", "-dn",
+            "-vf", "scale=48:27",
+            "-pix_fmt", "rgb24",
+            "-f", "rawvideo",
+            "pipe:1",
+        ]
+
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
+
+        try:
+            p = subprocess.Popen(cmd, **kwargs)
+        except FileNotFoundError as exc:
+            raise ModuleNotFoundError("For `predict_video` function `ffmpeg` command line tool must be installed.") from exc
+        out, err = p.communicate()
+        if p.returncode != 0 or not out:
+            msg = (err or b"")[:2000].decode("utf-8", errors="ignore")
+            raise RuntimeError(msg or "ffmpeg_extract_failed")
+
+        video = np.frombuffer(out, np.uint8).reshape([-1, 27, 48, 3])
         
         def wrapped_callback(pct):
             if progress_callback:

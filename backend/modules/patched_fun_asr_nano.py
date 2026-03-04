@@ -7,6 +7,7 @@ import time
 import traceback
 from typing import Union
 from itertools import groupby
+import sys
 
 import soundfile as sf
 import torch
@@ -21,6 +22,34 @@ from funasr.train_utils.device_funcs import force_gatherable, to_device
 from funasr.utils.datadir_writer import DatadirWriter
 from funasr.utils.load_utils import extract_fbank, load_audio_text_image_video
 from transformers import AutoConfig, AutoModelForCausalLM
+
+try:
+    if bool(getattr(sys, "frozen", False)):
+        import inspect
+
+        _orig_getsource = inspect.getsource
+        _orig_getsourcelines = inspect.getsourcelines
+
+        def _sacv_safe_getsourcelines(obj):  # type: ignore[no-untyped-def]
+            try:
+                return _orig_getsourcelines(obj)
+            except OSError as e:
+                if "could not get source code" in str(e):
+                    return ([], 0)
+                raise
+
+        def _sacv_safe_getsource(obj):  # type: ignore[no-untyped-def]
+            try:
+                return _orig_getsource(obj)
+            except OSError as e:
+                if "could not get source code" in str(e):
+                    return ""
+                raise
+
+        inspect.getsourcelines = _sacv_safe_getsourcelines  # type: ignore[assignment]
+        inspect.getsource = _sacv_safe_getsource  # type: ignore[assignment]
+except Exception:
+    pass
 
 # --- Inline CTC (from funasr/models/fun_asr_nano/ctc.py) ---
 class CTC(torch.nn.Module):
@@ -80,7 +109,6 @@ def forced_align(log_probs: torch.Tensor, targets: torch.Tensor, blank: int = 0)
 dtype_map = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 # --- FunASRNano Class (from funasr/models/fun_asr_nano/model.py) ---
-@tables.register("model_classes", "FunASRNano")
 class FunASRNano(nn.Module):
     def __init__(
         self,
@@ -95,6 +123,9 @@ class FunASRNano(nn.Module):
         **kwargs,
     ):
         super().__init__()
+        audio_encoder_conf = audio_encoder_conf or {}
+        audio_adaptor_conf = audio_adaptor_conf or {}
+        llm_conf = llm_conf or {}
 
         # audio encoder
         hub = audio_encoder_conf.get("hub", None)
@@ -130,7 +161,9 @@ class FunASRNano(nn.Module):
         init_param_path = llm_conf.get("init_param_path", None)
         llm_dim = None
 
-        llm_load_kwargs = llm_conf.get("load_kwargs", {})
+        llm_load_kwargs = llm_conf.get("load_kwargs") or {}
+        if not isinstance(llm_load_kwargs, dict):
+            llm_load_kwargs = {}
         config = AutoConfig.from_pretrained(init_param_path)
         model = AutoModelForCausalLM.from_config(config, **llm_load_kwargs)
 
@@ -148,6 +181,48 @@ class FunASRNano(nn.Module):
 
         # adaptor
         adaptor_class = tables.adaptor_classes.get(audio_adaptor)
+        if adaptor_class is None and audio_adaptor:
+            try:
+                import importlib
+                import pkgutil
+                import sys
+
+                import funasr  # type: ignore
+                failed = []
+
+                for modinfo in pkgutil.walk_packages(getattr(funasr, "__path__", None), "funasr."):
+                    name = modinfo.name
+                    low = name.lower()
+                    if "adaptor" not in low and "transformer" not in low:
+                        continue
+                    try:
+                        importlib.import_module(name)
+                    except Exception as e:
+                        if len(failed) < 25:
+                            failed.append(f"{name}:{type(e).__name__}:{e}")
+                    adaptor_class = tables.adaptor_classes.get(audio_adaptor)
+                    if adaptor_class is not None:
+                        break
+                if adaptor_class is None:
+                    try:
+                        logging.getLogger(__name__).warning(
+                            f"FUNASR_ADAPTOR_IMPORT_PROBE_FAILED: adaptor={audio_adaptor} failed_sample={failed[:10]} frozen={bool(getattr(sys,'frozen',False))} meipass={getattr(sys,'_MEIPASS',None)}"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        if adaptor_class is None:
+            try:
+                import sys
+
+                avail = sorted(list((getattr(tables, "adaptor_classes", {}) or {}).keys()))[:120]
+                logging.getLogger(__name__).error(
+                    f"FUNASR_REGISTRY_MISSING_ADAPTOR: adaptor={audio_adaptor} avail_sample={avail} frozen={bool(getattr(sys,'frozen',False))} meipass={getattr(sys,'_MEIPASS',None)}"
+                )
+            except Exception:
+                pass
+            raise RuntimeError(f"missing_dependency:funasr_registry:adaptor:{audio_adaptor}")
         if audio_encoder_output_size > 0:
             audio_adaptor_conf["encoder_dim"] = audio_encoder_output_size
         audio_adaptor_conf["llm_dim"] = (
@@ -179,6 +254,8 @@ class FunASRNano(nn.Module):
             )
             if ctc_tokenizer is not None and ctc_tokenizer_conf is not None:
                 ctc_tokenizer_class = tables.tokenizer_classes.get(ctc_tokenizer)
+                if ctc_tokenizer_class is None:
+                    raise RuntimeError(f"missing_dependency:funasr_registry:tokenizer:{ctc_tokenizer}")
                 ctc_tokenizer = ctc_tokenizer_class(**ctc_tokenizer_conf)
                 self.ctc_tokenizer = ctc_tokenizer
             assert ctc_tokenizer is not None, f"ctc_tokenizer must be set"
@@ -200,6 +277,8 @@ class FunASRNano(nn.Module):
                 self.ctc_decoder.eval()
 
             ctc_conf = kwargs.get("ctc_conf", {})
+            if ctc_conf is None:
+                ctc_conf = {}
             self.blank_id = ctc_conf.get("blank_id", ctc_vocab_size - 1)
             self.ctc_weight = kwargs.get("ctc_weight", 0.3)
             self.ctc = CTC(
@@ -801,3 +880,9 @@ class FunASRNano(nn.Module):
         model, kwargs = AutoModel.build_model(model=model, trust_remote_code=True, **kwargs)
 
         return model, kwargs
+
+try:
+    if "FunASRNano" not in tables.model_classes:
+        tables.model_classes["FunASRNano"] = FunASRNano
+except Exception:
+    pass

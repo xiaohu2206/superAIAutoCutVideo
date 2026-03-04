@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Cpu, Loader, Play, ShieldCheck, RefreshCw } from "lucide-react";
+import { Loader, Play, ShieldCheck, RefreshCw } from "lucide-react";
 import { message } from "@/services/message";
 import { funAsrService } from "../services/funAsrService";
 import { FUN_ASR_MODEL_OPTIONS } from "../constants";

@@ -222,7 +222,7 @@ const App: React.FC = () => {
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">SuperAI</p>
           {!!appVersion && <p className="text-xs text-gray-400 mt-1">v{appVersion}</p>}
-          <p className="text-sm text-gray-500">请不要相信,基于本项目改造的付费版本</p>
+          <p className="text-sm text-gray-500">第一次打开比较慢，预计需要5分钟，请稍等...</p>
         </div>
       </div>
     );

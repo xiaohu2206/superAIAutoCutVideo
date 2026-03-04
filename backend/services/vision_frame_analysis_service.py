@@ -20,6 +20,7 @@ from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def _resolve_moondream_env_n_gpu_layers() -> int:
@@ -418,13 +419,15 @@ class VisionFrameAnalyzer:
             def _try_ffmpeg() -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
                 def run_one(args: List[str]) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]:
                     try:
-                        p = subprocess.run(
-                            args,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            timeout=12,
-                            check=False,
-                        )
+                        kwargs: Dict[str, Any] = {
+                            "stdout": subprocess.PIPE,
+                            "stderr": subprocess.PIPE,
+                            "timeout": 12,
+                            "check": False,
+                        }
+                        if os.name == "nt":
+                            kwargs["creationflags"] = WIN_NO_WINDOW
+                        p = subprocess.run(args, **kwargs)
                         if p.returncode != 0 or not p.stdout:
                             return None, {
                                 "code": "ffmpeg_failed",
