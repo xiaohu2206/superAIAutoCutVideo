@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": [
+      "resources/ffmpeg.exe",
+      "resources/NOTICE-FFmpeg.txt",
+      "resources/superAutoCutVideoBackend.zip"
+    ]
+  }
+}

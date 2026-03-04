@@ -26,7 +26,11 @@
         "languages": ["English"]
       }
     },
-    "resources": []
+    "resources": [
+      "resources/ffmpeg.exe",
+      "resources/NOTICE-FFmpeg.txt",
+      "resources/superAutoCutVideoBackend.zip"
+    ]
   },
   "app": {
     "windows": [

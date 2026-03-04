@@ -21,6 +21,7 @@ desktop.ini
 .venv_gpu
 src-tauri/resources/superAutoCutVideoBackend
 src-tauri/resources/superAutoCutVideoBackend/*
+.sacv_build_tmp
 # ========================================
 # Node.js / Frontend
 # ========================================

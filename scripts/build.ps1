@@ -2,6 +2,7 @@ param(
   [switch]$FullBackend,
   [ValidateSet('cpu','gpu','all')]
   [string]$Variant = 'all',
+  [switch]$GpuEmbedBackendZip,
   [switch]$RecreateBackendVenv,
   [switch]$TauriDebug,
   [switch]$SkipClean,
@@ -21,7 +22,7 @@ function Invoke-ProcessWithHeartbeat(
   [string]$title,
   [int]$heartbeatSeconds = 30
 ) {
-  $p = Start-Process -FilePath $filePath -ArgumentList $argumentList -NoNewWindow -PassThru
+  $p = Start-Process -FilePath $filePath -ArgumentList $argumentList -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
   $start = Get-Date
   $lastBeat = Get-Date
   while (-not $p.HasExited) {
@@ -211,9 +212,7 @@ Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
 $repoRoot = (Get-Location).Path
-$sysDrive = $env:SystemDrive
-if (-not $sysDrive) { $sysDrive = "C:" }
-$tempRoot = Join-Path $sysDrive '.sacv_build_tmp'
+$tempRoot = Join-Path $repoRoot '.sacv_build_tmp'
 New-Item -ItemType Directory -Force $tempRoot | Out-Null
 $buildTemp = Join-Path $tempRoot 'build_temp'
 New-Item -ItemType Directory -Force $buildTemp | Out-Null
@@ -346,20 +345,45 @@ foreach ($variant in $variants) {
 
     Step "Configure pip mirror ($variant)"
     $env:PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
+    $env:SETUPTOOLS_USE_DISTUTILS = "stdlib"
 
     Step "Upgrade pip tooling ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "pip" "setuptools" "wheel" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
+    $pipToolingOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "setuptools" | Out-Null
+      if ($LASTEXITCODE -eq 0) {
+        & $venvPy "-m" "pip" "show" "wheel" | Out-Null
+        if ($LASTEXITCODE -eq 0) { $pipToolingOk = $true }
+      }
+    } catch { $pipToolingOk = $false }
+    if (-not $pipToolingOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pip" "setuptools" "wheel"
+      if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
+    }
 
     Step "Ensure build deps (PyInstaller) ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "pyinstaller" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "pyinstaller install failed (code $LASTEXITCODE)" }
+    $pyinstallerOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "pyinstaller" | Out-Null
+      if ($LASTEXITCODE -eq 0) { $pyinstallerOk = $true }
+    } catch { $pyinstallerOk = $false }
+    if (-not $pyinstallerOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pyinstaller"
+      if ($LASTEXITCODE -ne 0) { throw "pyinstaller install failed (code $LASTEXITCODE)" }
+    }
 
     Step "Sanity-check Python packages (fix backports namespace) ($variant)"
     try { & $venvPy "-m" "pip" "show" "backports" | Out-Null } catch { }
     if ($?) { Step "Uninstall problematic 'backports' package ($variant)" ; & $venvPy "-m" "pip" "uninstall" "-y" "backports" | Out-Null }
     Step "Ensure backports.tarfile present ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "backports.tarfile" | Out-Null
+    $backportsTarOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "backports.tarfile" | Out-Null
+      if ($LASTEXITCODE -eq 0) { $backportsTarOk = $true }
+    } catch { $backportsTarOk = $false }
+    if (-not $backportsTarOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "backports.tarfile"
+    }
 
     if ($FullBackend -and (Test-Path requirements.txt)) {
       Step "Install full dependencies (requirements.txt)"
@@ -538,16 +562,21 @@ foreach ($variant in $variants) {
     $oldCargoTargetDir = $env:CARGO_TARGET_DIR
     $env:CARGO_TARGET_DIR = $variantTargetDir
     if ($TauriDebug) {
-      cargo tauri build --debug
+      cargo tauri build --debug --config tauri.bundle.conf.json
       if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
     } else {
       if ($variant -eq 'gpu') {
-        Step "Build installer (NSIS) ($variant)"
-        cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+        if ($GpuEmbedBackendZip) {
+          Step "Build installer (NSIS, embed backend zip) ($variant)"
+          cargo tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
+        } else {
+          Step "Build installer (NSIS) ($variant)"
+          cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+        }
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
       } else {
         Step "Build installers (NSIS + MSI) ($variant)"
-        cargo tauri build --bundles nsis,msi
+        cargo tauri build --bundles nsis,msi --config tauri.bundle.conf.json
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
       }
     }
@@ -555,7 +584,7 @@ foreach ($variant in $variants) {
   catch {
     if (-not $TauriDebug) {
       Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-      try { cargo tauri build --bundles nsis }
+      try { cargo tauri build --bundles nsis --config tauri.bundle.conf.json }
       catch { Fail "Installer build failed: $($_.Exception.Message)" }
       if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
     } else {
@@ -564,7 +593,7 @@ foreach ($variant in $variants) {
   }
   finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
-  if (-not $TauriDebug -and $variant -eq 'gpu') {
+  if (-not $TauriDebug -and $variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
     Step "Patch NSIS installer (GPU offline zip copy)"
     $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
     Patch-GpuNsisInstaller $installerNsi
@@ -655,7 +684,7 @@ foreach ($variant in $variants) {
     }
   }
 
-  if (-not $TauriDebug -and $variant -eq 'gpu') {
+  if (-not $TauriDebug -and $variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
     $srcZip = Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
     if (Test-Path $srcZip) {
       $dstZip = Join-Path $installersOut 'superAutoCutVideoBackend_gpu.zip'

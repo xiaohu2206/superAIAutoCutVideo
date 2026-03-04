@@ -3,6 +3,7 @@ import json
 import multiprocessing
 import os
 import platform
+import shutil
 import subprocess
 import threading
 import time
@@ -45,6 +46,34 @@ _download_states: Dict[str, Dict[str, Any]] = {}
 _download_lock = asyncio.Lock()
 _download_processes: Dict[str, multiprocessing.Process] = {}
 _download_result_queues: Dict[str, multiprocessing.Queue] = {}
+
+
+def _modelscope_cache_base() -> Path:
+    env = os.environ.get("MODELSCOPE_CACHE")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".cache" / "modelscope"
+
+
+def _clear_modelscope_cache() -> None:
+    base = _modelscope_cache_base()
+    try:
+        target = base / "ast_indexer"
+        if target.exists():
+            shutil.rmtree(target)
+    except Exception:
+        pass
+
+
+def _is_modelscope_cache_error(err: Exception) -> bool:
+    if isinstance(err, json.JSONDecodeError):
+        return True
+    msg = str(err)
+    if "missing_dependency:modelscope" in msg and "Expecting value" in msg:
+        return True
+    if "ast_indexer" in msg and "Expecting value" in msg:
+        return True
+    return False
 
 
 async def _broadcast_download_event(payload: Dict[str, Any]) -> None:
@@ -106,7 +135,15 @@ def _download_worker(key: str, provider: str, target_dir: str, result_queue: mul
     reporter = threading.Thread(target=report_progress, daemon=True)
     reporter.start()
     try:
-        ret = download_model_snapshot(key, provider, Path(target_dir))
+        ret = None
+        try:
+            ret = download_model_snapshot(key, provider, Path(target_dir))
+        except Exception as e:
+            if provider == "modelscope" and _is_modelscope_cache_error(e):
+                _clear_modelscope_cache()
+                ret = download_model_snapshot(key, provider, Path(target_dir))
+            else:
+                raise
         result_queue.put({"type": "result", "ok": True, "data": ret})
     except Exception as e:
         result_queue.put({"type": "result", "ok": False, "error": str(e)})
@@ -536,6 +573,8 @@ async def fun_asr_test(req: FunASRTestRequest) -> Dict[str, Any]:
         ):
             if "model_invalid_or_missing:" in msg:
                 msg = f"{msg}。请先在‘模型管理’下载该模型，或检查本地文件完整性。"
+            if "missing_dependency:funasr_registry:" in msg or "missing_dependency:whisper_tiktoken:" in msg:
+                msg = f"{msg}。打包版通常是注册表依赖未被打包（例如 whisper/tiktoken 或 funasr.tokenizer 子模块），请确认安装依赖并按 backend.spec 重新打包后端。"
             if "unknown_model_key" in msg:
                 raise HTTPException(status_code=404, detail="unknown_model_key")
             raise HTTPException(status_code=503, detail=msg)

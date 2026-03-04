@@ -1,10 +1,10 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
-import { Loader, Play, ShieldCheck, RefreshCw } from "lucide-react";
 import { message } from "@/services/message";
-import { funAsrService } from "../services/funAsrService";
+import { Loader, Play, RefreshCw, ShieldCheck } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { FUN_ASR_MODEL_OPTIONS } from "../constants";
-import type { FunAsrDownloadProvider, FunAsrModelStatus } from "../types";
 import { useFunAsrModels } from "../hooks/useFunAsrModels";
+import { funAsrService } from "../services/funAsrService";
+import type { FunAsrDownloadProvider, FunAsrModelStatus } from "../types";
 import FunAsrModelOptionsList from "./FunAsrModelOptionsList";
 
 const badgeInfo = (st: { existsAll: boolean; validAll: boolean }) => {

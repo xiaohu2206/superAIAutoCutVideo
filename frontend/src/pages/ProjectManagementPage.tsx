@@ -217,7 +217,10 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
       {/* 区块标题：最近项目 + 搜索 + 创建按钮 */}
       <div className="flex items-center justify-between px-1">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900">最近项目</h2>
+        <div className="flex items-baseline space-x-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">最近项目</h2>
+          <span className="text-sm text-gray-500 font-normal">（新版本不对旧数据做兼容）</span>
+        </div>
         <div className="flex items-center space-x-3">
           <input
             type="text"

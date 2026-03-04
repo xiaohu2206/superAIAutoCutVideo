@@ -50,6 +50,8 @@ def prepare_windows_dll_search_paths() -> None:
             expanded.append(root)
             expanded.append(root / "torch" / "lib")
             expanded.append(root / "_internal" / "torch" / "lib")
+            expanded.append(root / "llama_cpp" / "lib")
+            expanded.append(root / "_internal" / "llama_cpp" / "lib")
             expanded.append(root / "Library" / "bin")
             expanded.append(root / "_internal" / "Library" / "bin")
             try:

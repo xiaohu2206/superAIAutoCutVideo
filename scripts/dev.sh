@@ -101,6 +101,7 @@ echo
 echo "请等待应用启动..."
 
 cd src-tauri
+export TAURI_DEV=1
 cargo tauri dev
 
 echo

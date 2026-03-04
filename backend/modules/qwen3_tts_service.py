@@ -541,6 +541,7 @@ def _try_get_windows_junction_alias(target_dir: str) -> Optional[str]:
             ["cmd", "/c", "mklink", "/J", str(link), str(t)],
             capture_output=True,
             text=True,
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
         )
         if r.returncode != 0:
             return None

@@ -37,8 +37,12 @@ hiddenimports = [
     'multipart',
     'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
     'qwen_tts',  # 动态导入的第三方包，确保打包后可用
+    'llama_cpp',
+    'llama_cpp.llama_cpp',
     'torch.distributed',
     'torch.distributed.rpc',
+    'funasr.register',
+    'funasr.register.tables',
 ]
 
 # 轻量收集：避免对 transformers/torch 等超大库做 collect_all() 触发超长扫描
@@ -46,6 +50,8 @@ hiddenimports = [
 _maybe_packages = [
     'cv2',
     'numpy',
+    'pandas',
+    'pkg_resources',
     'uvicorn',
     'fastapi',
     'pydantic',
@@ -57,6 +63,8 @@ _maybe_packages = [
     'funasr',
     'transformers',
     'huggingface_hub',
+    'whisper',
+    'tiktoken',
     'torch',
     'torchvision',
     'torchaudio',
@@ -64,11 +72,23 @@ _maybe_packages = [
 for package in _maybe_packages:
     hiddenimports.append(package)
 
-for package in ['onnxruntime', 'librosa', 'transformers', 'modelscope', 'torch', 'torchvision', 'torchaudio']:
+# 优化收集策略：避免对 torch/transformers 等超大库做全量扫描
+# PyInstaller 已内置 torch hook，通常不需要手动 collect_data_files
+for package in ['onnxruntime', 'librosa', 'modelscope']:
     try:
         datas += collect_data_files(package)
     except Exception as e:
         print(f"Warning: Failed to collect data files for {package}: {e}")
+
+try:
+    if importlib.util.find_spec("pandas") is not None:
+        datas += collect_data_files("pandas")
+        binaries += collect_dynamic_libs("pandas")
+except Exception as e:
+    print(f"Warning: Failed to collect pandas extras: {e}")
+
+# 移除对 torch/torchvision/torchaudio/transformers 的手动收集，依赖内置 hook
+# for package in ['transformers', 'torch', 'torchvision', 'torchaudio']: ...
 
 try:
     _funasr_ok = importlib.util.find_spec("funasr") is not None
@@ -81,11 +101,60 @@ if _funasr_ok:
     except Exception as e:
         print(f"Warning: Failed to collect funasr extras: {e}")
 
-for package in ['onnxruntime', 'torch', 'torchvision', 'torchaudio', 'soundfile']:
+try:
+    _whisper_ok = importlib.util.find_spec("whisper") is not None
+except Exception:
+    _whisper_ok = False
+if _whisper_ok:
+    try:
+        hiddenimports += collect_submodules("whisper")
+        datas += collect_data_files("whisper")
+    except Exception as e:
+        print(f"Warning: Failed to collect whisper extras: {e}")
+
+# 优化：移除对 torch 系列的手动动态库收集，避免 Windows 下扫描数千个 DLL 导致打包挂起
+# PyInstaller 内置 hook 已能很好处理 PyTorch
+for package in ['onnxruntime', 'soundfile', 'tiktoken']:
     try:
         binaries += collect_dynamic_libs(package)
     except Exception as e:
         print(f"Warning: Failed to collect dynamic libs for {package}: {e}")
+
+try:
+    _modelscope_ok = importlib.util.find_spec("modelscope") is not None
+except Exception:
+    _modelscope_ok = False
+if _modelscope_ok:
+    try:
+        hiddenimports += [
+            "modelscope",
+            "modelscope.hub",
+            "modelscope.hub.snapshot_download",
+            "modelscope.hub.api",
+            "modelscope.hub.errors",
+            "modelscope.hub.file_download",
+            "modelscope.hub.utils",
+            "modelscope.utils",
+            "modelscope.utils.constant",
+            "modelscope.utils.config",
+            "modelscope.utils.file_utils",
+            "modelscope.utils.import_utils",
+            "modelscope.utils.logger",
+            "modelscope.utils.device",
+            "modelscope.utils.hf_util",
+        ]
+        datas += collect_data_files("modelscope", includes=["**/*.json", "**/*.yaml", "**/*.yml"])
+    except Exception as e:
+        print(f"Warning: Failed to collect modelscope extras: {e}")
+
+try:
+    if importlib.util.find_spec("llama_cpp") is not None:
+        _d, _b, _h = collect_all("llama_cpp")
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+except Exception as e:
+    print(f"Warning: Failed to collect llama_cpp extras: {e}")
 
 def _is_importable(mod_name: str) -> bool:
     try:
@@ -101,6 +170,18 @@ _exclude_hidden_prefixes = [
 _filtered_hidden = []
 for _m in hiddenimports:
     if any(_m.startswith(p) for p in _exclude_hidden_prefixes):
+        continue
+    if _m == "funasr" or _m.startswith("funasr."):
+        _filtered_hidden.append(_m)
+        continue
+    if _m == "modelscope" or _m.startswith("modelscope."):
+        _filtered_hidden.append(_m)
+        continue
+    if _m == "whisper" or _m.startswith("whisper."):
+        _filtered_hidden.append(_m)
+        continue
+    if _m == "tiktoken" or _m.startswith("tiktoken."):
+        _filtered_hidden.append(_m)
         continue
     if _is_importable(_m):
         _filtered_hidden.append(_m)
@@ -118,7 +199,6 @@ a = Analysis(
     excludes=[
         'transformers.kernels.falcon_mamba',
         'mamba_ssm',
-        'pandas',
         'sklearn',
         'torch.utils.tensorboard',
     ],
