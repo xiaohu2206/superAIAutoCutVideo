@@ -275,7 +275,10 @@ class VideoProcessor:
                         project_id=project_id,
                         task_id=task_id,
                         cancel_event=cancel_event,
+<<<<<<< HEAD
                         force_reencode=force_reencode,
+=======
+>>>>>>> 040e1a1 (feat(build): 添加 ffprobe 到资源并改进路径处理与视频拼接)
                     )
                     return ok_final
                 finally:
