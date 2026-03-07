@@ -19,6 +19,7 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.task_cancel_store import task_cancel_store
+from modules.app_paths import normalize_path_str
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,14 @@ def _backend_root_dir() -> Path:
 
 
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     (up / "jianying_drafts").mkdir(parents=True, exist_ok=True)
     return up
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     try:
         rel = p.relative_to(up)
@@ -61,7 +62,7 @@ def _resolve_path(path_or_web: str) -> Path:
         return Path("")
     s_norm = path_str.replace("\\", "/")
     if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
+        env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
         rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
         candidates: List[Path] = []
         try:

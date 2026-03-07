@@ -75,6 +75,10 @@ function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinatio
   for ($i = 1; $i -le $retries; $i++) {
     try {
       if (Test-Path $destinationPath) { Microsoft.PowerShell.Management\Remove-Item $destinationPath -Force -ErrorAction SilentlyContinue }
+      $destParent = Split-Path -Parent $destinationPath
+      if ($destParent -and (-not (Test-Path $destParent))) {
+        New-Item -ItemType Directory -Force $destParent | Out-Null
+      }
       $base = (Resolve-Path $sourceDir).Path
       $baseTrim = $base.TrimEnd('\')
       $baseLen = $baseTrim.Length + 1
@@ -107,10 +111,13 @@ function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinatio
 }
 
 function Ensure-FFmpegInTauriResources([string]$venvPy) {
-  $resDir = Join-Path (Get-Location).Path "src-tauri\\resources"
+  $baseRoot = $script:rootDir
+  if (-not $baseRoot) { $baseRoot = (Get-Location).Path }
+  $resDir = Join-Path $baseRoot "src-tauri\\resources"
   New-Item -ItemType Directory -Force $resDir | Out-Null
   $ffmpegOut = Join-Path $resDir "ffmpeg.exe"
-  if (Test-Path $ffmpegOut) { return }
+  $ffprobeOut = Join-Path $resDir "ffprobe.exe"
+  if ((Test-Path $ffmpegOut) -and (Test-Path $ffprobeOut)) { return }
 
   try {
     if ($venvPy -and (Test-Path $venvPy)) {
@@ -118,8 +125,16 @@ function Ensure-FFmpegInTauriResources([string]$venvPy) {
       if ($p) {
         $pp = $p.Trim()
         if ($pp -and (Test-Path $pp)) {
-          Microsoft.PowerShell.Management\Copy-Item -Force $pp $ffmpegOut
-          return
+          try {
+            Microsoft.PowerShell.Management\Copy-Item -Force $pp $ffmpegOut
+          } catch { }
+          try {
+            $ffprobeFromImageio = Join-Path (Split-Path -Parent $pp) "ffprobe.exe"
+            if (-not (Test-Path $ffprobeOut) -and (Test-Path $ffprobeFromImageio)) {
+              Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeFromImageio $ffprobeOut
+            }
+          } catch { }
+          if ((Test-Path $ffmpegOut) -and (Test-Path $ffprobeOut)) { return }
         }
       }
     }
@@ -127,15 +142,23 @@ function Ensure-FFmpegInTauriResources([string]$venvPy) {
 
   try {
     $ffmpegExe = Get-ChildItem "C:\\ProgramData\\chocolatey\\lib\\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ffprobeExe = Get-ChildItem "C:\\ProgramData\\chocolatey\\lib\\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $ffmpegExe) {
       $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
       if ($cmd) { $ffmpegExe = Get-Item $cmd.Path }
     }
-    if ($ffmpegExe) {
-      Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName $ffmpegOut
-      return
+    if (-not $ffprobeExe) {
+      $cmdp = Get-Command ffprobe -ErrorAction SilentlyContinue
+      if ($cmdp) { $ffprobeExe = Get-Item $cmdp.Path }
     }
-    Info "FFmpeg not found; please ensure ffmpeg.exe is available."
+    if ($ffmpegExe -and (-not (Test-Path $ffmpegOut))) {
+      try { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName $ffmpegOut } catch { }
+    }
+    if ($ffprobeExe -and (-not (Test-Path $ffprobeOut))) {
+      try { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeExe.FullName $ffprobeOut } catch { }
+    }
+    if (-not (Test-Path $ffmpegOut)) { Info "FFmpeg not found; please ensure ffmpeg.exe is available." }
+    if (-not (Test-Path $ffprobeOut)) { Info "FFprobe not found; please ensure ffprobe.exe is available." }
   } catch { }
 }
 
@@ -313,7 +336,11 @@ $variants = if ($Variant -eq 'all') { @('cpu','gpu') } else { @($Variant) }
 $cfg = Microsoft.PowerShell.Management\Get-Content -Raw 'src-tauri\\tauri.conf.json' | ConvertFrom-Json
 $productName = $cfg.productName
 $version = $cfg.version
-$artifactBase = if ($TauriDebug) { 'src-tauri\\target\\debug\\dist' } else { 'src-tauri\\target\\release\\dist' }
+$artifactBase = if ($TauriDebug) {
+  Join-Path $rootDir 'src-tauri\\target\\debug\\dist'
+} else {
+  Join-Path $rootDir 'src-tauri\\target\\release\\dist'
+}
 New-Item -ItemType Directory -Force $artifactBase | Out-Null
 
 foreach ($variant in $variants) {
@@ -532,15 +559,19 @@ foreach ($variant in $variants) {
   finally { Pop-Location }
 
   Step "Copy backend executable to Tauri resources ($variant)"
-  New-Item -ItemType Directory -Force src-tauri\\resources | Out-Null
-  if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend') {
-    Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend' -Recurse -Force -ErrorAction SilentlyContinue
+  $tauriResDir = Join-Path $rootDir 'src-tauri\\resources'
+  $backendDistDir = Join-Path $rootDir 'backend\\dist\\superAutoCutVideoBackend'
+  $backendResDir = Join-Path $tauriResDir 'superAutoCutVideoBackend'
+  $backendResZip = Join-Path $tauriResDir 'superAutoCutVideoBackend.zip'
+  New-Item -ItemType Directory -Force $tauriResDir | Out-Null
+  if (Test-Path $backendResDir) {
+    Microsoft.PowerShell.Management\Remove-Item $backendResDir -Recurse -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.zip') {
-    Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.zip' -Force -ErrorAction SilentlyContinue
+  if (Test-Path $backendResZip) {
+    Microsoft.PowerShell.Management\Remove-Item $backendResZip -Force -ErrorAction SilentlyContinue
   }
-  Microsoft.PowerShell.Management\Copy-Item -Recurse -Force 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend'
-  Invoke-CompressArchiveWithRetry 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
+  Microsoft.PowerShell.Management\Copy-Item -Recurse -Force $backendDistDir $backendResDir
+  Invoke-CompressArchiveWithRetry $backendDistDir $backendResZip
   try { Ensure-FFmpegInTauriResources $venvPy } catch { Info "Skip FFmpeg prepare: $($_.Exception.Message)" }
  
 
