@@ -63,7 +63,7 @@ from routes.storage_routes import router as settings_router
 from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import ensure_defaults_migrated, user_data_dir
+from modules.app_paths import ensure_defaults_migrated, user_data_dir, normalize_path_str, windows_local_appdata_dir
 from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
@@ -460,7 +460,7 @@ def get_app_paths():
         if not service_data_dir.exists():
             service_data_dir = base_path / "serviceData"
         if sys.platform == "win32":
-            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+            base_data = windows_local_appdata_dir()
         elif sys.platform == "darwin":
             base_data = Path.home() / "Library" / "Application Support"
         else:
@@ -468,7 +468,7 @@ def get_app_paths():
         settings_dir = base_data / "SuperAutoCutVideo" / "config"
         settings_file = settings_dir / "app_settings.json"
         uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
-        install_dir_raw = str(os.environ.get("SACV_INSTALL_DIR") or "").strip()
+        install_dir_raw = normalize_path_str(os.environ.get("SACV_INSTALL_DIR") or "")
         if install_dir_raw:
             install_dir = Path(install_dir_raw).expanduser()
         else:
@@ -478,7 +478,7 @@ def get_app_paths():
             used_default = True
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = str(data.get("uploads_root") or "").strip()
+                cand = normalize_path_str(str(data.get("uploads_root") or ""))
                 if cand:
                     uploads_dir = Path(cand).expanduser()
                     used_default = False
@@ -500,7 +500,7 @@ def get_app_paths():
         service_data_dir = base_path / "serviceData"
         # 在开发环境也读取用户设置文件，保证重启后生效
         if sys.platform == "win32":
-            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+            base_data = windows_local_appdata_dir()
         elif sys.platform == "darwin":
             base_data = Path.home() / "Library" / "Application Support"
         else:
@@ -511,7 +511,7 @@ def get_app_paths():
         try:
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = str(data.get("uploads_root") or "").strip()
+                cand = normalize_path_str(str(data.get("uploads_root") or ""))
                 uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
             else:
                 uploads_dir = uploads_dir_default

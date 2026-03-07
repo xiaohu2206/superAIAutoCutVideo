@@ -15,6 +15,7 @@ from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
+from modules.app_paths import normalize_path_str
 
 
 def _now_ts() -> str:
@@ -31,14 +32,14 @@ def _backend_root_dir() -> Path:
 
 
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     (up / "jianying_drafts").mkdir(parents=True, exist_ok=True)
     return up
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     rel = p.relative_to(up)
     return "/uploads/" + str(rel).replace("\\", "/")
@@ -51,7 +52,7 @@ def _resolve_path(path_or_web: str) -> Path:
         return Path("")
     s_norm = path_str.replace("\\", "/")
     if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
+        env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
         rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
         candidates: List[Path] = []
         try:
