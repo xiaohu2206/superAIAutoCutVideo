@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { WebSocketMessage } from "../services/clients";
 import { wsClient } from "../services/clients";
 
@@ -26,14 +26,24 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
   const scope = options.scope;
   const projectId = options.projectId;
   const taskId = options.taskId ?? null;
-  const onProgress = options.onProgress;
-  const onLog = options.onLog;
-  const onCompleted = options.onCompleted;
-  const onCancelled = options.onCancelled;
-  const onError = options.onError;
+  const onProgressRef = useRef<UseWsTaskProgressOptions["onProgress"]>(undefined);
+  const onLogRef = useRef<UseWsTaskProgressOptions["onLog"]>(undefined);
+  const onCompletedRef = useRef<UseWsTaskProgressOptions["onCompleted"]>(undefined);
+  const onCancelledRef = useRef<UseWsTaskProgressOptions["onCancelled"]>(undefined);
+  const onErrorRef = useRef<UseWsTaskProgressOptions["onError"]>(undefined);
+  const maxProgressRef = useRef<number>(0);
+  const doneRef = useRef<boolean>(false);
+
+  onProgressRef.current = options.onProgress;
+  onLogRef.current = options.onLog;
+  onCompletedRef.current = options.onCompleted;
+  onCancelledRef.current = options.onCancelled;
+  onErrorRef.current = options.onError;
 
   useEffect(() => {
     if (!projectId) return;
+    maxProgressRef.current = 0;
+    doneRef.current = false;
 
     const handler = (message: WebSocketMessage) => {
       if (
@@ -48,14 +58,23 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
       if (msgScope !== scope || msgProjectId !== projectId) return;
 
       const msgTaskId = (message as any).task_id as string | undefined;
-      if (taskId && msgTaskId && msgTaskId !== taskId) return;
+      if (taskId) {
+        if (!msgTaskId) return;
+        if (msgTaskId !== taskId) return;
+      }
+
+      if (doneRef.current && message.type === "progress") return;
 
       if (typeof message.progress === "number") {
-        onProgress?.(clampPercent(message.progress));
+        const next = clampPercent(message.progress);
+        if (next >= maxProgressRef.current) {
+          maxProgressRef.current = next;
+          onProgressRef.current?.(next);
+        }
       }
 
       const msgText = message.message || "";
-      onLog?.({
+      onLogRef.current?.({
         timestamp: message.timestamp,
         message: msgText,
         phase: (message as any).phase,
@@ -63,13 +82,18 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
       });
 
       if (message.type === "completed") {
-        onCompleted?.(message);
+        doneRef.current = true;
+        maxProgressRef.current = 100;
+        onProgressRef.current?.(100);
+        onCompletedRef.current?.(message);
       }
       if (message.type === "cancelled") {
-        onCancelled?.(message);
+        doneRef.current = true;
+        onCancelledRef.current?.(message);
       }
       if (message.type === "error") {
-        onError?.(message);
+        doneRef.current = true;
+        onErrorRef.current?.(message);
       }
     };
 
@@ -81,10 +105,5 @@ export function useWsTaskProgress(options: UseWsTaskProgressOptions) {
     projectId,
     scope,
     taskId,
-    onProgress,
-    onLog,
-    onCompleted,
-    onCancelled,
-    onError,
   ]);
 }

@@ -89,6 +89,11 @@ class ExtractSceneService:
         project_id: str,
         force: bool = False,
         task_id: Optional[str] = None,
+        asr_provider: Optional[str] = None,
+        asr_model_key: Optional[str] = None,
+        asr_language: Optional[str] = None,
+        itn: bool = True,
+        hotwords: Optional[List[str]] = None,
         analyze_vision: bool = False,
         vision_mode: str = "all",
     ) -> Dict[str, Any]:
@@ -124,7 +129,10 @@ class ExtractSceneService:
             try:
                 # 1. 确保字幕已提取（并行触发）
                 current_p = projects_store.get_project(project_id)
-                if not current_p.subtitle_path:
+                subtitle_source = getattr(current_p, "subtitle_source", None)
+                should_force_subtitle = bool(force) and subtitle_source != "user"
+                should_start_subtitle = (not getattr(current_p, "subtitle_path", None)) or should_force_subtitle
+                if should_start_subtitle:
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,
@@ -133,8 +141,18 @@ class ExtractSceneService:
                         progress=5,
                         message="正在提取字幕（并行执行）...",
                     )
+                    sub_task_id = f"sub_{task_id}"
                     sub_task = asyncio.create_task(
-                        extract_subtitle_service.extract_subtitle(project_id=project_id, force=False)
+                        extract_subtitle_service.extract_subtitle(
+                            project_id=project_id,
+                            force=should_force_subtitle,
+                            task_id=sub_task_id,
+                            asr_provider=asr_provider,
+                            asr_model_key=asr_model_key,
+                            asr_language=asr_language,
+                            itn=itn,
+                            hotwords=hotwords,
+                        )
                     )
 
                 # 2. 开始提取镜头
