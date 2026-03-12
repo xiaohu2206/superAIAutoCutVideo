@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-﻿import React, { useEffect, useMemo, useState } from "react";
-=======
 import React, { useEffect, useMemo, useState } from "react";
->>>>>>> develop-vl
 import { Loader, Play, ShieldCheck, RefreshCw } from "lucide-react";
 import { message } from "@/services/message";
 import { funAsrService } from "../services/funAsrService";
