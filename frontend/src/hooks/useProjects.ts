@@ -719,7 +719,7 @@ export const useProjectDetail = (
     }
   }, [projectId, fetchProject]);
 
-  const extractScenes = useCallback(async (options?: { force?: boolean; task_id?: string | null; analyzeVision?: boolean; visionMode?: string }) => {
+  const extractScenes = useCallback(async (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string }) => {
     if (!project) return;
     setError(null);
     setExtractingScene(true);

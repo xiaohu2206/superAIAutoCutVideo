@@ -1,5 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { FUN_ASR_MLT_LANGUAGES, FUN_ASR_NANO_LANGUAGES } from "@/features/subtitleAsr/constants";
+import { useFunAsrModels } from "@/features/subtitleAsr/hooks/useFunAsrModels";
+import { message } from "@/services/message";
 
 export type SubtitleAsrProvider = "bcut" | "fun_asr";
 
@@ -16,29 +18,85 @@ export type SubtitleAsrSelectorProps = {
 };
 
 export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value, disabled, onChange }) => {
+  const { models, loading } = useFunAsrModels();
+  const lastWarnKeyRef = useRef<string>("");
+
   const provider = value.provider || "bcut";
-  const modelKey = value.modelKey || "fun_asr_nano_2512";
   const isFun = provider === "fun_asr";
+
+  const funModels = useMemo(() => {
+    const order: Record<string, number> = {
+      fun_asr_nano_2512: 1,
+      fun_asr_mlt_nano_2512: 2,
+    };
+    return (models || [])
+      .filter((m) => String(m?.key || "").startsWith("fun_asr_") && Boolean(m.exists) && Boolean(m.valid))
+      .slice()
+      .sort((a, b) => (order[a.key] ?? 999) - (order[b.key] ?? 999) || String(a.key).localeCompare(String(b.key)));
+  }, [models]);
+
+  const resolvedModelKey = useMemo(() => {
+    const cur = String(value.modelKey || "").trim() || "fun_asr_nano_2512";
+    if (!isFun) return cur;
+    if (funModels.some((m) => m.key === cur)) return cur;
+    if (funModels.length > 0) return funModels[0].key;
+    return cur;
+  }, [funModels, isFun, value.modelKey]);
 
   const languageOptions = useMemo(() => {
     if (!isFun) return ["中文"];
-    if (String(modelKey).includes("mlt")) return FUN_ASR_MLT_LANGUAGES.length ? FUN_ASR_MLT_LANGUAGES : ["中文"];
+    const meta = funModels.find((m) => m.key === resolvedModelKey);
+    const fromMeta = (meta?.languages || []).filter((x) => String(x || "").trim());
+    if (fromMeta.length) return fromMeta;
+    if (String(resolvedModelKey).includes("mlt")) return FUN_ASR_MLT_LANGUAGES.length ? FUN_ASR_MLT_LANGUAGES : ["中文"];
     return FUN_ASR_NANO_LANGUAGES;
-  }, [isFun, modelKey]);
+  }, [funModels, isFun, resolvedModelKey]);
 
   const normalizedLanguage = languageOptions.includes(value.language) ? value.language : languageOptions[0] || "中文";
+
+  const funAsrSelectable = !loading && funModels.length > 0;
+
+  useEffect(() => {
+    if (funModels.length > 0) lastWarnKeyRef.current = "";
+  }, [funModels.length]);
+
+  useEffect(() => {
+    if (provider !== "fun_asr") return;
+    if (loading) return;
+    if (funModels.length > 0) return;
+    if (lastWarnKeyRef.current === "no_fun_models") return;
+    lastWarnKeyRef.current = "no_fun_models";
+    message.warning("未检测到可用 FunASR 模型，已自动切换为内置 API（仅中文）");
+    onChange({ provider: "bcut", modelKey: value.modelKey || "fun_asr_nano_2512", language: "中文" });
+  }, [funModels.length, loading, onChange, provider, value.modelKey]);
+
+  useEffect(() => {
+    if (!isFun) return;
+    if (!funModels.length) return;
+    if (value.modelKey !== resolvedModelKey) {
+      onChange({ provider, modelKey: resolvedModelKey, language: normalizedLanguage });
+    }
+  }, [funModels.length, isFun, normalizedLanguage, onChange, provider, resolvedModelKey, value.modelKey]);
 
   const setProvider = (p: SubtitleAsrProvider) => {
     const next: SubtitleAsrSelectorValue = {
       provider: p,
-      modelKey,
+      modelKey: resolvedModelKey,
       language: p === "bcut" ? "中文" : normalizedLanguage,
     };
     onChange(next);
   };
 
   const setModelKey = (k: string) => {
-    const nextLangs = String(k).includes("mlt") ? (FUN_ASR_MLT_LANGUAGES.length ? FUN_ASR_MLT_LANGUAGES : ["中文"]) : FUN_ASR_NANO_LANGUAGES;
+    const meta = funModels.find((m) => m.key === k);
+    const metaLangs = (meta?.languages || []).filter((x) => String(x || "").trim());
+    const nextLangs = metaLangs.length
+      ? metaLangs
+      : String(k).includes("mlt")
+        ? FUN_ASR_MLT_LANGUAGES.length
+          ? FUN_ASR_MLT_LANGUAGES
+          : ["中文"]
+        : FUN_ASR_NANO_LANGUAGES;
     const next: SubtitleAsrSelectorValue = {
       provider,
       modelKey: k,
@@ -48,7 +106,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
   };
 
   const setLanguage = (lang: string) => {
-    onChange({ provider, modelKey, language: lang });
+    onChange({ provider, modelKey: resolvedModelKey, language: lang });
   };
 
   return (
@@ -63,7 +121,9 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
             className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
           >
             <option value="bcut">内置 API（仅中文）</option>
-            <option value="fun_asr">FunASR（本地模型）</option>
+            <option value="fun_asr" disabled={!funAsrSelectable}>
+              FunASR（本地模型）
+            </option>
           </select>
         </div>
 
@@ -72,14 +132,23 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
             <div>
               <label className="block text-xs text-gray-600 mb-1">模型</label>
               <select
-                value={modelKey}
-                disabled={disabled}
+                value={resolvedModelKey}
+                disabled={disabled || loading || funModels.length === 0}
                 onChange={(e) => setModelKey(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
                 title="选择 FunASR 模型"
               >
-                <option value="fun_asr_nano_2512">Fun-ASR-Nano-2512</option>
-                <option value="fun_asr_mlt_nano_2512">Fun-ASR-MLT-Nano-2512</option>
+                {loading ? (
+                  <option value={resolvedModelKey}>加载模型状态中…</option>
+                ) : funModels.length === 0 ? (
+                  <option value={resolvedModelKey}>暂无可用模型（请先在设置下载并校验）</option>
+                ) : (
+                  funModels.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.display_name || m.key}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -87,7 +156,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
               <label className="block text-xs text-gray-600 mb-1">语言</label>
               <select
                 value={normalizedLanguage}
-                disabled={disabled}
+                disabled={disabled || loading || funModels.length === 0}
                 onChange={(e) => setLanguage(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
                 title="选择识别语言"
@@ -106,11 +175,12 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
       <div className="mt-2 text-[11px] text-gray-600">
         {provider === "bcut"
           ? "内置 API 识别字幕只支持中文。"
-          : "使用 FunASR 需要先在「设置-字幕识别」下载并校验模型。"}
+          : funModels.length === 0
+            ? "未检测到可用 FunASR 模型：请先在「设置-字幕识别」下载并校验模型。"
+            : "使用 FunASR 需要先在「设置-字幕识别」下载并校验模型。"}
       </div>
     </div>
   );
 };
 
 export default SubtitleAsrSelector;
-

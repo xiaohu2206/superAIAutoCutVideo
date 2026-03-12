@@ -16,6 +16,7 @@ from modules.projects_store import projects_store, Project
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.fun_asr_service import fun_asr_service
+from modules.fun_asr_model_manager import FunASRPathManager, validate_model_dir
 from services.asr_bcut import BcutASR
 from services.asr_utils import utterances_to_srt
 
@@ -247,6 +248,29 @@ class ExtractSubtitleService:
             raise HTTPException(status_code=409, detail="已存在提取字幕，若需重提请传 force=true")
 
         run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
+
+        if provider == "fun_asr":
+            try:
+                pm = FunASRPathManager()
+                model_dir = pm.model_path(model_key)
+            except KeyError:
+                await _ws(project_id, "error", "funasr_model_unknown", f"未知 FunASR 模型：{model_key}", task_id=run_id)
+                raise HTTPException(status_code=400, detail=f"未知 FunASR 模型：{model_key}")
+            except Exception as e:
+                await _ws(project_id, "error", "funasr_model_error", f"读取 FunASR 模型信息失败：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="读取 FunASR 模型信息失败")
+
+            ok, missing = validate_model_dir(model_key, model_dir)
+            if not ok:
+                missing_text = "、".join([str(x) for x in (missing or []) if str(x).strip()]) or "文件缺失"
+                await _ws(
+                    project_id,
+                    "error",
+                    "funasr_model_missing",
+                    f"FunASR 模型不可用：{model_key}（{missing_text}），请先在设置下载并校验",
+                    task_id=run_id,
+                )
+                raise HTTPException(status_code=400, detail=f"FunASR 模型不可用：{model_key}（{missing_text}）")
 
         video_path = (getattr(p, "video_path", None) or "").strip()
         if not video_path:

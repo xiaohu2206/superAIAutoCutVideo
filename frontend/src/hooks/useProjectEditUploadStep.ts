@@ -43,7 +43,7 @@ export interface UseProjectEditUploadStepOptions {
   reorderVideos: (videoPaths: string[]) => Promise<void>;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
-  extractScenes: (options?: { force?: boolean; task_id?: string | null; analyzeVision?: boolean; visionMode?: string }) => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string }) => Promise<void>;
   sceneResult: any | null;
   extractingScene: boolean;
   sceneExtractProgress: number;
@@ -490,13 +490,20 @@ export function useProjectEditUploadStep(
         return;
       }
       try {
-        await options.extractScenes({ force: true, ...(opts || {}) });
+        const isFun = subtitleAsr.provider === "fun_asr";
+        await options.extractScenes({
+          force: true,
+          asr_provider: subtitleAsr.provider,
+          asr_model_key: isFun ? subtitleAsr.modelKey : null,
+          asr_language: isFun ? subtitleAsr.language : "中文",
+          ...(opts || {}),
+        });
         options.showSuccess("镜头提取任务已提交");
       } catch (err) {
         options.showError(err, "镜头提取失败");
       }
     },
-    [options]
+    [options, subtitleAsr]
   );
 
   return {
