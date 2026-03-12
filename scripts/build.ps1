@@ -2,6 +2,7 @@ param(
   [switch]$FullBackend,
   [ValidateSet('cpu','gpu','all')]
   [string]$Variant = 'all',
+  [switch]$GpuEmbedBackendZip,
   [switch]$RecreateBackendVenv,
   [switch]$TauriDebug,
   [switch]$SkipClean,
@@ -21,7 +22,7 @@ function Invoke-ProcessWithHeartbeat(
   [string]$title,
   [int]$heartbeatSeconds = 30
 ) {
-  $p = Start-Process -FilePath $filePath -ArgumentList $argumentList -NoNewWindow -PassThru
+  $p = Start-Process -FilePath $filePath -ArgumentList $argumentList -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
   $start = Get-Date
   $lastBeat = Get-Date
   while (-not $p.HasExited) {
@@ -74,6 +75,10 @@ function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinatio
   for ($i = 1; $i -le $retries; $i++) {
     try {
       if (Test-Path $destinationPath) { Microsoft.PowerShell.Management\Remove-Item $destinationPath -Force -ErrorAction SilentlyContinue }
+      $destParent = Split-Path -Parent $destinationPath
+      if ($destParent -and (-not (Test-Path $destParent))) {
+        New-Item -ItemType Directory -Force $destParent | Out-Null
+      }
       $base = (Resolve-Path $sourceDir).Path
       $baseTrim = $base.TrimEnd('\')
       $baseLen = $baseTrim.Length + 1
@@ -106,10 +111,13 @@ function Invoke-CompressArchiveWithRetry([string]$sourceDir, [string]$destinatio
 }
 
 function Ensure-FFmpegInTauriResources([string]$venvPy) {
-  $resDir = Join-Path (Get-Location).Path "src-tauri\\resources"
+  $baseRoot = $script:rootDir
+  if (-not $baseRoot) { $baseRoot = (Get-Location).Path }
+  $resDir = Join-Path $baseRoot "src-tauri\\resources"
   New-Item -ItemType Directory -Force $resDir | Out-Null
   $ffmpegOut = Join-Path $resDir "ffmpeg.exe"
-  if (Test-Path $ffmpegOut) { return }
+  $ffprobeOut = Join-Path $resDir "ffprobe.exe"
+  if ((Test-Path $ffmpegOut) -and (Test-Path $ffprobeOut)) { return }
 
   try {
     if ($venvPy -and (Test-Path $venvPy)) {
@@ -117,8 +125,16 @@ function Ensure-FFmpegInTauriResources([string]$venvPy) {
       if ($p) {
         $pp = $p.Trim()
         if ($pp -and (Test-Path $pp)) {
-          Microsoft.PowerShell.Management\Copy-Item -Force $pp $ffmpegOut
-          return
+          try {
+            Microsoft.PowerShell.Management\Copy-Item -Force $pp $ffmpegOut
+          } catch { }
+          try {
+            $ffprobeFromImageio = Join-Path (Split-Path -Parent $pp) "ffprobe.exe"
+            if (-not (Test-Path $ffprobeOut) -and (Test-Path $ffprobeFromImageio)) {
+              Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeFromImageio $ffprobeOut
+            }
+          } catch { }
+          if ((Test-Path $ffmpegOut) -and (Test-Path $ffprobeOut)) { return }
         }
       }
     }
@@ -126,15 +142,23 @@ function Ensure-FFmpegInTauriResources([string]$venvPy) {
 
   try {
     $ffmpegExe = Get-ChildItem "C:\\ProgramData\\chocolatey\\lib\\ffmpeg*" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ffprobeExe = Get-ChildItem "C:\\ProgramData\\chocolatey\\lib\\ffmpeg*" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $ffmpegExe) {
       $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
       if ($cmd) { $ffmpegExe = Get-Item $cmd.Path }
     }
-    if ($ffmpegExe) {
-      Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName $ffmpegOut
-      return
+    if (-not $ffprobeExe) {
+      $cmdp = Get-Command ffprobe -ErrorAction SilentlyContinue
+      if ($cmdp) { $ffprobeExe = Get-Item $cmdp.Path }
     }
-    Info "FFmpeg not found; please ensure ffmpeg.exe is available."
+    if ($ffmpegExe -and (-not (Test-Path $ffmpegOut))) {
+      try { Microsoft.PowerShell.Management\Copy-Item -Force $ffmpegExe.FullName $ffmpegOut } catch { }
+    }
+    if ($ffprobeExe -and (-not (Test-Path $ffprobeOut))) {
+      try { Microsoft.PowerShell.Management\Copy-Item -Force $ffprobeExe.FullName $ffprobeOut } catch { }
+    }
+    if (-not (Test-Path $ffmpegOut)) { Info "FFmpeg not found; please ensure ffmpeg.exe is available." }
+    if (-not (Test-Path $ffprobeOut)) { Info "FFprobe not found; please ensure ffprobe.exe is available." }
   } catch { }
 }
 
@@ -211,9 +235,7 @@ Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
 $repoRoot = (Get-Location).Path
-$sysDrive = $env:SystemDrive
-if (-not $sysDrive) { $sysDrive = "C:" }
-$tempRoot = Join-Path $sysDrive '.sacv_build_tmp'
+$tempRoot = Join-Path $repoRoot '.sacv_build_tmp'
 New-Item -ItemType Directory -Force $tempRoot | Out-Null
 $buildTemp = Join-Path $tempRoot 'build_temp'
 New-Item -ItemType Directory -Force $buildTemp | Out-Null
@@ -314,7 +336,11 @@ $variants = if ($Variant -eq 'all') { @('cpu','gpu') } else { @($Variant) }
 $cfg = Microsoft.PowerShell.Management\Get-Content -Raw 'src-tauri\\tauri.conf.json' | ConvertFrom-Json
 $productName = $cfg.productName
 $version = $cfg.version
-$artifactBase = if ($TauriDebug) { 'src-tauri\\target\\debug\\dist' } else { 'src-tauri\\target\\release\\dist' }
+$artifactBase = if ($TauriDebug) {
+  Join-Path $rootDir 'src-tauri\\target\\debug\\dist'
+} else {
+  Join-Path $rootDir 'src-tauri\\target\\release\\dist'
+}
 New-Item -ItemType Directory -Force $artifactBase | Out-Null
 
 foreach ($variant in $variants) {
@@ -346,20 +372,45 @@ foreach ($variant in $variants) {
 
     Step "Configure pip mirror ($variant)"
     $env:PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
+    $env:SETUPTOOLS_USE_DISTUTILS = "stdlib"
 
     Step "Upgrade pip tooling ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "pip" "setuptools" "wheel" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
+    $pipToolingOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "setuptools" | Out-Null
+      if ($LASTEXITCODE -eq 0) {
+        & $venvPy "-m" "pip" "show" "wheel" | Out-Null
+        if ($LASTEXITCODE -eq 0) { $pipToolingOk = $true }
+      }
+    } catch { $pipToolingOk = $false }
+    if (-not $pipToolingOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pip" "setuptools" "wheel"
+      if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
+    }
 
     Step "Ensure build deps (PyInstaller) ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "pyinstaller" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "pyinstaller install failed (code $LASTEXITCODE)" }
+    $pyinstallerOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "pyinstaller" | Out-Null
+      if ($LASTEXITCODE -eq 0) { $pyinstallerOk = $true }
+    } catch { $pyinstallerOk = $false }
+    if (-not $pyinstallerOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pyinstaller"
+      if ($LASTEXITCODE -ne 0) { throw "pyinstaller install failed (code $LASTEXITCODE)" }
+    }
 
     Step "Sanity-check Python packages (fix backports namespace) ($variant)"
     try { & $venvPy "-m" "pip" "show" "backports" | Out-Null } catch { }
     if ($?) { Step "Uninstall problematic 'backports' package ($variant)" ; & $venvPy "-m" "pip" "uninstall" "-y" "backports" | Out-Null }
     Step "Ensure backports.tarfile present ($variant)"
-    & $venvPy "-m" "pip" "install" "-U" "backports.tarfile" | Out-Null
+    $backportsTarOk = $false
+    try {
+      & $venvPy "-m" "pip" "show" "backports.tarfile" | Out-Null
+      if ($LASTEXITCODE -eq 0) { $backportsTarOk = $true }
+    } catch { $backportsTarOk = $false }
+    if (-not $backportsTarOk) {
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "backports.tarfile"
+    }
 
     if ($FullBackend -and (Test-Path requirements.txt)) {
       Step "Install full dependencies (requirements.txt)"
@@ -508,15 +559,19 @@ foreach ($variant in $variants) {
   finally { Pop-Location }
 
   Step "Copy backend executable to Tauri resources ($variant)"
-  New-Item -ItemType Directory -Force src-tauri\\resources | Out-Null
-  if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend') {
-    Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend' -Recurse -Force -ErrorAction SilentlyContinue
+  $tauriResDir = Join-Path $rootDir 'src-tauri\\resources'
+  $backendDistDir = Join-Path $rootDir 'backend\\dist\\superAutoCutVideoBackend'
+  $backendResDir = Join-Path $tauriResDir 'superAutoCutVideoBackend'
+  $backendResZip = Join-Path $tauriResDir 'superAutoCutVideoBackend.zip'
+  New-Item -ItemType Directory -Force $tauriResDir | Out-Null
+  if (Test-Path $backendResDir) {
+    Microsoft.PowerShell.Management\Remove-Item $backendResDir -Recurse -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path 'src-tauri\\resources\\superAutoCutVideoBackend.zip') {
-    Microsoft.PowerShell.Management\Remove-Item 'src-tauri\\resources\\superAutoCutVideoBackend.zip' -Force -ErrorAction SilentlyContinue
+  if (Test-Path $backendResZip) {
+    Microsoft.PowerShell.Management\Remove-Item $backendResZip -Force -ErrorAction SilentlyContinue
   }
-  Microsoft.PowerShell.Management\Copy-Item -Recurse -Force 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend'
-  Invoke-CompressArchiveWithRetry 'backend\\dist\\superAutoCutVideoBackend' 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
+  Microsoft.PowerShell.Management\Copy-Item -Recurse -Force $backendDistDir $backendResDir
+  Invoke-CompressArchiveWithRetry $backendDistDir $backendResZip
   try { Ensure-FFmpegInTauriResources $venvPy } catch { Info "Skip FFmpeg prepare: $($_.Exception.Message)" }
  
 
@@ -538,16 +593,21 @@ foreach ($variant in $variants) {
     $oldCargoTargetDir = $env:CARGO_TARGET_DIR
     $env:CARGO_TARGET_DIR = $variantTargetDir
     if ($TauriDebug) {
-      cargo tauri build --debug
+      cargo tauri build --debug --config tauri.bundle.conf.json
       if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
     } else {
       if ($variant -eq 'gpu') {
-        Step "Build installer (NSIS) ($variant)"
-        cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+        if ($GpuEmbedBackendZip) {
+          Step "Build installer (NSIS, embed backend zip) ($variant)"
+          cargo tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
+        } else {
+          Step "Build installer (NSIS) ($variant)"
+          cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+        }
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
       } else {
         Step "Build installers (NSIS + MSI) ($variant)"
-        cargo tauri build --bundles nsis,msi
+        cargo tauri build --bundles nsis,msi --config tauri.bundle.conf.json
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
       }
     }
@@ -555,7 +615,7 @@ foreach ($variant in $variants) {
   catch {
     if (-not $TauriDebug) {
       Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-      try { cargo tauri build --bundles nsis }
+      try { cargo tauri build --bundles nsis --config tauri.bundle.conf.json }
       catch { Fail "Installer build failed: $($_.Exception.Message)" }
       if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
     } else {
@@ -564,7 +624,7 @@ foreach ($variant in $variants) {
   }
   finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
-  if (-not $TauriDebug -and $variant -eq 'gpu') {
+  if (-not $TauriDebug -and $variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
     Step "Patch NSIS installer (GPU offline zip copy)"
     $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
     Patch-GpuNsisInstaller $installerNsi
@@ -655,7 +715,7 @@ foreach ($variant in $variants) {
     }
   }
 
-  if (-not $TauriDebug -and $variant -eq 'gpu') {
+  if (-not $TauriDebug -and $variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
     $srcZip = Join-Path $rootDir 'src-tauri\\resources\\superAutoCutVideoBackend.zip'
     if (Test-Path $srcZip) {
       $dstZip = Join-Path $installersOut 'superAutoCutVideoBackend_gpu.zip'

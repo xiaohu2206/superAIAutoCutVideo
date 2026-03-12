@@ -210,6 +210,65 @@ class VideoProcessor:
                 return False
 
             n = len(inputs)
+
+            async def _concat_in_batches(batch_size: int = 20) -> bool:
+                tmp_dir = Path(output_path).parent
+                token_b = uuid.uuid4().hex[:10]
+                outputs: List[str] = []
+                num_batches = (n + batch_size - 1) // batch_size
+
+                try:
+                    for bi in range(num_batches):
+                        start = bi * batch_size
+                        end = min(start + batch_size, n)
+                        out_i = tmp_dir / f".concat_{token_b}_b{bi}.mp4"
+                        outputs.append(str(out_i))
+
+                        async def _on_batch_progress(pct: float, _bi: int = bi) -> None:
+                            if not on_progress:
+                                return
+                            portion = 90.0 / float(num_batches)
+                            base = float(_bi) * portion
+                            mapped = base + (max(0.0, min(100.0, float(pct))) * (portion / 100.0))
+                            await on_progress(mapped)
+
+                        ok_i = await self.concat_videos(
+                            inputs[start:end],
+                            str(out_i),
+                            _on_batch_progress if on_progress else None,
+                            scope=scope,
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
+                        )
+                        if not ok_i:
+                            return False
+
+                    async def _on_final_progress(pct: float) -> None:
+                        if not on_progress:
+                            return
+                        mapped = 90.0 + (max(0.0, min(100.0, float(pct))) * 0.10)
+                        await on_progress(mapped)
+
+                    ok_final = await self.concat_videos(
+                        outputs,
+                        output_path,
+                        _on_final_progress if on_progress else None,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                    )
+                    return ok_final
+                finally:
+                    for p in outputs:
+                        try:
+                            fp = Path(p)
+                            if fp.exists():
+                                fp.unlink()
+                        except Exception:
+                            pass
+
             if n == 1:
                 src = str(inputs[0])
                 cmd = [
@@ -339,6 +398,7 @@ class VideoProcessor:
                     bsfilter_v = "h264_mp4toannexb" if vcodec0 == "h264" else "hevc_mp4toannexb"
                     tmp_dir = Path(output_path).parent
                     ts_files: List[Path] = []
+                    ts_list_path = tmp_dir / f".concat_{token}.ts.concat.txt"
                     procs = []
                     for idx, p in enumerate(inputs):
                         ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
@@ -381,13 +441,31 @@ class VideoProcessor:
                                 await on_progress(5.0)
                         except Exception:
                             pass
-                        concat_uri = "concat:" + "|".join(
-                            (f.resolve().as_posix() if hasattr(f, "resolve") else f.as_posix())
-                            for f in ts_files
-                        )
+                        try:
+                            lines = []
+                            for f in ts_files:
+                                q = f.as_posix()
+                                lines.append(f"file '{q}'")
+                            ts_list_path.write_text("\n".join(lines), encoding="utf-8")
+                        except Exception:
+                            can_concat_ts = False
+                            for f in ts_files:
+                                try:
+                                    if f.exists():
+                                        f.unlink()
+                                except Exception:
+                                    pass
+                            try:
+                                if ts_list_path.exists():
+                                    ts_list_path.unlink()
+                            except Exception:
+                                pass
+                            raise
+
                         cmd = [
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
-                            "-i", concat_uri,
+                            "-f", "concat", "-safe", "0",
+                            "-i", str(ts_list_path),
                             "-c", "copy",
                         ]
                         if acodec0 == "aac":
@@ -465,6 +543,11 @@ class VideoProcessor:
                                     f.unlink()
                             except Exception:
                                 pass
+                        try:
+                            if ts_list_path.exists():
+                                ts_list_path.unlink()
+                        except Exception:
+                            pass
                         if process.returncode == 0:
                             if on_progress:
                                 try:
@@ -623,12 +706,23 @@ class VideoProcessor:
                 ])
                 self.last_concat_cmd = cmd_try
 
-                process = await asyncio.create_subprocess_exec(
-                    *cmd_try,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
-                )
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd_try,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
+                    )
+                except OSError as e:
+                    winerr = getattr(e, "winerror", None)
+                    if os.name == "nt" and winerr == 206:
+                        try:
+                            if list_path.exists():
+                                list_path.unlink()
+                        except Exception:
+                            pass
+                        return await _concat_in_batches()
+                    raise
                 tracking = self._should_track(scope, project_id, task_id, cancel_event)
                 if tracking:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)

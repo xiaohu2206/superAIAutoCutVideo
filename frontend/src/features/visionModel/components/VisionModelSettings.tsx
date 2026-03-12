@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, ShieldCheck, Play, Loader, FolderOpen, ExternalLink, Download, XCircle, RefreshCw } from "lucide-react";
+import { Eye, ShieldCheck, Play, Loader, FolderOpen, Download, XCircle, RefreshCw, Info } from "lucide-react";
 import { useMoondreamModels } from "../hooks/useMoondreamModels";
 import { moondreamService } from "../services/moondreamService";
 import { message } from "@/services/message";
+import { TauriCommands } from "@/services/clients";
 
 export const VisionModelSettings: React.FC = () => {
     const { modelByKey, loading, validate, openModelDirInExplorer, downloadTask, downloadModel, stopDownload } = useMoondreamModels();
@@ -222,29 +223,31 @@ export const VisionModelSettings: React.FC = () => {
                     )}
                     
                     {!status?.valid && !isDownloading && (
-                         <div className="mt-3 bg-gray-50 border border-gray-100 rounded p-3 text-xs text-gray-600">
-                            <p className="font-medium mb-1">手动安装指引：</p>
-                            <ol className="list-decimal list-inside space-y-1 ml-1">
-                                <li>
-                                    访问模型下载页：
-                                    <a 
-                                        href="https://www.modelscope.cn/models/moondream/moondream2-gguf/files" 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 underline hover:text-blue-800 ml-1 inline-flex items-center"
-                                    >
-                                        ModelScope <ExternalLink className="w-3 h-3 ml-0.5" />
-                                    </a>
-                                </li>
-                                <li>下载所有必需文件（configuration.json, moondream2-mmproj-f16.gguf, moondream2-text-model-f16.gguf, moondream2.preset.json）</li>
-                                <li>点击“目录”按钮打开文件夹，将下载的文件放入其中</li>
-                                <li>点击“校验”按钮确认安装成功</li>
-                            </ol>
+                         <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2">
+                            <Info className="w-5 h-5 flex-shrink-0 text-blue-600" />
+                            <div className="space-y-1">
+                                <p className="font-medium">模型下载说明：</p>
+                                <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
+                                    <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+                                    <li>
+                                        手动下载入口：
+                                        <button 
+                                            onClick={() => TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc")}
+                                            className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900"
+                                            type="button"
+                                        >
+                                            网盘下载
+                                        </button>
+                                    </li>
+                                    <li>下载所有必需文件（configuration.json, moondream2-mmproj-f16.gguf, moondream2-text-model-f16.gguf, moondream2.preset.json）。</li>
+                                    <li>点击“目录”打开文件夹，将下载的文件放入其中；再点击“校验”确认安装成功。</li>
+                                </ul>
                             {status?.missing && status.missing.length > 0 && (
-                                <div className="mt-2 text-red-600">
+                                <div className="mt-2 text-red-600 text-xs">
                                     缺失文件: {status.missing.join(", ")}
                                 </div>
                             )}
+                            </div>
                          </div>
                     )}
                 </div>

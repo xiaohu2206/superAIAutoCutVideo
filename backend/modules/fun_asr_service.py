@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
@@ -15,6 +17,158 @@ from modules.fun_asr_model_manager import FUN_ASR_MODEL_REGISTRY, FunASRPathMana
 
 
 logger = logging.getLogger(__name__)
+WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+_FUNASR_DIAG_LOGGED = False
+
+
+def _json_dumps_safe(obj: Any) -> str:
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:
+        try:
+            return json.dumps(str(obj), ensure_ascii=False)
+        except Exception:
+            return "<json_dump_failed>"
+
+
+def _truncate_str(s: str, limit: int = 4000) -> str:
+    if not isinstance(s, str):
+        s = str(s)
+    if limit <= 0:
+        return ""
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "...(truncated)"
+
+
+def _collect_funasr_diag(expected_adaptor: str = "Transformer") -> Dict[str, Any]:
+    diag: Dict[str, Any] = {
+        "expected_adaptor": expected_adaptor,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "meipass": getattr(sys, "_MEIPASS", None),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+        "cwd": os.getcwd(),
+    }
+
+    try:
+        diag["sys_path_head"] = sys.path[:12]
+    except Exception:
+        pass
+
+    try:
+        import importlib.util
+
+        for mod in ["funasr", "modelscope", "torch", "torchaudio", "transformers", "whisper", "tiktoken"]:
+            try:
+                diag[f"find_spec:{mod}"] = bool(importlib.util.find_spec(mod) is not None)
+            except Exception as e:
+                diag[f"find_spec:{mod}"] = f"error:{type(e).__name__}:{e}"
+    except Exception:
+        pass
+
+    try:
+        import funasr  # type: ignore
+
+        diag["funasr_file"] = getattr(funasr, "__file__", None)
+        diag["funasr_version"] = getattr(funasr, "__version__", None)
+    except Exception as e:
+        diag["funasr_import_error"] = f"{type(e).__name__}:{e}"
+        return diag
+
+    try:
+        from funasr.register import tables  # type: ignore
+
+        adaptor_classes = getattr(tables, "adaptor_classes", {}) or {}
+        encoder_classes = getattr(tables, "encoder_classes", {}) or {}
+        model_classes = getattr(tables, "model_classes", {}) or {}
+        tokenizer_classes = getattr(tables, "tokenizer_classes", {}) or {}
+        diag["tables_sizes"] = {
+            "adaptor_classes": len(adaptor_classes),
+            "encoder_classes": len(encoder_classes),
+            "model_classes": len(model_classes),
+            "tokenizer_classes": len(tokenizer_classes),
+        }
+        diag["adaptor_present"] = bool(expected_adaptor in adaptor_classes)
+        try:
+            diag["adaptor_sample"] = sorted(list(adaptor_classes.keys()))[:80]
+        except Exception:
+            pass
+        try:
+            diag["model_classes_has_FunASRNano"] = bool("FunASRNano" in model_classes)
+        except Exception:
+            pass
+
+        try:
+            import importlib
+            import pkgutil
+
+            imported = 0
+            failed: List[str] = []
+            pkg_path = getattr(funasr, "__path__", None)
+            if pkg_path:
+                for modinfo in pkgutil.walk_packages(pkg_path, "funasr."):
+                    if expected_adaptor in getattr(tables, "adaptor_classes", {}):
+                        break
+                    name = modinfo.name
+                    low = name.lower()
+                    if "adaptor" not in low and "transformer" not in low:
+                        continue
+                    try:
+                        importlib.import_module(name)
+                        imported += 1
+                    except Exception as e:
+                        if len(failed) < 25:
+                            failed.append(f"{name}:{type(e).__name__}:{e}")
+                    if imported >= 300:
+                        break
+            diag["registry_import_probe"] = {
+                "imported": imported,
+                "failed_sample": failed,
+                "adaptor_present_after": bool(expected_adaptor in getattr(tables, "adaptor_classes", {})),
+            }
+        except Exception as e:
+            diag["registry_import_probe_error"] = f"{type(e).__name__}:{e}"
+    except Exception as e:
+        diag["tables_import_error"] = f"{type(e).__name__}:{e}"
+
+    return diag
+
+
+def _patch_inspect_getsource_for_frozen() -> bool:
+    if not bool(getattr(sys, "frozen", False)):
+        return False
+    try:
+        import inspect
+
+        if getattr(inspect.getsource, "__name__", "") == "_sacv_safe_getsource":
+            return True
+
+        _orig_getsource = inspect.getsource
+        _orig_getsourcelines = inspect.getsourcelines
+
+        def _sacv_safe_getsourcelines(obj):  # type: ignore[no-untyped-def]
+            try:
+                return _orig_getsourcelines(obj)
+            except OSError as e:
+                if "could not get source code" in str(e):
+                    return ([], 0)
+                raise
+
+        def _sacv_safe_getsource(obj):  # type: ignore[no-untyped-def]
+            try:
+                return _orig_getsource(obj)
+            except OSError as e:
+                if "could not get source code" in str(e):
+                    return ""
+                raise
+
+        inspect.getsourcelines = _sacv_safe_getsourcelines  # type: ignore[assignment]
+        inspect.getsource = _sacv_safe_getsource  # type: ignore[assignment]
+        return True
+    except Exception:
+        return False
 
 
 def _find_ffmpeg_bin(name: str) -> Optional[str]:
@@ -92,12 +246,134 @@ def _find_ffprobe() -> Optional[str]:
 
 
 def _ensure_dependency_ready() -> Tuple[bool, str]:
+    global _FUNASR_DIAG_LOGGED
+    try:
+        patched = _patch_inspect_getsource_for_frozen()
+        if patched and (bool(os.environ.get("SACV_FORCE_FUNASR_DIAG")) or not _FUNASR_DIAG_LOGGED):
+            logger.warning("FUNASR_INSPECT_PATCHED_FOR_FROZEN:1")
+    except Exception:
+        pass
+    try:
+        prepare_windows_dll_search_paths()
+    except Exception:
+        pass
     try:
         import funasr  # type: ignore
         from funasr.register import tables  # type: ignore
     except Exception as e:
         hint = "请在后端 Python 环境安装 FunASR 依赖（例如：python -m pip install -r backend/requirements.runtime.txt）"
         return False, f"missing_dependency:funasr:{e}。{hint}"
+
+    def _try_populate_registry(expected_adaptor: str) -> None:
+        if expected_adaptor in getattr(tables, "adaptor_classes", {}):
+            return
+        try:
+            import importlib
+            import pkgutil
+
+            def _walk_and_import(pkg_name: str, keywords: List[str], limit: int) -> None:
+                try:
+                    pkg = importlib.import_module(pkg_name)
+                except Exception:
+                    return
+                pkg_path = getattr(pkg, "__path__", None)
+                if not pkg_path:
+                    return
+                imported = 0
+                failed: List[str] = []
+                for modinfo in pkgutil.walk_packages(pkg_path, pkg_name + "."):
+                    if expected_adaptor in getattr(tables, "adaptor_classes", {}):
+                        if failed and (bool(getattr(sys, "frozen", False)) or bool(os.environ.get("SACV_FORCE_FUNASR_DIAG"))):
+                            logger.warning(f"FUNASR_REGISTRY_WALK_FAIL_SAMPLE:{_json_dumps_safe(failed[:10])}")
+                        return
+                    name = modinfo.name
+                    low = name.lower()
+                    if keywords and not any(k in low for k in keywords):
+                        continue
+                    try:
+                        importlib.import_module(name)
+                    except Exception:
+                        if len(failed) < 20:
+                            try:
+                                import traceback as _tb
+
+                                failed.append(f"{name}:err:{_tb.format_exc(limit=1).strip()}")
+                            except Exception:
+                                failed.append(f"{name}:err")
+                    imported += 1
+                    if imported >= limit:
+                        if failed and (bool(getattr(sys, "frozen", False)) or bool(os.environ.get("SACV_FORCE_FUNASR_DIAG"))):
+                            logger.warning(f"FUNASR_REGISTRY_WALK_FAIL_SAMPLE:{_json_dumps_safe(failed[:10])}")
+                        return
+
+            _walk_and_import("funasr.models", ["adaptor", "transformer", "nano"], limit=600)
+            _walk_and_import("funasr.modules", ["adaptor", "transformer"], limit=400)
+            _walk_and_import("funasr.tokenizer", ["token", "spm", "bpe"], limit=200)
+            if expected_adaptor in getattr(tables, "adaptor_classes", {}):
+                return
+            _walk_and_import("funasr.models", [], limit=1200)
+        except Exception:
+            return
+
+    try:
+        import importlib
+        import pkgutil
+
+        missing: List[str] = []
+        for mod in ["whisper", "tiktoken"]:
+            try:
+                importlib.import_module(mod)
+            except Exception as e:
+                missing.append(f"{mod}:{type(e).__name__}:{e}")
+        if missing:
+            hint = "请安装 openai-whisper 与 tiktoken，并确保打包时被正确收集（PyInstaller 需包含 whisper/tiktoken 与 funasr.tokenizer 子模块）。"
+            return False, f"missing_dependency:whisper_tiktoken:{'|'.join(missing)}。{hint}"
+
+        _manual_imports = [
+            "funasr.models.transformer",
+            "funasr.models.conformer",
+            "funasr.models.paraformer",
+            "funasr.models.campplus",
+            "funasr.models.fsmn",
+            "funasr.models.sense_voice",
+            "funasr.models.bicif_paraformer",
+        ]
+        manual_fail: List[str] = []
+        for m in _manual_imports:
+            try:
+                importlib.import_module(m)
+            except Exception as e:
+                if len(manual_fail) < 20:
+                    manual_fail.append(f"{m}:{type(e).__name__}:{e}")
+
+        for pkg_name in ["funasr.tokenizer", "funasr.modules", "funasr.models"]:
+            try:
+                pkg = importlib.import_module(pkg_name)
+            except Exception:
+                continue
+            try:
+                pkg_path = getattr(pkg, "__path__", None)
+                if not pkg_path:
+                    continue
+                for modinfo in pkgutil.iter_modules(pkg_path, pkg_name + "."):
+                    try:
+                        importlib.import_module(modinfo.name)
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        if manual_fail and (bool(getattr(sys, "frozen", False)) or bool(os.environ.get("SACV_FORCE_FUNASR_DIAG"))):
+            logger.warning(f"FUNASR_MANUAL_IMPORT_FAIL_SAMPLE:{_json_dumps_safe(manual_fail[:10])}")
+    except Exception:
+        pass
+
+    try:
+        if "Transformer" not in getattr(tables, "adaptor_classes", {}):
+            if bool(getattr(sys, "frozen", False)) or bool(os.environ.get("SACV_FORCE_FUNASR_REGISTRY_PRELOAD")):
+                _try_populate_registry("Transformer")
+    except Exception:
+        pass
 
     # Patch for FunASRNano if missing (often missing in funasr < 1.4)
     # We load our patched version which fixes broken imports in the site-packages version
@@ -107,7 +383,7 @@ def _ensure_dependency_ready() -> Tuple[bool, str]:
             from .patched_fun_asr_nano import FunASRNano  # type: ignore
             logger.info("Registered patched FunASRNano class")
         except Exception as e:
-            logger.warning(f"Failed to register patched FunASRNano: {e}")
+            logger.warning(f"Failed to register patched FunASRNano: {type(e).__name__}:{e}", exc_info=True)
             # Fallback to SenseVoiceSmall if patch fails (though likely incompatible config)
             if "SenseVoiceSmall" in tables.model_classes:
                 try:
@@ -115,6 +391,13 @@ def _ensure_dependency_ready() -> Tuple[bool, str]:
                     logger.info("Fallback: Patched FunASRNano -> SenseVoiceSmall")
                 except Exception:
                     pass
+
+    try:
+        if (bool(getattr(sys, "frozen", False)) or bool(os.environ.get("SACV_FORCE_FUNASR_DIAG"))) and not _FUNASR_DIAG_LOGGED:
+            _FUNASR_DIAG_LOGGED = True
+            logger.warning(f"FUNASR_PACK_DIAG_BOOT:{_json_dumps_safe(_collect_funasr_diag())}")
+    except Exception:
+        pass
 
     return True, ""
 
@@ -141,7 +424,10 @@ def _ffprobe_duration_ms(path: Path) -> Optional[int]:
         str(path),
     ]
     try:
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        kwargs: Dict[str, Any] = {"stderr": subprocess.DEVNULL}
+        if os.name == "nt":
+            kwargs["creationflags"] = WIN_NO_WINDOW
+        out = subprocess.check_output(cmd, **kwargs)
         s = out.decode("utf-8", errors="ignore").strip()
         if not s:
             return None
@@ -166,7 +452,10 @@ def _ffprobe_sample_rate(path: Path) -> Optional[int]:
         str(path),
     ]
     try:
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        kwargs: Dict[str, Any] = {"stderr": subprocess.DEVNULL}
+        if os.name == "nt":
+            kwargs["creationflags"] = WIN_NO_WINDOW
+        out = subprocess.check_output(cmd, **kwargs)
         s = out.decode("utf-8", errors="ignore").strip()
         if not s:
             return None
@@ -203,7 +492,10 @@ def _extract_segment_to_wav(src_audio: Path, start_ms: int, end_ms: int, out_wav
         "pcm_s16le",
         str(out_wav),
     ]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    kwargs2: Dict[str, Any] = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    if os.name == "nt":
+        kwargs2["creationflags"] = WIN_NO_WINDOW
+    proc = subprocess.run(cmd, **kwargs2)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", errors="ignore").strip() or "ffmpeg_extract_failed")
 
@@ -384,13 +676,67 @@ class FunASRService:
             return "cuda:0"
         return d
 
+    def _safe_extract_zip(self, zip_path: Path, dest_dir: Path) -> None:
+        base = dest_dir.resolve()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(str(zip_path), "r") as zf:
+            for info in zf.infolist():
+                name = str(info.filename or "")
+                if not name or name.endswith("/"):
+                    continue
+                name = name.replace("\\", "/")
+                if name.startswith("/") or name.startswith("../") or "/../" in name:
+                    raise RuntimeError(f"unsafe_zip_entry:{name}")
+                target = (dest_dir / name).resolve()
+                try:
+                    target.relative_to(base)
+                except Exception:
+                    raise RuntimeError(f"unsafe_zip_entry:{name}")
+                zf.extract(info, str(dest_dir))
+
+    def _maybe_extract_local_zip(self, key: str, model_dir: Path) -> bool:
+        if model_dir.exists():
+            return False
+        zip_path = model_dir.parent / f"{model_dir.name}.zip"
+        if not zip_path.exists() or not zip_path.is_file():
+            return False
+        try:
+            with zipfile.ZipFile(str(zip_path), "r") as zf:
+                roots = set()
+                for name in zf.namelist():
+                    n = str(name or "").replace("\\", "/")
+                    if not n or n.endswith("/"):
+                        continue
+                    parts = [p for p in n.split("/") if p]
+                    if parts:
+                        roots.add(parts[0])
+                if len(roots) == 1 and next(iter(roots)) == model_dir.name:
+                    self._safe_extract_zip(zip_path, model_dir.parent)
+                else:
+                    self._safe_extract_zip(zip_path, model_dir)
+            return model_dir.exists()
+        except Exception as e:
+            try:
+                logger.warning(f"funasr_zip_extract_failed: key={key} zip={zip_path} err={e}")
+            except Exception:
+                pass
+            return False
+
     def _resolve_model_dir(self, key: str) -> Path:
         pm = FunASRPathManager()
         p = pm.model_path(key)
-        ok, _ = validate_model_dir(key, p)
+        ok, missing = validate_model_dir(key, p)
         if ok:
             return p
-        raise RuntimeError(f"model_invalid_or_missing:{key}|path={p}")
+        if "dir_missing" in missing:
+            extracted = self._maybe_extract_local_zip(key, p)
+            if extracted:
+                ok2, missing2 = validate_model_dir(key, p)
+                if ok2:
+                    return p
+                missing = missing2
+        missing_s = ",".join(missing) if missing else ""
+        raise RuntimeError(f"model_invalid_or_missing:{key}|path={p}|missing={missing_s}")
 
     async def _load_models(self, asr_key: str, device: Optional[str] = None) -> None:
         async with self._load_lock:
@@ -468,12 +814,22 @@ class FunASRService:
                 vad_model = await loop.run_in_executor(None, _load_vad, requested_device)
                 actual_device = requested_device
             except Exception as e:
-                err_load = f"funasr_model_load_failed:{e}"
+                err_load = f"funasr_model_load_failed:{type(e).__name__}:{e}"
+                try:
+                    msg_e = str(e)
+                    if "missing_dependency:funasr_registry:" in msg_e or "could not get source code" in msg_e:
+                        diag = _collect_funasr_diag(expected_adaptor="Transformer")
+                        diag_s = _truncate_str(_json_dumps_safe(diag), 6000)
+                        logging.getLogger("modules.fun_asr_service").warning(f"FUNASR_PACK_DIAG_ON_FAIL:{diag_s}")
+                        err_load = f"{err_load}|diag={diag_s}"
+                except Exception:
+                    pass
                 if requested_device.startswith("cuda") and not explicit_device:
                     cuda_error = err_load
                     try:
                         logging.getLogger("modules.fun_asr_service").warning(
-                            f"FunASR 加载到 {requested_device} 失败，将回退 CPU：{e}"
+                            f"FunASR 加载到 {requested_device} 失败，将回退 CPU：{type(e).__name__}:{e}",
+                            exc_info=True,
                         )
                     except Exception:
                         pass
@@ -482,7 +838,17 @@ class FunASRService:
                         vad_model = await loop.run_in_executor(None, _load_vad, "cpu")
                         actual_device = "cpu"
                     except Exception as e2:
-                        raise RuntimeError(f"funasr_model_load_failed:{e2}")
+                        err2 = f"funasr_model_load_failed:{type(e2).__name__}:{e2}"
+                        try:
+                            msg_e2 = str(e2)
+                            if "missing_dependency:funasr_registry:" in msg_e2 or "could not get source code" in msg_e2:
+                                diag2 = _collect_funasr_diag(expected_adaptor="Transformer")
+                                diag2_s = _truncate_str(_json_dumps_safe(diag2), 6000)
+                                logging.getLogger("modules.fun_asr_service").warning(f"FUNASR_PACK_DIAG_ON_FAIL_CPU:{diag2_s}")
+                                err2 = f"{err2}|diag={diag2_s}"
+                        except Exception:
+                            pass
+                        raise RuntimeError(err2)
                 else:
                     raise RuntimeError(err_load)
 

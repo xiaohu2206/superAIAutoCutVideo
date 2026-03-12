@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SuperAIAutoCutVideo",
-  "version": "1.0.4",
+  "version": "1.2.1",
   "identifier": "com.superautocutvideo.app",
   "build": {
     "devUrl": "http://127.0.0.1:1420/",
@@ -26,11 +26,7 @@
         "languages": ["English"]
       }
     },
-    "resources": [
-      "resources/ffmpeg.exe",
-      "resources/NOTICE-FFmpeg.txt",
-      "resources/superAutoCutVideoBackend.zip"
-    ]
+    "resources": []
   },
   "app": {
     "windows": [

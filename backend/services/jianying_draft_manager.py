@@ -18,7 +18,9 @@ from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
+from modules.audio_normalizer import AudioNormalizer
 from modules.task_cancel_store import task_cancel_store
+from modules.app_paths import normalize_path_str
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +40,14 @@ def _backend_root_dir() -> Path:
 
 
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     (up / "jianying_drafts").mkdir(parents=True, exist_ok=True)
     return up
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     up = Path(env) if env else (_backend_root_dir() / "uploads")
     try:
         rel = p.relative_to(up)
@@ -61,7 +63,7 @@ def _resolve_path(path_or_web: str) -> Path:
         return Path("")
     s_norm = path_str.replace("\\", "/")
     if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
+        env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
         rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
         candidates: List[Path] = []
         try:
@@ -891,212 +893,283 @@ class JianyingDraftManager:
                 "timestamp": _now_ts(),
             })
             total_segments = len(segments)
-            need_tts: List[Dict[str, Any]] = []
-            for idx, seg in enumerate(segments, start=1):
-                st = float(seg.get("start_time") or 0.0)
-                et = float(seg.get("end_time") or 0.0)
-                if et <= st:
-                    continue
-                text = str(seg.get("text") or "").strip()
-                ost_flag = seg.get("OST")
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
-                if not is_original:
-                    need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
+            cfg = tts_engine_config_manager.get_active_config()
+            provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
-            tts_results: Dict[int, Dict[str, Any]] = {}
-            if need_tts:
-                await JianyingDraftManager._broadcast({
-                    "type": "progress",
-                    "scope": JianyingDraftManager.SCOPE,
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "phase": "tts_generate",
-                    "message": f"并发生成配音（{len(need_tts)} 段）",
-                    "progress": 41,
-                    "timestamp": _now_ts(),
-                })
-
-                async def _tts_job(idx: int, text: str, out_path: Path):
+            if provider == "qwen3_tts":
+                audio_norm = AudioNormalizer()
+                for idx, seg in enumerate(segments, start=1):
                     if cancel_event and cancel_event.is_set():
                         raise asyncio.CancelledError()
-                    res = await tts_service.synthesize(text, str(out_path), None)
-                    if not res.get("success"):
-                        raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
-                    return idx, (res if isinstance(res, dict) else {})
+                    st = float(seg.get("start_time") or 0.0)
+                    et = float(seg.get("end_time") or 0.0)
+                    if et <= st:
+                        continue
+                    dur = max(0.0, et - st)
+                    text = str(seg.get("text") or "").strip()
+                    subtitle = str(seg.get("subtitle") or "").strip()
+                    ost_flag = seg.get("OST")
+                    is_original = (ost_flag == 1) or text.startswith("播放原片")
 
-                tasks: List[asyncio.Task] = []
-                for it in need_tts:
-                    tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
-
-                completed = 0
-                try:
-                    for fut in asyncio.as_completed(tasks):
-                        if cancel_event and cancel_event.is_set():
-                            raise asyncio.CancelledError()
-                        try:
-                            idx, r = await fut
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:
-                            for ot in tasks:
-                                if ot is not fut and not ot.done():
-                                    try:
-                                        ot.cancel()
-                                    except Exception:
-                                        pass
-                            raise
-                        tts_results[idx] = r
-                        completed += 1
-                        try:
-                            base = 41
-                            span = 9
-                            prog = base + int((completed / max(1, len(need_tts))) * span)
-                            await JianyingDraftManager._broadcast({
-                                "type": "progress",
-                                "scope": JianyingDraftManager.SCOPE,
-                                "project_id": project_id,
-                                "task_id": task_id,
-                                "phase": "tts_generate_progress",
-                                "message": f"配音生成中 {completed}/{len(need_tts)}",
-                                "progress": min(50, prog),
-                                "timestamp": _now_ts(),
-                            })
-                        except Exception:
-                            pass
-                finally:
-                    for ot in tasks:
-                        if not ot.done():
-                            try:
-                                ot.cancel()
-                            except Exception:
-                                pass
-
-                try:
-                    cfg = tts_engine_config_manager.get_active_config()
-                    provider = (getattr(cfg, "provider", None) or "").lower()
-                    if provider == "qwen3_tts":
-                        total_tts_dur = 0.0
-                        missing = 0
-                        for it in need_tts:
-                            idx = int(it.get("idx") or 0)
-                            r = tts_results.get(idx) or {}
-                            d = _try_parse_float(r.get("duration"))
-                            if d <= 0.0:
-                                try:
-                                    d = _probe_audio_duration(Path(it.get("out"))) or 0.0
-                                except Exception:
-                                    d = 0.0
-                            if d > 0.0:
-                                total_tts_dur += d
-                            else:
-                                missing += 1
-                        logger.info(
-                            "QwenTTS 总配音时长: project_id=%s task_id=%s segments=%s total_duration_s=%.3f missing=%s",
-                            project_id,
-                            task_id,
-                            len(need_tts),
-                            total_tts_dur,
-                            missing,
-                        )
-                except Exception:
-                    pass
-
-            for idx, seg in enumerate(segments, start=1):
-                if cancel_event and cancel_event.is_set():
-                    raise asyncio.CancelledError()
-                st = float(seg.get("start_time") or 0.0)
-                et = float(seg.get("end_time") or 0.0)
-                if et <= st:
-                    continue
-                dur = max(0.0, et - st)
-                text = str(seg.get("text") or "").strip()
-                subtitle = str(seg.get("subtitle") or "").strip()
-                ost_flag = seg.get("OST")
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
-
-                if is_original:
-                    timeline_items.append({
-                        "kind": "original",
-                        "duration_us": _s_to_us(dur),
-                        "source_start_us": _s_to_us(st),
-                        "text": text,
-                        "subtitle": subtitle,
-                        "mute": False,
-                        "overlay_video_path": None,
-                        "overlay_duration_us": 0,
-                    })
-                else:
-                    tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
-                    if cancel_event and cancel_event.is_set():
-                        raise asyncio.CancelledError()
-                    res = tts_results.get(idx)
-                    if not res:
-                        raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
-                    narr_used = tts_out
-                    ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
-                    ok_ov = await _gen_blank_video_with_audio(
-                        int(meta.get("width") or 1920),
-                        int(meta.get("height") or 1080),
-                        float(meta.get("fps") or 30.0),
-                        narr_used,
-                        ov_out,
-                        scope=JianyingDraftManager.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        cancel_event=cancel_event,
-                    )
-                    if not ok_ov:
-                        raise RuntimeError(f"生成叠加视频失败: {idx}")
-                    adur = _try_parse_float(res.get("duration"))
-                    if adur <= 0.0:
-                        adur = _probe_audio_duration(narr_used) or 0.0
-                    if adur <= 0.0:
-                        adur = float((_probe_video_meta(ov_out).get("duration") or 0.0))
-                    if adur <= 0.0:
-                        raise RuntimeError(f"无法获取配音时长: {idx}")
-                    # 对齐视频片段时长到配音
-                    if adur > dur:
-                        ext = adur - dur
-                        fwd = max(0.0, video_dur - et)
-                        if fwd >= ext:
-                            new_start = st
-                            new_dur = dur + ext
-                        else:
-                            shortage = ext - fwd
-                            new_start = max(0.0, st - shortage)
-                            new_dur = max(0.0, video_dur - new_start)
-                    elif (adur + 0.05) < dur:
-                        new_start = st
-                        new_dur = adur
+                    if is_original:
+                        timeline_items.append({
+                            "kind": "original",
+                            "duration_us": _s_to_us(dur),
+                            "source_start_us": _s_to_us(st),
+                            "text": text,
+                            "subtitle": subtitle,
+                            "mute": False,
+                            "overlay_video_path": None,
+                            "overlay_duration_us": 0,
+                        })
                     else:
-                        new_start = st
-                        new_dur = dur
-                    timeline_items.append({
-                        "kind": "original",
-                        "duration_us": _s_to_us(new_dur),
-                        "source_start_us": _s_to_us(new_start),
-                        "text": text,
-                        "subtitle": subtitle,
-                        "mute": True,
-                        "overlay_video_path": str(ov_out),
-                        "overlay_duration_us": _s_to_us(adur),
-                    })
-                try:
-                    base = 50
-                    span = 15
-                    progress = base + int((idx / max(1, total_segments)) * span)
+                        tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
+                        res = await tts_service.synthesize(text, str(tts_out), None)
+                        if not res.get("success"):
+                            raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
+                        try:
+                            adur = float(res.get("duration") or 0.0)
+                        except Exception:
+                            adur = 0.0
+                        if adur <= 0.0:
+                            adur = _probe_audio_duration(tts_out) or 0.0
+                        if adur <= 0.0:
+                            raise RuntimeError(f"无法获取配音时长: {idx}")
+                        norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
+                        ok_norm = await audio_norm.normalize_audio_loudness(str(tts_out), str(norm_out))
+                        narr_used = norm_out if ok_norm else tts_out
+                        ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
+                        ok_ov = await _gen_blank_video_with_audio(
+                            int(meta.get("width") or 1920),
+                            int(meta.get("height") or 1080),
+                            float(meta.get("fps") or 30.0),
+                            narr_used,
+                            ov_out,
+                            scope=JianyingDraftManager.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
+                        )
+                        if not ok_ov:
+                            raise RuntimeError(f"生成叠加视频失败: {idx}")
+                        if adur > dur:
+                            ext = adur - dur
+                            fwd = max(0.0, video_dur - et)
+                            if fwd >= ext:
+                                new_start = st
+                                new_dur = dur + ext
+                            else:
+                                shortage = ext - fwd
+                                new_start = max(0.0, st - shortage)
+                                new_dur = max(0.0, video_dur - new_start)
+                        elif (adur + 0.05) < dur:
+                            new_start = st
+                            new_dur = adur
+                        else:
+                            new_start = st
+                            new_dur = dur
+                        timeline_items.append({
+                            "kind": "original",
+                            "duration_us": _s_to_us(new_dur),
+                            "source_start_us": _s_to_us(new_start),
+                            "text": text,
+                            "subtitle": subtitle,
+                            "mute": True,
+                            "overlay_video_path": str(ov_out),
+                            "overlay_duration_us": _s_to_us(adur),
+                        })
+                    try:
+                        base = 40
+                        span = 25
+                        progress = base + int((idx / max(1, total_segments)) * span)
+                        await JianyingDraftManager._broadcast({
+                            "type": "progress",
+                            "scope": JianyingDraftManager.SCOPE,
+                            "project_id": project_id,
+                            "task_id": task_id,
+                            "phase": "tts_progress",
+                            "message": f"已处理配音 {idx}/{total_segments}",
+                            "progress": min(65, progress),
+                            "timestamp": _now_ts(),
+                        })
+                    except Exception:
+                        pass
+            else:
+                need_tts: List[Dict[str, Any]] = []
+                for idx, seg in enumerate(segments, start=1):
+                    st = float(seg.get("start_time") or 0.0)
+                    et = float(seg.get("end_time") or 0.0)
+                    if et <= st:
+                        continue
+                    text = str(seg.get("text") or "").strip()
+                    ost_flag = seg.get("OST")
+                    is_original = (ost_flag == 1) or text.startswith("播放原片")
+                    if not is_original:
+                        need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
+
+                tts_results: Dict[int, Dict[str, Any]] = {}
+                if need_tts:
                     await JianyingDraftManager._broadcast({
                         "type": "progress",
                         "scope": JianyingDraftManager.SCOPE,
                         "project_id": project_id,
                         "task_id": task_id,
-                        "phase": "tts_progress",
-                        "message": f"已处理配音 {idx}/{total_segments}",
-                        "progress": min(65, progress),
+                        "phase": "tts_generate",
+                        "message": f"并发生成配音（{len(need_tts)} 段）",
+                        "progress": 41,
                         "timestamp": _now_ts(),
                     })
-                except Exception:
-                    pass
+
+                    async def _tts_job(idx: int, text: str, out_path: Path):
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        res = await tts_service.synthesize(text, str(out_path), None)
+                        if not res.get("success"):
+                            raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
+                        return idx, (res if isinstance(res, dict) else {})
+
+                    tasks: List[asyncio.Task] = []
+                    for it in need_tts:
+                        tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
+
+                    completed = 0
+                    try:
+                        for fut in asyncio.as_completed(tasks):
+                            if cancel_event and cancel_event.is_set():
+                                raise asyncio.CancelledError()
+                            try:
+                                idx, r = await fut
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                for ot in tasks:
+                                    if ot is not fut and not ot.done():
+                                        try:
+                                            ot.cancel()
+                                        except Exception:
+                                            pass
+                                raise
+                            tts_results[idx] = r
+                            completed += 1
+                            try:
+                                base = 41
+                                span = 9
+                                prog = base + int((completed / max(1, len(need_tts))) * span)
+                                await JianyingDraftManager._broadcast({
+                                    "type": "progress",
+                                    "scope": JianyingDraftManager.SCOPE,
+                                    "project_id": project_id,
+                                    "task_id": task_id,
+                                    "phase": "tts_generate_progress",
+                                    "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                    "progress": min(50, prog),
+                                    "timestamp": _now_ts(),
+                                })
+                            except Exception:
+                                pass
+                    finally:
+                        for ot in tasks:
+                            if not ot.done():
+                                try:
+                                    ot.cancel()
+                                except Exception:
+                                    pass
+
+                for idx, seg in enumerate(segments, start=1):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    st = float(seg.get("start_time") or 0.0)
+                    et = float(seg.get("end_time") or 0.0)
+                    if et <= st:
+                        continue
+                    dur = max(0.0, et - st)
+                    text = str(seg.get("text") or "").strip()
+                    subtitle = str(seg.get("subtitle") or "").strip()
+                    ost_flag = seg.get("OST")
+                    is_original = (ost_flag == 1) or text.startswith("播放原片")
+
+                    if is_original:
+                        timeline_items.append({
+                            "kind": "original",
+                            "duration_us": _s_to_us(dur),
+                            "source_start_us": _s_to_us(st),
+                            "text": text,
+                            "subtitle": subtitle,
+                            "mute": False,
+                            "overlay_video_path": None,
+                            "overlay_duration_us": 0,
+                        })
+                    else:
+                        tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        res = tts_results.get(idx)
+                        if not res:
+                            raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
+                        narr_used = tts_out
+                        ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
+                        ok_ov = await _gen_blank_video_with_audio(
+                            int(meta.get("width") or 1920),
+                            int(meta.get("height") or 1080),
+                            float(meta.get("fps") or 30.0),
+                            narr_used,
+                            ov_out,
+                            scope=JianyingDraftManager.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
+                        )
+                        if not ok_ov:
+                            raise RuntimeError(f"生成叠加视频失败: {idx}")
+                        adur = _try_parse_float(res.get("duration"))
+                        if adur <= 0.0:
+                            adur = _probe_audio_duration(narr_used) or 0.0
+                        if adur <= 0.0:
+                            adur = float((_probe_video_meta(ov_out).get("duration") or 0.0))
+                        if adur <= 0.0:
+                            raise RuntimeError(f"无法获取配音时长: {idx}")
+                        if adur > dur:
+                            ext = adur - dur
+                            fwd = max(0.0, video_dur - et)
+                            if fwd >= ext:
+                                new_start = st
+                                new_dur = dur + ext
+                            else:
+                                shortage = ext - fwd
+                                new_start = max(0.0, st - shortage)
+                                new_dur = max(0.0, video_dur - new_start)
+                        elif (adur + 0.05) < dur:
+                            new_start = st
+                            new_dur = adur
+                        else:
+                            new_start = st
+                            new_dur = dur
+                        timeline_items.append({
+                            "kind": "original",
+                            "duration_us": _s_to_us(new_dur),
+                            "source_start_us": _s_to_us(new_start),
+                            "text": text,
+                            "subtitle": subtitle,
+                            "mute": True,
+                            "overlay_video_path": str(ov_out),
+                            "overlay_duration_us": _s_to_us(adur),
+                        })
+                    try:
+                        base = 50
+                        span = 15
+                        progress = base + int((idx / max(1, total_segments)) * span)
+                        await JianyingDraftManager._broadcast({
+                            "type": "progress",
+                            "scope": JianyingDraftManager.SCOPE,
+                            "project_id": project_id,
+                            "task_id": task_id,
+                            "phase": "tts_progress",
+                            "message": f"已处理配音 {idx}/{total_segments}",
+                            "progress": min(65, progress),
+                            "timestamp": _now_ts(),
+                        })
+                    except Exception:
+                        pass
             await JianyingDraftManager._broadcast({
                 "type": "progress",
                 "scope": JianyingDraftManager.SCOPE,

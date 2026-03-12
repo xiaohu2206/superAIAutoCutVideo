@@ -63,7 +63,7 @@ from routes.storage_routes import router as settings_router
 from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import ensure_defaults_migrated, user_data_dir
+from modules.app_paths import ensure_defaults_migrated, user_data_dir, normalize_path_str, windows_local_appdata_dir
 from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
@@ -145,7 +145,11 @@ def acquire_single_instance_lock() -> None:
 
     scope = _get_runtime_scope()
     lock_path = _get_single_instance_lock_path()
-    f = lock_path.open("a+", encoding="utf-8")
+    try:
+        f = lock_path.open("a+", encoding="utf-8")
+    except PermissionError as e:
+        logger.warning(f"single_instance_lock_open_denied: scope={scope} path={lock_path} err={e}")
+        return
 
     try:
         if os.name == "nt":
@@ -164,19 +168,27 @@ def acquire_single_instance_lock() -> None:
             except BlockingIOError:
                 raise RuntimeError(f"后端服务已在 {scope} 环境运行中，无法重复启动")
 
-        f.seek(0)
-        f.truncate()
-        f.write(
-            json.dumps(
-                {
-                    "pid": os.getpid(),
-                    "scope": scope,
-                    "started_at": datetime.now().isoformat(),
-                },
-                ensure_ascii=False,
+        try:
+            f.seek(0)
+            f.truncate()
+            f.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "scope": scope,
+                        "started_at": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                )
             )
-        )
-        f.flush()
+            f.flush()
+        except PermissionError as e:
+            logger.warning(f"single_instance_lock_write_denied: scope={scope} path={lock_path} err={e}")
+            try:
+                f.close()
+            except Exception:
+                pass
+            return
 
         _single_instance_lock_handle = f
     except Exception:
@@ -448,7 +460,7 @@ def get_app_paths():
         if not service_data_dir.exists():
             service_data_dir = base_path / "serviceData"
         if sys.platform == "win32":
-            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+            base_data = windows_local_appdata_dir()
         elif sys.platform == "darwin":
             base_data = Path.home() / "Library" / "Application Support"
         else:
@@ -456,7 +468,7 @@ def get_app_paths():
         settings_dir = base_data / "SuperAutoCutVideo" / "config"
         settings_file = settings_dir / "app_settings.json"
         uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
-        install_dir_raw = str(os.environ.get("SACV_INSTALL_DIR") or "").strip()
+        install_dir_raw = normalize_path_str(os.environ.get("SACV_INSTALL_DIR") or "")
         if install_dir_raw:
             install_dir = Path(install_dir_raw).expanduser()
         else:
@@ -466,7 +478,7 @@ def get_app_paths():
             used_default = True
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = str(data.get("uploads_root") or "").strip()
+                cand = normalize_path_str(str(data.get("uploads_root") or ""))
                 if cand:
                     uploads_dir = Path(cand).expanduser()
                     used_default = False
@@ -488,7 +500,7 @@ def get_app_paths():
         service_data_dir = base_path / "serviceData"
         # 在开发环境也读取用户设置文件，保证重启后生效
         if sys.platform == "win32":
-            base_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+            base_data = windows_local_appdata_dir()
         elif sys.platform == "darwin":
             base_data = Path.home() / "Library" / "Application Support"
         else:
@@ -499,7 +511,7 @@ def get_app_paths():
         try:
             if settings_file.exists():
                 data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = str(data.get("uploads_root") or "").strip()
+                cand = normalize_path_str(str(data.get("uploads_root") or ""))
                 uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
             else:
                 uploads_dir = uploads_dir_default

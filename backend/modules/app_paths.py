@@ -4,9 +4,42 @@ import json
 import shutil
 from pathlib import Path
 
+def _strip_invisible_chars(s: str) -> str:
+    s = s.replace("\ufeff", "")
+    s = s.replace("\u200b", "")
+    s = s.replace("\u00ad", "")
+    return s
+
+
+def normalize_path_str(path_str: str) -> str:
+    s = _strip_invisible_chars(str(path_str or "")).strip()
+    if not s:
+        return ""
+    if os.name != "nt":
+        return s
+    s = s.replace("%5C", "\\").replace("%5c", "\\")
+    s = s.replace("%2F", "/").replace("%2f", "/")
+    if "%%" in s and ("\\" not in s and "/" not in s):
+        s = s.replace("%%", "\\")
+    if len(s) >= 2 and s[1] == ":" and "%" in s and ("Users" in s or "AppData" in s or "SuperAutoCutVideo" in s):
+        s = s.replace("%", "\\")
+    if "%" in s and ("\\" not in s and "/" not in s) and len(s) >= 2 and s[1] == ":":
+        s = s.replace("%", "\\")
+    if len(s) >= 3 and s[1] == ":" and s[2] not in ("\\", "/"):
+        s = s[:2] + "\\" + s[2:]
+    return s
+
+
+def windows_local_appdata_dir() -> Path:
+    raw = normalize_path_str(os.environ.get("LOCALAPPDATA") or "")
+    if raw:
+        return Path(raw)
+    return Path.home() / "AppData" / "Local"
+
+
 def data_base_dir() -> Path:
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+        base = windows_local_appdata_dir()
     elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     else:
@@ -27,15 +60,15 @@ def app_settings_file() -> Path:
     return user_config_dir() / "app_settings.json"
 
 def uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
     candidates = []
     if env:
-        candidates.append(Path(env))
+        candidates.append(Path(env).expanduser())
     try:
         settings_path = app_settings_file()
         if settings_path.exists():
             data = json.loads(settings_path.read_text(encoding="utf-8"))
-            root = str(data.get("uploads_root") or "").strip()
+            root = normalize_path_str(str(data.get("uploads_root") or ""))
             if root:
                 candidates.append(Path(root).expanduser())
     except Exception:

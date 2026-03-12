@@ -119,14 +119,28 @@ class FunASRPathManager:
         return out
 
 
-def _list_files_flat(p: Path) -> List[str]:
+def _list_files_recursive(p: Path, max_files: int = 5000) -> List[str]:
     if not p.exists() or not p.is_dir():
         return []
     out: List[str] = []
     try:
-        for item in p.iterdir():
-            if item.is_file():
-                out.append(item.name)
+        stack: List[Path] = [p]
+        while stack:
+            cur = stack.pop()
+            try:
+                for item in cur.iterdir():
+                    if item.is_dir():
+                        name = item.name
+                        if name in {".modelscope_cache", ".git", "__pycache__"}:
+                            continue
+                        stack.append(item)
+                        continue
+                    if item.is_file():
+                        out.append(item.name)
+                        if len(out) >= max_files:
+                            return out
+            except Exception:
+                continue
     except Exception:
         return []
     return out
@@ -136,7 +150,7 @@ def validate_model_dir(key: str, model_dir: Path) -> Tuple[bool, List[str]]:
     if not model_dir.exists() or not model_dir.is_dir():
         return False, ["dir_missing"]
 
-    files = set(_list_files_flat(model_dir))
+    files = set(_list_files_recursive(model_dir))
     missing: List[str] = []
 
     has_weights = any(

@@ -20,7 +20,7 @@ echo "[OK] Python 版本：$(python -V)"
 # 如果本机已安装 Tauri CLI 和 Cargo，直接进入开发模式
 if command -v cargo >/dev/null 2>&1; then
   if command -v tauri >/dev/null 2>&1; then
-    (cd "$ROOT_DIR" && cargo tauri dev)
+    (cd "$ROOT_DIR" && TAURI_DEV=1 cargo tauri dev)
   else
     echo "[ERR] 未安装 tauri CLI。可选安装：npm i -g @tauri-apps/cli 或 cargo install tauri-cli"
     exit 2

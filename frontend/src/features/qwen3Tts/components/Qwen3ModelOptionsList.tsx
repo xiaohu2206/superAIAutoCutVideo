@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Download, ShieldAlert, Copy, Check, Square, Info } from "lucide-react";
 import type { Qwen3TtsDownloadProvider } from "../types";
 import { Qwen3DownloadProgress } from "./Qwen3DownloadProgress";
+import { TauriCommands } from "@/services/clients";
 
 type OptionItem = { id: string; label: string; keys: string[]; size?: string; description?: string };
 
@@ -43,10 +44,20 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2">
         <Info className="w-5 h-5 flex-shrink-0 text-blue-600" />
         <div className="space-y-1">
-          <p className="font-medium">模型选择说明：</p>
+          <p className="font-medium">模型下载说明：</p>
           <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
             <li>下列模型只需<span className="font-bold">选择一个</span>下载即可使用。</li>
-            <li>支持点击按钮在线下载，也支持手动下载模型文件后复制到对应目录。</li>
+            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+            <li>
+              手动下载入口：
+              <button
+                type="button"
+                onClick={() => TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc")}
+                className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900"
+              >
+                网盘下载
+              </button>
+            </li>
           </ul>
         </div>
       </div>
