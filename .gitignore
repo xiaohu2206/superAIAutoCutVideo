@@ -17,6 +17,7 @@ desktop.ini
 .vscode/
 .venv_pack_cpu
 .venv_gpu
+.sacv_build_tmp
 # ========================================
 # Node.js / Frontend
 # ========================================
