@@ -760,6 +760,106 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 logger.error(f"千问在线 TTS 试听失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+        if provider == 'voxcpm_tts':
+            try:
+                from modules.voxcpm_tts_service import voxcpm_tts_service
+                from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
+                from modules.voxcpm_tts_model_manager import VoxCPMTTSPathManager, validate_model_dir
+
+                vid = str(voice_id).strip()
+                v = voxcpm_tts_voice_store.get(vid)
+                if not v:
+                    raise HTTPException(status_code=404, detail="voice_not_found")
+
+                model_key = (getattr(v, "model_key", None) or "voxcpm_0_5b").strip() or "voxcpm_0_5b"
+                try:
+                    pm = VoxCPMTTSPathManager()
+                    model_dir = pm.model_path(model_key)
+                except KeyError:
+                    raise RuntimeError(f"unknown_model_key:{model_key}")
+                ok, missing = validate_model_dir(model_key, model_dir)
+                if not ok:
+                    raise RuntimeError(f"model_invalid:{model_key}:{','.join(missing)}|path={model_dir}")
+
+                ts = int(time.time() * 1000)
+                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
+                filename = f"voxcpm_{safe_vid}_preview_{ts}.wav"
+                out_path = _get_preview_tmp_dir() / filename
+
+                text = req.text
+                if not text:
+                    lang = (req.language or (v.language if v else None) or "auto").lower().strip()
+                    default_texts = {
+                        "auto": "您好，欢迎使用智能配音。",
+                        "chinese": "您好，欢迎使用智能配音。",
+                        "zh": "您好，欢迎使用智能配音。",
+                        "english": "Hello, welcome to smart voiceover.",
+                        "en": "Hello, welcome to smart voiceover.",
+                    }
+                    if lang in default_texts:
+                        text = default_texts[lang]
+                    else:
+                        short_lang = lang.split('-')[0]
+                        text = default_texts.get(short_lang, "您好，欢迎使用智能配音。")
+
+                device_s = None
+                if cfg:
+                    extra = cfg.extra_params or {}
+                    device = extra.get("Device")
+                    device_s = str(device).strip() if isinstance(device, str) else None
+
+                try:
+                    res = await voxcpm_tts_service.synthesize_by_voice_asset(
+                        text=text,
+                        out_path=out_path,
+                        voice_asset=v,
+                        device=device_s
+                    )
+
+                    if not res.get("success"):
+                        raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                    audio_bytes = out_path.read_bytes()
+                finally:
+                    try:
+                        if out_path.exists():
+                            out_path.unlink()
+                    except Exception:
+                        pass
+
+                preview_id = await _preview_cache_put(
+                    content=audio_bytes,
+                    filename=filename,
+                    meta={"provider": "voxcpm_tts", "voice_id": vid},
+                )
+                audio_url = f"/api/tts/voices/preview/{preview_id}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": vid,
+                        "name": v.name if v else vid,
+                        "audio_url": audio_url,
+                        "description": None,
+                        "duration": res.get("duration"),
+                    },
+                    "message": "已生成 VoxCPM 试听音频"
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"VoxCPM 试听失败: {e}")
+                msg = str(e)
+                if (
+                    "voxcpm_tts_not_installed" in msg
+                    or "voxcpm_tts_import_failed" in msg
+                    or "model_invalid:" in msg
+                    or "unknown_model_key:" in msg
+                    or "missing_dependency:" in msg
+                ):
+                    if "model_invalid:" in msg:
+                        msg = f"{msg}。请先下载/放置对应模型文件，或在设置里配置 VOXCPM_TTS_MODELS_DIR/SACV_UPLOADS_DIR。"
+                    raise HTTPException(status_code=503, detail=msg)
+                raise HTTPException(status_code=500, detail=msg)
+
         # 非 Edge：严格校验音色存在
         if not match:
             raise HTTPException(status_code=404, detail=f"音色 '{voice_id}' 不存在")

@@ -44,7 +44,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -151,6 +151,23 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('qwen_online_tts_default')
 
+                if 'voxcpm_tts_default' not in self.configs:
+                    self.configs['voxcpm_tts_default'] = TtsEngineConfig(
+                        provider='voxcpm_tts',
+                        secret_id=None,
+                        secret_key=None,
+                        region=None,
+                        description='VoxCPM 默认配置（本地模型）',
+                        enabled=False,
+                        active_voice_id=None,
+                        speed_ratio=1.0,
+                        extra_params={
+                            "ModelKey": "voxcpm_0_5b",
+                            "Language": "Auto",
+                        }
+                    )
+                    missing_defaults.append('voxcpm_tts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -247,6 +264,23 @@ class TtsEngineConfigManager:
                     }
                 )
             ),
+            (
+                'voxcpm_tts_default',
+                TtsEngineConfig(
+                    provider='voxcpm_tts',
+                    secret_id=None,
+                    secret_key=None,
+                    region=None,
+                    description='VoxCPM 默认配置（本地模型）',
+                    enabled=False,
+                    active_voice_id=None,
+                    speed_ratio=1.0,
+                    extra_params={
+                        "ModelKey": "voxcpm_0_5b",
+                        "Language": "Auto",
+                    }
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -311,6 +345,13 @@ class TtsEngineConfigManager:
                 'provider': 'qwen3_tts',
                 'display_name': 'Qwen3-TTS(本地)',
                 'description': '生成配音比较慢，离线语音合成与快速声音克隆（需先下载模型）',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'voxcpm_tts',
+                'display_name': 'VoxCPM(本地)',
+                'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
                 'required_fields': [],
                 'optional_fields': []
             },
