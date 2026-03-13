@@ -44,7 +44,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -130,6 +130,27 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('qwen3_tts_default')
 
+                if 'qwen_online_tts_default' not in self.configs:
+                    self.configs['qwen_online_tts_default'] = TtsEngineConfig(
+                        provider='qwen_online_tts',
+                        secret_id=None,
+                        secret_key=None,
+                        region='cn',
+                        description='千问在线 TTS 默认配置（DashScope）',
+                        enabled=False,
+                        active_voice_id="Cherry",
+                        speed_ratio=1.0,
+                        extra_params={
+                            "Model": "qwen3-tts-flash",
+                            "Voice": "Cherry",
+                            "LanguageType": "Chinese",
+                            "Instructions": "",
+                            "OptimizeInstructions": False,
+                            "BaseUrl": "",
+                        }
+                    )
+                    missing_defaults.append('qwen_online_tts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -205,6 +226,27 @@ class TtsEngineConfigManager:
                     }
                 )
             ),
+            (
+                'qwen_online_tts_default',
+                TtsEngineConfig(
+                    provider='qwen_online_tts',
+                    secret_id=None,
+                    secret_key=None,
+                    region='cn',
+                    description='千问在线 TTS 默认配置（DashScope）',
+                    enabled=False,
+                    active_voice_id="Cherry",
+                    speed_ratio=1.0,
+                    extra_params={
+                        "Model": "qwen3-tts-flash",
+                        "Voice": "Cherry",
+                        "LanguageType": "Chinese",
+                        "Instructions": "",
+                        "OptimizeInstructions": False,
+                        "BaseUrl": "",
+                    }
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -257,6 +299,13 @@ class TtsEngineConfigManager:
                 'description': '微软 Edge 在线语音，免凭据，适合中文合成测试与预览',
                 'required_fields': [],
                 'optional_fields': []
+            },
+            {
+                'provider': 'qwen_online_tts',
+                'display_name': '千问在线 TTS',
+                'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key 或环境变量 DASHSCOPE_API_KEY）',
+                'required_fields': ['secret_key'],
+                'optional_fields': ['region']
             },
             {
                 'provider': 'qwen3_tts',
@@ -407,6 +456,32 @@ class TtsEngineConfigManager:
                         voice_type_tag=item.get('voice_type_tag') or None,
                         voice_human_style=item.get('voice_human_style') or None,
                     ))
+            elif provider == 'qwen_online_tts':
+                raw_list = [
+                    {"id": "Cherry", "name": "Cherry", "language": "zh-CN", "gender": None, "tags": ["system"]},
+                    {"id": "Dylan", "name": "Dylan", "language": "en-US", "gender": None, "tags": ["system"]},
+                    {"id": "Ella", "name": "Ella", "language": "en-US", "gender": None, "tags": ["system"]},
+                    {"id": "Grace", "name": "Grace", "language": "en-US", "gender": None, "tags": ["system"]},
+                    {"id": "Kevin", "name": "Kevin", "language": "en-US", "gender": None, "tags": ["system"]},
+                    {"id": "Luna", "name": "Luna", "language": "zh-CN", "gender": None, "tags": ["system"]},
+                ]
+                for item in raw_list:
+                    voices.append(
+                        TtsVoice(
+                            id=str(item.get("id") or ""),
+                            name=str(item.get("name") or ""),
+                            description=item.get("description") or None,
+                            sample_wav_url=item.get("sample_wav_url") or None,
+                            language=item.get("language") or None,
+                            gender=item.get("gender") or None,
+                            tags=item.get("tags") or [],
+                            voice_type=None,
+                            category=None,
+                            voice_quality=item.get("voice_quality") or None,
+                            voice_type_tag=item.get("voice_type_tag") or None,
+                            voice_human_style=item.get("voice_human_style") or None,
+                        )
+                    )
             else:
                 voices = []
         except Exception as e:
@@ -451,6 +526,86 @@ class TtsEngineConfigManager:
         config = self.get_config(config_id)
         if not config:
             return {"success": False, "config_id": config_id, "error": f"配置 '{config_id}' 不存在"}
+
+        if config.provider == 'qwen_online_tts':
+            api_key = (config.secret_key or "").strip()
+            if not api_key:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": "缺少 DashScope API Key（请配置环境变量 DASHSCOPE_API_KEY 或在 secret_key 填写）",
+                    "error": "missing_credentials",
+                }
+            try:
+                import dashscope  # noqa: F401
+            except Exception as import_err:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": f"未安装 DashScope SDK: {import_err}. 请安装 'dashscope>=1.24.6'",
+                    "error": str(import_err),
+                }
+            try:
+                from ..app_paths import user_data_dir
+                from modules.qwen_online_tts_service import qwen_online_tts_service
+
+                ep = getattr(config, "extra_params", None) or {}
+                base_url = str(ep.get("BaseUrl") or "").strip()
+                region = (config.region or "cn").strip().lower()
+                if not base_url:
+                    base_url = "https://dashscope-intl.aliyuncs.com/api/v1" if region in {"intl", "sg", "ap-singapore"} else "https://dashscope.aliyuncs.com/api/v1"
+                model = str(ep.get("Model") or "qwen3-tts-flash").strip() or "qwen3-tts-flash"
+                voice = str(config.active_voice_id or ep.get("Voice") or "Cherry").strip() or "Cherry"
+                language_type = str(ep.get("LanguageType") or "").strip() or None
+                instructions = str(ep.get("Instructions") or "").strip() or None
+                optimize = ep.get("OptimizeInstructions", None)
+                optimize_b = bool(optimize) if optimize is not None else None
+
+                out_dir = user_data_dir() / "tmp" / "tts"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_path = out_dir / "qwen_online_test_preview.mp3"
+                res = await qwen_online_tts_service.synthesize(
+                    text="你好，千问在线 TTS 连通性测试。",
+                    out_path=str(out_path),
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    voice=voice,
+                    language_type=language_type,
+                    instructions=instructions,
+                    optimize_instructions=optimize_b,
+                    stream=False,
+                )
+                try:
+                    if out_path.exists():
+                        out_path.unlink()
+                except Exception:
+                    pass
+                if res.get("success"):
+                    return {
+                        "success": True,
+                        "config_id": config_id,
+                        "provider": config.provider,
+                        "message": "服务可用",
+                        "duration": res.get("duration"),
+                    }
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": res.get("error") or "合成失败",
+                    "error": res.get("error") or "synthesize_failed",
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": "千问在线 TTS 测试失败",
+                    "error": str(e),
+                }
 
         if config.provider == 'edge_tts':
             try:

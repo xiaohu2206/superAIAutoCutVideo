@@ -3,10 +3,10 @@ import { contentModelService } from "../../../services/contentModelService";
 import { message } from "../../../services/message";
 import type { ContentModelConfig, TestResult } from "../types";
 import {
-    getContentConfigIdByProvider,
-    getContentDefaultBaseUrl,
-    getContentDefaultDescription,
-    getContentDefaultModelName,
+  getContentConfigIdByProvider,
+  getContentDefaultBaseUrl,
+  getContentDefaultDescription,
+  getContentDefaultModelName,
 } from "../utils";
 
 /**
@@ -14,13 +14,13 @@ import {
  */
 export const useContentModelConfig = () => {
   const [contentSelectedProvider, setContentSelectedProvider] =
-    useState<string>("qwen");
+    useState<string>("302ai");
   const [contentModelConfigs, setContentModelConfigs] = useState<
     Record<string, ContentModelConfig>
   >({});
   const [currentContentConfig, setCurrentContentConfig] =
     useState<ContentModelConfig>({
-      provider: "qwen",
+      provider: "302ai",
       api_key: "",
       base_url: "",
       model_name: "",

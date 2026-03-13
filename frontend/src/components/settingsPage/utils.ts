@@ -64,6 +64,7 @@ export const getContentConfigIdByProvider = (provider: string): string => {
  */
 export const getContentDefaultBaseUrl = (provider: string): string => {
   const defaults: Record<string, string> = {
+    "302ai": "https://api.302ai.cn/v1/chat/completions",
     qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
@@ -77,6 +78,7 @@ export const getContentDefaultBaseUrl = (provider: string): string => {
  */
 export const getContentDefaultModelName = (provider: string): string => {
   const defaults: Record<string, string> = {
+    "302ai": "gemini-3.1-pro-preview",
     qwen: "qwen3-max",
     doubao: "doubao-seed-1-8-251228",
     deepseek: "deepseek-chat",
@@ -90,6 +92,7 @@ export const getContentDefaultModelName = (provider: string): string => {
  */
 export const getContentDefaultDescription = (provider: string): string => {
   const defaults: Record<string, string> = {
+    "302ai": "302AI平台文案生成模型（支持结构化输出）",
     qwen: "通义千问文案生成模型",
     doubao: "豆包文案生成模型",
     deepseek: "DeepSeek文案生成模型",
