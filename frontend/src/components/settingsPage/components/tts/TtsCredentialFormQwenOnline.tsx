@@ -1,6 +1,7 @@
 import { KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import type { TtsEngineConfig, TtsTestResult } from "../../types";
+import { QWEN_ONLINE_TTS_MODELS } from "@/features/qwenOnlineTts/constants";
 
 interface Props {
   configId: string | null;
@@ -100,7 +101,29 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
             )}
           </div>
         </div>
-              <div>
+
+        <div>
+          <label className="block text-sm text-gray-700 mb-1">
+            Model（可选）
+          </label>
+          <select
+            value={modelInput}
+            onChange={(e) => setModelInput(e.target.value)}
+            onBlur={handleBlurExtraParams}
+            className="px-3 py-2 border border-gray-300 rounded-md w-full"
+          >
+            <option value="">默认</option>
+            {QWEN_ONLINE_TTS_MODELS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
           <label className="block text-sm text-gray-700 mb-1">
             LanguageType（可选）
           </label>
@@ -123,29 +146,9 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
             <option value="Russian">Russian（俄语）</option>
           </select>
         </div>
-        {/* <div>
-          <label className="block text-sm text-gray-700 mb-1">
-            Model（可选）
-          </label>
-          <select
-            value={modelInput}
-            onChange={(e) => setModelInput(e.target.value)}
-            onBlur={handleBlurExtraParams}
-            className="px-3 py-2 border border-gray-300 rounded-md w-full"
-          >
-            <option value="">默认</option>
-            {QWEN_ONLINE_TTS_MODELS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div> */}
       </div>
 
-     
-
-      {/* <div className="mb-4">
+      <div className="mb-4">
         <label className="block text-sm text-gray-700 mb-1">
           Instructions（可选）
         </label>
@@ -157,7 +160,7 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
           rows={2}
           className="px-3 py-2 border border-gray-300 rounded-md w-full"
         />
-      </div> */}
+      </div>
 
       <div className="flex items-center gap-6 mb-4">
         <label className="flex items-center gap-2 text-sm text-gray-700">

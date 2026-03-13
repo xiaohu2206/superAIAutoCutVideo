@@ -337,7 +337,7 @@ class TtsEngineConfigManager:
             },
             {
                 'provider': 'qwen_online_tts',
-                'display_name': 'Qwen3-TTS(在线)',
+                'display_name': '千问在线 TTS',
                 'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key 或环境变量 DASHSCOPE_API_KEY）',
                 'required_fields': ['secret_key'],
                 'optional_fields': ['region']
