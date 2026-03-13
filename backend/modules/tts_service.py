@@ -310,6 +310,65 @@ class TencentTtsService:
                 except Exception as e:
                     return {"success": False, "error": str(e)}
 
+            if provider == "voxcpm_tts":
+                try:
+                    from modules.voxcpm_tts_service import voxcpm_tts_service
+                except Exception as e:
+                    return {"success": False, "error": f"voxcpm_tts_import_failed:{e}"}
+
+                out = Path(out_path)
+                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+                device = ep.get("Device")
+                device_s = str(device).strip() if isinstance(device, str) else None
+
+                voxcpm_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+
+                if voxcpm_voice_id:
+                    try:
+                        from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
+
+                        vv = voxcpm_tts_voice_store.get(voxcpm_voice_id)
+                        if vv:
+                            try:
+                                res = await voxcpm_tts_service.synthesize_by_voice_asset(
+                                    text=text,
+                                    out_path=out,
+                                    voice_asset=vv,
+                                    device=device_s,
+                                )
+                                if res and res.get("success"):
+                                    return await self._postprocess_qwen_audio(res, out, cfg)
+                                return res
+                            except Exception as e:
+                                return {"success": False, "error": str(e)}
+                    except Exception:
+                        pass
+
+                # Legacy / Config-only Fallback
+                model_key = str(ep.get("ModelKey") or "voxcpm_0_5b")
+                language = str(ep.get("Language") or "Auto")
+                ref_audio = str(ep.get("RefAudio") or "").strip() or None
+                ref_text = str(ep.get("RefText") or "").strip() or None
+
+                if not ref_audio:
+                    return {"success": False, "error": "ref_audio_required_for_voice_clone"}
+
+                try:
+                    res = await voxcpm_tts_service.synthesize_voice_clone_to_wav(
+                        text=text,
+                        out_path=out,
+                        model_key=model_key,
+                        language=language,
+                        ref_audio=ref_audio,
+                        ref_text=ref_text,
+                        device=device_s,
+                    )
+                    if res and res.get("success"):
+                        return await self._postprocess_qwen_audio(res, out, cfg)
+                    return res
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
             return await self._synthesize_tencent(text=text, out_path=out_path, cfg=cfg, voice_id=voice_id)
     async def _synthesize_tencent(self, text: str, out_path: str, cfg, voice_id: Optional[str]) -> Dict[str, Any]:
         # 腾讯云 TTS 合成路径（需凭据）

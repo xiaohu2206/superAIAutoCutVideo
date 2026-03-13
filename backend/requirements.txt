@@ -34,3 +34,8 @@ edge-tts==7.2.6
 dashscope>=1.24.6
 tensorflow
 llama-cpp-python>=0.3.16
+# VoxCPM 依赖（先安装依赖）
+simplejson
+sortedcontainers
+# VoxCPM 需要手动安装以避免依赖冲突
+# 安装命令: pip install --no-deps voxcpm
