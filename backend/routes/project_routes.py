@@ -687,6 +687,11 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
             project_id=project_id,
             force=bool(req.force),
             task_id=req.task_id,
+            asr_provider=req.asr_provider,
+            asr_model_key=req.asr_model_key,
+            asr_language=req.asr_language,
+            itn=bool(getattr(req, "itn", True)),
+            hotwords=req.hotwords,
             analyze_vision=bool(req.analyzeVision),
             vision_mode=req.visionMode,
         )
