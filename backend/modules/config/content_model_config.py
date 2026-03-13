@@ -29,7 +29,7 @@ class ContentModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
+        allowed_providers = ['302ai', 'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -113,6 +113,17 @@ class ContentModelConfigManager:
         """创建默认配置"""
         default_configs = [
             {
+                'id': '302ai_content_generation',
+                'config': ContentModelConfig(
+                    provider='302ai',
+                    api_key='xxx',
+                    base_url='https://api.302ai.cn/v1/chat/completions',
+                    model_name='gemini-3.1-pro-preview',
+                    description='302AI平台文案生成模型（支持结构化输出）',
+                    enabled=True
+                )
+            },
+            {
                 'id': 'qwen_content_generation',
                 'config': ContentModelConfig(
                     provider='qwen',
@@ -120,7 +131,7 @@ class ContentModelConfigManager:
                     base_url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
                     model_name='qwen3-max',
                     description='通义千问文案生成模型',
-                    enabled=True
+                    enabled=False
                 )
             },
             {

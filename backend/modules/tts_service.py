@@ -256,6 +256,60 @@ class TencentTtsService:
                 except Exception as e:
                     return {"success": False, "error": str(e)}
 
+            if provider == "qwen_online_tts":
+                api_key = (os.getenv("DASHSCOPE_API_KEY") or ((cfg.secret_key or "").strip() if cfg else "")).strip()
+                if not api_key:
+                    return {"success": False, "error": "missing_credentials"}
+                try:
+                    from modules.qwen_online_tts_service import qwen_online_tts_service
+                    from modules.qwen_online_tts_voice_store import qwen_online_tts_voice_store
+                except Exception as e:
+                    return {"success": False, "error": f"qwen_online_import_failed:{e}"}
+
+                out = Path(out_path)
+                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+                base_url = str(ep.get("BaseUrl") or "").strip()
+                region = ((cfg.region or "").strip().lower() if cfg else "")
+                if not base_url:
+                    base_url = "https://dashscope-intl.aliyuncs.com/api/v1" if region in {"intl", "sg", "ap-singapore"} else "https://dashscope.aliyuncs.com/api/v1"
+
+                model = str(ep.get("Model") or "qwen3-tts-flash").strip() or "qwen3-tts-flash"
+                language_type = str(ep.get("LanguageType") or "").strip() or None
+                instructions = str(ep.get("Instructions") or "").strip() or None
+                optimize = ep.get("OptimizeInstructions", None)
+                optimize_b = bool(optimize) if optimize is not None else None
+
+                qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+                voice = str(ep.get("Voice") or "Cherry").strip() or "Cherry"
+                if qwen_voice_id:
+                    vrec = qwen_online_tts_voice_store.get(qwen_voice_id)
+                    if vrec:
+                        if not getattr(vrec, "voice", None):
+                            return {"success": False, "error": "voice_not_ready"}
+                        voice = str(vrec.voice).strip()
+                        model = str(getattr(vrec, "model", model) or model).strip() or model
+                if not qwen_voice_id:
+                    qwen_voice_id = None
+
+                try:
+                    res = await qwen_online_tts_service.synthesize(
+                        text=text,
+                        out_path=str(out),
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=model,
+                        voice=voice,
+                        language_type=language_type,
+                        instructions=instructions,
+                        optimize_instructions=optimize_b,
+                        stream=False,
+                    )
+                    if res and res.get("success"):
+                        return await self._postprocess_qwen_audio(res, out, cfg)
+                    return res
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
             return await self._synthesize_tencent(text=text, out_path=out_path, cfg=cfg, voice_id=voice_id)
     async def _synthesize_tencent(self, text: str, out_path: str, cfg, voice_id: Optional[str]) -> Dict[str, Any]:
         # 腾讯云 TTS 合成路径（需凭据）

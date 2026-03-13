@@ -10,6 +10,7 @@ tencentcloud-sdk-python==3.0.1220
 aiohttp==3.9.0
 psutil==5.9.8
 edge-tts==7.2.6
+dashscope==1.24.6
 transformers==4.57.3
 numpy==1.26.4
 huggingface_hub==0.34.0

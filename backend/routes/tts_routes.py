@@ -673,6 +673,93 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     raise HTTPException(status_code=503, detail=msg)
                 raise HTTPException(status_code=500, detail=msg)
 
+        if provider == 'qwen_online_tts':
+            try:
+                import os
+                from modules.qwen_online_tts_service import qwen_online_tts_service
+                from modules.qwen_online_tts_voice_store import qwen_online_tts_voice_store
+
+                api_key = (os.getenv("DASHSCOPE_API_KEY") or ((cfg.secret_key or "").strip() if cfg else "")).strip()
+                if not api_key:
+                    raise HTTPException(status_code=400, detail="missing_credentials")
+                try:
+                    import dashscope  # noqa: F401
+                except Exception as import_err:
+                    raise HTTPException(status_code=503, detail=f"dashscope_not_installed:{import_err}")
+
+                ep = (cfg.extra_params if cfg else {}) or {}
+                base_url = str(ep.get("BaseUrl") or "").strip()
+                region = ((cfg.region or "cn").strip().lower() if cfg else "cn")
+                if not base_url:
+                    base_url = "https://dashscope-intl.aliyuncs.com/api/v1" if region in {"intl", "sg", "ap-singapore"} else "https://dashscope.aliyuncs.com/api/v1"
+
+                vid = (match.id if match else str(voice_id)).strip()
+                model = str(ep.get("Model") or "qwen3-tts-flash").strip() or "qwen3-tts-flash"
+                voice = vid
+                vrec = qwen_online_tts_voice_store.get(vid)
+                if vrec:
+                    if not getattr(vrec, "voice", None):
+                        raise HTTPException(status_code=400, detail="voice_not_ready")
+                    voice = str(vrec.voice).strip()
+                    model = str(getattr(vrec, "model", model) or model).strip() or model
+
+                language_type = str(ep.get("LanguageType") or "").strip() or None
+                instructions = str(ep.get("Instructions") or "").strip() or None
+                optimize = ep.get("OptimizeInstructions", None)
+                optimize_b = bool(optimize) if optimize is not None else None
+
+                ts = int(time.time() * 1000)
+                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in str(vid))[:64]
+                filename = f"qwen_online_{safe_vid}_preview_{ts}.mp3"
+                out_path = _get_preview_tmp_dir() / filename
+
+                text = (req.text or "您好，欢迎使用智能配音。")
+                try:
+                    res = await qwen_online_tts_service.synthesize(
+                        text=text,
+                        out_path=str(out_path),
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=model,
+                        voice=voice,
+                        language_type=language_type,
+                        instructions=instructions,
+                        optimize_instructions=optimize_b,
+                        stream=False,
+                    )
+                    if not res.get("success"):
+                        raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                    audio_bytes = out_path.read_bytes()
+                finally:
+                    try:
+                        if out_path.exists():
+                            out_path.unlink()
+                    except Exception:
+                        pass
+
+                preview_id = await _preview_cache_put(
+                    content=audio_bytes,
+                    filename=filename,
+                    meta={"provider": "qwen_online_tts", "voice_id": str(vid)},
+                )
+                audio_url = f"/api/tts/voices/preview/{preview_id}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": vid,
+                        "name": (match.name if match else (vrec.name if vrec else vid)),
+                        "audio_url": audio_url,
+                        "description": (match.description if match else None),
+                        "duration": res.get("duration"),
+                    },
+                    "message": "已生成 千问在线 TTS 试听音频",
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"千问在线 TTS 试听失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
         # 非 Edge：严格校验音色存在
         if not match:
             raise HTTPException(status_code=404, detail=f"音色 '{voice_id}' 不存在")
