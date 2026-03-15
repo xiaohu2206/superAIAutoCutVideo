@@ -19,6 +19,7 @@ import { LabeledChip } from "./LabeledGroup";
 import { getGenderLabel } from "./utils";
 import Qwen3VoiceSection from "@/features/qwen3Tts/components/Qwen3VoiceSection";
 import QwenOnlineVoiceSection from "@/features/qwenOnlineTts/components/QwenOnlineVoiceSection";
+import VoxcpmVoiceSection from "@/features/voxcpmTts/components/VoxcpmVoiceSection";
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
@@ -353,7 +354,13 @@ export const TtsSettings: React.FC = () => {
 
         {/* 凭据设置 */}
         <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
-          {provider === "qwen3_tts" ? (
+          {provider === "voxcpm_tts" ? (
+            <VoxcpmVoiceSection
+              configId={currentConfigId}
+              activeVoiceId={currentConfig?.active_voice_id || ""}
+              onSetActive={handleSetActiveVoice}
+            />
+          ) : provider === "qwen3_tts" ? (
             <Qwen3VoiceSection
               configId={currentConfigId}
               activeVoiceId={currentConfig?.active_voice_id || ""}
@@ -395,7 +402,7 @@ export const TtsSettings: React.FC = () => {
         </section>
 
         {/* 音色库 */}
-        {provider === "qwen3_tts" || provider === "qwen_online_tts" ? null : (
+        {provider === "qwen3_tts" || provider === "qwen_online_tts" || provider === "voxcpm_tts" ? null : (
           <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-md font-semibold text-gray-900">音色库</h4>

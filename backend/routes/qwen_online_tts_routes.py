@@ -88,6 +88,7 @@ async def upload_clone_voice(
         preferred_name=preferred_name,
         api_key=api_key,
         base_url=base_url,
+        voice_prompt=ref_text,
     )
     if not enroll.get("success"):
         qwen_online_tts_voice_store.set_progress(v.id, "failed", 100, enroll.get("error") or "enroll_failed")

@@ -37,6 +37,16 @@ def _ensure_voxcpm_tts_importable() -> None:
             except Exception:
                 continue
 
+    try:
+        importlib.import_module("voxcpm")
+        here = Path(__file__).resolve()
+        vendor_dir = here.parent
+        sys.path.insert(0, str(vendor_dir))
+        importlib.import_module("voxcpm_tts")
+        return
+    except Exception:
+        pass
+
 
 _ensure_voxcpm_tts_importable()
 try:

@@ -55,6 +55,7 @@ _maybe_packages = [
     'uvicorn',
     'fastapi',
     'pydantic',
+    'dashscope',
     'onnxruntime',
     'tensorflow',
     'librosa',

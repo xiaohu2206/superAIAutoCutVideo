@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime
 import shutil
 import os
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -161,6 +162,123 @@ class VideoGenerationService:
         aud_tmp_dir = uploads_root / "audios" / "tmp" / f"{p.id}_{ts}"
         aud_tmp_dir.mkdir(parents=True, exist_ok=True)
 
+        async def _ensure_clip_video_not_longer_than_audio(clip_path: Path) -> Path:
+            tol = 0.05
+            try:
+                if cancel_event.is_set():
+                    raise asyncio.CancelledError()
+                if not clip_path.exists():
+                    return clip_path
+                adur = await video_processor._ffprobe_duration(str(clip_path), "audio") or 0.0
+                if adur <= 0.0:
+                    return clip_path
+                vdur = await video_processor._ffprobe_video_duration(str(clip_path))
+                if vdur is None:
+                    vdur = await video_processor._ffprobe_duration(str(clip_path), "format")
+                vdur = float(vdur or 0.0)
+                if vdur <= 0.0 or vdur <= (adur + tol):
+                    return clip_path
+
+                out_copy = clip_path.with_name(f"{clip_path.stem}_sync{clip_path.suffix}")
+                cmd_copy = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(clip_path),
+                    "-c",
+                    "copy",
+                    "-shortest",
+                    "-movflags",
+                    "+faststart",
+                    "-y",
+                    str(out_copy),
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_copy,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                task_cancel_store.register_process("generate_video", project_id, task_id, proc)
+                try:
+                    _, stderr = await video_processor._communicate_with_cancel(proc, cancel_event)
+                finally:
+                    task_cancel_store.unregister_process("generate_video", project_id, task_id, proc)
+                if proc.returncode == 0 and out_copy.exists():
+                    v2 = await video_processor._ffprobe_video_duration(str(out_copy))
+                    if v2 is None:
+                        v2 = await video_processor._ffprobe_duration(str(out_copy), "format")
+                    v2 = float(v2 or 0.0)
+                    if v2 > 0.0 and v2 <= (adur + tol):
+                        return out_copy
+
+                out_re = clip_path.with_name(f"{clip_path.stem}_sync_re{clip_path.suffix}")
+                adur_str = f"{adur:.3f}"
+                enc_name, vcodec_args_pick = await video_processor._pick_fast_encoder()
+                vcodec_args = list(vcodec_args_pick)
+                if enc_name == "h264_nvenc":
+                    vcodec_args.extend(["-rc:v", "vbr_hq", "-cq:v", "19"])
+                elif enc_name == "libx264":
+                    vcodec_args.extend(["-crf", "18"])
+                vcodec_args.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+                filter_complex = (
+                    f"[0:v]trim=start=0:end={adur_str},setpts=PTS-STARTPTS[v];"
+                    f"[0:a]atrim=0:{adur_str},asetpts=PTS-STARTPTS[a]"
+                )
+                cmd_re = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(clip_path),
+                    "-filter_complex",
+                    filter_complex,
+                    "-map",
+                    "[v]",
+                    "-map",
+                    "[a]",
+                    *vcodec_args,
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-ar",
+                    "48000",
+                    "-y",
+                    str(out_re),
+                ]
+                proc2 = await asyncio.create_subprocess_exec(
+                    *cmd_re,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                task_cancel_store.register_process("generate_video", project_id, task_id, proc2)
+                try:
+                    _, stderr2 = await video_processor._communicate_with_cancel(proc2, cancel_event)
+                finally:
+                    task_cancel_store.unregister_process("generate_video", project_id, task_id, proc2)
+                if proc2.returncode == 0 and out_re.exists():
+                    v3 = await video_processor._ffprobe_video_duration(str(out_re))
+                    if v3 is None:
+                        v3 = await video_processor._ffprobe_duration(str(out_re), "format")
+                    v3 = float(v3 or 0.0)
+                    if v3 > 0.0 and v3 <= (adur + tol):
+                        return out_re
+                if proc2.returncode != 0:
+                    try:
+                        _ = (stderr2 or stderr or b"").decode(errors="ignore")
+                    except Exception:
+                        _ = ""
+                return clip_path
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return clip_path
+
         try:
             try:
                 await manager.broadcast(
@@ -210,7 +328,16 @@ class VideoGenerationService:
                 text = str(seg.get("text", "") or "").strip()
                 ost_flag = seg.get("OST")
                 is_original = (ost_flag == 1) or text.startswith("播放原片")
-                logger.info(f"DEBUG segment_init idx={idx} start={start} end={end} duration={duration} ost={ost_flag} text_len={len(text)} is_original={is_original}")
+                logger.info(
+                    "DEBUG segment_init idx=%s start=%.3f end=%.3f duration=%.3f ost=%s text_len=%s is_original=%s",
+                    idx,
+                    start,
+                    end,
+                    duration,
+                    ost_flag,
+                    len(text),
+                    is_original,
+                )
 
                 ok = await video_processor.cut_video_segment(
                     str(input_abs),
@@ -387,7 +514,8 @@ class VideoGenerationService:
                     raise asyncio.CancelledError()
 
                 if is_original:
-                    clip_paths.append(str(clip_abs))
+                    clip_final = await _ensure_clip_video_not_longer_than_audio(clip_abs)
+                    clip_paths.append(str(clip_final))
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
@@ -476,7 +604,7 @@ class VideoGenerationService:
                             *cmd_fb,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
-                            **({"creationflags": __import__("subprocess").CREATE_NO_WINDOW} if __import__("os").name == "nt" else {})
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                         )
                         task_cancel_store.register_process("generate_video", project_id, task_id, p3)
                         try:
@@ -511,9 +639,11 @@ class VideoGenerationService:
                         vinfo_chk2, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
                         if vinfo_chk2 is None:
                             logger.warning(f"片段配音替换失败(无视频流), 降级使用原片音轨: {idx}")
-                            clip_paths.append(str(clip_abs))
+                            clip_final_fb = await _ensure_clip_video_not_longer_than_audio(clip_abs)
+                            clip_paths.append(str(clip_final_fb))
                             continue
-                    clip_paths.append(str(clip_nar_abs))
+                    clip_final_nar = await _ensure_clip_video_not_longer_than_audio(clip_nar_abs)
+                    clip_paths.append(str(clip_final_nar))
 
                 try:
                     base = 50
@@ -571,6 +701,7 @@ class VideoGenerationService:
                 project_id=project_id,
                 task_id=task_id,
                 cancel_event=cancel_event,
+                force_reencode=True,
             )
             if not ok_concat:
                 try:

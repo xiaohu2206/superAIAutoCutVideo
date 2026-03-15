@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, cast
 
@@ -17,6 +18,89 @@ class VoxCPMTTSService:
         self._runtime_device: str = "cpu"
         self._runtime_precision: str = "fp32"
         self._last_device_error: Optional[str] = None
+
+    def _compact_spaces(self, s: str) -> str:
+        x = (s or "").replace("\r", " ").replace("\n", " ")
+        return re.sub(r"\s+", " ", x).strip()
+
+    def _to_funasr_language(self, voxcpm_language: str) -> str:
+        s = (voxcpm_language or "").strip().lower()
+        if not s or s in {"auto", "default"}:
+            return "中文"
+        if s in {"zh", "zh-cn", "zh-hans", "chinese", "cn"}:
+            return "中文"
+        if s in {"yue", "cantonese", "zh-hk", "hk"}:
+            return "粤语"
+        if s in {"en", "en-us", "en-gb", "english"}:
+            return "英文"
+        if s in {"ja", "jp", "japanese"}:
+            return "日文"
+        if s in {"ko", "kr", "korean"}:
+            return "韩文"
+        if s in {"fr", "french"}:
+            return "法文"
+        if s in {"de", "german"}:
+            return "德文"
+        if s in {"es", "spanish"}:
+            return "西班牙语"
+        return "中文"
+
+    def _pick_funasr_model_key(self, funasr_language: str) -> Optional[str]:
+        try:
+            from modules.fun_asr_model_manager import FunASRPathManager, validate_model_dir as validate_funasr_model_dir
+        except Exception:
+            return None
+
+        candidates = ["fun_asr_nano_2512", "fun_asr_mlt_nano_2512"]
+        if funasr_language not in {"中文", "英文", "日文"}:
+            candidates = ["fun_asr_mlt_nano_2512", "fun_asr_nano_2512"]
+
+        pm = FunASRPathManager()
+        for key in candidates:
+            try:
+                p = pm.model_path(key)
+            except Exception:
+                continue
+            try:
+                ok, _missing = validate_funasr_model_dir(key, p)
+            except Exception:
+                ok = False
+            if ok:
+                return key
+        return None
+
+    async def _auto_infer_ref_text(self, ref_audio: str, language: str, device: Optional[str]) -> str:
+        p = Path(str(ref_audio or "").strip())
+        if not p.exists():
+            return ""
+
+        asr_lang = self._to_funasr_language(language)
+        asr_key = self._pick_funasr_model_key(asr_lang)
+        if not asr_key:
+            return ""
+
+        try:
+            from modules.fun_asr_service import fun_asr_service
+        except Exception:
+            return ""
+
+        try:
+            utterances = await fun_asr_service.transcribe_to_utterances(
+                audio_path=p,
+                model_key=asr_key,
+                language=asr_lang,
+                itn=True,
+                hotwords=[],
+                device=device,
+                on_progress=None,
+            )
+        except Exception:
+            return ""
+
+        text = " ".join(
+            self._compact_spaces(str(u.get("text") or "")) for u in (utterances or []) if isinstance(u, dict)
+        ).strip()
+        return self._compact_spaces(text)
 
     def get_runtime_status(self) -> Dict[str, Any]:
         return {
@@ -312,15 +396,25 @@ class VoxCPMTTSService:
     ) -> Dict[str, Any]:
         await self._load_model(model_key=model_key, device=device)
 
+        clean_text = self._compact_spaces(str(text or ""))
+        clean_ref_text = self._compact_spaces(str(ref_text or ""))
+        if not clean_text:
+            raise RuntimeError("empty_text")
+        if not clean_ref_text:
+            inferred = await self._auto_infer_ref_text(ref_audio=ref_audio, language=language, device=device)
+            clean_ref_text = self._compact_spaces(inferred)
+        if not clean_ref_text:
+            clean_ref_text = clean_text[:120].strip()
+
         def _run() -> Tuple[np.ndarray, int]:
             m = cast(Any, self._model)
             if m is None:
                 raise RuntimeError("voxcpm_model_not_loaded")
             wavs, sr = m.generate_voice_clone(
-                text=text,
+                text=clean_text,
                 language=language,
                 ref_audio=ref_audio,
-                ref_text=ref_text,
+                ref_text=clean_ref_text,
             )
             if not wavs:
                 raise RuntimeError("empty_audio")
@@ -348,12 +442,34 @@ class VoxCPMTTSService:
         kind = v.get("kind", "clone")
         model_key = v.get("model_key", "voxcpm_0_5b")
         language = v.get("language", "Auto")
+
+        if not self._compact_spaces(str(v.get("ref_text") or "")):
+            inferred = await self._auto_infer_ref_text(
+                ref_audio=str(v.get("ref_audio_path") or ""),
+                language=str(language or "Auto"),
+                device=device,
+            )
+            inferred = self._compact_spaces(inferred)
+            if inferred:
+                v["ref_text"] = inferred
+                try:
+                    from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
+
+                    vid = str(v.get("id") or "").strip()
+                    if vid:
+                        base_meta = v.get("meta")
+                        meta = dict(base_meta) if isinstance(base_meta, dict) else {}
+                        meta["auto_ref_text"] = inferred
+                        meta["auto_ref_text_source"] = "funasr"
+                        voxcpm_tts_voice_store.update(vid, {"ref_text": inferred, "meta": meta})
+                except Exception:
+                    pass
         try:
             device_s = (str(device or "").strip() or "auto")
             actual_text = text
             preview = actual_text.replace("\r", " ").replace("\n", " ")
-            if len(preview) > 120:
-                preview = preview[:120] + "..."
+            if len(preview) > 500:
+                preview = preview[:500] + "..."
             logging.getLogger("modules.voxcpm_tts_service").info(
                 f"VoxCPM 开始合成: kind={kind} key={model_key} language={language} device={device_s} out={Path(out_path).name} "
                 f"文本长度={len(actual_text)} 预览=\"{preview}\" 进度=0%"

@@ -6,6 +6,7 @@ TTS引擎配置管理模块
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from pydantic import BaseModel, Field, validator
@@ -336,7 +337,7 @@ class TtsEngineConfigManager:
             },
             {
                 'provider': 'qwen_online_tts',
-                'display_name': '千问在线 TTS',
+                'display_name': 'Qwen3-TTS(在线)',
                 'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key 或环境变量 DASHSCOPE_API_KEY）',
                 'required_fields': ['secret_key'],
                 'optional_fields': ['region']
@@ -585,7 +586,7 @@ class TtsEngineConfigManager:
                     "success": False,
                     "config_id": config_id,
                     "provider": config.provider,
-                    "message": f"未安装 DashScope SDK: {import_err}. 请安装 'dashscope>=1.24.6'",
+                    "message": f"未安装 DashScope SDK: {import_err}. 当前解释器: {sys.executable}. 请执行: {sys.executable} -m pip install --index-url https://mirrors.aliyun.com/pypi/simple/ \"dashscope>=1.24.6\"",
                     "error": str(import_err),
                 }
             try:
@@ -603,6 +604,27 @@ class TtsEngineConfigManager:
                 instructions = str(ep.get("Instructions") or "").strip() or None
                 optimize = ep.get("OptimizeInstructions", None)
                 optimize_b = bool(optimize) if optimize is not None else None
+                max_concurrency_i = None
+                try:
+                    mc = ep.get("MaxConcurrency", None)
+                    if mc is not None and not isinstance(mc, bool):
+                        max_concurrency_i = int(str(mc).strip())
+                except Exception:
+                    max_concurrency_i = None
+                min_interval_sec = None
+                try:
+                    mi = ep.get("MinIntervalMs", None)
+                    if mi is not None and not isinstance(mi, bool):
+                        min_interval_sec = float(str(mi).strip()) / 1000.0
+                except Exception:
+                    min_interval_sec = None
+                max_retries_i = None
+                try:
+                    mr = ep.get("MaxRetries", None)
+                    if mr is not None and not isinstance(mr, bool):
+                        max_retries_i = int(str(mr).strip())
+                except Exception:
+                    max_retries_i = None
 
                 out_dir = user_data_dir() / "tmp" / "tts"
                 out_dir.mkdir(parents=True, exist_ok=True)
@@ -618,6 +640,9 @@ class TtsEngineConfigManager:
                     instructions=instructions,
                     optimize_instructions=optimize_b,
                     stream=False,
+                    max_concurrency=max_concurrency_i,
+                    min_interval_sec=min_interval_sec,
+                    max_retries=max_retries_i,
                 )
                 try:
                     if out_path.exists():
