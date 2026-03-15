@@ -18,6 +18,7 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 _tts_semaphore: Optional[asyncio.Semaphore] = None
 _tts_semaphore_concurrency: int = 0
 _tts_semaphore_lock = asyncio.Lock()
+_voxcpm_tts_lock = asyncio.Lock()
 
 
 async def _get_tts_semaphore() -> asyncio.Semaphore:
@@ -132,244 +133,296 @@ class TencentTtsService:
         return res
 
     async def synthesize(self, text: str, out_path: str, voice_id: Optional[str] = None) -> Dict[str, Any]:
-        async with _tts_slot():
-            cfg = tts_engine_config_manager.get_active_config()
-            provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
+        cfg = tts_engine_config_manager.get_active_config()
+        provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
-            # Edge TTS 合成路径（免凭据）
-            if provider == "edge_tts":
-                try:
-                    from modules.edge_tts_service import edge_tts_service
-                except Exception as e:
-                    return {"success": False, "error": f"edge_service_import_failed: {e}"}
-
-                vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
-                speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
-                out = Path(out_path)
-                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-                override = None
-                try:
-                    pv = ep.get("ProxyUrl")
-                    if isinstance(pv, str) and pv.strip():
-                        override = pv.strip()
-                except Exception:
-                    override = None
-                try:
-                    logger.info(f"配音角色： edge_tts_synthesize voice={vid} speed={speed_ratio} text_len={len(text)}")
-                    res = await edge_tts_service.synthesize(
+        if provider == "voxcpm_tts":
+            async with _voxcpm_tts_lock:
+                async with _tts_slot():
+                    return await self._synthesize_with_provider(
                         text=text,
-                        voice_id=vid,
-                        speed_ratio=speed_ratio,
-                        out_path=out,
-                        proxy_override=override,
+                        out_path=out_path,
+                        voice_id=voice_id,
+                        cfg=cfg,
+                        provider=provider,
                     )
-                    return res
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
 
-            if provider == "qwen3_tts":
+        async with _tts_slot():
+            return await self._synthesize_with_provider(
+                text=text,
+                out_path=out_path,
+                voice_id=voice_id,
+                cfg=cfg,
+                provider=provider,
+            )
+
+    async def _synthesize_with_provider(
+        self,
+        text: str,
+        out_path: str,
+        voice_id: Optional[str],
+        cfg,
+        provider: str,
+    ) -> Dict[str, Any]:
+        # Edge TTS 合成路径（免凭据）
+        if provider == "edge_tts":
+            try:
+                from modules.edge_tts_service import edge_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"edge_service_import_failed: {e}"}
+
+            vid = voice_id or (cfg.active_voice_id if cfg else None) or "zh-CN-XiaoxiaoNeural"
+            speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
+            out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            override = None
+            try:
+                pv = ep.get("ProxyUrl")
+                if isinstance(pv, str) and pv.strip():
+                    override = pv.strip()
+            except Exception:
+                override = None
+            try:
+                logger.info(f"配音角色： edge_tts_synthesize voice={vid} speed={speed_ratio} text_len={len(text)}")
+                res = await edge_tts_service.synthesize(
+                    text=text,
+                    voice_id=vid,
+                    speed_ratio=speed_ratio,
+                    out_path=out,
+                    proxy_override=override,
+                )
+                return res
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        if provider == "qwen3_tts":
+            try:
+                from modules.qwen3_tts_service import qwen3_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"qwen3_tts_import_failed:{e}"}
+
+            out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            device = ep.get("Device")
+            device_s = str(device).strip() if isinstance(device, str) else None
+
+            qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+
+            if qwen_voice_id:
                 try:
-                    from modules.qwen3_tts_service import qwen3_tts_service
-                except Exception as e:
-                    return {"success": False, "error": f"qwen3_tts_import_failed:{e}"}
+                    from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
 
-                out = Path(out_path)
-                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-                device = ep.get("Device")
-                device_s = str(device).strip() if isinstance(device, str) else None
+                    vv = qwen3_tts_voice_store.get(qwen_voice_id)
+                    if vv:
+                        try:
+                            res = await qwen3_tts_service.synthesize_by_voice_asset(
+                                text=text,
+                                out_path=out,
+                                voice_asset=vv,
+                                device=device_s,
+                            )
+                            if res and res.get("success"):
+                                return await self._postprocess_qwen_audio(res, out, cfg)
+                            return res
+                        except Exception as e:
+                            return {"success": False, "error": str(e)}
+                except Exception:
+                    pass
 
-                qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+            # Legacy / Config-only Fallback
+            model_key = str(ep.get("ModelKey") or "custom_0_6b")
+            language = str(ep.get("Language") or "Auto")
+            instruct = str(ep.get("Instruct") or "").strip() or None
 
-                if qwen_voice_id:
-                    try:
-                        from modules.qwen3_tts_voice_store import qwen3_tts_voice_store
+            try:
+                if model_key.startswith("custom_"):
+                    speaker = str(ep.get("Speaker") or (qwen_voice_id or "")).strip() or None
+                    if not speaker:
+                        try:
+                            supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
+                            if supported:
+                                speaker = str(supported[0]).strip() or speaker
+                        except Exception:
+                            pass
+                    if not speaker:
+                        return {"success": False, "error": "speaker_required_for_custom_voice"}
 
-                        vv = qwen3_tts_voice_store.get(qwen_voice_id)
-                        if vv:
-                            try:
-                                res = await qwen3_tts_service.synthesize_by_voice_asset(
-                                    text=text,
-                                    out_path=out,
-                                    voice_asset=vv,
-                                    device=device_s,
-                                )
-                                if res and res.get("success"):
-                                    return await self._postprocess_qwen_audio(res, out, cfg)
-                                return res
-                            except Exception as e:
-                                return {"success": False, "error": str(e)}
-                    except Exception:
-                        pass
-
-                # Legacy / Config-only Fallback
-                model_key = str(ep.get("ModelKey") or "custom_0_6b")
-                language = str(ep.get("Language") or "Auto")
-                instruct = str(ep.get("Instruct") or "").strip() or None
-
-                try:
-                    if model_key.startswith("custom_"):
-                        speaker = str(ep.get("Speaker") or (qwen_voice_id or "")).strip() or None
-                        if not speaker:
-                            try:
-                                supported = await qwen3_tts_service.list_supported_speakers(model_key=model_key, device=device_s)
-                                if supported:
-                                    speaker = str(supported[0]).strip() or speaker
-                            except Exception:
-                                pass
-                        if not speaker:
-                            return {"success": False, "error": "speaker_required_for_custom_voice"}
-
-                        res = await qwen3_tts_service.synthesize_custom_voice_to_wav(
-                            text=text,
-                            out_path=out,
-                            model_key=model_key,
-                            language=language,
-                            speaker=speaker,
-                            instruct=instruct,
-                            device=device_s,
-                        )
-                        if res and res.get("success"):
-                            return await self._postprocess_qwen_audio(res, out, cfg)
-                        return res
-                    else:
-                        ref_audio = str(ep.get("RefAudio") or "").strip() or None
-                        ref_text = str(ep.get("RefText") or "").strip() or None
-                        xvec_in = ep.get("XVectorOnly", None)
-                        x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
-
-                        if not ref_audio:
-                            return {"success": False, "error": "ref_audio_required_for_voice_clone"}
-
-                        res = await qwen3_tts_service.synthesize_voice_clone_to_wav(
-                            text=text,
-                            out_path=out,
-                            model_key=model_key,
-                            language=language,
-                            ref_audio=ref_audio,
-                            ref_text=ref_text,
-                            x_vector_only_mode=x_vector_only_mode,
-                            device=device_s,
-                        )
-                        if res and res.get("success"):
-                            return await self._postprocess_qwen_audio(res, out, cfg)
-                        return res
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-
-            if provider == "qwen_online_tts":
-                api_key = (os.getenv("DASHSCOPE_API_KEY") or ((cfg.secret_key or "").strip() if cfg else "")).strip()
-                if not api_key:
-                    return {"success": False, "error": "missing_credentials"}
-                try:
-                    from modules.qwen_online_tts_service import qwen_online_tts_service
-                    from modules.qwen_online_tts_voice_store import qwen_online_tts_voice_store
-                except Exception as e:
-                    return {"success": False, "error": f"qwen_online_import_failed:{e}"}
-
-                out = Path(out_path)
-                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-                base_url = str(ep.get("BaseUrl") or "").strip()
-                region = ((cfg.region or "").strip().lower() if cfg else "")
-                if not base_url:
-                    base_url = "https://dashscope-intl.aliyuncs.com/api/v1" if region in {"intl", "sg", "ap-singapore"} else "https://dashscope.aliyuncs.com/api/v1"
-
-                model = str(ep.get("Model") or "qwen3-tts-flash").strip() or "qwen3-tts-flash"
-                language_type = str(ep.get("LanguageType") or "").strip() or None
-                instructions = str(ep.get("Instructions") or "").strip() or None
-                optimize = ep.get("OptimizeInstructions", None)
-                optimize_b = bool(optimize) if optimize is not None else None
-
-                qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
-                voice = str(ep.get("Voice") or "Cherry").strip() or "Cherry"
-                if qwen_voice_id:
-                    vrec = qwen_online_tts_voice_store.get(qwen_voice_id)
-                    if vrec:
-                        if not getattr(vrec, "voice", None):
-                            return {"success": False, "error": "voice_not_ready"}
-                        voice = str(vrec.voice).strip()
-                        model = str(getattr(vrec, "model", model) or model).strip() or model
-                if not qwen_voice_id:
-                    qwen_voice_id = None
-
-                try:
-                    res = await qwen_online_tts_service.synthesize(
+                    res = await qwen3_tts_service.synthesize_custom_voice_to_wav(
                         text=text,
-                        out_path=str(out),
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=model,
-                        voice=voice,
-                        language_type=language_type,
-                        instructions=instructions,
-                        optimize_instructions=optimize_b,
-                        stream=False,
+                        out_path=out,
+                        model_key=model_key,
+                        language=language,
+                        speaker=speaker,
+                        instruct=instruct,
+                        device=device_s,
                     )
                     if res and res.get("success"):
                         return await self._postprocess_qwen_audio(res, out, cfg)
                     return res
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
+                else:
+                    ref_audio = str(ep.get("RefAudio") or "").strip() or None
+                    ref_text = str(ep.get("RefText") or "").strip() or None
+                    xvec_in = ep.get("XVectorOnly", None)
+                    x_vector_only_mode = bool(xvec_in) if xvec_in is not None else True
 
-            if provider == "voxcpm_tts":
-                try:
-                    from modules.voxcpm_tts_service import voxcpm_tts_service
-                except Exception as e:
-                    return {"success": False, "error": f"voxcpm_tts_import_failed:{e}"}
+                    if not ref_audio:
+                        return {"success": False, "error": "ref_audio_required_for_voice_clone"}
 
-                out = Path(out_path)
-                ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-                device = ep.get("Device")
-                device_s = str(device).strip() if isinstance(device, str) else None
-
-                voxcpm_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
-
-                if voxcpm_voice_id:
-                    try:
-                        from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
-
-                        vv = voxcpm_tts_voice_store.get(voxcpm_voice_id)
-                        if vv:
-                            try:
-                                res = await voxcpm_tts_service.synthesize_by_voice_asset(
-                                    text=text,
-                                    out_path=out,
-                                    voice_asset=vv,
-                                    device=device_s,
-                                )
-                                if res and res.get("success"):
-                                    return await self._postprocess_qwen_audio(res, out, cfg)
-                                return res
-                            except Exception as e:
-                                return {"success": False, "error": str(e)}
-                    except Exception:
-                        pass
-
-                # Legacy / Config-only Fallback
-                model_key = str(ep.get("ModelKey") or "voxcpm_0_5b")
-                language = str(ep.get("Language") or "Auto")
-                ref_audio = str(ep.get("RefAudio") or "").strip() or None
-                ref_text = str(ep.get("RefText") or "").strip() or None
-
-                if not ref_audio:
-                    return {"success": False, "error": "ref_audio_required_for_voice_clone"}
-
-                try:
-                    res = await voxcpm_tts_service.synthesize_voice_clone_to_wav(
+                    res = await qwen3_tts_service.synthesize_voice_clone_to_wav(
                         text=text,
                         out_path=out,
                         model_key=model_key,
                         language=language,
                         ref_audio=ref_audio,
                         ref_text=ref_text,
+                        x_vector_only_mode=x_vector_only_mode,
                         device=device_s,
                     )
                     if res and res.get("success"):
                         return await self._postprocess_qwen_audio(res, out, cfg)
                     return res
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
 
-            return await self._synthesize_tencent(text=text, out_path=out_path, cfg=cfg, voice_id=voice_id)
+        if provider == "qwen_online_tts":
+            api_key = (os.getenv("DASHSCOPE_API_KEY") or ((cfg.secret_key or "").strip() if cfg else "")).strip()
+            if not api_key:
+                return {"success": False, "error": "missing_credentials"}
+            try:
+                from modules.qwen_online_tts_service import qwen_online_tts_service
+                from modules.qwen_online_tts_voice_store import qwen_online_tts_voice_store
+            except Exception as e:
+                return {"success": False, "error": f"qwen_online_import_failed:{e}"}
+
+            out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            base_url = str(ep.get("BaseUrl") or "").strip()
+            region = ((cfg.region or "").strip().lower() if cfg else "")
+            if not base_url:
+                base_url = "https://dashscope-intl.aliyuncs.com/api/v1" if region in {"intl", "sg", "ap-singapore"} else "https://dashscope.aliyuncs.com/api/v1"
+
+            model = str(ep.get("Model") or "qwen3-tts-flash").strip() or "qwen3-tts-flash"
+            language_type = str(ep.get("LanguageType") or "").strip() or None
+            instructions = str(ep.get("Instructions") or "").strip() or None
+            optimize = ep.get("OptimizeInstructions", None)
+            optimize_b = bool(optimize) if optimize is not None else None
+            max_concurrency_i = None
+            try:
+                mc = ep.get("MaxConcurrency", None)
+                if mc is not None and not isinstance(mc, bool):
+                    max_concurrency_i = int(str(mc).strip())
+            except Exception:
+                max_concurrency_i = None
+            min_interval_sec = None
+            try:
+                mi = ep.get("MinIntervalMs", None)
+                if mi is not None and not isinstance(mi, bool):
+                    min_interval_sec = float(str(mi).strip()) / 1000.0
+            except Exception:
+                min_interval_sec = None
+            max_retries_i = None
+            try:
+                mr = ep.get("MaxRetries", None)
+                if mr is not None and not isinstance(mr, bool):
+                    max_retries_i = int(str(mr).strip())
+            except Exception:
+                max_retries_i = None
+
+            qwen_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+            voice = str(ep.get("Voice") or "Cherry").strip() or "Cherry"
+            if qwen_voice_id:
+                vrec = qwen_online_tts_voice_store.get(qwen_voice_id)
+                if vrec:
+                    if not getattr(vrec, "voice", None):
+                        return {"success": False, "error": "voice_not_ready"}
+                    voice = str(vrec.voice).strip()
+                    model = str(getattr(vrec, "model", model) or model).strip() or model
+            if not qwen_voice_id:
+                qwen_voice_id = None
+
+            try:
+                res = await qwen_online_tts_service.synthesize(
+                    text=text,
+                    out_path=str(out),
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    voice=voice,
+                    language_type=language_type,
+                    instructions=instructions,
+                    optimize_instructions=optimize_b,
+                    stream=False,
+                    max_concurrency=max_concurrency_i,
+                    min_interval_sec=min_interval_sec,
+                    max_retries=max_retries_i,
+                )
+                if res and res.get("success"):
+                    return await self._postprocess_qwen_audio(res, out, cfg)
+                return res
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        if provider == "voxcpm_tts":
+            try:
+                from modules.voxcpm_tts_service import voxcpm_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"voxcpm_tts_import_failed:{e}"}
+
+            out = Path(out_path)
+            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+            device = ep.get("Device")
+            device_s = str(device).strip() if isinstance(device, str) else None
+
+            voxcpm_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
+
+            if voxcpm_voice_id:
+                try:
+                    from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
+
+                    vv = voxcpm_tts_voice_store.get(voxcpm_voice_id)
+                    if vv:
+                        try:
+                            res = await voxcpm_tts_service.synthesize_by_voice_asset(
+                                text=text,
+                                out_path=out,
+                                voice_asset=vv,
+                                device=device_s,
+                            )
+                            if res and res.get("success"):
+                                return await self._postprocess_qwen_audio(res, out, cfg)
+                            return res
+                        except Exception as e:
+                            return {"success": False, "error": str(e)}
+                except Exception:
+                    pass
+
+            # Legacy / Config-only Fallback
+            model_key = str(ep.get("ModelKey") or "voxcpm_0_5b")
+            language = str(ep.get("Language") or "Auto")
+            ref_audio = str(ep.get("RefAudio") or "").strip() or None
+            ref_text = str(ep.get("RefText") or "").strip() or None
+
+            if not ref_audio:
+                return {"success": False, "error": "ref_audio_required_for_voice_clone"}
+
+            try:
+                res = await voxcpm_tts_service.synthesize_voice_clone_to_wav(
+                    text=text,
+                    out_path=out,
+                    model_key=model_key,
+                    language=language,
+                    ref_audio=ref_audio,
+                    ref_text=ref_text,
+                    device=device_s,
+                )
+                if res and res.get("success"):
+                    return await self._postprocess_qwen_audio(res, out, cfg)
+                return res
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        return await self._synthesize_tencent(text=text, out_path=out_path, cfg=cfg, voice_id=voice_id)
+
     async def _synthesize_tencent(self, text: str, out_path: str, cfg, voice_id: Optional[str]) -> Dict[str, Any]:
         # 腾讯云 TTS 合成路径（需凭据）
         env_sid = (os.getenv("TENCENTCLOUD_SECRET_ID") or "").strip()

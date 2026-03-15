@@ -10,6 +10,7 @@ import asyncio
 import time
 import tempfile
 import uuid
+import sys
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -685,7 +686,7 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 try:
                     import dashscope  # noqa: F401
                 except Exception as import_err:
-                    raise HTTPException(status_code=503, detail=f"dashscope_not_installed:{import_err}")
+                    raise HTTPException(status_code=503, detail=f"dashscope_not_installed:{import_err}|py={sys.executable}")
 
                 ep = (cfg.extra_params if cfg else {}) or {}
                 base_url = str(ep.get("BaseUrl") or "").strip()
@@ -707,6 +708,27 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                 instructions = str(ep.get("Instructions") or "").strip() or None
                 optimize = ep.get("OptimizeInstructions", None)
                 optimize_b = bool(optimize) if optimize is not None else None
+                max_concurrency_i = None
+                try:
+                    mc = ep.get("MaxConcurrency", None)
+                    if mc is not None and not isinstance(mc, bool):
+                        max_concurrency_i = int(str(mc).strip())
+                except Exception:
+                    max_concurrency_i = None
+                min_interval_sec = None
+                try:
+                    mi = ep.get("MinIntervalMs", None)
+                    if mi is not None and not isinstance(mi, bool):
+                        min_interval_sec = float(str(mi).strip()) / 1000.0
+                except Exception:
+                    min_interval_sec = None
+                max_retries_i = None
+                try:
+                    mr = ep.get("MaxRetries", None)
+                    if mr is not None and not isinstance(mr, bool):
+                        max_retries_i = int(str(mr).strip())
+                except Exception:
+                    max_retries_i = None
 
                 ts = int(time.time() * 1000)
                 safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in str(vid))[:64]
@@ -726,6 +748,9 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                         instructions=instructions,
                         optimize_instructions=optimize_b,
                         stream=False,
+                        max_concurrency=max_concurrency_i,
+                        min_interval_sec=min_interval_sec,
+                        max_retries=max_retries_i,
                     )
                     if not res.get("success"):
                         raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")

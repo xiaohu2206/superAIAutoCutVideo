@@ -12,7 +12,7 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, List
-
+import os
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
@@ -386,7 +386,7 @@ async def _stop_download_task(key: str) -> Dict[str, Any]:
 
 class VoxCPMTTSDownloadRequest(BaseModel):
     key: str = Field(..., description="模型key，如 voxcpm_0_5b")
-    provider: str = Field(..., description="modelscope")
+    provider: Optional[str] = Field(default="hf", description="hf（默认）/modelscope（兼容旧参数）")
 
 
 class VoxCPMTTSStopDownloadRequest(BaseModel):
@@ -442,9 +442,11 @@ async def download_voxcpm_model(req: VoxCPMTTSDownloadRequest) -> Dict[str, Any]
         if req.key not in VOXCPM_TTS_MODEL_REGISTRY:
             raise HTTPException(status_code=404, detail="unknown_model_key")
 
-        provider = (req.provider or "").strip().lower()
-        if provider != "modelscope":
-            raise HTTPException(status_code=400, detail="provider_must_be_modelscope")
+        provider_in = (req.provider or "").strip().lower()
+        if provider_in in {"", "hf", "huggingface", "huggingface_hub", "modelscope"}:
+            provider = "hf"
+        else:
+            raise HTTPException(status_code=400, detail="provider_not_supported")
 
         target_dir = pm.model_path(req.key)
         total_bytes = VOXCPM_TTS_MODEL_TOTAL_BYTES_BY_KEY.get(req.key)

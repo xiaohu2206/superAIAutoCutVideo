@@ -132,8 +132,23 @@ class VideoProcessor:
                 except Exception:
                     dur = None
                 if dur is not None and dur > 0.01:
-                    logger.info(f"视频剪切成功: {output_path}")
-                    return True
+                    try:
+                        a_dur = await self._ffprobe_duration(output_path, "audio")
+                        a_dur_val = float(a_dur or 0.0)
+                    except Exception:
+                        a_dur_val = 0.0
+                    tol = 0.20
+                    if a_dur_val > 0.0 and (a_dur_val + tol) < float(dur):
+                        logger.warning(
+                            "剪切结果音画时长不一致，进入重编码回退: audio=%.3fs video=%.3fs target=%.3fs path=%s",
+                            a_dur_val,
+                            float(dur),
+                            float(duration),
+                            output_path,
+                        )
+                    else:
+                        logger.info(f"视频剪切成功: {output_path}")
+                        return True
                 logger.warning("剪切结果时长异常，进入重编码回退")
             else:
                 err = stderr.decode(errors="ignore")
@@ -199,6 +214,7 @@ class VideoProcessor:
         project_id: Optional[str] = None,
         task_id: Optional[str] = None,
         cancel_event: Optional[asyncio.Event] = None,
+        force_reencode: bool = False,
     ) -> bool:
         """
         """
@@ -240,6 +256,7 @@ class VideoProcessor:
                             project_id=project_id,
                             task_id=task_id,
                             cancel_event=cancel_event,
+                            force_reencode=force_reencode,
                         )
                         if not ok_i:
                             return False
@@ -258,6 +275,7 @@ class VideoProcessor:
                         project_id=project_id,
                         task_id=task_id,
                         cancel_event=cancel_event,
+                        force_reencode=force_reencode,
                     )
                     return ok_final
                 finally:
@@ -372,6 +390,8 @@ class VideoProcessor:
                         ):
                             copy_possible = False
                             break
+            if force_reencode:
+                copy_possible = False
             token = uuid.uuid4().hex[:10]
             can_concat_demuxer = False
             list_path = Path(output_path).with_suffix(f".{token}.concat.txt")

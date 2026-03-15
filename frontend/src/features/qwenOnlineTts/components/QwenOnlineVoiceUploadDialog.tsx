@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Loader, Upload, X } from "lucide-react";
+import { Loader, Upload, X, ChevronDown, Check } from "lucide-react";
 import { message } from "@/services/message";
 import type {
   QwenOnlineTtsVoice,
@@ -42,18 +42,47 @@ const ACCEPTED_TYPES = [
   "audio/aac",
 ];
 
+const DEFAULT_MODEL = "qwen3-tts-vc-2026-01-22";
+const MODEL_VALUE_SET: ReadonlySet<string> = new Set(
+  QWEN_ONLINE_TTS_MODELS.map((m) => m.value)
+);
+
 const QwenOnlineVoiceUploadDialog: React.FC<
   QwenOnlineVoiceUploadDialogProps
 > = ({ isOpen, voice, onClose, onSubmit }) => {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState<string>("");
-  const [model, setModel] = useState<string>("qwen3-tts-vc-2026-01-22");
+  const [model, setModel] = useState<string>(DEFAULT_MODEL);
   const [refText, setRefText] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [dragOver, setDragOver] = useState<boolean>(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   const isEdit = !!voice;
   const canSubmit = isEdit || (!!file && !submitting);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        modelDropdownRef.current &&
+        !modelDropdownRef.current.contains(event.target as Node)
+      ) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFile(null);
+    setName(voice?.name ?? "");
+    setModel(voice?.model ?? DEFAULT_MODEL);
+    setRefText(voice?.ref_text ?? "");
+  }, [isOpen, voice]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -93,16 +122,35 @@ const QwenOnlineVoiceUploadDialog: React.FC<
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    const resolvedModel = (model || DEFAULT_MODEL).trim();
+    if (!MODEL_VALUE_SET.has(resolvedModel)) {
+      message.warning(
+        `模型仅支持：${QWEN_ONLINE_TTS_MODELS.map((m) => m.value).join(" / ")}`
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
       if (isEdit && voice) {
+        const nextName = name.trim();
+        const nextRefText = refText.trim();
+        const patch: Partial<QwenOnlineTtsVoice> = {};
+        if (nextName && nextName !== voice.name) patch.name = nextName;
+        if (nextRefText && nextRefText !== (voice.ref_text ?? "")) {
+          patch.ref_text = nextRefText;
+        }
+        if (resolvedModel !== voice.model) patch.model = resolvedModel;
+        if (Object.keys(patch).length === 0) {
+          handleClose();
+          return;
+        }
+
         await onSubmit({
           edit: true,
           voiceId: voice.id,
           patch: {
-            name: name || undefined,
-            ref_text: refText || undefined,
-            model: model || undefined,
+            ...patch,
           },
         });
       } else if (file) {
@@ -110,9 +158,9 @@ const QwenOnlineVoiceUploadDialog: React.FC<
           edit: false,
           input: {
             file,
-            name: name || undefined,
-            model: model || undefined,
-            ref_text: refText || undefined,
+            name: name.trim() || undefined,
+            model: resolvedModel || undefined,
+            ref_text: refText.trim() || undefined,
           },
         });
       }
@@ -127,7 +175,7 @@ const QwenOnlineVoiceUploadDialog: React.FC<
     if (!submitting) {
       setFile(null);
       setName("");
-      setModel("qwen3-tts-vc-2026-01-22");
+      setModel(DEFAULT_MODEL);
       setRefText("");
       onClose();
     }
@@ -159,6 +207,7 @@ const QwenOnlineVoiceUploadDialog: React.FC<
           <div className="p-5 space-y-4">
             {!isEdit && (
               <div
+                onClick={() => fileInputRef.current?.click()}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDragOver(true);
@@ -175,6 +224,13 @@ const QwenOnlineVoiceUploadDialog: React.FC<
                   ${file ? "border-green-400 bg-green-50" : ""}
                 `}
               >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_TYPES.join(",")}
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
                 {file ? (
                   <div className="space-y-2">
                     <div className="text-sm font-medium text-gray-900">
@@ -188,6 +244,10 @@ const QwenOnlineVoiceUploadDialog: React.FC<
                       onClick={(e) => {
                         e.stopPropagation();
                         setFile(null);
+                        // Reset input value so same file can be selected again if needed
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = "";
+                        }
                       }}
                       className="text-xs text-red-600 hover:underline"
                     >
@@ -199,15 +259,9 @@ const QwenOnlineVoiceUploadDialog: React.FC<
                     <Upload className="h-8 w-8 mx-auto text-gray-400" />
                     <div className="text-sm text-gray-600">
                       拖拽音频文件到此处，或{" "}
-                      <label className="text-blue-600 hover:underline cursor-pointer">
+                      <span className="text-blue-600 hover:underline cursor-pointer">
                         点击选择
-                        <input
-                          type="file"
-                          accept={ACCEPTED_TYPES.join(",")}
-                          onChange={handleFileChange}
-                          className="hidden"
-                        />
-                      </label>
+                      </span>
                     </div>
                     <div className="text-xs text-gray-500">
                       支持 mp3/wav/m4a/flac/ogg/aac
@@ -231,19 +285,57 @@ const QwenOnlineVoiceUploadDialog: React.FC<
               />
             </div>
 
-            <div>
+            <div ref={modelDropdownRef} className="relative">
               <label className="block text-sm text-gray-700 mb-1">模型</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md w-full"
-              >
-                {QWEN_ONLINE_TTS_MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  onFocus={() => setModelDropdownOpen(true)}
+                  placeholder="输入或选择模型"
+                  className="px-3 py-2 pr-8 border border-gray-300 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform duration-200 ${
+                      modelDropdownOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {modelDropdownOpen && (
+                <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto py-1">
+                  {QWEN_ONLINE_TTS_MODELS.map((m) => {
+                    const isSelected = model === m.value;
+                    return (
+                      <li
+                        key={m.value}
+                        onClick={() => {
+                          setModel(m.value);
+                          setModelDropdownOpen(false);
+                        }}
+                        className={`
+                          px-3 py-2 text-sm cursor-pointer flex items-center justify-between transition-colors
+                          ${
+                            isSelected
+                              ? "bg-blue-50 text-blue-600 font-medium"
+                              : "text-gray-700 hover:bg-gray-50"
+                          }
+                        `}
+                      >
+                        <span>{m.label}</span>
+                        {isSelected && <Check className="h-4 w-4" />}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
 
             <div>

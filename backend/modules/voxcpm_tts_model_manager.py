@@ -10,6 +10,7 @@ from modules.app_paths import uploads_dir
 VOXCPM_TTS_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "voxcpm_0_5b": {
         "ms": "OpenBMB/VoxCPM-0.5B",
+        "hf": "openbmb/VoxCPM-0.5B",
         "local": "VoxCPM-0.5B",
         "model_type": "voice_clone",
         "size": "0.5B",
@@ -17,6 +18,7 @@ VOXCPM_TTS_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "voxcpm_1_5b": {
         "ms": "OpenBMB/VoxCPM1.5",
+        "hf": "openbmb/VoxCPM1.5",
         "local": "VoxCPM1.5",
         "model_type": "voice_clone",
         "size": "1.5B",
@@ -69,6 +71,7 @@ class VoxCPMTTSPathManager:
                     display_names=info.get("display_names", []),
                     sources={
                         "ms": str(info.get("ms", "")),
+                        "hf": str(info.get("hf", "")),
                         "local": str(info.get("local", "")),
                     },
                 )
@@ -150,40 +153,35 @@ def download_model_snapshot(key: str, provider: str, target_dir: Path) -> Dict[s
     if key not in VOXCPM_TTS_MODEL_REGISTRY:
         raise ValueError(f"unknown_model_key: {key}")
     provider = (provider or "").strip().lower()
-    if provider != "modelscope":
-        raise ValueError("provider_must_be_modelscope")
+    if provider in {"", "hf", "huggingface", "huggingface_hub", "modelscope"}:
+        provider = "hf"
+    else:
+        raise ValueError(f"provider_not_supported:{provider}")
 
     target_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        from modelscope.hub.snapshot_download import snapshot_download as ms_snapshot_download
+        from huggingface_hub import snapshot_download
     except Exception as e:
-        raise RuntimeError(f"missing_dependency:modelscope:{e}")
+        raise RuntimeError(f"missing_dependency:huggingface_hub:{type(e).__name__}:{e}")
 
-    model_id = VOXCPM_TTS_MODEL_REGISTRY[key]["ms"]
-    ms_cache_dir = target_dir / ".modelscope_cache"
-    ms_cache_dir.mkdir(parents=True, exist_ok=True)
-    downloaded = ms_snapshot_download(model_id=model_id, cache_dir=str(ms_cache_dir))
-    downloaded_dir = Path(str(downloaded))
-    if downloaded_dir.exists() and downloaded_dir.is_dir() and downloaded_dir.resolve() != target_dir.resolve():
-        for item in downloaded_dir.iterdir():
-            _merge_move(item, target_dir / item.name)
-        try:
-            shutil.rmtree(ms_cache_dir)
-        except Exception:
-            pass
+    repo_id = str(VOXCPM_TTS_MODEL_REGISTRY[key].get("hf") or "").strip() or str(
+        VOXCPM_TTS_MODEL_REGISTRY[key].get("ms") or ""
+    ).strip()
+    if not repo_id:
+        raise RuntimeError(f"missing_repo_id_for_key:{key}")
 
-    legacy_owner_dir = target_dir / (model_id.split("/", 1)[0] if "/" in model_id else model_id)
-    if legacy_owner_dir.exists() and legacy_owner_dir.is_dir() and (target_dir / "config.json").exists():
-        try:
-            shutil.rmtree(legacy_owner_dir)
-        except Exception:
-            pass
+    downloaded = snapshot_download(
+        repo_id=repo_id,
+        local_dir=str(target_dir),
+        local_dir_use_symlinks=False,
+        resume_download=True,
+    )
     return {
-        "provider": "modelscope",
-        "model_id": model_id,
+        "provider": provider,
+        "repo_id": repo_id,
         "path": str(target_dir),
-        "snapshot_path": str(downloaded_dir),
+        "snapshot_path": str(downloaded),
     }
 
 
