@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Download, ShieldAlert, Copy, Check, Square, Info } from "lucide-react";
+import { Box, Download, Check, Square, Info } from "lucide-react";
 import type { VoxcpmTtsDownloadProvider } from "../types";
 import VoxcpmCloneProgressItem from "./VoxcpmCloneProgressItem";
 import { TauriCommands } from "@/services/clients";
