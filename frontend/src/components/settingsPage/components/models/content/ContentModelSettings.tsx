@@ -41,7 +41,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
     currentContentConfig.model_name
   );
   const providerLinks: Record<string, string> = {
-    yunwu: "https://yunwu.apifox.cn",
+    yunwu: "https://yunwu.apifox.cn/api-232421924",
     "302ai": "https://302.ai/apis/list",
     qwen: "https://bailian.console.aliyun.com/cn-beijing/?spm=5176.28197619.console-base_search-panel.dvisited_sfm.20d53ae4f6I5R3&tab=model#/api-key",
     doubao: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
