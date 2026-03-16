@@ -1,6 +1,7 @@
 import { apiClient } from "@/services/clients";
 import type {
   ApiOk,
+  VoxcpmTtsAccelerationStatus,
   VoxcpmTtsDownloadProvider,
   VoxcpmTtsModelStatus,
   VoxcpmTtsPatchVoiceInput,
@@ -12,6 +13,10 @@ import type {
 export const voxcpmTtsService = {
   getRuntimeStatus(): Promise<ApiOk<any>> {
     return apiClient.get("/api/tts/voxcpm/runtime-status");
+  },
+
+  getAccelerationStatus(): Promise<ApiOk<VoxcpmTtsAccelerationStatus>> {
+    return apiClient.get("/api/tts/voxcpm/acceleration-status");
   },
 
   listModels(): Promise<ApiOk<VoxcpmTtsModelStatus[]>> {

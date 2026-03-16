@@ -72,3 +72,26 @@ export type VoxcpmTtsRuntimeStatus = {
   precision?: string;
   last_device_error?: string | null;
 };
+
+export type VoxcpmTtsAccelerationStatus = {
+  acceleration: {
+    supported: boolean;
+    preferred_device: string;
+    backend: string;
+    reasons: string[];
+    gpu?: {
+      index?: number;
+      name?: string | null;
+      total_memory_bytes?: number | null;
+      compute_capability?: { major: number; minor: number };
+    } | null;
+  };
+  runtime: {
+    loaded: boolean;
+    model_key?: string | null;
+    model_path?: string | null;
+    device: string;
+    precision?: string;
+    last_device_error?: string | null;
+  };
+};

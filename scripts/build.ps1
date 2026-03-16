@@ -440,6 +440,32 @@ foreach ($variant in $variants) {
     }
     else { Fail "No backend requirements file found" }
 
+    if ($variant -ne "cpu") {
+      Step "Ensure llama-cpp-python is CUDA-built (GGML_CUDA=on) ($variant)"
+      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "ninja"
+      if ($LASTEXITCODE -ne 0) { throw "ninja install failed (code $LASTEXITCODE)" }
+
+      $oldCmakeArgs = $env:CMAKE_ARGS
+      $oldForceCmake = $env:FORCE_CMAKE
+      $oldCmakeGen = $env:CMAKE_GENERATOR
+      try {
+        $env:CMAKE_ARGS = "-DGGML_CUDA=on"
+        $env:FORCE_CMAKE = "1"
+        $env:CMAKE_GENERATOR = "Ninja"
+        & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
+        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python CUDA build install failed (code $LASTEXITCODE)" }
+
+        $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
+        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
+        $llamaDiagText = ($llamaDiag | Out-String)
+        if ($llamaDiagText -notmatch 'supports_gpu_offload\s+True') { throw "llama-cpp-python was installed but GPU offload is not enabled; expected GGML_CUDA=on" }
+      } finally {
+        $env:CMAKE_ARGS = $oldCmakeArgs
+        $env:FORCE_CMAKE = $oldForceCmake
+        $env:CMAKE_GENERATOR = $oldCmakeGen
+      }
+    }
+
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
     $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu128" }
     $torchAlreadyOk = $false

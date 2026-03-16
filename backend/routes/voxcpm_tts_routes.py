@@ -27,6 +27,7 @@ from modules.voxcpm_tts_model_manager import (
 from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
 from modules.ws_manager import manager
 from modules.voxcpm_tts_service import voxcpm_tts_service
+from modules.voxcpm_tts_acceleration import get_voxcpm_tts_acceleration_status
 
 
 router = APIRouter(prefix="/api/tts/voxcpm", tags=["VoxCPM-TTS"])
@@ -41,6 +42,20 @@ async def get_voxcpm_tts_runtime_status() -> Dict[str, Any]:
     resp = {"success": True, "data": data, "message": "ok"}
     try:
         logger.info("VoxCPM-TTS runtime-status resp=%s", json.dumps(resp, ensure_ascii=False))
+    except Exception:
+        pass
+    return resp
+
+
+@router.get("/acceleration-status")
+async def get_voxcpm_tts_acceleration() -> Dict[str, Any]:
+    data = {
+        "acceleration": get_voxcpm_tts_acceleration_status(),
+        "runtime": voxcpm_tts_service.get_runtime_status(),
+    }
+    resp = {"success": True, "data": data, "message": "ok"}
+    try:
+        logger.info("VoxCPM-TTS acceleration-status resp=%s", json.dumps(resp, ensure_ascii=False))
     except Exception:
         pass
     return resp
@@ -921,3 +936,5 @@ async def get_voxcpm_voice_clone_status(voice_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# // voxcmp/acceleration-status
