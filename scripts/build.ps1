@@ -493,7 +493,7 @@ foreach ($variant in $variants) {
         $env:CMAKE_ARGS = "-DGGML_CUDA=on"
         $env:FORCE_CMAKE = "1"
         $env:CMAKE_GENERATOR = "Ninja"
-        
+
         # Load vcvars64.bat if available to ensure MSVC compiler is found
         $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
         if (Test-Path $vcvars) {
@@ -501,7 +501,7 @@ foreach ($variant in $variants) {
         } else {
             & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
         }
-        
+
         if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python CUDA build install failed (code $LASTEXITCODE)" }
 
         $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
