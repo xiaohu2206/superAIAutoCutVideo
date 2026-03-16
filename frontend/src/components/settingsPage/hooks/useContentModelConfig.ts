@@ -14,18 +14,18 @@ import {
  */
 export const useContentModelConfig = () => {
   const [contentSelectedProvider, setContentSelectedProvider] =
-    useState<string>("302ai");
+    useState<string>("yunwu");
   const [contentModelConfigs, setContentModelConfigs] = useState<
     Record<string, ContentModelConfig>
   >({});
   const [currentContentConfig, setCurrentContentConfig] =
     useState<ContentModelConfig>({
-      provider: "302ai",
+      provider: "yunwu",
       api_key: "",
-      base_url: "",
-      model_name: "",
+      base_url: getContentDefaultBaseUrl("yunwu"),
+      model_name: getContentDefaultModelName("yunwu"),
       extra_params: {},
-      description: "",
+      description: getContentDefaultDescription("yunwu"),
     });
   const [testingContentConnection, setTestingContentConnection] = useState(false);
   const [contentTestResult, setContentTestResult] = useState<TestResult | null>(null);
@@ -88,6 +88,8 @@ export const useContentModelConfig = () => {
         enabled: true,
       };
       setCurrentContentConfig(newConfig);
+      await contentModelService.updateConfig(newConfigId, newConfig);
+      await loadContentGenerationConfigs();
     }
 
     setContentTestResult(null);
@@ -190,4 +192,3 @@ export const useContentModelConfig = () => {
     testContentModelConnection,
   };
 };
-
