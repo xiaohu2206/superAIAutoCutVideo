@@ -10,6 +10,7 @@ from .doubao import DoubaoProvider
 from .deepseek import DeepSeekProvider
 from .openrouter import OpenRouterProvider
 from .ai302 import AI302Provider
+from .yunwu import YunwuProvider
 
 __all__ = [
     "QwenProvider",
@@ -17,10 +18,12 @@ __all__ = [
     "DeepSeekProvider",
     "OpenRouterProvider",
     "AI302Provider",
+    "YunwuProvider",
 ]
 
 # 提供商注册表
 PROVIDER_REGISTRY = {
+    "yunwu": YunwuProvider,
     "302ai": AI302Provider,
     "qwen": QwenProvider,
     "doubao": DoubaoProvider,

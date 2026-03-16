@@ -29,7 +29,7 @@ class ContentModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['302ai', 'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
+        allowed_providers = ['yunwu', '302ai', 'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -112,6 +112,17 @@ class ContentModelConfigManager:
     def _create_default_configs(self):
         """创建默认配置"""
         default_configs = [
+            {
+                'id': 'yunwu_content_generation',
+                'config': ContentModelConfig(
+                    provider='yunwu',
+                    api_key='xxx',
+                    base_url='https://yunwu.ai/v1/chat/completions',
+                    model_name='gemini-3.1-pro-preview',
+                    description='云雾API平台文案生成模型（支持结构化输出）',
+                    enabled=False
+                )
+            },
             {
                 'id': '302ai_content_generation',
                 'config': ContentModelConfig(

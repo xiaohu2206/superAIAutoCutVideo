@@ -36,6 +36,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
   testContentModelConnection,
 }) => {
   const providerLinks: Record<string, string> = {
+    yunwu: "https://yunwu.apifox.cn/api-232421924",
     "302ai": "https://302.ai/apis/list",
     qwen: "https://bailian.console.aliyun.com/cn-beijing/?spm=5176.28197619.console-base_search-panel.dvisited_sfm.20d53ae4f6I5R3&tab=model#/api-key",
     doubao: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
@@ -54,6 +55,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           onChange={(e) => handleContentProviderChange(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
+          <option value="yunwu">云雾API平台 (Yunwu.AI)</option>
           <option value="302ai">302平台 (302.AI)</option>
           <option value="qwen">通义千问 (Qwen)</option>
           <option value="doubao">豆包 (Doubao)</option>
