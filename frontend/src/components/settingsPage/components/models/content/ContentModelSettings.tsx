@@ -1,4 +1,5 @@
 import { TauriCommands } from "@/services/clients";
+import { message } from "@/services/message";
 import { AlertCircle, CheckCircle, ExternalLink, Eye, EyeOff } from "lucide-react";
 import React from "react";
 import type { ContentModelConfig, TestResult } from "../../../types";
@@ -35,8 +36,12 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
   updateCurrentContentConfig,
   testContentModelConnection,
 }) => {
+  const apiKeyBeforeEditRef = React.useRef<string>(currentContentConfig.api_key);
+  const modelNameBeforeEditRef = React.useRef<string>(
+    currentContentConfig.model_name
+  );
   const providerLinks: Record<string, string> = {
-    yunwu: "https://yunwu.apifox.cn/api-232421924",
+    yunwu: "https://yunwu.apifox.cn",
     "302ai": "https://302.ai/apis/list",
     qwen: "https://bailian.console.aliyun.com/cn-beijing/?spm=5176.28197619.console-base_search-panel.dvisited_sfm.20d53ae4f6I5R3&tab=model#/api-key",
     doubao: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
@@ -55,8 +60,8 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           onChange={(e) => handleContentProviderChange(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="yunwu">云雾API平台 (Yunwu.AI)</option>
           <option value="302ai">302平台 (302.AI)</option>
+          <option value="yunwu">云雾API平台 (Yunwu.AI)</option>
           <option value="qwen">通义千问 (Qwen)</option>
           <option value="doubao">豆包 (Doubao)</option>
           <option value="deepseek">DeepSeek</option>
@@ -92,9 +97,22 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
                 api_key: e.target.value,
               }))
             }
-            onBlur={(e) =>
-              updateCurrentContentConfig("api_key", e.target.value)
-            }
+            onFocus={(e) => {
+              apiKeyBeforeEditRef.current = e.target.value;
+            }}
+            onBlur={(e) => {
+              const trimmed = e.target.value.trim();
+              if (!trimmed) {
+                setCurrentContentConfig((prev) => ({
+                  ...prev,
+                  api_key: apiKeyBeforeEditRef.current,
+                }));
+                message.warning("API密钥不能为空");
+                return;
+              }
+              if (trimmed === apiKeyBeforeEditRef.current) return;
+              updateCurrentContentConfig("api_key", trimmed);
+            }}
             placeholder="请输入API密钥"
             className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
@@ -148,9 +166,22 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
               model_name: e.target.value,
             }))
           }
-          onBlur={(e) =>
-            updateCurrentContentConfig("model_name", e.target.value)
-          }
+          onFocus={(e) => {
+            modelNameBeforeEditRef.current = e.target.value;
+          }}
+          onBlur={(e) => {
+            const trimmed = e.target.value.trim();
+            if (!trimmed) {
+              setCurrentContentConfig((prev) => ({
+                ...prev,
+                model_name: modelNameBeforeEditRef.current,
+              }));
+              message.warning("模型名称不能为空");
+              return;
+            }
+            if (trimmed === modelNameBeforeEditRef.current) return;
+            updateCurrentContentConfig("model_name", trimmed);
+          }}
           placeholder="请输入模型名称"
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />

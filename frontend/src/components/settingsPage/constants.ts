@@ -29,7 +29,6 @@ export const sections: SettingsSection[] = [
   { id: "subtitleAsr", label: "字幕识别", icon: Subtitles },
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
   { id: "storage", label: "存储设置", icon: HardDrive },
-  { id: "globalParams", label: "全局参数", icon: Settings },
   { id: "monitor", label: "状态监控", icon: Activity },
   { id: "about", label: "关于", icon: Info },
 ];

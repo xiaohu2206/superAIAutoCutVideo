@@ -18,7 +18,9 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 _tts_semaphore: Optional[asyncio.Semaphore] = None
 _tts_semaphore_concurrency: int = 0
 _tts_semaphore_lock = asyncio.Lock()
-_voxcpm_tts_lock = asyncio.Lock()
+_voxcpm_tts_semaphore: Optional[asyncio.Semaphore] = None
+_voxcpm_tts_semaphore_concurrency: int = 0
+_voxcpm_tts_semaphore_lock = asyncio.Lock()
 
 
 async def _get_tts_semaphore() -> asyncio.Semaphore:
@@ -36,9 +38,64 @@ async def _get_tts_semaphore() -> asyncio.Semaphore:
         return _tts_semaphore
 
 
+async def _get_voxcpm_tts_semaphore(cfg) -> asyncio.Semaphore:
+    global _voxcpm_tts_semaphore, _voxcpm_tts_semaphore_concurrency
+    max_workers, _src = generate_concurrency_config_manager.get_effective("tts")
+    tts_target = max(1, int(max_workers or 1))
+
+    ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+    raw = ep.get("MaxConcurrency", None)
+    target = None
+    try:
+        if raw is not None and not isinstance(raw, bool):
+            target = int(str(raw).strip())
+    except Exception:
+        target = None
+    if target is None:
+        target = 2 if tts_target >= 2 else 1
+    target = max(1, min(int(target), int(tts_target)))
+
+    if _voxcpm_tts_semaphore is not None and _voxcpm_tts_semaphore_concurrency == target:
+        return _voxcpm_tts_semaphore
+
+    async with _voxcpm_tts_semaphore_lock:
+        max_workers2, _src2 = generate_concurrency_config_manager.get_effective("tts")
+        tts_target2 = max(1, int(max_workers2 or 1))
+
+        ep2 = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
+        raw2 = ep2.get("MaxConcurrency", None)
+        target2 = None
+        try:
+            if raw2 is not None and not isinstance(raw2, bool):
+                target2 = int(str(raw2).strip())
+        except Exception:
+            target2 = None
+        if target2 is None:
+            target2 = 2 if tts_target2 >= 2 else 1
+        target2 = max(1, min(int(target2), int(tts_target2)))
+
+        if _voxcpm_tts_semaphore is None or _voxcpm_tts_semaphore_concurrency != target2:
+            _voxcpm_tts_semaphore = asyncio.Semaphore(target2)
+            _voxcpm_tts_semaphore_concurrency = target2
+        return _voxcpm_tts_semaphore
+
+
 @asynccontextmanager
 async def _tts_slot():
     sem = await _get_tts_semaphore()
+    await sem.acquire()
+    try:
+        yield
+    finally:
+        try:
+            sem.release()
+        except Exception:
+            pass
+
+
+@asynccontextmanager
+async def _voxcpm_tts_slot(cfg):
+    sem = await _get_voxcpm_tts_semaphore(cfg)
     await sem.acquire()
     try:
         yield
@@ -137,7 +194,7 @@ class TencentTtsService:
         provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
         if provider == "voxcpm_tts":
-            async with _voxcpm_tts_lock:
+            async with _voxcpm_tts_slot(cfg):
                 async with _tts_slot():
                     return await self._synthesize_with_provider(
                         text=text,

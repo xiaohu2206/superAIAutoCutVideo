@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 import numpy as np
 
 from modules.voxcpm_tts_model_manager import VoxCPMTTSPathManager, validate_model_dir
+from modules.fun_asr_acceleration import prepare_windows_dll_search_paths
 
 
 class VoxCPMTTSService:
@@ -178,6 +179,7 @@ class VoxCPMTTSService:
 
             model_path = self._normalize_model_path(str(model_dir))
             requested_device = self._normalize_device(device)
+            explicit_device = bool(requested_device)
             requested_precision = None
             if precision is not None:
                 p_in = (precision or "").strip().lower()
@@ -199,11 +201,9 @@ class VoxCPMTTSService:
 
             if not requested_device:
                 try:
-                    import torch
-                    if torch.cuda.is_available():
-                        requested_device = "cuda:0"
-                    else:
-                        requested_device = "cpu"
+                    from modules.voxcpm_tts_acceleration import get_voxcpm_tts_preferred_device
+
+                    requested_device = self._normalize_device(get_voxcpm_tts_preferred_device())
                 except Exception:
                     requested_device = "cpu"
             if requested_precision is None:
@@ -221,6 +221,7 @@ class VoxCPMTTSService:
                 raise RuntimeError(err)
 
             try:
+                prepare_windows_dll_search_paths()
                 import torch
             except Exception as e:
                 raise RuntimeError(f"missing_dependency:torch:{e}")
@@ -307,7 +308,7 @@ class VoxCPMTTSService:
                         )
                     except Exception:
                         pass
-                    if q.startswith("cuda"):
+                    if q.startswith("cuda") and explicit_device:
                         raise RuntimeError(self._last_device_error)
                     actual_device = "cpu"
             if actual_device == "cpu":

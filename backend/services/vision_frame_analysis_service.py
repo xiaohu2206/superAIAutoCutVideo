@@ -87,6 +87,14 @@ class _MoondreamRunner:
         except Exception:
             supports_offload = False
 
+        dev = str(runtime.get("device") or "").strip().lower()
+        wants_gpu = dev.startswith("cuda") or (n_gpu_layers != 0)
+        if wants_gpu and (not supports_offload):
+            raise RuntimeError(
+                "Moondream 需要 llama-cpp-python 的 CUDA 构建（GGML_CUDA=on）才能进行 GPU offload，但当前环境检测为 CPU 构建。"
+                "请安装/打包 GPU 版后端，或将 Moondream 推理设备切换为 CPU。"
+            )
+
         if n_gpu_layers >= 99:
             n_gpu_layers = -1
         main_gpu = runtime.get("main_gpu")

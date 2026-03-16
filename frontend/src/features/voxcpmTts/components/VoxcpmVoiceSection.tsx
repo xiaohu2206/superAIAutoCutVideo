@@ -1,12 +1,13 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import { message } from "@/services/message";
 import { useVoxcpmVoices } from "../hooks/useVoxcpmVoices";
 import { useVoxcpmModels } from "../hooks/useVoxcpmModels";
+import { voxcpmTtsService } from "../services/voxcpmTtsService";
 import VoxcpmVoiceList from "./VoxcpmVoiceList";
 import VoxcpmVoiceUploadDialog, { type VoxcpmVoiceUploadDialogResult, type VoxcpmVoiceUploadDialogEditResult } from "./VoxcpmVoiceUploadDialog";
 import VoxcpmModelOptionsList from "./VoxcpmModelOptionsList";
-import type { VoxcpmTtsDownloadProvider, VoxcpmTtsVoice } from "../types";
+import type { VoxcpmTtsAccelerationStatus, VoxcpmTtsDownloadProvider, VoxcpmTtsVoice } from "../types";
 
 export type VoxcpmVoiceSectionProps = {
   configId: string | null;
@@ -41,8 +42,33 @@ export const VoxcpmVoiceSection: React.FC<VoxcpmVoiceSectionProps> = ({ configId
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
   const [editVoice, setEditVoice] = useState<VoxcpmTtsVoice | null>(null);
   
+  const [accelerationStatus, setAccelerationStatus] = useState<VoxcpmTtsAccelerationStatus | null>(null);
+  const [accelerationLoading, setAccelerationLoading] = useState<boolean>(false);
+  const [accelerationError, setAccelerationError] = useState<string | null>(null);
+
   const [providerByOptionId, setProviderByOptionId] = useState<Record<string, VoxcpmTtsDownloadProvider>>({});
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
+
+  const refreshAcceleration = useCallback(async () => {
+    setAccelerationLoading(true);
+    setAccelerationError(null);
+    try {
+      const res = await voxcpmTtsService.getAccelerationStatus();
+      if (res?.success) {
+        setAccelerationStatus((res as any).data || null);
+      } else {
+        setAccelerationError(res?.message || "加载加速状态失败");
+      }
+    } catch (e: any) {
+      setAccelerationError(e?.message || "加载加速状态失败");
+    } finally {
+      setAccelerationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAcceleration();
+  }, [refreshAcceleration]);
 
   const closeAllDialogs = () => {
     setUploadOpen(false);
@@ -50,6 +76,40 @@ export const VoxcpmVoiceSection: React.FC<VoxcpmVoiceSectionProps> = ({ configId
   };
 
   const isUploadDialogOpen = uploadOpen || !!editVoice;
+
+  const accelerationView = useMemo(() => {
+    if (accelerationLoading) {
+      return {
+        className: "bg-gray-100 text-gray-600 border-gray-200",
+        text: "加速检测中…",
+        title: "正在检测当前设备是否支持 VoxCPM-TTS GPU 加速",
+      };
+    }
+
+    if (accelerationError) {
+      return {
+        className: "bg-red-50 text-red-700 border-red-200",
+        text: "加速状态异常",
+        title: accelerationError,
+      };
+    }
+
+    const acc = accelerationStatus?.acceleration;
+    const runtime = accelerationStatus?.runtime;
+    const runtimeDevice = runtime?.loaded ? runtime?.device : null;
+    const device = String(runtimeDevice || acc?.preferred_device || "cpu");
+    const isGpu = device.toLowerCase().startsWith("cuda");
+    const labelPrefix = runtime?.loaded ? "当前推理" : "推理设备";
+    const gpuName = acc?.gpu?.name ? ` (${acc.gpu.name})` : "";
+    const title = acc?.supported
+      ? `支持 GPU 加速，默认设备: ${acc.preferred_device}${gpuName}`
+      : `不支持 GPU 加速，原因: ${(acc?.reasons || []).join(",") || "unknown"}`;
+    return {
+      className: isGpu ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200",
+      text: `${labelPrefix}: ${isGpu ? "GPU" : "CPU"}`,
+      title,
+    };
+  }, [accelerationError, accelerationLoading, accelerationStatus]);
 
   const modelKeys = useMemo(() => {
     const keys = localModels
@@ -164,6 +224,23 @@ export const VoxcpmVoiceSection: React.FC<VoxcpmVoiceSectionProps> = ({ configId
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h4 className="text-md font-semibold text-gray-900">VoxCPM-TTS 音色库</h4>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView.className}`}
+              title={accelerationView.title}
+            >
+              {accelerationView.text}
+            </button>
+            <button
+              onClick={() => refreshAcceleration()}
+              disabled={accelerationLoading}
+              className={`p-1 rounded-md transition-all ${accelerationLoading ? "text-gray-300" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"}`}
+              title="刷新加速状态"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${accelerationLoading ? "animate-spin" : ""}`} />
+            </button>
           </div>
         </div>
         <div className="bg-gray-50/50 p-3 rounded-lg border border-gray-100 space-y-3">
