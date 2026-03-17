@@ -1,8 +1,8 @@
-<img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
+<img src="frontend/src/assets/logo.png" alt="SuperAI影视剪辑 Logo" width="120" />
 
 # SuperAI·AutoCutVideo · AI智能视频剪辑
 - 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，支持通过字幕、视觉分析自动剪辑。（免费）
-- 2026-03-02视觉推理代码已经更新（v1.2.0版本
+- 2026-03-02视觉推理代码已经更新（v1.2.2版本
 <div align="center">
   <h3>✨ 视觉推理（核心功能）</h3>
   <img src="docs/image/支持视觉推理.png" alt="支持视觉推理" width="500" />
@@ -17,7 +17,7 @@
 </div>
 
 ## 软件版本
-<a href="https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc" target="_blank" >v1.2.0</a>
+<a href="https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc" target="_blank" >v1.2.2</a>
 
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤

@@ -16,6 +16,38 @@ function Step($msg) { Write-Host "[+] $msg" -ForegroundColor Cyan }
 function Info($msg) { Write-Host "    $msg" }
 function Fail($msg) { Write-Host "[x] $msg" -ForegroundColor Red ; exit 1 }
 
+function Remove-DirWithRetry([string]$dirPath, [int]$retries = 6, [int]$delayMs = 700) {
+  if (-not $dirPath) { return }
+  if (-not (Test-Path $dirPath)) { return }
+  for ($i = 1; $i -le $retries; $i++) {
+    try {
+      try {
+        Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process super-auto-cut-video -ErrorAction SilentlyContinue | Stop-Process -Force
+      } catch { }
+
+      try {
+        $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue
+        foreach ($p in $procs) {
+          $ep = $p.ExecutablePath
+          $cl = $p.CommandLine
+          $hit = $false
+          if ($ep -and $ep.StartsWith($dirPath, [System.StringComparison]::OrdinalIgnoreCase)) { $hit = $true }
+          elseif ($cl -and ($cl.IndexOf($dirPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) { $hit = $true }
+          if ($hit) {
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+          }
+        }
+      } catch { }
+
+      Microsoft.PowerShell.Management\Remove-Item $dirPath -Recurse -Force -ErrorAction SilentlyContinue
+      if (-not (Test-Path $dirPath)) { return }
+    } catch { }
+    Start-Sleep -Milliseconds $delayMs
+  }
+  throw "failed to remove dir: $dirPath"
+}
+
 function Invoke-ProcessWithHeartbeat(
   [string]$filePath,
   [string[]]$argumentList,
@@ -350,14 +382,23 @@ foreach ($variant in $variants) {
     $venvDir = Join-Path (Get-Location).Path (".venv_pack_{0}" -f $variant)
     if ($RecreateBackendVenv -and (Test-Path $venvDir)) {
       Step "Recreate backend venv ($variant)"
-      Microsoft.PowerShell.Management\Remove-Item $venvDir -Recurse -Force -ErrorAction SilentlyContinue
+      Remove-DirWithRetry $venvDir
+    }
+    $venvCfg = Join-Path $venvDir 'pyvenv.cfg'
+    $venvPy = Join-Path $venvDir 'Scripts\\python.exe'
+    if (Test-Path $venvDir) {
+      $venvHealthy = (Test-Path $venvCfg) -and (Test-Path $venvPy)
+      if (-not $venvHealthy) {
+        Step "Broken backend venv detected, recreate ($variant)"
+        Remove-DirWithRetry $venvDir
+        if (Test-Path $venvDir) { throw "failed to remove broken venv: $venvDir" }
+      }
     }
     if (-not (Test-Path $venvDir)) {
       Step "Create backend venv ($variant)"
       & $pythonCmd $pythonArgsPrefix "-m" "venv" $venvDir
       if ($LASTEXITCODE -ne 0) { throw "venv creation failed (code $LASTEXITCODE)" }
     }
-    $venvPy = Join-Path $venvDir 'Scripts\\python.exe'
     if (-not (Test-Path $venvPy)) { throw "venv python not found: $venvPy" }
 
     Step "Ensure pip available in venv ($variant)"

@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo   AI智能视频剪辑 - 生产环境打包脚本
+echo   SuperAI影视剪辑 - 生产环境打包脚本
 echo ========================================
 echo.
 
@@ -110,9 +110,9 @@ echo 后端可执行文件: backend\dist\superAutoCutVideoBackend.exe
 echo.
 
 :: 显示文件大小
-if exist "src-tauri\target\release\SuperAIAutoCutVideo.exe" (
+if exist "src-tauri\target\release\super-auto-cut-video.exe" (
     echo 应用大小:
-    dir "src-tauri\target\release\SuperAIAutoCutVideo.exe" | findstr "SuperAIAutoCutVideo.exe"
+    dir "src-tauri\target\release\super-auto-cut-video.exe" | findstr "super-auto-cut-video.exe"
 )
 
 echo.

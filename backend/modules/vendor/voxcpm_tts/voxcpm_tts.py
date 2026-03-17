@@ -1,6 +1,7 @@
 import numpy as np
+import os
+import sys
 from typing import Optional, Tuple
-from voxcpm import VoxCPM
 
 
 class VoxCPMTTSModel:
@@ -17,8 +18,24 @@ class VoxCPMTTSModel:
 
     def _load_model(self, **kwargs):
         enable_denoiser = kwargs.get('enable_denoiser', False)
-        optimize = kwargs.get('optimize', True)
-        
+        optimize = kwargs.get('optimize', None)
+        if optimize is None:
+            optimize = False if bool(getattr(sys, "frozen", False)) else True
+
+        if bool(getattr(sys, "frozen", False)):
+            os.environ.setdefault("PYTORCH_JIT", "0")
+            os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
+            try:
+                import torch
+                import torch.jit._state as _jit_state
+                _jit_state.disable()
+                if hasattr(torch, "_C") and hasattr(torch._C, "_jit_set_enabled"):
+                    torch._C._jit_set_enabled(False)
+            except Exception:
+                pass
+
+        from voxcpm import VoxCPM
+
         self._model = VoxCPM(
             voxcpm_model_path=self.model_path,
             enable_denoiser=enable_denoiser,
