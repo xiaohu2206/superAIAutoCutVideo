@@ -70,7 +70,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
           <p className="font-medium">模型下载说明：</p>
           <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
             <li>每个选项包含 ASR 模型 + VAD 模型；两者都可用才算“就绪”。</li>
-            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\FunASR)。</li>
             <li>
               手动下载入口：
               <button
@@ -135,8 +135,8 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                       disabled={modelsLoading || isDownloading}
                       title="下载源"
                     >
-                      <option value="modelscope">国内（ModelScope）</option>
-                      <option value="hf">国外（HuggingFace）</option>
+                      <option value="modelscope">国内</option>
+                      <option value="hf">国外</option>
                     </select>
                   )}
 
@@ -169,7 +169,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                       className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
                       title="校验完整性"
                     >
-                      <ShieldAlert className="h-3.5 w-3.5" />
+                      校验
                     </button>
 
                     <button
@@ -178,7 +178,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                       className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
                       title="打开模型目录"
                     >
-                      {copiedOptionId === option.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copiedOptionId === option.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : "目录"}
                     </button>
                   </div>
                 </div>

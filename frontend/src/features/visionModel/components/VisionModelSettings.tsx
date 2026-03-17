@@ -228,7 +228,7 @@ export const VisionModelSettings: React.FC = () => {
                             <div className="space-y-1">
                                 <p className="font-medium">模型下载说明：</p>
                                 <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
-                                    <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+                                    <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\Moondream)。</li>
                                     <li>
                                         手动下载入口：
                                         <button 
