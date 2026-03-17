@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, cast
 
@@ -221,17 +223,38 @@ class VoxCPMTTSService:
                 raise RuntimeError(err)
 
             try:
+                import sys as _sys
+
                 prepare_windows_dll_search_paths()
+                if bool(getattr(_sys, "frozen", False)):
+                    os.environ.setdefault("PYTORCH_JIT", "0")
+                    os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
                 import torch
+                if bool(getattr(_sys, "frozen", False)):
+                    try:
+                        if hasattr(torch, "_C") and hasattr(torch._C, "_jit_set_enabled"):
+                            torch._C._jit_set_enabled(False)
+                    except Exception:
+                        pass
+                    try:
+                        import torch.jit._state as _jit_state
+                        _jit_state.disable()
+                    except Exception:
+                        pass
+                    try:
+                        logging.getLogger("modules.voxcpm_tts_service").info(
+                            f"VoxCPM torch runtime: PYTORCH_JIT={os.environ.get('PYTORCH_JIT')} jit_enabled={getattr(getattr(torch, '_C', None), '_jit_is_enabled', lambda: None)()}"
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
-                raise RuntimeError(f"missing_dependency:torch:{e}")
+                raise RuntimeError(f"missing_dependency:torch:{type(e).__name__}:{e}")
 
             try:
                 from modules.vendor.voxcpm_tts import VoxCPMTTSModel
             except Exception as e:
                 hint = ""
                 try:
-                    import sys
                     if sys.platform == "win32" and (getattr(e, "winerror", None) == 206 or "WinError 206" in str(e) or "文件名或扩展名太长" in str(e)):
                         hint = " | windows_path_too_long: 建议将后端安装/运行目录移到更短路径，或在系统中启用 Windows 长路径支持"
                 except Exception:
@@ -278,6 +301,17 @@ class VoxCPMTTSService:
                     inst = await asyncio.get_running_loop().run_in_executor(None, _load_cpu)
                     chosen_dtype = getattr(__import__("torch"), "float32")
             except Exception as e:
+                try:
+                    import traceback
+                    tb = traceback.format_exc()
+                    tail = "\n".join(tb.splitlines()[-14:])
+                    logging.getLogger("modules.voxcpm_tts_service").error(
+                        f"VoxCPM model load exception: {type(e).__name__}: {e} | "
+                        f"frozen={bool(getattr(sys, 'frozen', False))} PYTORCH_JIT={os.environ.get('PYTORCH_JIT')} | "
+                        f"trace_tail={tail}"
+                    )
+                except Exception:
+                    pass
                 raise RuntimeError(f"voxcpm_model_load_failed:{e}")
 
             try:

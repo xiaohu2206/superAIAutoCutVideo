@@ -1,5 +1,5 @@
-!define APPNAME "SuperAIAutoCutVideo"
-!define COMPANY "SuperAIAutoCutVideo"
+!define APPNAME "SuperAI影视剪辑"
+!define COMPANY "SuperAI影视剪辑"
 !define VERSION "1.0.0"
 !define INSTALLDIR "$PROGRAMFILES64\${APPNAME}"
 OutFile "E:\learn\superAutoCutVideoApp\src-tauri\target\release\bundle\nsis\${APPNAME}_${VERSION}_x64-setup.exe"

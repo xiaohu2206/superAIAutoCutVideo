@@ -43,6 +43,8 @@ hiddenimports = [
     'torch.distributed.rpc',
     'funasr.register',
     'funasr.register.tables',
+    'modules.vendor.voxcpm_tts',
+    'modules.vendor.voxcpm_tts.voxcpm_tts',
 ]
 
 # 轻量收集：避免对 transformers/torch 等超大库做 collect_all() 触发超长扫描
@@ -81,6 +83,12 @@ for package in ['onnxruntime', 'librosa', 'modelscope']:
         datas += collect_data_files(package)
     except Exception as e:
         print(f"Warning: Failed to collect data files for {package}: {e}")
+
+try:
+    if importlib.util.find_spec("voxcpm") is not None:
+        datas += collect_data_files("voxcpm", include_py_files=True)
+except Exception as e:
+    print(f"Warning: Failed to collect voxcpm py files: {e}")
 
 try:
     if importlib.util.find_spec("pandas") is not None:

@@ -1,11 +1,11 @@
-<img src="frontend/src/assets/logo.png" alt="SuperAIAutoCutVideo Logo" width="120" />
+<img src="frontend/src/assets/logo.png" alt="SuperAI影视剪辑 Logo" width="120" />
 
-# SuperAI·AutoCutVideo · AI智能视频剪辑
+# SuperAI影视剪辑 · AI智能视频剪辑
 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，目前只支持通过字幕自动剪辑。（免费）
 
 
 ## 软件版本
-- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.1/superAIAutoCutVideo-1.0.1.zip">SuperAI-v1.0.1</a>
+- <a href="https://github.com/xiaohu2206/superAIAutoCutVideo/releases/download/v1.0.1/superAIAutoCutVideo-1.0.1.zip">SuperAI影视剪辑-v1.0.1</a>
 
 
 ## 亮点特性
