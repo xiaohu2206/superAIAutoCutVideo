@@ -1,6 +1,6 @@
 <img src="frontend/src/assets/logo.png" alt="SuperAI影视剪辑 Logo" width="120" />
 
-# SuperAI·AutoCutVideo · AI智能影视剪辑
+# SuperAI影视剪辑 · AI智能影视剪辑
 - 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，支持通过字幕、视觉分析自动剪辑。（免费）
 - 部分电脑暂时无法使用全部功能
 
