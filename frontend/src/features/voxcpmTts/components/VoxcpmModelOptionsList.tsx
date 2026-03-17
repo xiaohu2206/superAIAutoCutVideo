@@ -45,7 +45,7 @@ const VoxcpmModelOptionsList: React.FC<VoxcpmModelOptionsListProps> = ({
           <p className="font-medium">模型下载说明：</p>
           <ul className="list-disc list-inside text-orange-700 space-y-0.5 ml-1">
             <li>下列模型只需<span className="font-bold">选择一个</span>下载即可使用。</li>
-            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\OpenBMB\VoxCPM)。</li>
             <li>
                                                     手动下载入口：
                                                     <button 
@@ -138,7 +138,7 @@ const VoxcpmModelOptionsList: React.FC<VoxcpmModelOptionsListProps> = ({
                       className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
                       title="校验完整性"
                     >
-                      <ShieldAlert className="h-3.5 w-3.5" />
+                      校验
                     </button>
 
                     <button
@@ -150,7 +150,7 @@ const VoxcpmModelOptionsList: React.FC<VoxcpmModelOptionsListProps> = ({
                       {copiedOptionId === option.id ? (
                         <Check className="h-3.5 w-3.5 text-green-600" />
                       ) : (
-                        <Copy className="h-3.5 w-3.5" />
+                        "目录"
                       )}
                     </button>
                   </div>

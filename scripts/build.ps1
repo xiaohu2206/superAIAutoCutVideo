@@ -415,14 +415,14 @@ foreach ($variant in $variants) {
     if ($FullBackend -and (Test-Path requirements.txt)) {
       Step "Install full dependencies (requirements.txt)"
       $tmpFull = Join-Path $env:TEMP "requirements.full.filtered.txt"
-    (Microsoft.PowerShell.Management\Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpFull
+      (Microsoft.PowerShell.Management\Get-Content requirements.txt -Encoding UTF8) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpFull -Encoding UTF8
       & $venvPy "-m" "pip" "install" "-r" $tmpFull
     Microsoft.PowerShell.Management\Remove-Item $tmpFull -Force -ErrorAction SilentlyContinue
     }
     elseif (Test-Path requirements.runtime.txt) {
       Step "Install runtime dependencies (requirements.runtime.txt)"
       $tmpRuntime = Join-Path $env:TEMP "requirements.runtime.filtered.txt"
-    (Microsoft.PowerShell.Management\Get-Content requirements.runtime.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpRuntime
+      (Microsoft.PowerShell.Management\Get-Content requirements.runtime.txt -Encoding UTF8) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpRuntime -Encoding UTF8
       & $venvPy "-m" "pip" "install" "-r" $tmpRuntime
       if ($LASTEXITCODE -ne 0) {
         Info "Runtime dependency install failed; retry once ($variant)"
@@ -434,7 +434,7 @@ foreach ($variant in $variants) {
     elseif (Test-Path requirements.txt) {
       Step "Fallback to requirements.txt (runtime file missing)"
       $tmpFullFallback = Join-Path $env:TEMP "requirements.full.filtered.txt"
-    (Microsoft.PowerShell.Management\Get-Content requirements.txt) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpFullFallback
+      (Microsoft.PowerShell.Management\Get-Content requirements.txt -Encoding UTF8) | Where-Object { $_ -notmatch '^\s*qwen-tts\s*$' } | Microsoft.PowerShell.Management\Set-Content $tmpFullFallback -Encoding UTF8
       & $venvPy "-m" "pip" "install" "-r" $tmpFullFallback
     Microsoft.PowerShell.Management\Remove-Item $tmpFullFallback -Force -ErrorAction SilentlyContinue
     }
@@ -452,7 +452,15 @@ foreach ($variant in $variants) {
         $env:CMAKE_ARGS = "-DGGML_CUDA=on"
         $env:FORCE_CMAKE = "1"
         $env:CMAKE_GENERATOR = "Ninja"
-        & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
+        
+        # Load vcvars64.bat if available to ensure MSVC compiler is found
+        $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+        if (Test-Path $vcvars) {
+            cmd.exe /c "call `"$vcvars`" && `"$venvPy`" -m pip install --force-reinstall --no-cache-dir --no-deps llama-cpp-python==0.3.16"
+        } else {
+            & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
+        }
+        
         if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python CUDA build install failed (code $LASTEXITCODE)" }
 
         $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
@@ -533,6 +541,15 @@ foreach ($variant in $variants) {
     Step "Sanity-check Qwen3-TTS imports ($variant)"
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
+
+    if ($variant -eq "gpu") {
+      Step "Install VoxCPM (no-deps) ($variant)"
+      & $venvPy "-m" "pip" "install" "voxcpm" "--no-deps"
+      if ($LASTEXITCODE -ne 0) { throw "voxcpm install failed (code $LASTEXITCODE)" }
+      Step "Sanity-check VoxCPM imports ($variant)"
+      & $venvPy "-c" "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
+      if ($LASTEXITCODE -ne 0) { throw "VoxCPM import check failed (code $LASTEXITCODE)" }
+    }
 
     $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
     $distExe = Join-Path $distRoot "superAutoCutVideoBackend.exe"

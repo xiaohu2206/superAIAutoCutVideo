@@ -69,6 +69,7 @@ _maybe_packages = [
     'torch',
     'torchvision',
     'torchaudio',
+    'voxcpm',
 ]
 for package in _maybe_packages:
     hiddenimports.append(package)

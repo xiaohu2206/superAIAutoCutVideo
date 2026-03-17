@@ -47,7 +47,7 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
           <p className="font-medium">模型下载说明：</p>
           <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
             <li>下列模型只需<span className="font-bold">选择一个</span>下载即可使用。</li>
-            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录。</li>
+            <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\Qwen)。</li>
             <li>
               手动下载入口：
               <button
@@ -121,8 +121,8 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
                       disabled={modelsLoading || isDownloading}
                       title="下载源"
                     >
-                      <option value="modelscope">国内（ModelScope）</option>
-                      <option value="hf">国外（HuggingFace）</option>
+                      <option value="modelscope">国内</option>
+                      <option value="hf">国外</option>
                     </select>
                   )}
 
@@ -152,22 +152,22 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
                     <button
                       onClick={() => onValidate(option)}
                       disabled={modelsLoading || isDownloading}
-                      className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
+                      className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400 whitespace-nowrap"
                       title="校验完整性"
                     >
-                      <ShieldAlert className="h-3.5 w-3.5" />
+                      校验
                     </button>
 
                     <button
                       onClick={() => onOpenDir(option)}
                       disabled={modelsLoading || isDownloading}
-                      className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
+                      className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400 whitespace-nowrap"
                       title="打开模型目录"
                     >
                       {copiedOptionId === option.id ? (
                         <Check className="h-3.5 w-3.5 text-green-600" />
                       ) : (
-                        <Copy className="h-3.5 w-3.5" />
+                        "目录"
                       )}
                     </button>
                   </div>

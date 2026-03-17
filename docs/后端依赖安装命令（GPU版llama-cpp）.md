@@ -64,13 +64,14 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 ## 2.2 安装 VoxCPM（可选）
 
 说明：`requirements.runtime.txt` 里只包含 VoxCPM 的前置依赖（`simplejson`、`sortedcontainers`），主包需要你手动装，并且必须 `--no-deps` 以避免依赖冲突。
+如果你使用仓库的一键打包脚本 `scripts/build.ps1 -Variant gpu`，脚本会自动安装 `voxcpm` 并做导入自检。
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
 $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 & $py -m pip install --no-deps voxcpm
-& $py -c "from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
+& $py -c "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
 ```
 
 ## 3. 安装 CUDA 构建的 llama-cpp-python（关键）
