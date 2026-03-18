@@ -1,8 +1,9 @@
 <img src="frontend/src/assets/logo.png" alt="SuperAI影视剪辑 Logo" width="120" />
 
-# SuperAI·AutoCutVideo · AI智能视频剪辑
+# SuperAI·AutoCutVideo · AI智能影视剪辑
 - 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，支持通过字幕、视觉分析自动剪辑。（免费）
-- 2026-03-02视觉推理代码已经更新（v1.2.2版本
+- 部分电脑暂时无法使用全部功能
+
 <div align="center">
   <h3>✨ 视觉推理（核心功能）</h3>
   <img src="docs/image/支持视觉推理.png" alt="支持视觉推理" width="500" />
@@ -26,6 +27,7 @@
 
 
 ## 亮点特性
+- 2026-03-18: 支持云雾API平台、302ai平台、qwentts配音在线版
 - 2026-03-02: 视觉推理视频功能（moondream分析帧）
 - 2026-02-20: 本地ASR识别字幕
 - 2026-02-09: Qwen-tts配音、添加手动剪辑片头片尾
@@ -64,6 +66,7 @@
 
 
 ### 解决问题
+1. 修复funasr无法识别外语
 3. 对uploads的垃圾数据进行清理
 4. 缓存目录uploads更新无效的问题
 5. 打开应用启动了两个后端服务，导致更改uploads目录失败问题
