@@ -134,9 +134,9 @@ class AI302Provider(AIProviderBase):
     @classmethod
     def get_available_models(cls) -> List[str]:
         return [
-            "gemini-3.1-pro-preview",
             "gpt-4o",
             "gpt-4o-mini",
+            "gemini-3.1-pro-preview",
             "claude-sonnet-4-20250514",
         ]
 
