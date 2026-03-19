@@ -233,23 +233,23 @@ export const GlobalParamsSettings: React.FC = () => {
     [scheduleAutoSave]
   );
 
-  // const handleAllowParallelChange = useCallback(
-  //   (checked: boolean) => {
-  //     dirtyRef.current = true;
-  //     setData((prev) => {
-  //       if (!prev) return prev;
-  //       return {
-  //         ...prev,
-  //         config: {
-  //           ...prev.config,
-  //           allow_same_project_parallel: checked,
-  //         },
-  //       };
-  //     });
-  //     scheduleAutoSave();
-  //   },
-  //   [scheduleAutoSave]
-  // );
+  const handleAllowParallelChange = useCallback(
+    (checked: boolean) => {
+      dirtyRef.current = true;
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            allow_same_project_parallel: checked,
+          },
+        };
+      });
+      scheduleAutoSave();
+    },
+    [scheduleAutoSave]
+  );
 
   if (loading && !data) {
     return (
