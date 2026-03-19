@@ -3,17 +3,17 @@ import { message } from "../../../services/message";
 import { videoModelService } from "../../../services/videoModelService";
 import type { TestResult, VideoModelConfig } from "../types";
 import {
-    getConfigIdByProvider,
-    getDefaultBaseUrl,
-    getDefaultDescription,
-    getDefaultModelName,
+  getConfigIdByProvider,
+  getDefaultBaseUrl,
+  getDefaultDescription,
+  getDefaultModelName,
 } from "../utils";
 
 /**
  * 视频生成模型配置管理 Hook
  */
 export const useVideoModelConfig = () => {
-  const [selectedProvider, setSelectedProvider] = useState<string>("qwen");
+  const [selectedProvider, setSelectedProvider] = useState<string>("yunwu");
   const [modelConfigs, setModelConfigs] = useState<
     Record<string, VideoModelConfig>
   >({});
@@ -44,7 +44,7 @@ export const useVideoModelConfig = () => {
         if (Object.keys(configs).length > 0) {
           // 查找 enabled 为 true 的配置
           const enabledConfigId = Object.keys(configs).find(
-            (id) => configs[id].enabled === true
+            (id) => configs[id].enabled === true,
           );
 
           // 如果找到启用的配置，使用它；否则使用第一个配置
@@ -108,10 +108,7 @@ export const useVideoModelConfig = () => {
       const configId = getConfigIdByProvider(config.provider);
 
       // 更新配置
-      const response = await videoModelService.updateConfig(
-        configId,
-        config
-      );
+      const response = await videoModelService.updateConfig(configId, config);
 
       if (response.success) {
         await loadVideoAnalysisConfigs();
@@ -163,4 +160,3 @@ export const useVideoModelConfig = () => {
     testModelConnection,
   };
 };
-

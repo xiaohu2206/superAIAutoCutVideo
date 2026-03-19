@@ -14,6 +14,8 @@ export const getConfigIdByProvider = (provider: string): string => {
  */
 export const getDefaultBaseUrl = (provider: string): string => {
   const defaults: Record<string, string> = {
+    yunwu: "https://yunwu.ai/v1/chat/completions",
+    "302ai": "https://api.302ai.cn/v1/chat/completions",
     qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
@@ -27,6 +29,8 @@ export const getDefaultBaseUrl = (provider: string): string => {
  */
 export const getDefaultModelName = (provider: string): string => {
   const defaults: Record<string, string> = {
+    yunwu: "gpt-4o",
+    "302ai": "gpt-4o",
     qwen: "qwen-vl-plus",
     doubao: "doubao-vision-pro",
     deepseek: "deepseek-vl-chat",
@@ -40,6 +44,8 @@ export const getDefaultModelName = (provider: string): string => {
  */
 export const getDefaultDescription = (provider: string): string => {
   const defaults: Record<string, string> = {
+    yunwu: "云雾API平台视频分析模型（支持视觉）",
+    "302ai": "302AI平台视频分析模型（支持视觉）",
     qwen: "通义千问视频生成模型",
     doubao: "豆包视频生成模型",
     deepseek: "DeepSeek视频生成模型",

@@ -29,7 +29,7 @@ class VideoModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
+        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter', 'yunwu', '302ai']
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -76,6 +76,9 @@ class VideoModelConfigManager:
                     except Exception as e:
                         logger.error(f"加载视频分析模型配置 {config_id} 失败: {e}")
                 
+                # 检查并添加缺失的默认配置
+                self._ensure_default_configs()
+                
                 logger.info(f"成功加载 {len(self.configs)} 个视频分析模型配置")
             else:
                 # 创建默认配置
@@ -84,6 +87,65 @@ class VideoModelConfigManager:
         except Exception as e:
             logger.error(f"加载视频分析模型配置失败: {e}")
             self._create_default_configs()
+
+    def _ensure_default_configs(self):
+        """确保所有默认配置都存在，缺失的自动添加"""
+        default_configs = [
+            {
+                'id': 'qwen_video_analysis',
+                'config': VideoModelConfig(
+                    provider='qwen',
+                    api_key='xxx',
+                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
+                    model_name='qwen-vl-plus',
+                    description='通义千问视频分析模型',
+                    enabled=True
+                )
+            },
+            {
+                'id': 'doubao_video_analysis',
+                'config': VideoModelConfig(
+                    provider='doubao',
+                    api_key='xxx',
+                    base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                    model_name='doubao-seed-1-6-vision-250815',
+                    description='豆包视频分析模型',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'yunwu_video_analysis',
+                'config': VideoModelConfig(
+                    provider='yunwu',
+                    api_key='xxx',
+                    base_url='https://yunwu.ai/v1/chat/completions',
+                    model_name='gpt-4o',
+                    description='云雾API平台视频分析模型（支持视觉）',
+                    enabled=False
+                )
+            },
+            {
+                'id': '302ai_video_analysis',
+                'config': VideoModelConfig(
+                    provider='302ai',
+                    api_key='xxx',
+                    base_url='https://api.302ai.cn/v1/chat/completions',
+                    model_name='gpt-4o',
+                    description='302AI平台视频分析模型（支持视觉）',
+                    enabled=False
+                )
+            }
+        ]
+        
+        added = False
+        for item in default_configs:
+            if item['id'] not in self.configs:
+                self.configs[item['id']] = item['config']
+                logger.info(f"自动添加缺失的默认配置: {item['id']}")
+                added = True
+        
+        if added:
+            self.save_configs()
 
     def save_configs(self):
         """保存配置到文件"""
@@ -131,6 +193,28 @@ class VideoModelConfigManager:
                     base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
                     model_name='doubao-seed-1-6-vision-250815',
                     description='豆包视频分析模型',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'yunwu_video_analysis',
+                'config': VideoModelConfig(
+                    provider='yunwu',
+                    api_key='xxx',
+                    base_url='https://yunwu.ai/v1/chat/completions',
+                    model_name='gpt-4o',
+                    description='云雾API平台视频分析模型（支持视觉）',
+                    enabled=False
+                )
+            },
+            {
+                'id': '302ai_video_analysis',
+                'config': VideoModelConfig(
+                    provider='302ai',
+                    api_key='xxx',
+                    base_url='https://api.302ai.cn/v1/chat/completions',
+                    model_name='gpt-4o',
+                    description='302AI平台视频分析模型（支持视觉）',
                     enabled=False
                 )
             }

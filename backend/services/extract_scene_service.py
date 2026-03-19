@@ -21,6 +21,7 @@ from modules.task_cancel_store import task_cancel_store
 from services.extract_subtitle_service import extract_subtitle_service, _resolve_path, _uploads_dir, _to_web_path
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
+from modules.config.video_model_config import video_model_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +130,8 @@ class ExtractSceneService:
             try:
                 # 1. 确保字幕已提取（并行触发）
                 current_p = projects_store.get_project(project_id)
-                subtitle_source = getattr(current_p, "subtitle_source", None)
-                should_force_subtitle = bool(force) and subtitle_source != "user"
-                should_start_subtitle = (not getattr(current_p, "subtitle_path", None)) or should_force_subtitle
+                subtitle_path = getattr(current_p, "subtitle_path", None)
+                should_start_subtitle = not subtitle_path
                 if should_start_subtitle:
                     task_progress_store.set_state(
                         scope=self.SCOPE,
@@ -145,7 +145,7 @@ class ExtractSceneService:
                     sub_task = asyncio.create_task(
                         extract_subtitle_service.extract_subtitle(
                             project_id=project_id,
-                            force=should_force_subtitle,
+                            force=False,
                             task_id=sub_task_id,
                             asr_provider=asr_provider,
                             asr_model_key=asr_model_key,
@@ -403,7 +403,7 @@ class ExtractSceneService:
                 
                 optimized_scenes = self._optimize_scenes(scenes, fps, current_p)
                 
-                # 4.5 视觉分析 (Moondream)
+                # 4.5 视觉分析 (Moondream or Online Vision)
                 if analyze_vision:
                     try:
                         task_progress_store.set_state(
@@ -414,13 +414,31 @@ class ExtractSceneService:
                             progress=90,
                             message="准备进行视觉分析...",
                         )
-                        optimized_scenes = await vision_frame_analyzer.analyze_scenes(
-                            project_id=project_id,
-                            video_path=str(video_abs_path),
-                            scenes=optimized_scenes,
-                            mode=vision_mode,
-                            task_id=task_id
-                        )
+                        
+                        active_config = video_model_config_manager.get_active_config()
+                        if active_config and active_config.provider in ("yunwu", "302ai"):
+                            logger.info(f"Using online vision model: {active_config.provider} - {active_config.model_name}")
+                            optimized_scenes = await vision_frame_analyzer.analyze_scenes_online(
+                                project_id=project_id,
+                                video_path=str(video_abs_path),
+                                scenes=optimized_scenes,
+                                provider=active_config.provider,
+                                api_key=active_config.api_key,
+                                base_url=active_config.base_url,
+                                model_name=active_config.model_name,
+                                timeout=active_config.timeout or 120,
+                                mode=vision_mode,
+                                task_id=task_id
+                            )
+                        else:
+                            logger.info("Using local Moondream model for vision analysis")
+                            optimized_scenes = await vision_frame_analyzer.analyze_scenes(
+                                project_id=project_id,
+                                video_path=str(video_abs_path),
+                                scenes=optimized_scenes,
+                                mode=vision_mode,
+                                task_id=task_id
+                            )
                     except Exception as e:
                         logger.error(f"Vision analysis failed: {e}")
                         task_progress_store.set_state(
