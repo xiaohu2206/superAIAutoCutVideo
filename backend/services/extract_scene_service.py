@@ -10,7 +10,7 @@ import asyncio
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import uuid
 
 import numpy as np
@@ -24,6 +24,10 @@ from modules.subtitle_utils import parse_srt
 from modules.config.video_model_config import video_model_config_manager
 
 logger = logging.getLogger(__name__)
+
+_SCENES_SPLIT_VERSION = 1
+_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed"})
+
 
 class ExtractSceneService:
     SCOPE = "extract_scene"
@@ -85,6 +89,79 @@ class ExtractSceneService:
                 continue
         return candidates[0]
 
+    def _video_fingerprint(self, video_abs_path: Path) -> str:
+        try:
+            st = video_abs_path.stat()
+            return f"{st.st_size}:{st.st_mtime_ns}:{video_abs_path.resolve()}"
+        except OSError:
+            return ""
+
+    def _scenes_split_cache_path(self, project_id: str) -> Path:
+        return _uploads_dir() / "analyses" / f"{project_id}_scenes_split.json"
+
+    def _scene_dict_without_vision(self, scene: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in scene.items() if k not in _VISION_SCENE_KEYS}
+
+    def _scenes_list_without_vision(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [self._scene_dict_without_vision(dict(s)) for s in scenes]
+
+    def _try_load_scenes_split(
+        self, project_id: str, video_abs_path: Path
+    ) -> Optional[Tuple[List[Dict[str, Any]], float, int]]:
+        path = self._scenes_split_cache_path(project_id)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("读取镜头分割缓存失败: %s", e)
+            return None
+        if data.get("version") != _SCENES_SPLIT_VERSION:
+            return None
+        fp = self._video_fingerprint(video_abs_path)
+        if not fp or data.get("video_fingerprint") != fp:
+            return None
+        scenes = data.get("scenes")
+        if not isinstance(scenes, list) or len(scenes) == 0:
+            return None
+        try:
+            fps = float(data.get("fps") or 0)
+            total_frames = int(data.get("total_frames") or 0)
+        except (TypeError, ValueError):
+            return None
+        if fps <= 0:
+            fps = 25.0
+        cleaned = self._scenes_list_without_vision(scenes)
+        logger.info("复用镜头分割缓存: project_id=%s scenes=%d", project_id, len(cleaned))
+        return cleaned, fps, total_frames
+
+    def _save_scenes_split_cache(
+        self,
+        project_id: str,
+        video_abs_path: Path,
+        project_video_web: Optional[str],
+        fps: float,
+        total_frames: int,
+        optimized_scenes: List[Dict[str, Any]],
+    ) -> None:
+        analysis_dir = _uploads_dir() / "analyses"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        path = self._scenes_split_cache_path(project_id)
+        payload = {
+            "version": _SCENES_SPLIT_VERSION,
+            "video_fingerprint": self._video_fingerprint(video_abs_path),
+            "project_video_path": project_video_web,
+            "fps": fps,
+            "total_frames": total_frames,
+            "scenes": self._scenes_list_without_vision(optimized_scenes),
+            "created_at": datetime.now().isoformat(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning("写入镜头分割缓存失败: %s", e)
+
     async def extract_scenes(
         self,
         project_id: str,
@@ -129,8 +206,14 @@ class ExtractSceneService:
         async def _run():
             sub_task = None
             try:
-                # 1. 确保字幕已提取（并行触发）
                 current_p = projects_store.get_project(project_id)
+                video_abs_path = _resolve_path(current_p.video_path)
+                if not video_abs_path.exists():
+                    raise FileNotFoundError(f"视频文件不存在: {current_p.video_path}")
+
+                split_loaded = None if force else self._try_load_scenes_split(project_id, video_abs_path)
+                split_from_cache = split_loaded is not None
+
                 subtitle_path = getattr(current_p, "subtitle_path", None)
                 should_start_subtitle = not subtitle_path
                 if should_start_subtitle:
@@ -143,267 +226,290 @@ class ExtractSceneService:
                         message="正在提取字幕（并行执行）...",
                     )
                     sub_task_id = f"sub_{task_id}"
-                    sub_task = asyncio.create_task(
-                        extract_subtitle_service.extract_subtitle(
-                            project_id=project_id,
-                            force=False,
-                            task_id=sub_task_id,
-                            asr_provider=asr_provider,
-                            asr_model_key=asr_model_key,
-                            asr_language=asr_language,
-                            itn=itn,
-                            hotwords=hotwords,
-                        )
+                    sub_kw: Dict[str, Any] = dict(
+                        project_id=project_id,
+                        force=False,
+                        task_id=sub_task_id,
+                        asr_provider=asr_provider,
+                        asr_model_key=asr_model_key,
+                        asr_language=asr_language,
+                        itn=itn,
+                        hotwords=hotwords,
                     )
-
-                # 2. 开始提取镜头
-                task_progress_store.set_state(
-                    scope=self.SCOPE,
-                    project_id=project_id,
-                    task_id=task_id,
-                    status="processing",
-                    progress=10,
-                    message="正在加载模型...",
-                )
-                
-                # 在线程中运行模型预测，避免阻塞 asyncio loop
-                loop = asyncio.get_running_loop()
-                
-                video_abs_path = _resolve_path(current_p.video_path)
-                if not video_abs_path.exists():
-                    raise FileNotFoundError(f"视频文件不存在: {current_p.video_path}")
-
-                model = self._get_model()
-                chunk_seconds = 180.0
-                overlap_frames = 25
-                max_chunk_concurrency = 0
-                try:
-                    v = str(os.environ.get("TRANSNETV2_CHUNK_SECONDS") or "").strip()
-                    if v:
-                        chunk_seconds = float(v)
-                except Exception:
-                    chunk_seconds = 180.0
-                try:
-                    v = str(os.environ.get("TRANSNETV2_OVERLAP_FRAMES") or "").strip()
-                    if v:
-                        overlap_frames = int(v)
-                except Exception:
-                    overlap_frames = 25
-                try:
-                    v = str(os.environ.get("TRANSNETV2_MAX_CONCURRENCY") or "").strip()
-                    if v:
-                        max_chunk_concurrency = int(v)
-                except Exception:
-                    max_chunk_concurrency = 0
-                if overlap_frames < 0:
-                    overlap_frames = 0
-                if chunk_seconds <= 0:
-                    chunk_seconds = 180.0
-                single_frame_predictions = None
-                import cv2
-                cap0 = cv2.VideoCapture(str(video_abs_path))
-                fps0 = cap0.get(cv2.CAP_PROP_FPS)
-                total_frames0 = int(cap0.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-                cap0.release()
-                if fps0 <= 0:
-                    fps0 = 25.0
-                if total_frames0 <= 0:
-                    def cb_tmp(pct):
-                        mapped_pct = 10 + (pct * 0.8)
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="processing",
-                            progress=mapped_pct,
-                            message=f"正在分析镜头: {pct:.1f}%",
+                    if split_from_cache:
+                        asyncio.create_task(extract_subtitle_service.extract_subtitle(**sub_kw))
+                    else:
+                        sub_task = asyncio.create_task(
+                            extract_subtitle_service.extract_subtitle(**sub_kw)
                         )
-                        if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                            raise asyncio.CancelledError("任务已取消")
-                    _, sp_tmp, _ = await loop.run_in_executor(
-                        None, lambda: model.predict_video(str(video_abs_path), cb_tmp)
-                    )
-                    if sp_tmp is None or len(sp_tmp) == 0:
-                        raise ValueError("未能从视频中解码任何帧，无法进行镜头分析")
-                    single_frame_predictions = sp_tmp
-                else:
-                    chunk_frames = max(1, int(round(chunk_seconds * fps0)))
-                    starts = list(range(0, total_frames0, chunk_frames))
-                    final_pred = np.zeros(total_frames0, dtype=np.float32)
-                    total_core = total_frames0
-                    chunk_core: Dict[int, int] = {}
-                    for i, sf in enumerate(starts):
-                        ef = min(total_frames0, sf + chunk_frames)
-                        chunk_core[i] = (ef - sf)
-                    progress_map: Dict[int, float] = {i: 0.0 for i in chunk_core}
-                    prog_lock = threading.Lock()
-                    def _update_overall():
-                        with prog_lock:
-                            acc = 0.0
-                            for i, w in chunk_core.items():
-                                acc += w * max(0.0, min(100.0, float(progress_map.get(i, 0.0))))
-                            overall = (acc / max(1, total_core)) / 100.0
-                        mapped_pct = 10 + (overall * 80.0)
-                        loop.call_soon_threadsafe(
-                            task_progress_store.set_state,
-                            self.SCOPE,
-                            project_id,
-                            task_id,
-                            "processing",
-                            mapped_pct,
-                            f"正在分析镜头: {overall * 100.0:.1f}%"
-                        )
-                    def _on_chunk_progress(idx: int, pct: float):
-                        with prog_lock:
-                            progress_map[idx] = pct
-                        _update_overall()
-                    async def run_chunk(si, sf, ef, asf, aef):
-                        if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                            raise asyncio.CancelledError("任务已取消")
-                        st = asf / fps0
-                        dur = max(0.0, (aef - asf) / fps0)
-                        _, sp, _ = await loop.run_in_executor(
-                            None,
-                            lambda: model.predict_video(
-                                str(video_abs_path),
-                                lambda p: _on_chunk_progress(si, p),
-                                st,
-                                dur,
-                            ),
-                        )
-                        keep_l = ef - sf
-                        dl = sf - asf
-                        dr = aef - ef
-                        if dl < 0:
-                            dl = 0
-                        if dr < 0:
-                            dr = 0
-                        pred = sp[int(dl):int(dl)+int(keep_l)]
-                        if len(pred) < keep_l:
-                            if len(pred) > 0:
-                                pad_val = float(pred[-1])
-                            else:
-                                pad_val = 0.0
-                            pred = np.pad(pred, (0, keep_l - len(pred)), constant_values=pad_val)
-                        elif len(pred) > keep_l:
-                            pred = pred[:keep_l]
-                        with prog_lock:
-                            progress_map[si] = 100.0
-                        _update_overall()
-                        return si, sf, ef, pred
-                    pending = set()
-                    next_i = 0
-                    total_chunks = len(starts)
-                    effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
-                    def _enqueue_more():
-                        nonlocal next_i
-                        while next_i < total_chunks and len(pending) < effective_concurrency:
-                            sf = starts[next_i]
-                            ef = min(total_frames0, sf + chunk_frames)
-                            asf = max(0, sf - (overlap_frames if sf > 0 else 0))
-                            aef = min(total_frames0, ef + (overlap_frames if ef < total_frames0 else 0))
-                            pending.add(asyncio.create_task(run_chunk(next_i, sf, ef, asf, aef)))
-                            next_i += 1
-                    _enqueue_more()
-                    processed = 0
-                    try:
-                        while pending:
-                            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                            for t in done:
-                                si, sf, ef, pred = t.result()
-                                final_pred[sf:ef] = pred[:(ef - sf)]
-                                processed += (ef - sf)
-                                pct = (processed / max(1, total_core)) * 100.0
-                                mapped_pct = 10 + (pct * 0.8)
-                                task_progress_store.set_state(
-                                    scope=self.SCOPE,
-                                    project_id=project_id,
-                                    task_id=task_id,
-                                    status="processing",
-                                    progress=mapped_pct,
-                                    message=f"正在分析镜头: {pct:.1f}%",
-                                )
-                                if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                                    for pt in pending:
-                                        try:
-                                            pt.cancel()
-                                        except Exception:
-                                            pass
-                                    await asyncio.gather(*pending, return_exceptions=True)
-                                    raise asyncio.CancelledError("任务已取消")
-                            _enqueue_more()
-                    except Exception:
-                        for pt in pending:
-                            try:
-                                pt.cancel()
-                            except Exception:
-                                pass
-                        await asyncio.gather(*pending, return_exceptions=True)
-                        raise
-                    single_frame_predictions = final_pred
-                
-                # 3. 获取场景
-                scenes = model.predictions_to_scenes(single_frame_predictions)
-                # scenes is np.ndarray [[start_frame, end_frame], ...]
-                
-                # 4. 优化场景
-                # 需要 fps 来转换 frame 到 time
-                import cv2
-                cap = cv2.VideoCapture(str(video_abs_path))
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                cap.release()
-                
-                if fps <= 0:
-                    fps = 25.0 # default fallback
-                
-                analysis_dir = _uploads_dir() / "analyses"
-                analysis_dir.mkdir(parents=True, exist_ok=True)
-                raw_scenes = []
-                for idx, (start_f, end_f) in enumerate(scenes, start=1):
-                    s_t = float(start_f) / float(fps)
-                    e_t = float(end_f) / float(fps)
-                    raw_scenes.append({
-                        "id": idx,
-                        "start_frame": int(start_f),
-                        "end_frame": int(end_f),
-                        "start_time": s_t,
-                        "end_time": e_t,
-                        "time_range": f"{self._format_ts(s_t)} - {self._format_ts(e_t)}",
-                        "subtitle": "无"
-                    })
-                raw_out_name = f"{project_id}_scenes_raw.json"
-                raw_out_path = analysis_dir / raw_out_name
-                raw_result_data = {
-                    "scenes": raw_scenes,
-                    "fps": fps,
-                    "total_frames": len(single_frame_predictions),
-                    "created_at": datetime.now().isoformat()
-                }
-                with open(raw_out_path, "w", encoding="utf-8") as f:
-                    json.dump(raw_result_data, f, ensure_ascii=False, indent=2)
-                raw_web_path = _to_web_path(raw_out_path)
-                projects_store.update_project(project_id, {
-                    "scenes_raw_path": raw_web_path,
-                    "scenes_raw_updated_at": datetime.now().isoformat()
-                })
 
-                if sub_task:
+                if split_from_cache:
+                    optimized_scenes, fps, total_frames = split_loaded
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,
                         task_id=task_id,
                         status="processing",
-                        progress=90,
-                        message="等待字幕完成以优化镜头...",
+                        progress=88,
+                        message="复用已保存的镜头分割，跳过模型检测...",
                     )
+                else:
+                    # 2. 开始提取镜头（TransNetV2 + 字幕优化后写入 scenes_split 缓存）
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=10,
+                        message="正在加载模型...",
+                    )
+
+                    # 在线程中运行模型预测，避免阻塞 asyncio loop
+                    loop = asyncio.get_running_loop()
+
+                    model = self._get_model()
+                    chunk_seconds = 180.0
+                    overlap_frames = 25
+                    max_chunk_concurrency = 0
                     try:
-                        await sub_task
-                    except Exception as e:
-                        logger.warning(f"字幕提取失败，将不使用字幕优化：{e}")
-                    current_p = projects_store.get_project(project_id)
-                
-                optimized_scenes = self._optimize_scenes(scenes, fps, current_p)
-                
+                        v = str(os.environ.get("TRANSNETV2_CHUNK_SECONDS") or "").strip()
+                        if v:
+                            chunk_seconds = float(v)
+                    except Exception:
+                        chunk_seconds = 180.0
+                    try:
+                        v = str(os.environ.get("TRANSNETV2_OVERLAP_FRAMES") or "").strip()
+                        if v:
+                            overlap_frames = int(v)
+                    except Exception:
+                        overlap_frames = 25
+                    try:
+                        v = str(os.environ.get("TRANSNETV2_MAX_CONCURRENCY") or "").strip()
+                        if v:
+                            max_chunk_concurrency = int(v)
+                    except Exception:
+                        max_chunk_concurrency = 0
+                    if overlap_frames < 0:
+                        overlap_frames = 0
+                    if chunk_seconds <= 0:
+                        chunk_seconds = 180.0
+                    single_frame_predictions = None
+                    import cv2
+                    cap0 = cv2.VideoCapture(str(video_abs_path))
+                    fps0 = cap0.get(cv2.CAP_PROP_FPS)
+                    total_frames0 = int(cap0.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                    cap0.release()
+                    if fps0 <= 0:
+                        fps0 = 25.0
+                    if total_frames0 <= 0:
+                        def cb_tmp(pct):
+                            mapped_pct = 10 + (pct * 0.8)
+                            task_progress_store.set_state(
+                                scope=self.SCOPE,
+                                project_id=project_id,
+                                task_id=task_id,
+                                status="processing",
+                                progress=mapped_pct,
+                                message=f"正在分析镜头: {pct:.1f}%",
+                            )
+                            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError("任务已取消")
+                        _, sp_tmp, _ = await loop.run_in_executor(
+                            None, lambda: model.predict_video(str(video_abs_path), cb_tmp)
+                        )
+                        if sp_tmp is None or len(sp_tmp) == 0:
+                            raise ValueError("未能从视频中解码任何帧，无法进行镜头分析")
+                        single_frame_predictions = sp_tmp
+                    else:
+                        chunk_frames = max(1, int(round(chunk_seconds * fps0)))
+                        starts = list(range(0, total_frames0, chunk_frames))
+                        final_pred = np.zeros(total_frames0, dtype=np.float32)
+                        total_core = total_frames0
+                        chunk_core: Dict[int, int] = {}
+                        for i, sf in enumerate(starts):
+                            ef = min(total_frames0, sf + chunk_frames)
+                            chunk_core[i] = (ef - sf)
+                        progress_map: Dict[int, float] = {i: 0.0 for i in chunk_core}
+                        prog_lock = threading.Lock()
+                        def _update_overall():
+                            with prog_lock:
+                                acc = 0.0
+                                for i, w in chunk_core.items():
+                                    acc += w * max(0.0, min(100.0, float(progress_map.get(i, 0.0))))
+                                overall = (acc / max(1, total_core)) / 100.0
+                            mapped_pct = 10 + (overall * 80.0)
+                            loop.call_soon_threadsafe(
+                                task_progress_store.set_state,
+                                self.SCOPE,
+                                project_id,
+                                task_id,
+                                "processing",
+                                mapped_pct,
+                                f"正在分析镜头: {overall * 100.0:.1f}%"
+                            )
+                        def _on_chunk_progress(idx: int, pct: float):
+                            with prog_lock:
+                                progress_map[idx] = pct
+                            _update_overall()
+                        async def run_chunk(si, sf, ef, asf, aef):
+                            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError("任务已取消")
+                            st = asf / fps0
+                            dur = max(0.0, (aef - asf) / fps0)
+                            _, sp, _ = await loop.run_in_executor(
+                                None,
+                                lambda: model.predict_video(
+                                    str(video_abs_path),
+                                    lambda p: _on_chunk_progress(si, p),
+                                    st,
+                                    dur,
+                                ),
+                            )
+                            keep_l = ef - sf
+                            dl = sf - asf
+                            dr = aef - ef
+                            if dl < 0:
+                                dl = 0
+                            if dr < 0:
+                                dr = 0
+                            pred = sp[int(dl):int(dl)+int(keep_l)]
+                            if len(pred) < keep_l:
+                                if len(pred) > 0:
+                                    pad_val = float(pred[-1])
+                                else:
+                                    pad_val = 0.0
+                                pred = np.pad(pred, (0, keep_l - len(pred)), constant_values=pad_val)
+                            elif len(pred) > keep_l:
+                                pred = pred[:keep_l]
+                            with prog_lock:
+                                progress_map[si] = 100.0
+                            _update_overall()
+                            return si, sf, ef, pred
+                        pending = set()
+                        next_i = 0
+                        total_chunks = len(starts)
+                        effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
+                        def _enqueue_more():
+                            nonlocal next_i
+                            while next_i < total_chunks and len(pending) < effective_concurrency:
+                                sf = starts[next_i]
+                                ef = min(total_frames0, sf + chunk_frames)
+                                asf = max(0, sf - (overlap_frames if sf > 0 else 0))
+                                aef = min(total_frames0, ef + (overlap_frames if ef < total_frames0 else 0))
+                                pending.add(asyncio.create_task(run_chunk(next_i, sf, ef, asf, aef)))
+                                next_i += 1
+                        _enqueue_more()
+                        processed = 0
+                        try:
+                            while pending:
+                                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                                for t in done:
+                                    si, sf, ef, pred = t.result()
+                                    final_pred[sf:ef] = pred[:(ef - sf)]
+                                    processed += (ef - sf)
+                                    pct = (processed / max(1, total_core)) * 100.0
+                                    mapped_pct = 10 + (pct * 0.8)
+                                    task_progress_store.set_state(
+                                        scope=self.SCOPE,
+                                        project_id=project_id,
+                                        task_id=task_id,
+                                        status="processing",
+                                        progress=mapped_pct,
+                                        message=f"正在分析镜头: {pct:.1f}%",
+                                    )
+                                    if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                        for pt in pending:
+                                            try:
+                                                pt.cancel()
+                                            except Exception:
+                                                pass
+                                        await asyncio.gather(*pending, return_exceptions=True)
+                                        raise asyncio.CancelledError("任务已取消")
+                                _enqueue_more()
+                        except Exception:
+                            for pt in pending:
+                                try:
+                                    pt.cancel()
+                                except Exception:
+                                    pass
+                            await asyncio.gather(*pending, return_exceptions=True)
+                            raise
+                        single_frame_predictions = final_pred
+                    
+                    # 3. 获取场景
+                    scenes = model.predictions_to_scenes(single_frame_predictions)
+                    # scenes is np.ndarray [[start_frame, end_frame], ...]
+                    
+                    # 4. 优化场景
+                    # 需要 fps 来转换 frame 到 time
+                    import cv2
+                    cap = cv2.VideoCapture(str(video_abs_path))
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    cap.release()
+                    
+                    if fps <= 0:
+                        fps = 25.0 # default fallback
+                    
+                    analysis_dir = _uploads_dir() / "analyses"
+                    analysis_dir.mkdir(parents=True, exist_ok=True)
+                    raw_scenes = []
+                    for idx, (start_f, end_f) in enumerate(scenes, start=1):
+                        s_t = float(start_f) / float(fps)
+                        e_t = float(end_f) / float(fps)
+                        raw_scenes.append({
+                            "id": idx,
+                            "start_frame": int(start_f),
+                            "end_frame": int(end_f),
+                            "start_time": s_t,
+                            "end_time": e_t,
+                            "time_range": f"{self._format_ts(s_t)} - {self._format_ts(e_t)}",
+                            "subtitle": "无"
+                        })
+                    raw_out_name = f"{project_id}_scenes_raw.json"
+                    raw_out_path = analysis_dir / raw_out_name
+                    raw_result_data = {
+                        "scenes": raw_scenes,
+                        "fps": fps,
+                        "total_frames": len(single_frame_predictions),
+                        "created_at": datetime.now().isoformat()
+                    }
+                    with open(raw_out_path, "w", encoding="utf-8") as f:
+                        json.dump(raw_result_data, f, ensure_ascii=False, indent=2)
+                    raw_web_path = _to_web_path(raw_out_path)
+                    projects_store.update_project(project_id, {
+                        "scenes_raw_path": raw_web_path,
+                        "scenes_raw_updated_at": datetime.now().isoformat()
+                    })
+    
+                    if sub_task:
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=90,
+                            message="等待字幕完成以优化镜头...",
+                        )
+                        try:
+                            await sub_task
+                        except Exception as e:
+                            logger.warning(f"字幕提取失败，将不使用字幕优化：{e}")
+                        current_p = projects_store.get_project(project_id)
+                    
+                    optimized_scenes = self._optimize_scenes(scenes, fps, current_p)
+                    total_frames = len(single_frame_predictions)
+                    self._save_scenes_split_cache(
+                        project_id,
+                        video_abs_path,
+                        getattr(current_p, "video_path", None),
+                        fps,
+                        total_frames,
+                        optimized_scenes,
+                    )
+
+                analysis_dir = _uploads_dir() / "analyses"
+                analysis_dir.mkdir(parents=True, exist_ok=True)
+
                 # 4.5 视觉分析 (Moondream or Online Vision)
                 if analyze_vision:
                     try:
@@ -464,7 +570,7 @@ class ExtractSceneService:
                 result_data = {
                     "scenes": optimized_scenes,
                     "fps": fps,
-                    "total_frames": len(single_frame_predictions),
+                    "total_frames": total_frames,
                     "created_at": datetime.now().isoformat()
                 }
                 
