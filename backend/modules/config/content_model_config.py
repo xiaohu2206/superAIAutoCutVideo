@@ -29,7 +29,10 @@ class ContentModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['yunwu', '302ai', 'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter']
+        allowed_providers = [
+            'yunwu', '302ai', 'qwen', 'doubao', 'deepseek', 'openai', 'claude',
+            'openrouter', 'custom_openai',
+        ]
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -75,6 +78,18 @@ class ContentModelConfigManager:
                         self.configs[config_id] = ContentModelConfig(**config_data)
                     except Exception as e:
                         logger.error(f"加载文案生成模型配置 {config_id} 失败: {e}")
+
+                # 旧版配置文件补全「自定义 OpenAI 兼容」项
+                if 'custom_openai_content_generation' not in self.configs:
+                    self.configs['custom_openai_content_generation'] = ContentModelConfig(
+                        provider='custom_openai',
+                        api_key='xxx',
+                        base_url='https://api.openai.com/v1/chat/completions',
+                        model_name='gpt-4o-mini',
+                        description='自定义 OpenAI 兼容接口（httpx）',
+                        enabled=False,
+                    )
+                    self.save_configs()
                 
                 logger.info(f"成功加载 {len(self.configs)} 个文案生成模型配置")
             else:
@@ -175,6 +190,17 @@ class ContentModelConfigManager:
                     base_url='https://openrouter.ai/api/v1/chat/completions',
                     model_name='openai/gpt-4o-mini',
                     description='OpenRouter文案生成模型（支持结构化输出）',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'custom_openai_content_generation',
+                'config': ContentModelConfig(
+                    provider='custom_openai',
+                    api_key='xxx',
+                    base_url='https://api.openai.com/v1/chat/completions',
+                    model_name='gpt-4o-mini',
+                    description='自定义 OpenAI 兼容接口（httpx）',
                     enabled=False
                 )
             }

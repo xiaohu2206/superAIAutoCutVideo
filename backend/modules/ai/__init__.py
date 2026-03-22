@@ -11,6 +11,8 @@ from .providers import (
     DoubaoProvider,
     DeepSeekProvider,
     OpenRouterProvider,
+    CustomOpenAIProvider,
+    CustomOpenAIVisionProvider,
     PROVIDER_REGISTRY,
     get_provider_class,
     get_available_providers
@@ -25,6 +27,8 @@ __all__ = [
     "DoubaoProvider",
     "DeepSeekProvider",
     "OpenRouterProvider",
+    "CustomOpenAIProvider",
+    "CustomOpenAIVisionProvider",
     "PROVIDER_REGISTRY",
     "get_provider_class",
     "get_available_providers"

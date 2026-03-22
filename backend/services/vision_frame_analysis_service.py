@@ -14,6 +14,7 @@ from io import BytesIO
 import cv2
 from PIL import Image
 
+from modules.ai import AIModelConfig, ChatMessage, get_provider_class
 from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
@@ -26,29 +27,29 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 class _OnlineVisionRunner:
     def __init__(self, provider: str, api_key: str, base_url: str, model_name: str, timeout: int = 120):
         self._provider = provider
-        self._api_key = api_key
-        self._base_url = base_url
         self._model_name = model_name
-        self._timeout = timeout
-        self._client = None
+        self._signature = (str(provider or ""), str(api_key or ""), str(base_url or ""), str(model_name or ""), int(timeout or 0))
 
-    def _get_client(self):
-        import httpx
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(self._timeout))
-        return self._client
+        provider_cls = get_provider_class(provider)
+        if not provider_cls:
+            raise ValueError(f"不支持的AI提供商: {provider}")
+
+        ai_cfg = AIModelConfig(
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+            timeout=timeout,
+            extra_params={"max_tokens": 512},
+        )
+        self._provider_impl = provider_cls(ai_cfg)
+
+    @property
+    def signature(self) -> Tuple[str, str, str, str, int]:
+        return self._signature
 
     async def close(self):
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
-
-    def _get_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        await self._provider_impl.close()
 
     async def infer(self, img: Image.Image, prompt: str = "Describe this image briefly.") -> Tuple[str, Dict[str, Any]]:
         buf = BytesIO()
@@ -56,63 +57,32 @@ class _OnlineVisionRunner:
         img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         data_uri = f"data:image/jpeg;base64,{img_base64}"
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_uri}},
-                ],
-            }
-        ]
-
-        payload = {
-            "model": self._model_name,
-            "messages": messages,
-            "max_tokens": 512,
-        }
-
         t0 = time.time()
-        client = self._get_client()
-        response = await client.post(
-            self._base_url,
-            json=payload,
-            headers=self._get_headers(),
+        resp = await self._provider_impl.chat_completion(
+            [
+                ChatMessage(
+                    role="user",
+                    content=[
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                    ],
+                )
+            ]
         )
         t1 = time.time()
-
-        if response.status_code >= 400:
-            err_text = response.text
-            try:
-                err_json = response.json()
-                if isinstance(err_json, dict) and "error" in err_json:
-                    err_info = err_json["error"]
-                    if isinstance(err_info, dict):
-                        err_text = err_info.get("message", err_text)
-            except Exception:
-                pass
-            raise Exception(f"Online vision API error ({response.status_code}): {err_text}")
-
-        response_data = response.json()
-        choices = response_data.get("choices", [])
-        if not choices:
-            raise ValueError("No choices in response")
-
-        message = choices[0].get("message", {})
-        content = message.get("content", "")
-        usage = response_data.get("usage", {}) or {}
+        usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
 
         stats = {
             "backend": "online",
             "provider": self._provider,
             "model": self._model_name,
             "infer_s": t1 - t0,
-            "prompt_tokens": usage.get("prompt_tokens", 0),
-            "completion_tokens": usage.get("completion_tokens", 0),
-            "total_tokens": usage.get("total_tokens", 0),
+            "prompt_tokens": int((usage or {}).get("prompt_tokens", 0) or 0),
+            "completion_tokens": int((usage or {}).get("completion_tokens", 0) or 0),
+            "total_tokens": int((usage or {}).get("total_tokens", 0) or 0),
         }
 
-        return content, stats
+        return (resp.content or ""), stats
 
 
 def _resolve_moondream_env_n_gpu_layers() -> int:
@@ -392,11 +362,23 @@ class VisionFrameAnalyzer:
         self._online_runner: Optional[_OnlineVisionRunner] = None
         self._online_runner_lock = threading.Lock()
 
-    def _get_online_runner(self, provider: str, api_key: str, base_url: str, model_name: str, timeout: int = 120) -> _OnlineVisionRunner:
+    async def _get_online_runner(self, provider: str, api_key: str, base_url: str, model_name: str, timeout: int = 120) -> _OnlineVisionRunner:
+        sig = (str(provider or ""), str(api_key or ""), str(base_url or ""), str(model_name or ""), int(timeout or 0))
+        old: Optional[_OnlineVisionRunner] = None
         with self._online_runner_lock:
             if self._online_runner is None:
                 self._online_runner = _OnlineVisionRunner(provider, api_key, base_url, model_name, timeout)
-            return self._online_runner
+            elif self._online_runner.signature != sig:
+                old = self._online_runner
+                self._online_runner = _OnlineVisionRunner(provider, api_key, base_url, model_name, timeout)
+            runner = self._online_runner
+
+        if old is not None:
+            try:
+                await old.close()
+            except Exception:
+                pass
+        return runner
 
     async def close_online_runner(self):
         if self._online_runner is not None:
@@ -654,7 +636,7 @@ class VisionFrameAnalyzer:
         Analyze scenes using online vision models (302ai, yunwu, etc.).
         mode: "no_subtitles" (default) or "all"
         """
-        online_runner = self._get_online_runner(provider, api_key, base_url, model_name, timeout)
+        online_runner = await self._get_online_runner(provider, api_key, base_url, model_name, timeout)
         prompt = "Describe this image briefly."
 
         extract_concurrency = max(1, min(max_concurrency, 8))

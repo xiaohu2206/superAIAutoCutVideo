@@ -11,6 +11,7 @@ from .deepseek import DeepSeekProvider
 from .openrouter import OpenRouterProvider
 from .ai302 import AI302Provider
 from .yunwu import YunwuProvider
+from .custom_openai import CustomOpenAIProvider, CustomOpenAIVisionProvider
 
 __all__ = [
     "QwenProvider",
@@ -19,6 +20,8 @@ __all__ = [
     "OpenRouterProvider",
     "AI302Provider",
     "YunwuProvider",
+    "CustomOpenAIProvider",
+    "CustomOpenAIVisionProvider",
 ]
 
 # 提供商注册表
@@ -29,6 +32,8 @@ PROVIDER_REGISTRY = {
     "doubao": DoubaoProvider,
     "deepseek": DeepSeekProvider,
     "openrouter": OpenRouterProvider,
+    "custom_openai": CustomOpenAIProvider,
+    "custom_openai_vision": CustomOpenAIVisionProvider,
 }
 
 def get_provider_class(provider_name: str):

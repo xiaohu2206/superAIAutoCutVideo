@@ -416,7 +416,13 @@ class ExtractSceneService:
                         )
                         
                         active_config = video_model_config_manager.get_active_config()
-                        if active_config and active_config.provider in ("yunwu", "302ai"):
+                        if active_config and active_config.provider in (
+                            "yunwu",
+                            "302ai",
+                            "qwen",
+                            "doubao",
+                            "custom_openai_vision",
+                        ):
                             logger.info(f"Using online vision model: {active_config.provider} - {active_config.model_name}")
                             optimized_scenes = await vision_frame_analyzer.analyze_scenes_online(
                                 project_id=project_id,
