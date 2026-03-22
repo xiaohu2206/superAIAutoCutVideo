@@ -97,6 +97,7 @@ class ExtractSceneService:
         hotwords: Optional[List[str]] = None,
         analyze_vision: bool = False,
         vision_mode: str = "all",
+        vision_key_frames: int = 1,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -424,6 +425,7 @@ class ExtractSceneService:
                             "custom_openai_vision",
                         ):
                             logger.info(f"Using online vision model: {active_config.provider} - {active_config.model_name}")
+                            vk = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
                             optimized_scenes = await vision_frame_analyzer.analyze_scenes_online(
                                 project_id=project_id,
                                 video_path=str(video_abs_path),
@@ -434,7 +436,8 @@ class ExtractSceneService:
                                 model_name=active_config.model_name,
                                 timeout=active_config.timeout or 120,
                                 mode=vision_mode,
-                                task_id=task_id
+                                task_id=task_id,
+                                vision_key_frames=vk,
                             )
                         else:
                             logger.info("Using local Moondream model for vision analysis")

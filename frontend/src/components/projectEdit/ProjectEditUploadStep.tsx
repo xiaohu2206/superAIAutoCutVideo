@@ -60,7 +60,7 @@ interface ProjectEditUploadStepProps {
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
   onNextStep: () => void;
   
-  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string }) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => void;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
@@ -134,6 +134,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   });
 
   const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("all");
+  const [visionKeyFrames, setVisionKeyFrames] = React.useState<1 | 3>(1);
   const analyzeVision = true;
 
   return (
@@ -218,36 +219,63 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           
           {project.project_type === "visual" ? (
              <div className="flex flex-col gap-2 items-end">
-               <div className="flex items-center gap-2 text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded">
-                  <span className="text-gray-600 select-none">视觉分析(Moondream)</span>
-                  <span className="text-gray-300">|</span>
-                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                    <input
-                      type="radio"
-                      name="visionMode"
-                      value="no_subtitles"
-                      checked={visionMode === "no_subtitles"}
-                      onChange={e => setVisionMode(e.target.value as any)}
-                      disabled={extractingScene}
-                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    仅无字幕镜头
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                    <input
-                      type="radio"
-                      name="visionMode"
-                      value="all"
-                      checked={visionMode === "all"}
-                      onChange={e => setVisionMode(e.target.value as any)}
-                      disabled={extractingScene}
-                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    所有镜头
-                  </label>
+               <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <span className="text-gray-600 select-none">在线视觉分析</span>
+                    <span className="text-gray-300 hidden sm:inline">|</span>
+                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                      <input
+                        type="radio"
+                        name="visionMode"
+                        value="no_subtitles"
+                        checked={visionMode === "no_subtitles"}
+                        onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
+                        disabled={extractingScene}
+                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      仅无字幕镜头
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                      <input
+                        type="radio"
+                        name="visionMode"
+                        value="all"
+                        checked={visionMode === "all"}
+                        onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
+                        disabled={extractingScene}
+                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      所有镜头
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap justify-end border-t border-gray-200/80 pt-1.5 w-full">
+                    <span className="text-gray-500 select-none shrink-0">每镜头抽帧</span>
+                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                      <input
+                        type="radio"
+                        name="visionKeyFrames"
+                        checked={visionKeyFrames === 1}
+                        onChange={() => setVisionKeyFrames(1)}
+                        disabled={extractingScene}
+                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      1 帧
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                      <input
+                        type="radio"
+                        name="visionKeyFrames"
+                        checked={visionKeyFrames === 3}
+                        onChange={() => setVisionKeyFrames(3)}
+                        disabled={extractingScene}
+                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      3 帧
+                    </label>
+                  </div>
                </div>
                <button
-                onClick={() => onExtractScenes({ analyzeVision, visionMode })}
+                onClick={() => onExtractScenes({ analyzeVision, visionMode, visionKeyFrames })}
                 disabled={
                   subtitleLoading ||
                   extractingSubtitle ||
