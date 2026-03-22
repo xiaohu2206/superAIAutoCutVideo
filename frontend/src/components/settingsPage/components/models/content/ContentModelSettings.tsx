@@ -66,9 +66,10 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           <option value="doubao">豆包 (Doubao)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openrouter">OpenRouter</option>
+          <option value="custom_openai">自定义模型（OpenAI 兼容接口）</option>
         </select>
         <p className="text-xs text-gray-500 mt-1">
-          选择用于文案生成的AI模型提供商
+          选择用于文案生成的AI模型提供商；自定义项需填写下方接口地址、密钥与模型名
         </p>
         {providerLink && (
           <button
@@ -131,26 +132,32 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         <p className="text-xs text-gray-500 mt-1">从模型提供商获取的API密钥（需自己获取）</p>
       </div>
 
-      {/* 接口地址 */}
-      {/* <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          大模型接口地址
-        </label>
-        <input
-          type="text"
-          value={currentContentConfig.base_url}
-          onChange={(e) =>
-            setCurrentContentConfig((prev) => ({
-              ...prev,
-              base_url: e.target.value,
-            }))
-          }
-          onBlur={(e) => updateCurrentContentConfig("base_url", e.target.value)}
-          placeholder="请输入接口地址"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <p className="text-xs text-gray-500 mt-1">模型API的基础URL地址</p>
-      </div> */}
+      {/* 接口地址：固定提供商沿用预设；自定义模型必须可编辑 */}
+      {contentSelectedProvider === "custom_openai" && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            大模型接口地址
+          </label>
+          <input
+            type="text"
+            value={currentContentConfig.base_url}
+            onChange={(e) =>
+              setCurrentContentConfig((prev) => ({
+                ...prev,
+                base_url: e.target.value,
+              }))
+            }
+            onBlur={(e) =>
+              updateCurrentContentConfig("base_url", e.target.value.trim())
+            }
+            placeholder="例如 https://api.openai.com/v1/chat/completions"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            OpenAI 兼容 Chat Completions 地址；若未以 /chat/completions 结尾会自动补全（与通义、云雾等用法一致）
+          </p>
+        </div>
+      )}
 
       {/* 模型名称 */}
       <div>

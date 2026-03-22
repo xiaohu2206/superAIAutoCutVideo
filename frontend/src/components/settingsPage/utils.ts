@@ -20,19 +20,54 @@ export const getDefaultBaseUrl = (provider: string): string => {
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
     openrouter: "https://openrouter.ai/api/v1/chat/completions",
+    custom_openai_vision: "https://api.openai.com/v1/chat/completions",
   };
   return defaults[provider] || "";
+};
+
+/** 视频视觉分析：各提供商可选模型（第一项为默认） */
+export const VIDEO_VISION_MODEL_OPTIONS: Record<
+  string,
+  { value: string; label: string }[]
+> = {
+  yunwu: [
+    { value: "qwen3-vl-flash", label: "qwen3-vl-flash" },
+    {
+      value: "gemini-3.1-flash-lite-preview",
+      label: "gemini-3.1-flash-lite-preview",
+    },
+  ],
+  qwen: [{ value: "qwen3-vl-flash", label: "qwen3-vl-flash" }],
+  "302ai": [
+    { value: "qwen3-vl-flash", label: "qwen3-vl-flash" },
+    { value: "gemini-2.0-flash-lite", label: "gemini-2.0-flash-lite" },
+    {
+      value: "gemini-2.5-flash-lite-preview-09-2025",
+      label: "gemini-2.5-flash-lite-preview-09-2025",
+    },
+  ],
+  doubao: [
+    {
+      value: "doubao-seed-1-6-flash-250828",
+      label: "doubao-seed-1-6-flash-250828",
+    },
+  ],
+  custom_openai_vision: [],
+};
+
+export const getVideoVisionModelOptions = (
+  provider: string,
+): { value: string; label: string }[] => {
+  return VIDEO_VISION_MODEL_OPTIONS[provider] ?? [];
 };
 
 /**
  * 获取默认的模型名称
  */
 export const getDefaultModelName = (provider: string): string => {
+  const fromPresets = VIDEO_VISION_MODEL_OPTIONS[provider]?.[0]?.value;
+  if (fromPresets) return fromPresets;
   const defaults: Record<string, string> = {
-    yunwu: "gpt-4o",
-    "302ai": "gpt-4o",
-    qwen: "qwen-vl-plus",
-    doubao: "doubao-vision-pro",
     deepseek: "deepseek-vl-chat",
     openrouter: "openai/gpt-4o-mini",
   };
@@ -50,6 +85,7 @@ export const getDefaultDescription = (provider: string): string => {
     doubao: "豆包视频生成模型",
     deepseek: "DeepSeek视频生成模型",
     openrouter: "OpenRouter视频生成模型",
+    custom_openai_vision: "自定义视觉模型（OpenAI 兼容 Chat Completions，支持图片）",
   };
   return defaults[provider] || "";
 };
@@ -76,6 +112,7 @@ export const getContentDefaultBaseUrl = (provider: string): string => {
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
     openrouter: "https://openrouter.ai/api/v1/chat/completions",
+    custom_openai: "https://api.openai.com/v1/chat/completions",
   };
   return defaults[provider] || "";
 };
@@ -91,6 +128,7 @@ export const getContentDefaultModelName = (provider: string): string => {
     doubao: "doubao-seed-1-8-251228",
     deepseek: "deepseek-chat",
     openrouter: "openai/gpt-4o-mini",
+    custom_openai: "gpt-4o-mini",
   };
   return defaults[provider] || "";
 };
@@ -106,6 +144,7 @@ export const getContentDefaultDescription = (provider: string): string => {
     doubao: "豆包文案生成模型",
     deepseek: "DeepSeek文案生成模型",
     openrouter: "OpenRouter文案生成模型（支持结构化输出）",
+    custom_openai: "自定义 OpenAI 兼容接口（与通义等相同 HTTP 调用）",
   };
   return defaults[provider] || "";
 };

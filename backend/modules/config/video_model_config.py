@@ -29,7 +29,10 @@ class VideoModelConfig(BaseModel):
     
     @validator('provider')
     def validate_provider(cls, v):
-        allowed_providers = ['qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter', 'yunwu', '302ai']
+        allowed_providers = [
+            'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter',
+            'yunwu', '302ai', 'custom_openai_vision',
+        ]
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
@@ -92,36 +95,14 @@ class VideoModelConfigManager:
         """确保所有默认配置都存在，缺失的自动添加"""
         default_configs = [
             {
-                'id': 'qwen_video_analysis',
-                'config': VideoModelConfig(
-                    provider='qwen',
-                    api_key='xxx',
-                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
-                    model_name='qwen-vl-plus',
-                    description='通义千问视频分析模型',
-                    enabled=True
-                )
-            },
-            {
-                'id': 'doubao_video_analysis',
-                'config': VideoModelConfig(
-                    provider='doubao',
-                    api_key='xxx',
-                    base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-                    model_name='doubao-seed-1-6-vision-250815',
-                    description='豆包视频分析模型',
-                    enabled=False
-                )
-            },
-            {
                 'id': 'yunwu_video_analysis',
                 'config': VideoModelConfig(
                     provider='yunwu',
                     api_key='xxx',
                     base_url='https://yunwu.ai/v1/chat/completions',
-                    model_name='gpt-4o',
+                    model_name='qwen3-vl-flash',
                     description='云雾API平台视频分析模型（支持视觉）',
-                    enabled=False
+                    enabled=True
                 )
             },
             {
@@ -130,8 +111,41 @@ class VideoModelConfigManager:
                     provider='302ai',
                     api_key='xxx',
                     base_url='https://api.302ai.cn/v1/chat/completions',
-                    model_name='gpt-4o',
+                    model_name='qwen3-vl-flash',
                     description='302AI平台视频分析模型（支持视觉）',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'qwen_video_analysis',
+                'config': VideoModelConfig(
+                    provider='qwen',
+                    api_key='xxx',
+                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
+                    model_name='qwen3-vl-flash',
+                    description='通义千问视频分析模型',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'doubao_video_analysis',
+                'config': VideoModelConfig(
+                    provider='doubao',
+                    api_key='xxx',
+                    base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                    model_name='doubao-seed-1-6-flash-250828',
+                    description='豆包视频分析模型',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'custom_openai_vision_video_analysis',
+                'config': VideoModelConfig(
+                    provider='custom_openai_vision',
+                    api_key='xxx',
+                    base_url='https://api.openai.com/v1/chat/completions',
+                    model_name='gpt-4o-mini',
+                    description='自定义视觉模型（OpenAI 兼容，支持图片）',
                     enabled=False
                 )
             }
@@ -180,19 +194,8 @@ class VideoModelConfigManager:
                     provider='qwen',
                     api_key='xxx',
                     base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
-                    model_name='qwen-vl-plus',
+                    model_name='qwen3-vl-flash',
                     description='通义千问视频分析模型',
-                    enabled=True
-                )
-            },
-            {
-                'id': 'doubao_video_analysis',
-                'config': VideoModelConfig(
-                    provider='doubao',
-                    api_key='xxx',
-                    base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-                    model_name='doubao-seed-1-6-vision-250815',
-                    description='豆包视频分析模型',
                     enabled=False
                 )
             },
@@ -202,9 +205,9 @@ class VideoModelConfigManager:
                     provider='yunwu',
                     api_key='xxx',
                     base_url='https://yunwu.ai/v1/chat/completions',
-                    model_name='gpt-4o',
+                    model_name='qwen3-vl-flash',
                     description='云雾API平台视频分析模型（支持视觉）',
-                    enabled=False
+                    enabled=True
                 )
             },
             {
@@ -213,8 +216,30 @@ class VideoModelConfigManager:
                     provider='302ai',
                     api_key='xxx',
                     base_url='https://api.302ai.cn/v1/chat/completions',
-                    model_name='gpt-4o',
+                    model_name='qwen3-vl-flash',
                     description='302AI平台视频分析模型（支持视觉）',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'doubao_video_analysis',
+                'config': VideoModelConfig(
+                    provider='doubao',
+                    api_key='xxx',
+                    base_url='https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                    model_name='doubao-seed-1-6-flash-250828',
+                    description='豆包视频分析模型',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'custom_openai_vision_video_analysis',
+                'config': VideoModelConfig(
+                    provider='custom_openai_vision',
+                    api_key='xxx',
+                    base_url='https://api.openai.com/v1/chat/completions',
+                    model_name='gpt-4o-mini',
+                    description='自定义视觉模型（OpenAI 兼容，支持图片）',
                     enabled=False
                 )
             }
