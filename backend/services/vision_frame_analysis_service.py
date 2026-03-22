@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import threading
 import subprocess
@@ -83,6 +84,161 @@ class _OnlineVisionRunner:
         }
 
         return (resp.content or ""), stats
+
+    async def infer_multi(
+        self,
+        images: List[Image.Image],
+        prompt: str,
+        max_tokens: int = 1024,
+    ) -> Tuple[str, Dict[str, Any]]:
+        if not images:
+            raise ValueError("infer_multi 需要至少一张图片")
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for img in images:
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            data_uri = f"data:image/jpeg;base64,{img_base64}"
+            content.append({"type": "image_url", "image_url": {"url": data_uri}})
+
+        t0 = time.time()
+        resp = await self._provider_impl.chat_completion(
+            [
+                ChatMessage(
+                    role="user",
+                    content=content,
+                )
+            ],
+            extra_params={"max_tokens": int(max_tokens)},
+        )
+        t1 = time.time()
+        usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
+
+        stats = {
+            "backend": "online",
+            "provider": self._provider,
+            "model": self._model_name,
+            "infer_s": t1 - t0,
+            "n_images": len(images),
+            "prompt_tokens": int((usage or {}).get("prompt_tokens", 0) or 0),
+            "completion_tokens": int((usage or {}).get("completion_tokens", 0) or 0),
+            "total_tokens": int((usage or {}).get("total_tokens", 0) or 0),
+        }
+
+        return (resp.content or ""), stats
+
+
+def _segment_key_frame_seek_times(t_start: float, t_end: float, count: int) -> List[float]:
+    ts = float(t_start)
+    te = float(t_end)
+    if te < ts:
+        ts, te = te, ts
+    span = te - ts
+    if count <= 1 or span <= 1e-6:
+        return [(ts + te) / 2.0]
+    if count >= 3:
+        eps = min(0.05, span / 6.0)
+        return [ts + eps, (ts + te) / 2.0, te - eps]
+    return [(ts + te) / 2.0]
+
+
+def _normalize_subtitle_for_vision(sub: Any) -> str:
+    s = (str(sub).strip() if sub is not None else "") or ""
+    if not s or s == "无":
+        return "（本镜头无对白或未识别字幕）"
+    return s
+
+
+def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> str:
+    sub = _normalize_subtitle_for_vision(subtitle_text)
+    frame_hint = "单张关键帧" if int(num_frames) <= 1 else f"按时间顺序排列的 {int(num_frames)} 张关键帧"
+    return f"""你是一个影视镜头分析专家，请根据提供的{frame_hint}和字幕内容，对该镜头进行语义理解。
+
+【要求】
+1. 综合多帧信息，不要只描述单帧
+2. 优先识别人物、动作、场景、情绪
+3. 如果字幕提供了语义，结合字幕理解（但不要照抄字幕）
+4. 输出必须结构化 JSON
+
+【输出字段定义】
+- desc：一句话描述这个镜头发生了什么（自然语言）
+- objects：画面中主要物体（数组）
+- action：核心动作（动词，如：离开/奔跑/对话）
+- scene：场景（室内/室外/街道/房间等）
+- emotion：整体情绪（如：开心/悲伤/紧张/平静）
+
+字幕：
+{sub}
+
+【输出JSON格式】
+{{
+  "desc": "",
+  "objects": [],
+  "action": "",
+  "scene": "",
+  "emotion": ""
+}}"""
+
+
+def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s, re.IGNORECASE)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except Exception:
+            pass
+    try:
+        out = json.loads(s)
+        return out if isinstance(out, dict) else None
+    except Exception:
+        pass
+    i = s.find("{")
+    j = s.rfind("}")
+    if i >= 0 and j > i:
+        try:
+            out = json.loads(s[i : j + 1])
+            return out if isinstance(out, dict) else None
+        except Exception:
+            pass
+    return None
+
+
+def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
+    desc = str(d.get("desc") or "").strip()
+    objs = d.get("objects")
+    if isinstance(objs, list):
+        obj_str = "、".join(str(x).strip() for x in objs if str(x).strip())
+    else:
+        obj_str = str(objs or "").strip()
+    action = str(d.get("action") or "").strip()
+    scene = str(d.get("scene") or "").strip()
+    emotion = str(d.get("emotion") or "").strip()
+    lines: List[str] = []
+    if desc:
+        lines.append(f"画面：{desc}")
+    if obj_str:
+        lines.append(f"物体：{obj_str}")
+    if action:
+        lines.append(f"动作：{action}")
+    if scene:
+        lines.append(f"场景：{scene}")
+    if emotion:
+        lines.append(f"情绪：{emotion}")
+    return "\n".join(lines)
+
+
+def _parse_online_vision_model_output(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    parsed = _try_parse_vision_json(raw)
+    if parsed:
+        display = _vision_structured_to_display_text(parsed)
+        if display.strip():
+            return parsed, display
+        tail = (raw or "").strip()
+        return parsed, tail if tail else json.dumps(parsed, ensure_ascii=False)
+    return None, (raw or "").strip()
 
 
 def _resolve_moondream_env_n_gpu_layers() -> int:
@@ -412,20 +568,16 @@ class VisionFrameAnalyzer:
             
         return img
 
-    def extract_center_frame(self, video_path: str, t_start: float, t_end: float) -> Optional[Image.Image]:
-        img, _ = self.extract_center_frame_with_reason(video_path, t_start, t_end)
-        return img
-
-    def extract_center_frame_with_reason(self, video_path: str, t_start: float, t_end: float) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
+    def extract_frame_at_time_with_reason(self, video_path: str, seek_time: float) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
         try:
             if not video_path:
                 return None, {"code": "invalid_path", "message": "video_path 为空"}
             if not Path(video_path).exists():
                 return None, {"code": "path_not_found", "message": "视频文件不存在", "video_path": video_path}
 
-            center_time = (float(t_start) + float(t_end)) / 2.0
-            if center_time < 0:
-                center_time = 0.0
+            seek_t = float(seek_time)
+            if seek_t < 0:
+                seek_t = 0.0
 
             def _try_cv2(mode: str) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
                 cap = cv2.VideoCapture(video_path)
@@ -444,10 +596,10 @@ class VisionFrameAnalyzer:
 
                 try:
                     if mode == "msec":
-                        ok_seek = cap.set(cv2.CAP_PROP_POS_MSEC, float(center_time) * 1000.0)
+                        ok_seek = cap.set(cv2.CAP_PROP_POS_MSEC, float(seek_t) * 1000.0)
                         ret, frame = cap.read()
                         if (not ret) or frame is None:
-                            back = max(0.0, float(center_time) - 2.0)
+                            back = max(0.0, float(seek_t) - 2.0)
                             cap.set(cv2.CAP_PROP_POS_MSEC, back * 1000.0)
                             frame = None
                             for _ in range(int(round(2.0 * fps_safe)) + 5):
@@ -457,7 +609,7 @@ class VisionFrameAnalyzer:
                                 frame = fr_i
                             ret = frame is not None
                     else:
-                        target_frame = int(round(float(center_time) * float(fps_safe)))
+                        target_frame = int(round(float(seek_t) * float(fps_safe)))
                         if frame_count_ok:
                             target_frame = max(0, min(int(frame_count) - 1, target_frame))
                         ok_seek = cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
@@ -483,9 +635,7 @@ class VisionFrameAnalyzer:
                             "code": "read_failed",
                             "message": "读取帧失败",
                             "seek_mode": mode,
-                            "t_start": float(t_start),
-                            "t_end": float(t_end),
-                            "center_time": float(center_time),
+                            "seek_time": float(seek_t),
                             "fps": float(fps),
                             "frame_count": float(frame_count),
                             "seek_ok": bool(ok_seek),
@@ -506,9 +656,7 @@ class VisionFrameAnalyzer:
                         "code": "cv2_exception",
                         "message": str(e),
                         "seek_mode": mode,
-                        "t_start": float(t_start),
-                        "t_end": float(t_end),
-                        "center_time": float(center_time),
+                        "seek_time": float(seek_t),
                     }
 
             def _try_ffmpeg() -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
@@ -538,7 +686,7 @@ class VisionFrameAnalyzer:
                     except Exception as e:
                         return None, {"code": "ffmpeg_exception", "message": str(e)}
 
-                ts = f"{float(center_time):.3f}"
+                ts = f"{float(seek_t):.3f}"
                 cmd_fast = [
                     "ffmpeg",
                     "-hide_banner",
@@ -609,6 +757,34 @@ class VisionFrameAnalyzer:
             logger.error(f"Error extracting frame: {e}")
             return None, {"code": "exception", "message": str(e)}
 
+    def extract_center_frame_with_reason(self, video_path: str, t_start: float, t_end: float) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
+        seek_t = (float(t_start) + float(t_end)) / 2.0
+        if seek_t < 0:
+            seek_t = 0.0
+        return self.extract_frame_at_time_with_reason(video_path, seek_t)
+
+    def extract_center_frame(self, video_path: str, t_start: float, t_end: float) -> Optional[Image.Image]:
+        img, _ = self.extract_center_frame_with_reason(video_path, t_start, t_end)
+        return img
+
+    def extract_segment_key_frames_with_reason(
+        self, video_path: str, t_start: float, t_end: float, key_frame_count: int
+    ) -> Tuple[Optional[List[Image.Image]], Optional[Dict[str, Any]]]:
+        times = _segment_key_frame_seek_times(t_start, t_end, int(key_frame_count))
+        images: List[Image.Image] = []
+        for t in times:
+            img, err = self.extract_frame_at_time_with_reason(video_path, t)
+            if not img:
+                merged = dict(err or {})
+                merged["code"] = merged.get("code") or "extract_frame_failed"
+                merged["seek_times"] = times
+                merged["failed_seek_time"] = float(t)
+                merged["t_start"] = float(t_start)
+                merged["t_end"] = float(t_end)
+                return None, merged
+            images.append(img)
+        return images, None
+
     def infer_with_moondream(self, img: Image.Image, prompt: str = "Describe this image briefly.", return_stats: bool = False):
         optimized_img = self._optimize_image(img)
         if return_stats:
@@ -631,13 +807,15 @@ class VisionFrameAnalyzer:
         mode: str = "all",
         task_id: Optional[str] = None,
         max_concurrency: int = 4,
+        vision_key_frames: int = 1,
     ) -> List[Dict[str, Any]]:
         """
         Analyze scenes using online vision models (302ai, yunwu, etc.).
-        mode: "no_subtitles" (default) or "all"
+        mode: "no_subtitles" or "all"
+        vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
         """
         online_runner = await self._get_online_runner(provider, api_key, base_url, model_name, timeout)
-        prompt = "Describe this image briefly."
+        kf = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
 
         extract_concurrency = max(1, min(max_concurrency, 8))
         api_concurrency = max(1, min(max_concurrency, 4))
@@ -667,13 +845,13 @@ class VisionFrameAnalyzer:
 
         def _extract_segment_sync(v_path: str, t_s: float, t_e: float, scene_idx: int):
             try:
-                img, frame_err = self.extract_center_frame_with_reason(v_path, t_s, t_e)
-                if not img:
-                    return {"ok": False, "img": None, "error": "extract_frame_failed", "frame_error": frame_err}
-                return {"ok": True, "img": img, "error": None, "frame_error": None}
+                imgs, frame_err = self.extract_segment_key_frames_with_reason(v_path, t_s, t_e, kf)
+                if not imgs:
+                    return {"ok": False, "imgs": None, "error": "extract_frame_failed", "frame_error": frame_err}
+                return {"ok": True, "imgs": imgs, "error": None, "frame_error": None}
             except Exception as e:
                 logger.error(f"Frame extract failed for {t_s}-{t_e}: {e}")
-                return {"ok": False, "img": None, "error": str(e), "frame_error": None}
+                return {"ok": False, "imgs": None, "error": str(e), "frame_error": None}
 
         async def analyze_single_scene(idx: int):
             nonlocal processed_count
@@ -682,6 +860,7 @@ class VisionFrameAnalyzer:
 
             scene = scenes[idx]
             merged_from = scene.get("merged_from", [])
+            subtitle_for_scene = scene.get("subtitle")
 
             segments = merged_from if merged_from else [{"start_time": scene["start_time"], "end_time": scene["end_time"]}]
 
@@ -698,7 +877,8 @@ class VisionFrameAnalyzer:
                     extract_res = await loop.run_in_executor(extract_executor, _extract_segment_sync, video_path, t_start, t_end, idx)
                 t1 = time.time()
 
-                if not (isinstance(extract_res, dict) and extract_res.get("ok") and extract_res.get("img") is not None):
+                imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
+                if not (isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0):
                     err = extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result"
                     if err == "extract_frame_failed":
                         vision_segments.append(
@@ -726,28 +906,41 @@ class VisionFrameAnalyzer:
                     raise asyncio.CancelledError("任务已取消")
 
                 try:
-                    logger.info(f"Online vision analyze: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} provider={provider}")
-                    img = extract_res.get("img")
-                    optimized_img = self._optimize_image(img, max_edge=1024)
+                    logger.info(
+                        f"Online vision analyze: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
+                        f"provider={provider} key_frames={len(imgs)}"
+                    )
+                    optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
+                    prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
 
                     async with api_semaphore:
                         t2 = time.time()
-                        out, online_stats = await online_runner.infer(optimized_img, prompt=prompt)
+                        out, online_stats = await online_runner.infer_multi(optimized_imgs, prompt=prompt)
                         t3 = time.time()
 
                     logger.info(
-                        f"Online vision timing: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} extract_s={t1 - t0:.3f} infer_s={t3 - t2:.3f} total_s={t3 - t0:.3f} provider={provider} model={model_name}"
+                        f"Online vision timing: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
+                        f"extract_s={t1 - t0:.3f} infer_s={t3 - t2:.3f} total_s={t3 - t0:.3f} provider={provider} model={model_name} "
+                        f"n_images={online_stats.get('n_images')}"
                     )
 
-                    txt = str(out or "").strip()
-                    vision_segments.append(
-                        {
-                            "start_time": float(t_start),
-                            "end_time": float(t_end),
-                            "status": "ok" if txt else "empty",
-                            "text": txt if txt else None,
+                    structured, display_text = _parse_online_vision_model_output(str(out or ""))
+                    txt = (display_text or "").strip()
+                    seg_out: Dict[str, Any] = {
+                        "start_time": float(t_start),
+                        "end_time": float(t_end),
+                        "status": "ok" if txt else "empty",
+                        "text": txt if txt else None,
+                    }
+                    if structured and isinstance(structured, dict):
+                        seg_out["structured"] = {
+                            "desc": structured.get("desc"),
+                            "objects": structured.get("objects"),
+                            "action": structured.get("action"),
+                            "scene": structured.get("scene"),
+                            "emotion": structured.get("emotion"),
                         }
-                    )
+                    vision_segments.append(seg_out)
                 except Exception as e:
                     logger.error(f"Online vision analysis failed for {t_start}-{t_end}: {e}")
                     vision_segments.append(
