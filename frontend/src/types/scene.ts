@@ -12,11 +12,20 @@ export interface Scene {
   vision_analyzed?: boolean;
 }
 
+export interface VisionStructured {
+  desc?: unknown;
+  objects?: unknown;
+  action?: unknown;
+  scene?: unknown;
+  emotion?: unknown;
+}
+
 export interface VisionSegment {
   start_time: number;
   end_time: number;
   status: "ok" | "empty" | "no_frame" | "error";
   text?: string | null;
+  structured?: VisionStructured;
   error?: string | null;
   frame_error?: any;
 }

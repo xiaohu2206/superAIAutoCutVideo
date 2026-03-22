@@ -43,7 +43,7 @@ export interface UseProjectEditUploadStepOptions {
   reorderVideos: (videoPaths: string[]) => Promise<void>;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
-  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string }) => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string; visionKeyFrames?: 1 | 3 }) => Promise<void>;
   sceneResult: any | null;
   extractingScene: boolean;
   sceneExtractProgress: number;
@@ -91,7 +91,7 @@ export interface UseProjectEditUploadStepReturn {
   onReloadSubtitle: () => void;
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
-  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string }) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => void;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
@@ -483,7 +483,7 @@ export function useProjectEditUploadStep(
   }, [options, subtitleDraft]);
 
   const onExtractScenes = useCallback(
-    async (opts?: { analyzeVision: boolean; visionMode: string }) => {
+    async (opts?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => {
       if (!options.project) return;
       if (!options.project.video_path) {
         options.showErrorText("请先上传视频文件");

@@ -598,6 +598,7 @@ export class ProjectService {
       hotwords?: string[];
       analyzeVision?: boolean;
       visionMode?: string;
+      visionKeyFrames?: 1 | 3;
     }
   ): Promise<{ task_id: string; status: string; message: string }> {
     const payload = options
@@ -611,6 +612,7 @@ export class ProjectService {
           hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
           analyzeVision: Boolean(options.analyzeVision),
           visionMode: options.visionMode ?? "all",
+          visionKeyFrames: options.visionKeyFrames === 3 ? 3 : 1,
         }
       : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
