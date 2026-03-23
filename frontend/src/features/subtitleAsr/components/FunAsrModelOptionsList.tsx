@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Download, ShieldAlert, Copy, Check, Square, Info } from "lucide-react";
+import { Box, Download, Check, Square, Info } from "lucide-react";
 import type { FunAsrDownloadProvider } from "../types";
 import FunAsrDownloadProgress from "./FunAsrDownloadProgress";
 import { TauriCommands } from "@/services/clients";

@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Download, ShieldAlert, Copy, Check, Square, Info } from "lucide-react";
+import { Box, Download, Check, Square, Info } from "lucide-react";
 import type { Qwen3TtsDownloadProvider } from "../types";
 import { Qwen3DownloadProgress } from "./Qwen3DownloadProgress";
 import { TauriCommands } from "@/services/clients";

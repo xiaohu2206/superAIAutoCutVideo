@@ -189,7 +189,7 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
       </div>
 
       <div className="flex items-center gap-3">
-        <button
+        {/* <button
           className={`inline-flex items-center px-3 py-2 rounded-md text-sm ${
             testing || !hasCredentials || !configId
               ? "bg-gray-200 text-gray-500 cursor-not-allowed"
@@ -205,7 +205,7 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
             <KeyRound className="h-4 w-4 mr-1" />
           )}
           测试连通性
-        </button>
+        </button> */}
 
         {testResult && (
           <div

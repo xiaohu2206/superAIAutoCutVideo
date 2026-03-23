@@ -9,6 +9,8 @@ interface ProjectOperationsProps {
   project: Project;
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
+  handleStopGenerateCopywriting: () => void;
+  isStoppingCopywriting: boolean;
   copywritingGenProgress: number;
   copywritingGenLogs: { timestamp: string; message: string; type?: string }[];
   isGeneratingScript: boolean;
@@ -37,6 +39,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   project,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
+  handleStopGenerateCopywriting,
+  isStoppingCopywriting,
   copywritingGenProgress,
   copywritingGenLogs,
   isGeneratingScript,
@@ -211,7 +215,22 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         <div className="w-full ml-0 mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>文案生成进度(预计1～2分钟)</span>
-            <span>{Math.round(copywritingGenProgress)}%</span>
+            <div className="flex items-center gap-2">
+              <span>{Math.round(copywritingGenProgress)}%</span>
+              <button
+                onClick={handleStopGenerateCopywriting}
+                disabled={isStoppingCopywriting}
+                title="停止生成"
+                className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStoppingCopywriting ? (
+                  <Loader className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+                <span className="text-xs font-medium">停止</span>
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 mb-2 bg-gray-200 rounded">
             <div
