@@ -7,9 +7,9 @@ interface Props {
   setCopywritingWordCountAndPersist: (value: number | null) => Promise<void>;
 }
 
-const MIN_COUNT = 300;
+const MIN_COUNT = 50;
 const MAX_COUNT = 50000;
-const STEP = 100;
+const STEP = 50;
 const MARKS = [MIN_COUNT, 5000, 15000, 20000, 30000, 35000, 45000, MAX_COUNT];
 
 const CopywritingWordCountSelector: React.FC<Props> = ({
