@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
 from modules.ws_manager import manager
+from modules.task_progress_store import task_progress_store
 from services.script_generation_service import ScriptGenerationService
 
 
@@ -121,6 +123,9 @@ class GenerateCopywritingService:
         video_path: str,
         subtitle_path: Optional[str],
         narration_type: str,
+        *,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -139,12 +144,28 @@ class GenerateCopywritingService:
                 raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
 
         try:
+            if task_id:
+                try:
+                    task_progress_store.set_state(
+                        scope="generate_copywriting",
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=1.0,
+                        message="开始生成解说文案",
+                        phase="start",
+                        msg_type="progress",
+                        timestamp=_now_ts(),
+                    )
+                except Exception:
+                    pass
             await manager.broadcast(
                 json.dumps(
                     {
                         "type": "progress",
                         "scope": "generate_copywriting",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "start",
                         "message": "开始生成解说文案",
                         "progress": 1,
@@ -155,6 +176,9 @@ class GenerateCopywritingService:
         except Exception:
             pass
 
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError()
+
         subtitle_text = _load_subtitle_text(p, subtitle_path) if not use_visual else ""
         scenes_data = _load_scenes_data(p, project_id) if use_visual else None
         drama_name = p.name or "剧名"
@@ -164,12 +188,28 @@ class GenerateCopywritingService:
         copywriting_word_count = getattr(p, "copywriting_word_count", None)
 
         try:
+            if task_id:
+                try:
+                    task_progress_store.set_state(
+                        scope="generate_copywriting",
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=70.0,
+                        message="大模型生成解说文案",
+                        phase="llm_generate_copywriting",
+                        msg_type="progress",
+                        timestamp=_now_ts(),
+                    )
+                except Exception:
+                    pass
             await manager.broadcast(
                 json.dumps(
                     {
                         "type": "progress",
                         "scope": "generate_copywriting",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "llm_generate_copywriting",
                         "message": "大模型生成解说文案",
                         "progress": 70,
@@ -180,6 +220,9 @@ class GenerateCopywritingService:
         except Exception:
             pass
 
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError()
+
         if use_visual and scenes_data is not None:
             copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
                 scenes_data=scenes_data,
@@ -188,6 +231,7 @@ class GenerateCopywritingService:
                 script_language=str(script_language) if script_language else None,
                 script_length=str(script_length) if script_length else None,
                 copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                cancel_event=cancel_event,
             )
         else:
             copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline(
@@ -197,7 +241,10 @@ class GenerateCopywritingService:
                 script_language=str(script_language) if script_language else None,
                 script_length=str(script_length) if script_length else None,
                 copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                cancel_event=cancel_event,
             )
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError()
         copywriting = {
             "version": "1.0",
             "title": drama_name,
@@ -226,12 +273,28 @@ class GenerateCopywritingService:
         )
 
         try:
+            if task_id:
+                try:
+                    task_progress_store.set_state(
+                        scope="generate_copywriting",
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="completed",
+                        progress=100.0,
+                        message="解说文案生成成功",
+                        phase="done",
+                        msg_type="completed",
+                        timestamp=_now_ts(),
+                    )
+                except Exception:
+                    pass
             await manager.broadcast(
                 json.dumps(
                     {
                         "type": "completed",
                         "scope": "generate_copywriting",
                         "project_id": project_id,
+                        "task_id": task_id,
                         "phase": "done",
                         "message": "解说文案生成成功",
                         "progress": 100,

@@ -603,7 +603,22 @@ async def generate_script(req: GenerateScriptRequest):
 
 @router.post("/generate-copywriting")
 async def generate_copywriting(req: GenerateCopywritingRequest):
+    task_id = f"generate_copywriting_{req.project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     try:
+        try:
+            task_progress_store.set_state(
+                scope="generate_copywriting",
+                project_id=req.project_id,
+                task_id=task_id,
+                status="processing",
+                progress=1.0,
+                message="开始生成解说文案",
+                phase="start",
+                msg_type="progress",
+                timestamp=now_ts(),
+            )
+        except Exception:
+            pass
         try:
             logger.info(
                 "route generate-copywriting project_id=%s video_path=%s subtitle_path=%s narration_type=%s",
@@ -614,18 +629,50 @@ async def generate_copywriting(req: GenerateCopywritingRequest):
             )
         except Exception:
             pass
+        cancel_event = task_cancel_store.get_event("generate_copywriting", req.project_id, task_id)
         return await generate_copywriting_service.generate_copywriting(
             project_id=req.project_id,
             video_path=req.video_path,
             subtitle_path=req.subtitle_path,
             narration_type=req.narration_type,
+            task_id=task_id,
+            cancel_event=cancel_event,
         )
+    except asyncio.CancelledError:
+        try:
+            task_progress_store.set_state(
+                scope="generate_copywriting",
+                project_id=req.project_id,
+                task_id=task_id,
+                status="cancelled",
+                progress=0.0,
+                message="已停止",
+                phase="cancelled",
+                msg_type="cancelled",
+                timestamp=now_ts(),
+            )
+        except Exception:
+            pass
+        try:
+            await manager.broadcast(json.dumps({
+                "type": "cancelled",
+                "scope": "generate_copywriting",
+                "project_id": req.project_id,
+                "task_id": task_id,
+                "phase": "cancelled",
+                "message": "已停止",
+                "timestamp": now_ts(),
+            }))
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="文案生成已停止")
     except HTTPException as e:
         try:
             await manager.broadcast(json.dumps({
                 "type": "error",
                 "scope": "generate_copywriting",
                 "project_id": req.project_id,
+                "task_id": task_id,
                 "phase": "failed",
                 "message": str(getattr(e, "detail", "")) or "文案生成失败",
                 "timestamp": now_ts(),
@@ -636,10 +683,25 @@ async def generate_copywriting(req: GenerateCopywritingRequest):
     except Exception as e:
         projects_store.update_project(req.project_id, {"status": "failed"})
         try:
+            task_progress_store.set_state(
+                scope="generate_copywriting",
+                project_id=req.project_id,
+                task_id=task_id,
+                status="failed",
+                progress=0.0,
+                message=f"文案生成失败: {str(e)}",
+                phase="failed",
+                msg_type="error",
+                timestamp=now_ts(),
+            )
+        except Exception:
+            pass
+        try:
             await manager.broadcast(json.dumps({
                 "type": "error",
                 "scope": "generate_copywriting",
                 "project_id": req.project_id,
+                "task_id": task_id,
                 "phase": "failed",
                 "message": f"文案生成失败: {str(e)}",
                 "timestamp": now_ts(),
