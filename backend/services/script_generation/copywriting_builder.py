@@ -110,6 +110,26 @@ def _build_template_messages(
     return [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
 
 
+def _append_subtitles_context_message(messages: List[ChatMessage], subs_text: str) -> List[ChatMessage]:
+    """
+    始终附加字幕上下文，不依赖模板里是否包含 subtitle 变量或 <subtitles> 标签。
+    """
+    msgs = list(messages)
+    text = str(subs_text or "").strip()
+    if not text:
+        return msgs
+    msgs.append(
+        ChatMessage(
+            role="user",
+            content=(
+                "补充剧情参考字幕（含时间戳）如下，请据此理解剧情并创作：\n"
+                f"{text}"
+            ),
+        )
+    )
+    return msgs
+
+
 def _add_language_and_count_messages(
     messages: List[ChatMessage],
     script_language: Optional[str],
@@ -200,12 +220,37 @@ def _remove_leading_quoted_subtitle_lines(text: str) -> str:
     return merged
 
 
-async def _call_llm_text(messages: List[ChatMessage], max_retries: int = 3) -> str:
+async def _call_llm_text(
+    messages: List[ChatMessage],
+    *,
+    cancel_event: Optional[asyncio.Event] = None,
+    max_retries: int = 3,
+) -> str:
     merged = _merge_system_messages(messages)
     for attempt in range(max_retries + 1):
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError()
         try:
-            resp = await ai_service.send_chat(merged)
+            if cancel_event:
+                llm_task = asyncio.create_task(ai_service.send_chat(merged))
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait({llm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    try:
+                        llm_task.cancel()
+                    except Exception:
+                        pass
+                    raise asyncio.CancelledError()
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+                resp = await llm_task
+            else:
+                resp = await ai_service.send_chat(merged)
             return _strip_code_fences(str(resp.content or "").strip())
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             if attempt < max_retries:
                 logger.warning(f"LLM call failed (attempt {attempt + 1}): {e}. Retrying...")
@@ -221,6 +266,8 @@ async def _generate_outline(
     subs_text: str,
     num_sections: int,
     script_language: Optional[str],
+    *,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> List[str]:
     """让模型生成一个分段大纲，返回各段的标题/摘要列表。"""
     lang_hint = "English" if _is_english(script_language) else "中文"
@@ -239,7 +286,7 @@ async def _generate_outline(
         ChatMessage(role="system", content=system),
         ChatMessage(role="user", content=user),
     ]
-    text = await _call_llm_text(messages)
+    text = await _call_llm_text(messages, cancel_event=cancel_event)
     lines = [ln.strip() for ln in text.strip().split("\n") if ln.strip()]
     if len(lines) < num_sections:
         chunks_per = max(1, len(subs_text.split("\n")) // num_sections)
@@ -262,9 +309,12 @@ async def _generate_section(
     default_key: str,
     script_language: Optional[str],
     per_section_chars: int,
+    *,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     """根据大纲中某一段的描述，生成对应段落的文案。"""
     messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
+    messages = _append_subtitles_context_message(messages, subs_text)
 
     position_hints = []
     if section_idx == 0:
@@ -291,7 +341,7 @@ async def _generate_section(
     ))
 
     messages = _add_language_and_count_messages(messages, script_language, per_section_chars)
-    text = await _call_llm_text(messages)
+    text = await _call_llm_text(messages, cancel_event=cancel_event)
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"分段文案 {section_idx + 1}/{total_sections} 生成完成, 字数: {len(text)}")
     return text
@@ -306,6 +356,7 @@ async def generate_copywriting_from_subtitles(
     script_language: Optional[str] = None,
     script_length: Optional[str] = None,
     copywriting_word_count: Optional[int] = None,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     """
     使用提示词模板系统生成纯文本解说文案。
@@ -336,6 +387,7 @@ async def generate_copywriting_from_subtitles(
             template_key=template_key,
             default_key=default_key,
             script_language=script_language,
+            cancel_event=cancel_event,
         )
 
     return await _generate_single(
@@ -345,6 +397,7 @@ async def generate_copywriting_from_subtitles(
         template_key=template_key,
         default_key=default_key,
         script_language=script_language,
+        cancel_event=cancel_event,
     )
 
 
@@ -355,6 +408,7 @@ async def generate_copywriting_from_scenes(
     script_language: Optional[str] = None,
     script_length: Optional[str] = None,
     copywriting_word_count: Optional[int] = None,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     scenes_raw = scenes_data.get("scenes") if isinstance(scenes_data, dict) else None
     if not isinstance(scenes_raw, list) or not scenes_raw:
@@ -393,6 +447,7 @@ async def generate_copywriting_from_scenes(
             template_key=template_key,
             default_key=default_key,
             script_language=script_language,
+            cancel_event=cancel_event,
         )
 
     return await _generate_single(
@@ -402,6 +457,7 @@ async def generate_copywriting_from_scenes(
         template_key=template_key,
         default_key=default_key,
         script_language=script_language,
+        cancel_event=cancel_event,
     )
 
 
@@ -412,10 +468,13 @@ async def _generate_single(
     template_key: str,
     default_key: str,
     script_language: Optional[str],
+    *,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
+    messages = _append_subtitles_context_message(messages, subs_text)
     messages = _add_language_and_count_messages(messages, script_language, target_chars)
-    text = await _call_llm_text(messages)
+    text = await _call_llm_text(messages, cancel_event=cancel_event)
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"解说文案生成完成 (单次), 字数: {len(text)}")
     return text
@@ -428,6 +487,8 @@ async def _generate_segmented(
     template_key: str,
     default_key: str,
     script_language: Optional[str],
+    *,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     per_call_max = 2500
     num_sections = max(2, math.ceil(target_chars / per_call_max))
@@ -442,6 +503,7 @@ async def _generate_segmented(
         subs_text=subs_text,
         num_sections=num_sections,
         script_language=script_language,
+        cancel_event=cancel_event,
     )
     logger.info(f"大纲生成完成, 共{len(outline_items)}段")
 
@@ -449,6 +511,8 @@ async def _generate_segmented(
     section_texts: List[Optional[str]] = [None] * len(outline_items)
 
     async def gen_one(idx: int):
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError()
         async with sem:
             section_texts[idx] = await _generate_section(
                 section_idx=idx,
@@ -460,6 +524,7 @@ async def _generate_segmented(
                 default_key=default_key,
                 script_language=script_language,
                 per_section_chars=per_section_chars,
+                cancel_event=cancel_event,
             )
 
     tasks = [gen_one(i) for i in range(len(outline_items))]

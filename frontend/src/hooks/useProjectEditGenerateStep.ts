@@ -30,6 +30,8 @@ export interface UseProjectEditGenerateStepOptions {
 export interface UseProjectEditGenerateStepReturn {
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
+  handleStopGenerateCopywriting: () => void;
+  isStoppingCopywriting: boolean;
   copywritingGenProgress: number;
   copywritingGenLogs: WsProgressLog[];
   editedCopywriting: string;
@@ -80,6 +82,7 @@ export function useProjectEditGenerateStep(
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [isStoppingCopywriting, setIsStoppingCopywriting] = useState(false);
   const [isStoppingVideo, setIsStoppingVideo] = useState(false);
   const [isStoppingDraft, setIsStoppingDraft] = useState(false);
   const [draftTaskId, setDraftTaskId] = useState<string | null>(null);
@@ -88,6 +91,7 @@ export function useProjectEditGenerateStep(
 
   const [copywritingGenProgress, setCopywritingGenProgress] = useState<number>(0);
   const [copywritingGenLogs, setCopywritingGenLogs] = useState<WsProgressLog[]>([]);
+  const [copywritingTaskId, setCopywritingTaskId] = useState<string | null>(null);
   const [scriptGenProgress, setScriptGenProgress] = useState<number>(0);
   const [scriptGenLogs, setScriptGenLogs] = useState<WsProgressLog[]>([]);
   const [videoGenProgress, setVideoGenProgress] = useState<number>(0);
@@ -191,6 +195,7 @@ export function useProjectEditGenerateStep(
         applyRunningTask(res.generate_copywriting, (task) => {
           setIsGeneratingCopywriting(true);
           setCopywritingGenProgress(typeof task.progress === "number" ? task.progress : 1);
+          if (task.task_id) setCopywritingTaskId(task.task_id || null);
           if (task.message) {
             setCopywritingGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
           }
@@ -239,6 +244,9 @@ export function useProjectEditGenerateStep(
 
         if (isGeneratingCopywriting) {
           const t = latest.generate_copywriting;
+          if (t?.task_id && !copywritingTaskId) {
+            setCopywritingTaskId(t.task_id || null);
+          }
           if (isTaskFinished(t)) {
             setIsGeneratingCopywriting(false);
             setCopywritingGenProgress(100);
@@ -290,6 +298,7 @@ export function useProjectEditGenerateStep(
       window.clearInterval(id);
     };
   }, [
+    copywritingTaskId,
     draftTaskId,
     isGeneratingCopywriting,
     isGeneratingDraft,
@@ -318,6 +327,7 @@ export function useProjectEditGenerateStep(
     setIsGeneratingCopywriting(true);
     setCopywritingGenProgress(0);
     setCopywritingGenLogs([]);
+    setCopywritingTaskId(null);
 
     try {
       await projectService.flushPendingUpdates(project.id);
@@ -337,6 +347,19 @@ export function useProjectEditGenerateStep(
       setIsGeneratingCopywriting(false);
     }
   }, [options, project, setEditedCopywritingSafe]);
+
+  const handleStopGenerateCopywriting = useCallback(async () => {
+    if (!project?.id) return;
+    try {
+      setIsStoppingCopywriting(true);
+      options.showSuccess("正在停止文案生成...");
+      await projectService.cancelTask(project.id, { scope: "generate_copywriting", task_id: copywritingTaskId });
+    } catch (err) {
+      options.showError(err, "停止生成失败");
+    } finally {
+      setIsStoppingCopywriting(false);
+    }
+  }, [copywritingTaskId, options, project?.id]);
 
   const handleGenerateScript = useCallback(async () => {
     if (!project) return;
@@ -534,6 +557,12 @@ export function useProjectEditGenerateStep(
       options.showSuccess("解说文案生成成功！");
       void options.refreshProject();
     },
+    onCancelled: (m: WebSocketMessage) => {
+      setIsGeneratingCopywriting(false);
+      setCopywritingGenProgress(0);
+      options.showSuccess(m.message || "文案生成已停止");
+      void options.refreshProject();
+    },
     onError: (m: WebSocketMessage) => {
       setIsGeneratingCopywriting(false);
       setCopywritingGenProgress(0);
@@ -610,6 +639,8 @@ export function useProjectEditGenerateStep(
   return {
     isGeneratingCopywriting,
     handleGenerateCopywriting,
+    handleStopGenerateCopywriting,
+    isStoppingCopywriting,
     copywritingGenProgress,
     copywritingGenLogs,
     editedCopywriting,

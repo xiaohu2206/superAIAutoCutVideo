@@ -9,6 +9,8 @@ interface ProjectEditGenerateStepProps {
 
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
+  handleStopGenerateCopywriting: () => void;
+  isStoppingCopywriting: boolean;
   copywritingGenProgress: number;
   copywritingGenLogs: { timestamp: string; message: string; phase?: string; type?: string }[];
 
@@ -51,6 +53,8 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   project,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
+  handleStopGenerateCopywriting,
+  isStoppingCopywriting,
   copywritingGenProgress,
   copywritingGenLogs,
   isGeneratingScript,
@@ -109,6 +113,8 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           project={project}
           isGeneratingCopywriting={isGeneratingCopywriting}
           handleGenerateCopywriting={handleGenerateCopywriting}
+          handleStopGenerateCopywriting={handleStopGenerateCopywriting}
+          isStoppingCopywriting={isStoppingCopywriting}
           copywritingGenProgress={copywritingGenProgress}
           copywritingGenLogs={copywritingGenLogs}
           isGeneratingScript={isGeneratingScript}
@@ -149,4 +155,3 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 };
 
 export default ProjectEditGenerateStep;
-

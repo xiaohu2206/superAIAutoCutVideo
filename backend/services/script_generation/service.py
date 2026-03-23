@@ -99,6 +99,7 @@ class ScriptGenerationService:
         script_language: Optional[str] = None,
         script_length: Optional[str] = None,
         copywriting_word_count: Optional[int] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> str:
         """使用提示词模板生成纯文本解说文案。"""
         return await generate_copywriting_from_subtitles(
@@ -108,6 +109,7 @@ class ScriptGenerationService:
             script_language=script_language,
             script_length=script_length,
             copywriting_word_count=copywriting_word_count,
+            cancel_event=cancel_event,
         )
 
     @staticmethod
@@ -118,6 +120,7 @@ class ScriptGenerationService:
         script_language: Optional[str] = None,
         script_length: Optional[str] = None,
         copywriting_word_count: Optional[int] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> str:
         """使用镜头数据生成纯文本解说文案。"""
         return await generate_copywriting_from_scenes(
@@ -127,6 +130,7 @@ class ScriptGenerationService:
             script_language=script_language,
             script_length=script_length,
             copywriting_word_count=copywriting_word_count,
+            cancel_event=cancel_event,
         )
 
     @staticmethod
