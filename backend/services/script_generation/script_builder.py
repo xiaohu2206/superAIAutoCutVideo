@@ -192,6 +192,18 @@ async def _generate_script_chunk(
             ),
         ),
     )
+    messages.insert(
+        0,
+        ChatMessage(
+            role="system",
+            content=(
+                "你必须保证每条'narration'的配音时长与对应timestamp镜头时长匹配。"
+                "按自然语速估算：中文约3-4字/秒（例如10个字约2.5-3.5秒），英文约2-3词/秒。"
+                "若文本预计配音时长明显短于或长于镜头时长，必须增删或改写该条文本以匹配镜头长度。"
+                "每条预计配音时长与镜头时长误差尽量控制在±0.5秒内。"
+            ),
+        ),
+    )
     if int(chunk_total or 0) > 0:
         total = int(chunk_total)
         idx = int(chunk_idx)
