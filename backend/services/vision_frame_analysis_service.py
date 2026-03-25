@@ -100,6 +100,7 @@ class _OnlineVisionRunner:
             img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
             data_uri = f"data:image/jpeg;base64,{img_base64}"
             content.append({"type": "image_url", "image_url": {"url": data_uri}})
+            
 
         t0 = time.time()
         resp = await self._provider_impl.chat_completion(
@@ -177,7 +178,9 @@ def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> 
   "action": "",
   "scene": "",
   "emotion": ""
-}}"""
+}}
+
+"""
 
 
 def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:

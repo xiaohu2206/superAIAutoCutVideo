@@ -211,11 +211,47 @@ class ExtractSceneService:
                 if not video_abs_path.exists():
                     raise FileNotFoundError(f"视频文件不存在: {current_p.video_path}")
 
-                split_loaded = None if force else self._try_load_scenes_split(project_id, video_abs_path)
+                split_loaded = self._try_load_scenes_split(project_id, video_abs_path)
                 split_from_cache = split_loaded is not None
 
                 subtitle_path = getattr(current_p, "subtitle_path", None)
-                should_start_subtitle = not subtitle_path
+                subtitle_source = getattr(current_p, "subtitle_source", None)
+                subtitle_status = getattr(current_p, "subtitle_status", None)
+                
+                if not subtitle_path:
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="failed",
+                        message="镜头分析失败: 没有字幕信息，请先上传或提取字幕",
+                    )
+                    return
+                
+                if subtitle_source == "user":
+                    subtitle_abs_path = _resolve_path(subtitle_path)
+                    if not subtitle_abs_path.exists():
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="failed",
+                            message="镜头分析失败: 本地上传的字幕文件不存在",
+                        )
+                        return
+                    parsed_subs = parse_srt(subtitle_abs_path)
+                    if not parsed_subs or len(parsed_subs) == 0:
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="failed",
+                            message="镜头分析失败: 本地字幕文件格式错误或无有效字幕，请检查SRT格式",
+                        )
+                        return
+                    logger.info(f"Using user-uploaded subtitle for scene analysis: {subtitle_path}, valid segments: {len(parsed_subs)}")
+                
+                should_start_subtitle = subtitle_source != "user" and not subtitle_path
                 if should_start_subtitle:
                     task_progress_store.set_state(
                         scope=self.SCOPE,
