@@ -249,6 +249,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
       {currentStep === "generate" && (
         <ProjectEditGenerateStep
           project={project}
+          refreshProject={refreshProject}
           {...generateStep}
         />
       )}

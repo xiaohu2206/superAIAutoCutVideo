@@ -158,11 +158,54 @@ def _add_language_and_count_messages(
             f"你必须输出一篇连续的纯文本解说文案，{count_hint}。"
             "不要输出JSON格式、代码块或任何格式标记，只输出解说文案正文。"
             "文案应按照剧情时间顺序完整讲述，段落之间用换行分隔。"
-            "字幕仅用于理解剧情信息，不要逐字照搬字幕原句；不要用引号直接输出字幕台词（尤其不要用一整句原文台词做开头）。"
-            "如需表达人物对话，请用转述/概述方式改写，不要出现与字幕连续8个字以上完全相同的句子。"
+            "字幕仅用于理解剧情信息。"
+            "不可以有各种符号、表情符号等，纯文本输出。"
         ),
     ))
     return msgs
+
+
+def _append_film_context_system_message(
+    messages: List[ChatMessage],
+    film_context: Optional[str],
+) -> List[ChatMessage]:
+    """在已有提示词之后追加影片背景 system，须先于 `_append_subtitles_context_message` 调用。"""
+    text = (film_context or "").strip()
+    if not text:
+        return messages
+    out = list(messages)
+    out.append(
+        ChatMessage(
+            role="system",
+            content=(
+                "以下为该影片的背景资料（含剧情脉络、人物关系等），请在严格遵循字幕/对白所呈现的事实前提下参考使用；"
+                "写作时不要大段复述背景资料，主要用于理顺人物关系与整体故事线，使解说更准确连贯：\n\n"
+                f"{text}"
+            ),
+        )
+    )
+    return out
+
+
+def _append_reference_copywriting_user_message(
+    messages: List[ChatMessage],
+    reference_copywriting: Optional[str],
+) -> List[ChatMessage]:
+    """在消息列表末尾追加参考解说 user（须在字幕等 user 之后调用）。"""
+    text = (reference_copywriting or "").strip()
+    if not text:
+        return messages
+    out = list(messages)
+    out.append(
+        ChatMessage(
+            role="user",
+            content=(
+                "以下为用户提供的参考解说文案（仅作风格、节奏与结构上的借鉴；须严格依据上文事实独立创作，禁止整段照搬或与参考高度雷同）：\n\n"
+                f"{text}"
+            ),
+        )
+    )
+    return out
 
 
 def _merge_system_messages(messages: List[ChatMessage]) -> List[ChatMessage]:
@@ -267,6 +310,8 @@ async def _generate_outline(
     num_sections: int,
     script_language: Optional[str],
     *,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> List[str]:
     """让模型生成一个分段大纲，返回各段的标题/摘要列表。"""
@@ -282,10 +327,10 @@ async def _generate_outline(
         f"字幕内容：\n{subs_text}\n\n"
         f"请生成{num_sections}段大纲。"
     )
-    messages = [
-        ChatMessage(role="system", content=system),
-        ChatMessage(role="user", content=user),
-    ]
+    messages = [ChatMessage(role="system", content=system)]
+    messages = _append_film_context_system_message(messages, film_context)
+    messages.append(ChatMessage(role="user", content=user))
+    messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
     lines = [ln.strip() for ln in text.strip().split("\n") if ln.strip()]
     if len(lines) < num_sections:
@@ -310,11 +355,12 @@ async def _generate_section(
     script_language: Optional[str],
     per_section_chars: int,
     *,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     """根据大纲中某一段的描述，生成对应段落的文案。"""
     messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
-    messages = _append_subtitles_context_message(messages, subs_text)
 
     position_hints = []
     if section_idx == 0:
@@ -341,6 +387,9 @@ async def _generate_section(
     ))
 
     messages = _add_language_and_count_messages(messages, script_language, per_section_chars)
+    messages = _append_film_context_system_message(messages, film_context)
+    messages = _append_subtitles_context_message(messages, subs_text)
+    messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"分段文案 {section_idx + 1}/{total_sections} 生成完成, 字数: {len(text)}")
@@ -356,6 +405,8 @@ async def generate_copywriting_from_subtitles(
     script_language: Optional[str] = None,
     script_length: Optional[str] = None,
     copywriting_word_count: Optional[int] = None,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     """
@@ -387,6 +438,8 @@ async def generate_copywriting_from_subtitles(
             template_key=template_key,
             default_key=default_key,
             script_language=script_language,
+            film_context=film_context,
+            reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
         )
 
@@ -397,6 +450,8 @@ async def generate_copywriting_from_subtitles(
         template_key=template_key,
         default_key=default_key,
         script_language=script_language,
+        film_context=film_context,
+        reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
     )
 
@@ -408,6 +463,8 @@ async def generate_copywriting_from_scenes(
     script_language: Optional[str] = None,
     script_length: Optional[str] = None,
     copywriting_word_count: Optional[int] = None,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     scenes_raw = scenes_data.get("scenes") if isinstance(scenes_data, dict) else None
@@ -447,6 +504,8 @@ async def generate_copywriting_from_scenes(
             template_key=template_key,
             default_key=default_key,
             script_language=script_language,
+            film_context=film_context,
+            reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
         )
 
@@ -457,6 +516,8 @@ async def generate_copywriting_from_scenes(
         template_key=template_key,
         default_key=default_key,
         script_language=script_language,
+        film_context=film_context,
+        reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
     )
 
@@ -469,11 +530,15 @@ async def _generate_single(
     default_key: str,
     script_language: Optional[str],
     *,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
-    messages = _append_subtitles_context_message(messages, subs_text)
     messages = _add_language_and_count_messages(messages, script_language, target_chars)
+    messages = _append_film_context_system_message(messages, film_context)
+    messages = _append_subtitles_context_message(messages, subs_text)
+    messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"解说文案生成完成 (单次), 字数: {len(text)}")
@@ -488,6 +553,8 @@ async def _generate_segmented(
     default_key: str,
     script_language: Optional[str],
     *,
+    film_context: Optional[str] = None,
+    reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     per_call_max = 2500
@@ -503,6 +570,8 @@ async def _generate_segmented(
         subs_text=subs_text,
         num_sections=num_sections,
         script_language=script_language,
+        film_context=film_context,
+        reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
     )
     logger.info(f"大纲生成完成, 共{len(outline_items)}段")
@@ -524,6 +593,8 @@ async def _generate_segmented(
                 default_key=default_key,
                 script_language=script_language,
                 per_section_chars=per_section_chars,
+                film_context=film_context,
+                reference_copywriting=reference_copywriting,
                 cancel_event=cancel_event,
             )
 

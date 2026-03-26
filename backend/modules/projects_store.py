@@ -53,6 +53,10 @@ class Project(BaseModel):
     chunk_results: List[Dict[str, Any]] = Field(default_factory=list)
     narration_copywriting: Optional[Dict[str, Any]] = None
     narration_copywriting_path: Optional[str] = None
+    # 电影解说：用户从外部大模型整理的影片背景（脉络/人物等），生成文案时作为 system 上下文
+    narration_film_context: Optional[str] = None
+    # 电影解说：用户提供的参考解说全文，生成时作为最后一条 user 消息
+    narration_reference_copywriting: Optional[str] = None
     output_video_path: Optional[str] = None
     scenes_path: Optional[str] = None
     scenes_updated_at: Optional[str] = None
@@ -138,6 +142,10 @@ class ProjectsStore:
                                 p["narration_copywriting"] = None
                             if "narration_copywriting_path" not in p:
                                 p["narration_copywriting_path"] = None
+                            if "narration_film_context" not in p:
+                                p["narration_film_context"] = None
+                            if "narration_reference_copywriting" not in p:
+                                p["narration_reference_copywriting"] = None
                             if "project_type" not in p:
                                 p["project_type"] = "subtitle"
                             if "scenes_path" not in p:
@@ -214,6 +222,8 @@ class ProjectsStore:
             chunk_results=[],
             narration_copywriting=None,
             narration_copywriting_path=None,
+            narration_film_context=None,
+            narration_reference_copywriting=None,
             output_video_path=None,
             script=None,
             created_at=now,
@@ -261,6 +271,8 @@ class ProjectsStore:
                 "chunk_results",
                 "narration_copywriting",
                 "narration_copywriting_path",
+                "narration_film_context",
+                "narration_reference_copywriting",
                 "output_video_path",
                 "scenes_path",
                 "scenes_updated_at",
@@ -275,6 +287,9 @@ class ProjectsStore:
                     continue
                 if key == "copywriting_word_count":
                     data[key] = updates[key]
+                elif key in ("narration_film_context", "narration_reference_copywriting"):
+                    v = updates.get(key)
+                    data[key] = None if v is None else str(v)
                 elif updates[key] is not None:
                     data[key] = updates[key]
                 elif key in {"script_length", "original_ratio"}:

@@ -6,6 +6,7 @@ import ScriptEditor from "./ScriptEditor";
 
 interface ProjectEditGenerateStepProps {
   project: Project;
+  refreshProject: () => Promise<void>;
 
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
@@ -51,6 +52,7 @@ interface ProjectEditGenerateStepProps {
 
 const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   project,
+  refreshProject,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
   handleStopGenerateCopywriting,
@@ -111,6 +113,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
         <ProjectOperations
           project={project}
+          refreshProject={refreshProject}
           isGeneratingCopywriting={isGeneratingCopywriting}
           handleGenerateCopywriting={handleGenerateCopywriting}
           handleStopGenerateCopywriting={handleStopGenerateCopywriting}
