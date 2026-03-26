@@ -93,6 +93,28 @@ def _load_subtitle_text(p: Project, subtitle_path: Optional[str]) -> str:
     return sub_abs.read_text(encoding="utf-8", errors="ignore")
 
 
+def _movie_narration_film_context(p: Project, narration_type: str) -> Optional[str]:
+    t = (narration_type or "").strip()
+    if "电影解说" not in t:
+        return None
+    raw = getattr(p, "narration_film_context", None)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s if s else None
+
+
+def _movie_narration_reference_copywriting(p: Project, narration_type: str) -> Optional[str]:
+    t = (narration_type or "").strip()
+    if "电影解说" not in t:
+        return None
+    raw = getattr(p, "narration_reference_copywriting", None)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s if s else None
+
+
 def _load_scenes_data(p: Project, project_id: str) -> Dict[str, Any]:
     scenes_abs: Optional[Path] = None
     if getattr(p, "scenes_path", None):
@@ -223,6 +245,9 @@ class GenerateCopywritingService:
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
 
+        film_ctx = _movie_narration_film_context(p, narration_type)
+        reference_cw = _movie_narration_reference_copywriting(p, narration_type)
+
         if use_visual and scenes_data is not None:
             copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
                 scenes_data=scenes_data,
@@ -231,6 +256,8 @@ class GenerateCopywritingService:
                 script_language=str(script_language) if script_language else None,
                 script_length=str(script_length) if script_length else None,
                 copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                film_context=film_ctx,
+                reference_copywriting=reference_cw,
                 cancel_event=cancel_event,
             )
         else:
@@ -241,6 +268,8 @@ class GenerateCopywritingService:
                 script_language=str(script_language) if script_language else None,
                 script_length=str(script_length) if script_length else None,
                 copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                film_context=film_ctx,
+                reference_copywriting=reference_cw,
                 cancel_event=cancel_event,
             )
         if cancel_event and cancel_event.is_set():
@@ -256,6 +285,8 @@ class GenerateCopywritingService:
                 "script_language": str(script_language) if script_language else "zh",
                 "script_length": str(script_length) if script_length else "",
                 "copywriting_word_count": int(copywriting_word_count) if copywriting_word_count else None,
+                "film_context_included": bool(film_ctx),
+                "reference_copywriting_included": bool(reference_cw),
             },
         }
 

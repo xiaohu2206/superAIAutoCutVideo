@@ -1,8 +1,8 @@
-import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors, Square } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors, Square, X, FileText } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
-import { Project } from "../../types/project";
+import { NarrationType, Project } from "../../types/project";
 import { Dropdown } from "../ui/Dropdown";
 
 interface ProjectOperationsProps {
@@ -33,6 +33,7 @@ interface ProjectOperationsProps {
   draftGenLogs: { timestamp: string; message: string; type?: string }[];
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
+  refreshProject: () => Promise<void>;
 }
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
@@ -63,10 +64,38 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   draftGenLogs,
   showMergedPreview,
   setShowMergedPreview,
+  refreshProject,
 }) => {
   const [outputVideoCacheBust, setOutputVideoCacheBust] = useState<number>(0);
   const [copying, setCopying] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [filmModalOpen, setFilmModalOpen] = useState(false);
+  const [filmDraft, setFilmDraft] = useState("");
+  const [savingFilmContext, setSavingFilmContext] = useState(false);
+  const [copyingFilmPrompt, setCopyingFilmPrompt] = useState(false);
+  const [referenceModalOpen, setReferenceModalOpen] = useState(false);
+  const [referenceDraft, setReferenceDraft] = useState("");
+  const [savingReference, setSavingReference] = useState(false);
+
+  const isMovieNarration = project.narration_type === NarrationType.MOVIE;
+  const hasFilmContextSaved = Boolean((project.narration_film_context || "").trim());
+  const hasReferenceCopywritingSaved = Boolean((project.narration_reference_copywriting || "").trim());
+
+  const filmExtractPrompt = useMemo(() => {
+    const raw = project.video_current_name || "";
+    const title = raw.replace(/\.[^./\\]+$/, "").trim() || project.name?.trim() || "电影名称";
+    return `帮忙提取《${title}》这部电影的「1、电影的整体脉络简介」「2、涉及到的人物简介」，输出为 markdown 格式到代码块`;
+  }, [project.video_current_name, project.name]);
+
+  useEffect(() => {
+    if (!filmModalOpen) return;
+    setFilmDraft(project.narration_film_context ?? "");
+  }, [filmModalOpen, project.id, project.narration_film_context]);
+
+  useEffect(() => {
+    if (!referenceModalOpen) return;
+    setReferenceDraft(project.narration_reference_copywriting ?? "");
+  }, [referenceModalOpen, project.id, project.narration_reference_copywriting]);
 
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
   const isGeneratingAny = isGeneratingCopywriting || isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
@@ -126,6 +155,60 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     }
   };
 
+  const handleOpenFilmContextModal = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setFilmModalOpen(true);
+  };
+
+  const handleCopyFilmPrompt = async () => {
+    try {
+      setCopyingFilmPrompt(true);
+      await navigator.clipboard.writeText(filmExtractPrompt);
+      message.success("提示词已复制");
+    } catch {
+      message.error("复制失败");
+    } finally {
+      setCopyingFilmPrompt(false);
+    }
+  };
+
+  const handleSaveFilmContext = async () => {
+    try {
+      setSavingFilmContext(true);
+      await projectService.updateProjectQueued(project.id, {
+        narration_film_context: filmDraft.trim() ? filmDraft.trim() : "",
+      });
+      await refreshProject();
+      message.success("影片信息已保存");
+      setFilmModalOpen(false);
+    } catch (e: any) {
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSavingFilmContext(false);
+    }
+  };
+
+  const handleOpenReferenceModal = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setReferenceModalOpen(true);
+  };
+
+  const handleSaveReferenceCopywriting = async () => {
+    try {
+      setSavingReference(true);
+      await projectService.updateProjectQueued(project.id, {
+        narration_reference_copywriting: referenceDraft.trim() ? referenceDraft.trim() : "",
+      });
+      await refreshProject();
+      message.success("参考解说文案已保存");
+      setReferenceModalOpen(false);
+    } catch (e: any) {
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSavingReference(false);
+    }
+  };
+
   const handleOpenOutputVideoInExplorer = async () => {
     if (!project.output_video_path) {
       message.error("尚未生成输出视频");
@@ -143,27 +226,58 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   };
 
   return (
-    <div className="pt-4 border-t border-gray-200 flex items-center space-x-3 flex-wrap">
-      <button
-        onClick={handleGenerateCopywriting}
-        disabled={copywritingButtonDisabled}
-        className="mt-2 flex items-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isGeneratingCopywriting ? (
-          <>
-            <Loader className="h-5 w-5 mr-2 animate-spin" />
-            生成中...
-          </>
-        ) : (
-          <>生成解说文案</>
+    <div className="pt-4 border-t border-gray-200 flex flex-wrap items-start gap-3">
+      <div className="flex flex-col items-start space-y-2">
+        <button
+          onClick={handleGenerateCopywriting}
+          disabled={copywritingButtonDisabled}
+          className="flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isGeneratingCopywriting ? (
+            <>
+              <Loader className="h-5 w-5 mr-2 animate-spin" />
+              生成中...
+            </>
+          ) : (
+            <>生成解说文案</>
+          )}
+        </button>
+        
+        {isMovieNarration && (
+          <div className="flex items-center gap-2 pl-1">
+            <button
+              onClick={handleOpenFilmContextModal}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                hasFilmContextSaved 
+                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+              }`}
+              title="设置影片脉络与人物简介"
+            >
+              {hasFilmContextSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+              <span>附加影片信息</span>
+            </button>
+            <button
+              onClick={handleOpenReferenceModal}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                hasReferenceCopywritingSaved 
+                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+              }`}
+              title="设置参考解说文案"
+            >
+              {hasReferenceCopywritingSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+              <span>参考解说文案</span>
+            </button>
+          </div>
         )}
-      </button>
+      </div>
 
       <button
         onClick={handleGenerateScript}
         disabled={scriptButtonDisabled}
         title={scriptButtonTitle}
-        className="mt-2 flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGeneratingScript ? (
           <>
@@ -181,7 +295,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
        <Dropdown
         disabled={isGeneratingAny}
         trigger={
-          <button className="flex mt-2 items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
+          <button className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
             视频操作
             <ChevronDown className="ml-2 h-4 w-4" />
           </button>
@@ -346,6 +460,157 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       )}
 
       {/* 合并视频预览弹窗 */}
+      {filmModalOpen && (
+        <div className="fixed inset-0 z-[55] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setFilmModalOpen(false)} />
+          <div className="flex items-center justify-center min-h-screen p-4">
+            <div
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+                <h3 className="text-lg font-semibold text-gray-900">附加影片信息</h3>
+                <button
+                  type="button"
+                  onClick={() => setFilmModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg transition-colors"
+                  aria-label="关闭"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-5 text-sm text-gray-700 overflow-y-auto">
+                <p className="leading-relaxed text-gray-600 text-base">
+                  请复制下方提示词，打开{" "}
+                  <a
+                    href="https://doubao.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700 font-medium hover:underline"
+                  >
+                    豆包
+                  </a>
+                  或{" "}
+                  <a
+                    href="https://chatgpt.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700 font-medium hover:underline"
+                  >
+                    ChatGPT
+                  </a>
+                  的网页对话，将模型回复的影片信息粘贴到下方输入框，保存后即可在生成解说文案时自动带上。
+                </p>
+                <div className="bg-gray-50/50 rounded-lg p-4 border border-gray-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">可复制提示词</span>
+                    <button
+                      type="button"
+                      onClick={handleCopyFilmPrompt}
+                      disabled={copyingFilmPrompt}
+                      className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 shadow-sm"
+                    >
+                      {copyingFilmPrompt ? <Loader className="h-4 w-4 animate-spin" /> : <Clipboard className="h-4 w-4" />}
+                      复制提示词
+                    </button>
+                  </div>
+                  <pre className="text-sm bg-white border border-gray-200 rounded-md p-3.5 whitespace-pre-wrap break-words max-h-40 overflow-y-auto text-gray-600 font-mono shadow-sm">
+                    {filmExtractPrompt}
+                  </pre>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">影片信息（粘贴模型输出）</label>
+                  <textarea
+                    value={filmDraft}
+                    onChange={(e) => setFilmDraft(e.target.value)}
+                    rows={12}
+                    placeholder="将豆包 / ChatGPT 返回的影片脉络与人物简介粘贴到这里…"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFilmModalOpen(false)}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveFilmContext}
+                  disabled={savingFilmContext}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                >
+                  {savingFilmContext ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                  保存并关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {referenceModalOpen && (
+        <div className="fixed inset-0 z-[55] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setReferenceModalOpen(false)} />
+          <div className="flex items-center justify-center min-h-screen p-4">
+            <div
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+                <h3 className="text-lg font-semibold text-gray-900">参考解说文案</h3>
+                <button
+                  type="button"
+                  onClick={() => setReferenceModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg transition-colors"
+                  aria-label="关闭"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4 text-sm text-gray-700 overflow-y-auto">
+                <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
+                  <p className="leading-relaxed text-blue-800 text-sm">
+                    粘贴你喜欢的解说成稿作为风格与结构参考。生成新文案时会附在对话最后；请仍严格按当前项目字幕事实撰写，避免照搬。
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">参考解说全文</label>
+                  <textarea
+                    value={referenceDraft}
+                    onChange={(e) => setReferenceDraft(e.target.value)}
+                    rows={16}
+                    placeholder="粘贴参考解说文案…"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setReferenceModalOpen(false)}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveReferenceCopywriting}
+                  disabled={savingReference}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                >
+                  {savingReference ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                  保存并关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showMergedPreview && project?.merged_video_path && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4">
