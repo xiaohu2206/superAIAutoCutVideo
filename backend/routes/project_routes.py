@@ -341,6 +341,8 @@ class UpdateProjectRequest(BaseModel):
     audio_path: Optional[str] = None
     narration_copywriting: Optional[Dict[str, Any]] = None
     narration_copywriting_path: Optional[str] = None
+    narration_film_context: Optional[str] = None
+    narration_reference_copywriting: Optional[str] = None
     script: Optional[Dict[str, Any]] = None
 
 

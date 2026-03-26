@@ -99,6 +99,8 @@ class ScriptGenerationService:
         script_language: Optional[str] = None,
         script_length: Optional[str] = None,
         copywriting_word_count: Optional[int] = None,
+        film_context: Optional[str] = None,
+        reference_copywriting: Optional[str] = None,
         cancel_event: Optional[asyncio.Event] = None,
     ) -> str:
         """使用提示词模板生成纯文本解说文案。"""
@@ -109,6 +111,8 @@ class ScriptGenerationService:
             script_language=script_language,
             script_length=script_length,
             copywriting_word_count=copywriting_word_count,
+            film_context=film_context,
+            reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
         )
 
@@ -120,6 +124,8 @@ class ScriptGenerationService:
         script_language: Optional[str] = None,
         script_length: Optional[str] = None,
         copywriting_word_count: Optional[int] = None,
+        film_context: Optional[str] = None,
+        reference_copywriting: Optional[str] = None,
         cancel_event: Optional[asyncio.Event] = None,
     ) -> str:
         """使用镜头数据生成纯文本解说文案。"""
@@ -130,6 +136,8 @@ class ScriptGenerationService:
             script_language=script_language,
             script_length=script_length,
             copywriting_word_count=copywriting_word_count,
+            film_context=film_context,
+            reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
         )
 

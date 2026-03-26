@@ -122,6 +122,10 @@ export interface Project {
   asr_language?: string | null;
   narration_copywriting?: NarrationCopywriting;
   narration_copywriting_path?: string;
+  /** 电影解说：外部整理好的影片脉络/人物等，生成文案时作为模型 system 上下文 */
+  narration_film_context?: string | null;
+  /** 电影解说：用户参考解说全文，生成时作为最后一条 user 消息 */
+  narration_reference_copywriting?: string | null;
   output_video_path?: string; // 输出视频文件路径
   scenes_path?: string; // 镜头分割结果路径
   scenes_updated_at?: string; // 镜头更新时间
@@ -194,6 +198,8 @@ export interface UpdateProjectRequest {
   subtitle_format?: string | null;
   narration_copywriting?: NarrationCopywriting;
   narration_copywriting_path?: string;
+  narration_film_context?: string | null;
+  narration_reference_copywriting?: string | null;
   output_video_path?: string;
   script?: VideoScript;
 }
