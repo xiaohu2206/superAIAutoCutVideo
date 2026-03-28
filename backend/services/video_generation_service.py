@@ -11,12 +11,11 @@ import asyncio
 from datetime import datetime
 import shutil
 import os
-import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from modules.projects_store import Project, projects_store
-from modules.video_processor import video_processor
+from modules.video_processor import WIN_NO_WINDOW, video_processor
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
@@ -199,7 +198,7 @@ class VideoGenerationService:
                     *cmd_copy,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    creationflags=WIN_NO_WINDOW,
                 )
                 task_cancel_store.register_process("generate_video", project_id, task_id, proc)
                 try:
@@ -222,7 +221,8 @@ class VideoGenerationService:
                     vcodec_args.extend(["-rc:v", "vbr_hq", "-cq:v", "19"])
                 elif enc_name == "libx264":
                     vcodec_args.extend(["-crf", "18"])
-                vcodec_args.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+                pix_fmt = "nv12" if enc_name in {"h264_qsv", "h264_amf"} else "yuv420p"
+                vcodec_args.extend(["-pix_fmt", pix_fmt, "-movflags", "+faststart"])
                 filter_complex = (
                     f"[0:v]trim=start=0:end={adur_str},setpts=PTS-STARTPTS[v];"
                     f"[0:a]atrim=0:{adur_str},asetpts=PTS-STARTPTS[a]"
@@ -254,7 +254,7 @@ class VideoGenerationService:
                     *cmd_re,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    creationflags=WIN_NO_WINDOW,
                 )
                 task_cancel_store.register_process("generate_video", project_id, task_id, proc2)
                 try:
@@ -604,7 +604,7 @@ class VideoGenerationService:
                             *cmd_fb,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
-                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                            creationflags=WIN_NO_WINDOW,
                         )
                         task_cancel_store.register_process("generate_video", project_id, task_id, p3)
                         try:

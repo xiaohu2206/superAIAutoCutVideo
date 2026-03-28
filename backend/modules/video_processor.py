@@ -22,6 +22,11 @@ from modules.task_cancel_store import task_cancel_store
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
+
+def _concat_list_file_encoding() -> str:
+    """Windows 上部分 ffmpeg 构建依赖带 BOM 的 UTF-8 才能正确解析 concat 列表中的非 ASCII 路径。"""
+    return "utf-8-sig" if os.name == "nt" else "utf-8"
+
 class VideoProcessor:
     """视频处理器类"""
     
@@ -30,6 +35,7 @@ class VideoProcessor:
         self.audio_normalizer = AudioNormalizer()
         self.last_concat_error: Optional[str] = None
         self.last_concat_cmd: Optional[List[str]] = None
+        self._encoder_usable_cache: Dict[str, bool] = {}
 
     def _should_track(self, scope: Optional[str], project_id: Optional[str], task_id: Optional[str], cancel_event: Optional[asyncio.Event]) -> bool:
         return bool(scope and project_id and task_id and cancel_event)
@@ -166,7 +172,7 @@ class VideoProcessor:
                 "-ss", str(start_time),
                 "-t", str(duration),
                 *vcodec_args,
-                "-pix_fmt", "yuv420p",
+                "-pix_fmt", self._preferred_pix_fmt(enc_name),
                 "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
                 "-movflags", "+faststart",
                 "-y",
@@ -401,7 +407,7 @@ class VideoProcessor:
                     for p in inputs:
                         q = Path(p).as_posix()
                         lines.append(f"file '{q}'")
-                    list_path.write_text("\n".join(lines), encoding="utf-8")
+                    list_path.write_text("\n".join(lines), encoding=_concat_list_file_encoding())
                     can_concat_demuxer = True
                 except Exception:
                     can_concat_demuxer = False
@@ -466,7 +472,7 @@ class VideoProcessor:
                             for f in ts_files:
                                 q = f.as_posix()
                                 lines.append(f"file '{q}'")
-                            ts_list_path.write_text("\n".join(lines), encoding="utf-8")
+                            ts_list_path.write_text("\n".join(lines), encoding=_concat_list_file_encoding())
                         except Exception:
                             can_concat_ts = False
                             for f in ts_files:
@@ -690,11 +696,11 @@ class VideoProcessor:
                 base_fr_val = _fr_to_float(vinfo_list[0].get("r_frame_rate")) if vinfo_list and vinfo_list[0] else None
                 if base_fr_val is not None:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={base_fr_val},format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
                     )
                 else:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,setpts=PTS-STARTPTS[v{i}]"
                     )
                 if has_audio[i]:
                     vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
@@ -710,12 +716,14 @@ class VideoProcessor:
             encoder_sets = await self._get_encoder_priority_list()
             last_err = None
             for vcodec_args in encoder_sets:
+                enc_name = self._encoder_name_from_args(vcodec_args)
+                pix_fmt = self._preferred_pix_fmt(enc_name)
                 cmd_try = list(cmd)
                 cmd_try.extend([
                     "-filter_complex", filter_complex,
                     "-map", "[v]", "-map", "[a]",
                     *vcodec_args,
-                    "-pix_fmt", "yuv420p",
+                    "-pix_fmt", pix_fmt,
                     "-c:a", "aac", "-b:a", "128k"
                 ])
                 cmd_try.extend([
@@ -886,15 +894,27 @@ class VideoProcessor:
     async def _pick_fast_encoder(self) -> Tuple[str, List[str]]:
         await self._detect_cuda()
         encoders = await self._detect_encoders()
-        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in encoders):
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in encoders) and await self._is_encoder_usable("h264_nvenc"):
             logger.info("编码器选择: h264_nvenc (GPU)")
             return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p3"]
-        if "h264_qsv" in encoders:
+        if "h264_qsv" in encoders and await self._is_encoder_usable("h264_qsv"):
             logger.info("编码器选择: h264_qsv (GPU)")
             return "h264_qsv", ["-c:v", "h264_qsv"]
-        if "h264_amf" in encoders:
+        if "h264_amf" in encoders and await self._is_encoder_usable("h264_amf"):
             logger.info("编码器选择: h264_amf (GPU)")
             return "h264_amf", ["-c:v", "h264_amf"]
+        if "libx264" in encoders:
+            logger.info("编码器选择: libx264 (CPU)")
+            return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
+        if "libopenh264" in encoders:
+            logger.info("编码器选择: libopenh264 (CPU)")
+            return "libopenh264", ["-c:v", "libopenh264", "-b:v", "4M"]
+        if "h264_mf" in encoders:
+            logger.info("编码器选择: h264_mf (CPU)")
+            return "h264_mf", ["-c:v", "h264_mf", "-b:v", "4M"]
+        if "mpeg4" in encoders:
+            logger.info("编码器选择: mpeg4 (CPU)")
+            return "mpeg4", ["-c:v", "mpeg4", "-q:v", "4"]
         logger.info("编码器选择: libx264 (CPU)")
         return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
 
@@ -902,14 +922,26 @@ class VideoProcessor:
         await self._detect_cuda()
         names = await self._detect_encoders()
         seq: List[List[str]] = []
-        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names):
+        cpu_seq: List[List[str]] = []
+        if "libx264" in names:
+            cpu_seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+        if "libopenh264" in names:
+            cpu_seq.append(["-c:v", "libopenh264", "-b:v", "4M"])
+        if "h264_mf" in names:
+            cpu_seq.append(["-c:v", "h264_mf", "-b:v", "4M"])
+        if "mpeg4" in names:
+            cpu_seq.append(["-c:v", "mpeg4", "-q:v", "4"])
+        if not cpu_seq:
+            cpu_seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+
+        seq.extend(cpu_seq)
+
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names) and await self._is_encoder_usable("h264_nvenc"):
             seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
-        if "h264_qsv" in names:
+        if "h264_qsv" in names and await self._is_encoder_usable("h264_qsv"):
             seq.append(["-c:v", "h264_qsv"])
-        if "h264_amf" in names:
+        if "h264_amf" in names and await self._is_encoder_usable("h264_amf"):
             seq.append(["-c:v", "h264_amf"])
-        # 将 CPU 编码优先级提升，确保在常见无CUDA环境下优先使用稳定的 libx264
-        seq.insert(0, ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
         return seq
 
     async def _detect_encoders(self) -> List[str]:
@@ -925,7 +957,7 @@ class VideoProcessor:
             out, _ = await proc.communicate()
             text = out.decode(errors="ignore")
             names = []
-            for name in ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"]:
+            for name in ["h264_nvenc", "h264_qsv", "h264_amf", "libx264", "libopenh264", "h264_mf", "mpeg4"]:
                 if name in text:
                     names.append(name)
             setattr(self, "_encoders_cache", names)
@@ -933,6 +965,81 @@ class VideoProcessor:
         except Exception:
             setattr(self, "_encoders_cache", ["libx264"])
             return ["libx264"]
+
+    def _preferred_pix_fmt(self, encoder_name: Optional[str]) -> str:
+        name = (encoder_name or "").lower().strip()
+        if name in {"h264_qsv", "h264_amf"}:
+            return "nv12"
+        return "yuv420p"
+
+    def _encoder_name_from_args(self, vcodec_args: List[str]) -> Optional[str]:
+        try:
+            for i in range(len(vcodec_args) - 1):
+                if vcodec_args[i] == "-c:v":
+                    return str(vcodec_args[i + 1])
+        except Exception:
+            return None
+        return None
+
+    async def _is_encoder_usable(self, encoder_name: str) -> bool:
+        key = (encoder_name or "").strip()
+        if not key:
+            return False
+        cached = self._encoder_usable_cache.get(key)
+        if cached is not None:
+            return bool(cached)
+        pix_fmt = self._preferred_pix_fmt(key)
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x64:rate=30",
+            "-t",
+            "0.2",
+            "-an",
+            "-c:v",
+            key,
+            "-pix_fmt",
+            pix_fmt,
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+            try:
+                out, err = await asyncio.wait_for(proc.communicate(), timeout=6.0)
+            except asyncio.TimeoutError:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                try:
+                    out, err = await asyncio.wait_for(proc.communicate(), timeout=1.5)
+                except Exception:
+                    out, err = b"", b""
+                ok = False
+            else:
+                ok = (proc.returncode == 0)
+            if not ok:
+                msg = (err or b"")[:600].decode("utf-8", errors="ignore").strip()
+                if msg:
+                    logger.info("编码器不可用: %s err=%s", key, msg.replace("\n", " ")[:300])
+        except FileNotFoundError:
+            ok = False
+        except Exception:
+            ok = False
+        self._encoder_usable_cache[key] = bool(ok)
+        return bool(ok)
 
     async def _ffmpeg_supports_cuda_hwaccel(self) -> bool:
         try:
@@ -1230,7 +1337,7 @@ class VideoProcessor:
                 vcodec_args.extend(["-rc:v", "vbr_hq", "-cq:v", "19"])
             elif enc_name == "libx264":
                 vcodec_args.extend(["-crf", "18"])
-            vcodec_args.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+            vcodec_args.extend(["-pix_fmt", self._preferred_pix_fmt(enc_name), "-movflags", "+faststart"])
 
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
