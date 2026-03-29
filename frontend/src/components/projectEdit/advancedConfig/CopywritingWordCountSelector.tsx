@@ -87,7 +87,7 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
   return (
     <div className="border-t border-gray-200 pt-4">
       <div className="flex items-center justify-between mb-2">
-        <label className="block text-sm font-medium text-gray-700">解说文案字数</label>
+        <label className="block text-sm font-medium text-gray-700">解说文案字数<span className="text-xs text-gray-400">（字数是否稳定，由模型决定）</span></label>
         {loading ? (
           <span className="text-xs text-gray-500">加载中</span>
         ) : saving ? (

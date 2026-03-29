@@ -209,6 +209,7 @@ class PromptManager:
                 "origin": (tpl.origin or "official"),
                 "category": tpl.category,
                 "tags": tpl.tags or [],
+                "description": tpl.description,
             })
         def add_prompt(key: str, p: BasePrompt):
             items.append({
@@ -217,6 +218,7 @@ class PromptManager:
                 "origin": "official",
                 "category": p.metadata.category,
                 "tags": p.metadata.tags or [],
+                "description": p.metadata.description,
             })
         if category:
             for tid, tpl in self._templates.items():

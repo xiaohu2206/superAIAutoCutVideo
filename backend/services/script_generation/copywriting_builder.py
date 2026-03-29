@@ -65,7 +65,8 @@ def _resolve_template_key(
         lang = str(script_language).strip().lower()
         cat, name = key.split(":", 1)
         if lang in {"en", "en-us", "英文", "english"}:
-            if name != "script_generation_en":
+            # 仅在「默认中文模板」与英文模板之间切换，保留用户选择的其它官方模板（如幽默搞笑）
+            if name == "script_generation":
                 candidate = f"{cat}:script_generation_en"
                 try:
                     if prompt_manager.get_prompt(candidate):
@@ -73,7 +74,7 @@ def _resolve_template_key(
                 except Exception:
                     pass
         elif lang in {"zh", "zh-cn", "中文", "chinese"}:
-            if name != "script_generation":
+            if name == "script_generation_en":
                 candidate = f"{cat}:script_generation"
                 try:
                     if prompt_manager.get_prompt(candidate):
@@ -87,12 +88,12 @@ def _build_template_messages(
     key: str,
     default_key: str,
     drama_name: str,
-    subs_text: str,
 ) -> List[ChatMessage]:
+    # 字幕正文由 _append_subtitles_context_message 注入；subtitle_content 仅留空以兼容仍含 ${subtitle_content} 的自定义模板
     variables = {
         "drama_name": drama_name,
         "plot_analysis": "",
-        "subtitle_content": subs_text,
+        "subtitle_content": "",
     }
     try:
         messages_dicts = prompt_manager.build_chat_messages(key, variables)
@@ -111,9 +112,7 @@ def _build_template_messages(
 
 
 def _append_subtitles_context_message(messages: List[ChatMessage], subs_text: str) -> List[ChatMessage]:
-    """
-    始终附加字幕上下文，不依赖模板里是否包含 subtitle 变量或 <subtitles> 标签。
-    """
+    """将带时间戳的字幕作为独立 user 消息附加（不再通过模板变量 subtitle_content 注入正文）。"""
     msgs = list(messages)
     text = str(subs_text or "").strip()
     if not text:
@@ -165,18 +164,18 @@ def _add_language_and_count_messages(
     return msgs
 
 
-def _append_film_context_system_message(
+def _append_film_context_user_message(
     messages: List[ChatMessage],
     film_context: Optional[str],
 ) -> List[ChatMessage]:
-    """在已有提示词之后追加影片背景 system，须先于 `_append_subtitles_context_message` 调用。"""
+    """在已有消息之后追加影片背景 user；字幕正文由 `_append_subtitles_context_message` 另行附加。"""
     text = (film_context or "").strip()
     if not text:
         return messages
     out = list(messages)
     out.append(
         ChatMessage(
-            role="system",
+            role="user",
             content=(
                 "以下为该影片的背景资料（含剧情脉络、人物关系等），请在严格遵循字幕/对白所呈现的事实前提下参考使用；"
                 "写作时不要大段复述背景资料，主要用于理顺人物关系与整体故事线，使解说更准确连贯：\n\n"
@@ -328,7 +327,7 @@ async def _generate_outline(
         f"请生成{num_sections}段大纲。"
     )
     messages = [ChatMessage(role="system", content=system)]
-    messages = _append_film_context_system_message(messages, film_context)
+    messages = _append_film_context_user_message(messages, film_context)
     messages.append(ChatMessage(role="user", content=user))
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
@@ -360,7 +359,7 @@ async def _generate_section(
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
     """根据大纲中某一段的描述，生成对应段落的文案。"""
-    messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
+    messages = _build_template_messages(template_key, default_key, drama_name)
 
     position_hints = []
     if section_idx == 0:
@@ -387,7 +386,7 @@ async def _generate_section(
     ))
 
     messages = _add_language_and_count_messages(messages, script_language, per_section_chars)
-    messages = _append_film_context_system_message(messages, film_context)
+    messages = _append_film_context_user_message(messages, film_context)
     messages = _append_subtitles_context_message(messages, subs_text)
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
@@ -534,9 +533,9 @@ async def _generate_single(
     reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> str:
-    messages = _build_template_messages(template_key, default_key, drama_name, subs_text)
+    messages = _build_template_messages(template_key, default_key, drama_name)
     messages = _add_language_and_count_messages(messages, script_language, target_chars)
-    messages = _append_film_context_system_message(messages, film_context)
+    messages = _append_film_context_user_message(messages, film_context)
     messages = _append_subtitles_context_message(messages, subs_text)
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
     text = await _call_llm_text(messages, cancel_event=cancel_event)
