@@ -6,11 +6,14 @@ interface PromptItem {
   id_or_key: string;
   name: string;
   origin: "official" | "user";
+  description?: string | null;
 }
 
 interface Props {
   narrationType: NarrationType | undefined;
   featureKey: string;
+  /** 与 featureKey 对应的官方默认模板说明（来自接口） */
+  defaultOfficialDescription?: string | null;
   selectedIdOrKey: string;
   items: PromptItem[];
   otherOfficialItems: PromptItem[];
@@ -24,6 +27,7 @@ interface Props {
 const PromptTemplateList: React.FC<Props> = ({
   narrationType,
   featureKey,
+  defaultOfficialDescription,
   selectedIdOrKey,
   items,
   otherOfficialItems,
@@ -36,9 +40,14 @@ const PromptTemplateList: React.FC<Props> = ({
   return (
     <div className="border-gray-200">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 mb-2">{`提示词选择（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{`解说风格（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div
+        className="max-h-[min(70vh,520px)] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth [scrollbar-gutter:stable] rounded-lg border border-gray-100 bg-gray-50/40"
+        role="region"
+        aria-label="解说风格模板列表"
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-2">
         <div
           className={`
                 relative flex flex-col p-3 rounded-lg border cursor-pointer transition-all duration-200 min-h-[80px]
@@ -50,18 +59,26 @@ const PromptTemplateList: React.FC<Props> = ({
              `}
           onClick={() => onSelect("official", featureKey)}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-1 gap-2">
             <span
-              className={`text-sm font-medium ${selectedIdOrKey === featureKey ? "text-violet-900" : "text-gray-900"}`}
+              className={`text-sm font-medium shrink min-w-0 ${selectedIdOrKey === featureKey ? "text-violet-900" : "text-gray-900"}`}
             >
-              官方默认模板
+              默认风格
             </span>
             {selectedIdOrKey === featureKey && (
-              <div className="h-4 w-4 rounded-full bg-violet-600 flex items-center justify-center">
+              <div className="h-4 w-4 rounded-full bg-violet-600 flex items-center justify-center shrink-0">
                 <Check className="h-3 w-3 text-white" />
               </div>
             )}
           </div>
+          {defaultOfficialDescription ? (
+            <p
+              className="text-xs text-gray-500 leading-snug line-clamp-4 mb-2"
+              title={defaultOfficialDescription}
+            >
+              {defaultOfficialDescription}
+            </p>
+          ) : null}
           <div className="mt-auto flex justify-end">
             <button
               onClick={(e) => {
@@ -90,19 +107,24 @@ const PromptTemplateList: React.FC<Props> = ({
                 `}
               onClick={() => onSelect("official", it.id_or_key)}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1 gap-2">
                 <span
-                  className={`text-sm font-medium truncate ${isSelected ? "text-violet-900" : "text-gray-900"}`}
+                  className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-violet-900" : "text-gray-900"}`}
                   title={it.name}
                 >
                   {it.name}
                 </span>
                 {isSelected && (
-                  <div className="h-4 w-4 rounded-full bg-violet-600 flex items-center justify-center">
+                  <div className="h-4 w-4 rounded-full bg-violet-600 flex items-center justify-center shrink-0">
                     <Check className="h-3 w-3 text-white" />
                   </div>
                 )}
               </div>
+              {it.description ? (
+                <p className="text-xs text-gray-500 leading-snug line-clamp-4 mb-2" title={it.description}>
+                  {it.description}
+                </p>
+              ) : null}
               <div className="mt-auto flex justify-end">
                 <button
                   onClick={(e) => {
@@ -135,9 +157,9 @@ const PromptTemplateList: React.FC<Props> = ({
                 `}
                 onClick={() => onSelect("user", it.id_or_key)}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2 overflow-hidden">
-                    <span className="text-[10px] px-1.5 py-0.5 bg-yellow-50 text-yellow-600 rounded border border-yellow-200 whitespace-nowrap">
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <div className="flex items-center space-x-2 overflow-hidden min-w-0">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-yellow-50 text-yellow-600 rounded border border-yellow-200 whitespace-nowrap shrink-0">
                       自定义
                     </span>
                     <span
@@ -153,6 +175,11 @@ const PromptTemplateList: React.FC<Props> = ({
                     </div>
                   )}
                 </div>
+                {it.description ? (
+                  <p className="text-xs text-gray-500 leading-snug line-clamp-3 mb-2 pl-0" title={it.description}>
+                    {it.description}
+                  </p>
+                ) : null}
                 <div className="mt-auto flex justify-end space-x-3" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => onPreview(it.id_or_key)} className="text-xs text-blue-600 hover:underline">
                     预览
@@ -181,6 +208,7 @@ const PromptTemplateList: React.FC<Props> = ({
         >
           <span className="text-sm font-medium">新建自定义模板</span>
         </button>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { usePrompts } from "../../hooks/usePrompts";
 import { NarrationType } from "../../types/project";
 import type { CreatePromptPayload } from "../../types/prompts";
@@ -75,6 +75,10 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
   const otherOfficialItems = (items || []).filter((it) => it.origin === "official" && it.id_or_key !== featureKey);
+  const defaultOfficialDescription = useMemo(() => {
+    const row = (items || []).find((it) => it.id_or_key === featureKey);
+    return row?.description ?? null;
+  }, [items, featureKey]);
 
   const handleSelect = async (origin: "official" | "user", id_or_key: string) => {
     await setProjectSelection(origin, id_or_key);
@@ -237,6 +241,7 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
       <PromptTemplateList
         narrationType={narrationType}
         featureKey={featureKey}
+        defaultOfficialDescription={defaultOfficialDescription}
         selectedIdOrKey={selectedIdOrKey}
         items={(items || []) as any}
         otherOfficialItems={otherOfficialItems as any}

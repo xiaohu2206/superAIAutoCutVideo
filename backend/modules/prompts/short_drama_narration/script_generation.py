@@ -14,11 +14,14 @@ class ScriptGenerationPrompt(TextPrompt):
             name=name,
             category="short_drama_narration",
             version="v3.0",
-            description="基于短剧解说创作核心要素，生成高质量纯文本解说文案，包含黄金开场、爽点放大、个性吐槽等专业技巧",
+            description=(
+                "经典短剧解说范式：黄金开场、主线提炼、爽点放大、吐槽与悬念预埋，"
+                "节奏快、信息密，适合竖屏短剧与连载解说。"
+            ),
             model_type=ModelType.TEXT,
             output_format=OutputFormat.TEXT,
             tags=["短剧", "解说文案", "文案生成", "黄金开场", "爽点放大", "个性吐槽", "悬念预埋"],
-            parameters=["drama_name", "plot_analysis", "subtitle_content"]
+            parameters=["drama_name", "plot_analysis", "subtitle_content"],
         )
         super().__init__(metadata)
         self._system_prompt = (
@@ -120,6 +123,7 @@ ${plot_analysis}
 
 ### 原始字幕（含精确时间戳）
 <subtitles>
+完整带时间戳的字幕在同轮对话中「补充剧情参考字幕」用户消息内提供，请严格依据该消息中的事实理解剧情并创作。
 ${subtitle_content}
 </subtitles>
 
