@@ -4,6 +4,8 @@ export interface PromptSummaryItem {
   origin: 'official' | 'user'
   category?: string
   tags?: string[]
+  /** 列表接口返回的简短说明，用于模板卡片展示 */
+  description?: string | null
 }
 
 export interface PromptDetail {
