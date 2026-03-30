@@ -891,6 +891,115 @@ class VideoProcessor:
         except Exception:
             return None, None
 
+    _WEB_PREVIEW_CONTAINERS = {".mp4", ".mov", ".m4v"}
+
+    def _upload_needs_web_transcode(
+        self, path: Path, v: Optional[Dict[str, Any]], a: Optional[Dict[str, Any]]
+    ) -> bool:
+        """前端 / WebView2 预览：优先 H.264 + yuv420p + AAC，封装在 MP4/MOV。"""
+        if not v:
+            return False
+        suf = path.suffix.lower()
+        if suf not in self._WEB_PREVIEW_CONTAINERS:
+            return True
+        c = (v.get("codec_name") or "").lower()
+        px = (v.get("pix_fmt") or "").lower()
+        if c not in ("h264", "avc"):
+            return True
+        if px and "p10" in px:
+            return True
+        if px in ("yuv422p", "yuv444p", "gbrp", "yuv420p12le"):
+            return True
+        if px and "420" not in px and "j420" not in px and px not in ("yuv420p", "yuvj420p"):
+            return True
+        if a:
+            ac = (a.get("codec_name") or "").lower()
+            if ac not in ("aac", "mp3"):
+                return True
+        return False
+
+    async def normalize_upload_for_web_preview(self, path: Path) -> Path:
+        """
+        上传保存后调用：必要时转码为 H.264(yuv420p) + AAC 的 MP4（+faststart），
+        避免 HEVC/10bit/非 MP4 容器等导致 WebView2 黑屏或无法解码。
+        失败时返回原路径，不阻断上传。
+        """
+        try:
+            v, a = await self._probe_stream_info(str(path))
+            if not v:
+                logger.warning("normalize_upload_for_web_preview: 无视频轨，跳过: %s", path)
+                return path
+            if not self._upload_needs_web_transcode(path, v, a):
+                logger.info("normalize_upload_for_web_preview: 已兼容 Web 预览，跳过: %s", path.name)
+                return path
+            _, enc_args = await self._pick_fast_encoder()
+            tmp_out = path.parent / f".{path.stem}_web_{uuid.uuid4().hex[:10]}.mp4"
+            try:
+                if tmp_out.exists():
+                    tmp_out.unlink()
+            except Exception:
+                pass
+            out_final = path.with_suffix(".mp4")
+            cmd: List[str] = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-i",
+                str(path),
+                "-map",
+                "0:v:0",
+            ]
+            if a:
+                cmd.extend(["-map", "0:a:0"])
+            else:
+                cmd.append("-an")
+            cmd.extend(enc_args)
+            cmd.extend(["-pix_fmt", "yuv420p"])
+            if a:
+                cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ac", "2"])
+            cmd.extend(["-movflags", "+faststart", "-y", str(tmp_out)])
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+            _stdout, stderr = await proc.communicate()
+            if proc.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size <= 0:
+                err = (stderr or b"").decode(errors="ignore").strip()
+                logger.error("normalize_upload_for_web_preview 转码失败: %s | %s", path, err[:800])
+                try:
+                    if tmp_out.exists():
+                        tmp_out.unlink()
+                except Exception:
+                    pass
+                return path
+            try:
+                if path.suffix.lower() == ".mp4" and path.resolve() == out_final.resolve():
+                    os.replace(str(tmp_out), str(path))
+                else:
+                    try:
+                        if path.exists():
+                            path.unlink()
+                    except Exception:
+                        pass
+                    os.replace(str(tmp_out), str(out_final))
+            except Exception as e:
+                logger.error("normalize_upload_for_web_preview 替换文件失败: %s", e)
+                try:
+                    if tmp_out.exists():
+                        tmp_out.unlink()
+                except Exception:
+                    pass
+                return path
+            logger.info("normalize_upload_for_web_preview: 已转码为 Web 预览用 MP4: %s", out_final.name)
+            return out_final
+        except Exception as e:
+            logger.exception("normalize_upload_for_web_preview 异常: %s", e)
+            return path
+
     async def _pick_fast_encoder(self) -> Tuple[str, List[str]]:
         await self._detect_cuda()
         encoders = await self._detect_encoders()
