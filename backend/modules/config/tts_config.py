@@ -338,7 +338,7 @@ class TtsEngineConfigManager:
             {
                 'provider': 'qwen_online_tts',
                 'display_name': 'Qwen3-TTS(在线)',
-                'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key 或环境变量 DASHSCOPE_API_KEY）',
+                'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key）',
                 'required_fields': ['secret_key'],
                 'optional_fields': ['region']
             },
@@ -349,13 +349,13 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
-            # {
-            #     'provider': 'voxcpm_tts',
-            #     'display_name': 'VoxCPM(本地)',
-            #     'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
-            #     'required_fields': [],
-            #     'optional_fields': []
-            # },
+            {
+                'provider': 'voxcpm_tts',
+                'display_name': 'VoxCPM(本地)',
+                'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
+                'required_fields': [],
+                'optional_fields': []
+            },
             {
                 'provider': 'tencent_tts',
                 'display_name': '腾讯云 TTS',
