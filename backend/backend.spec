@@ -9,6 +9,10 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dyn
 datas = [
     ('serviceData', 'serviceData'),
 ]
+# 提示词资源（markdown/json等）：运行时按模块相对路径读取，需要随包分发
+# 例如 modules/prompts/common/sharp_roast/sharp_roast.md
+if os.path.isdir('modules/prompts'):
+    datas.append(('modules/prompts', 'modules/prompts'))
 cache_dir = '../.trae/cache/Qwen3-TTS'
 if os.path.isdir(cache_dir):
     datas.append((cache_dir, '.trae/cache/Qwen3-TTS'))

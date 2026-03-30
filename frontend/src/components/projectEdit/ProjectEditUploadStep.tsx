@@ -248,7 +248,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                       所有镜头
                     </label>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap justify-end border-t border-gray-200/80 pt-1.5 w-full">
+                  {/* <div className="flex items-center gap-2 flex-wrap justify-end border-t border-gray-200/80 pt-1.5 w-full">
                     <span className="text-gray-500 select-none shrink-0">每镜头抽帧</span>
                     <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
                       <input
@@ -272,7 +272,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                       />
                       3 帧
                     </label>
-                  </div>
+                  </div> */}
                </div>
                <button
                 onClick={() => onExtractScenes({ analyzeVision, visionMode, visionKeyFrames })}
