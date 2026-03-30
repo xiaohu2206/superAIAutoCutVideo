@@ -471,13 +471,17 @@ def get_app_paths():
             base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
         settings_dir = base_data / "SuperAutoCutVideo" / "config"
         settings_file = settings_dir / "app_settings.json"
+        # 注意：打包版默认必须落在“用户数据目录”，不能落在安装目录，否则卸载/重装会丢文件
         uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
         install_dir_raw = normalize_path_str(os.environ.get("SACV_INSTALL_DIR") or "")
         if install_dir_raw:
             install_dir = Path(install_dir_raw).expanduser()
         else:
             install_dir = exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir
-        uploads_dir_default = install_dir / "uploads"
+        # 历史版本可能把 uploads 放在安装目录；保留 legacy 路径用于迁移
+        legacy_uploads_dir = install_dir / "uploads"
+        # 新默认：用户目录（持久化）
+        uploads_dir_default = uploads_dir_default_fallback
         try:
             used_default = True
             if settings_file.exists():
@@ -498,6 +502,29 @@ def get_app_paths():
                 uploads_dir.mkdir(parents=True, exist_ok=True)
             except Exception:
                 uploads_dir = uploads_dir_default_fallback
+            # 兼容迁移：若老版本把 uploads 存在安装目录，则首次运行时复制到新的用户目录
+            try:
+                if legacy_uploads_dir.exists() and legacy_uploads_dir.is_dir():
+                    # 避免重复迁移：仅在目标目录为空/不存在时迁移
+                    should_migrate = True
+                    if uploads_dir.exists():
+                        try:
+                            should_migrate = not any(uploads_dir.iterdir())
+                        except Exception:
+                            should_migrate = False
+                    if should_migrate:
+                        for item in legacy_uploads_dir.iterdir():
+                            src = item
+                            dst = uploads_dir / item.name
+                            if dst.exists():
+                                continue
+                            if src.is_dir():
+                                shutil.copytree(src, dst)
+                            else:
+                                shutil.copy2(src, dst)
+                        logger.info(f"Migrated legacy uploads from {legacy_uploads_dir} -> {uploads_dir}")
+            except Exception as e:
+                logger.warning(f"Legacy uploads migration failed: {e}")
     else:
         base_path = Path(__file__).resolve().parent
         project_root = base_path.parent

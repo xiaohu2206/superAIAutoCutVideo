@@ -16,7 +16,7 @@ export const getDefaultBaseUrl = (provider: string): string => {
   const defaults: Record<string, string> = {
     yunwu: "https://yunwu.ai/v1/chat/completions",
     "302ai": "https://api.302ai.cn/v1/chat/completions",
-    qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
+    qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
     openrouter: "https://openrouter.ai/api/v1/chat/completions",
@@ -108,7 +108,7 @@ export const getContentDefaultBaseUrl = (provider: string): string => {
   const defaults: Record<string, string> = {
     yunwu: "https://yunwu.ai/v1/chat/completions",
     "302ai": "https://api.302ai.cn/v1/chat/completions",
-    qwen: "https://dashscope.aliyuncs.com/api/v1/chat/completions",
+    qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     doubao: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     deepseek: "https://api.deepseek.com/chat/completions",
     openrouter: "https://openrouter.ai/api/v1/chat/completions",

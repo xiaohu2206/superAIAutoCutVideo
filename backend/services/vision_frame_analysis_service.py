@@ -809,19 +809,31 @@ class VisionFrameAnalyzer:
         timeout: int = 120,
         mode: str = "all",
         task_id: Optional[str] = None,
-        max_concurrency: int = 4,
+        max_concurrency: int = 128,
         vision_key_frames: int = 1,
     ) -> List[Dict[str, Any]]:
         """
         Analyze scenes using online vision models (302ai, yunwu, etc.).
         mode: "no_subtitles" or "all"
         vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
+        max_concurrency: 抽帧与 API 调用的默认并发上限（默认 200，单参数同时约束两侧，硬顶 32）。
         """
-        online_runner = await self._get_online_runner(provider, api_key, base_url, model_name, timeout)
+        try:
+            infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
+        except Exception:
+            infer_wall_sec = 300.0
+        if infer_wall_sec < 1.0:
+            infer_wall_sec = 300.0
+
+        effective_http_timeout = max(int(timeout or 0), int(infer_wall_sec + 0.999))
+        online_runner = await self._get_online_runner(
+            provider, api_key, base_url, model_name, effective_http_timeout
+        )
         kf = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
 
-        extract_concurrency = max(1, min(max_concurrency, 8))
-        api_concurrency = max(1, min(max_concurrency, 4))
+        cap = max(1, min(int(max_concurrency or 1), 32))
+        extract_concurrency = cap
+        api_concurrency = cap
         extract_semaphore = asyncio.Semaphore(extract_concurrency)
         api_semaphore = asyncio.Semaphore(api_concurrency)
 
@@ -843,6 +855,8 @@ class VisionFrameAnalyzer:
 
         processed_count = 0
         loop = asyncio.get_running_loop()
+        stop_infer_all = asyncio.Event()
+        scene_tasks: List[asyncio.Task] = []
 
         extract_executor = ThreadPoolExecutor(max_workers=extract_concurrency, thread_name_prefix="online_vision_extract")
 
@@ -856,114 +870,23 @@ class VisionFrameAnalyzer:
                 logger.error(f"Frame extract failed for {t_s}-{t_e}: {e}")
                 return {"ok": False, "imgs": None, "error": str(e), "frame_error": None}
 
-        async def analyze_single_scene(idx: int):
+        def _finalize_scene_vision(scene: Dict[str, Any], vision_segments: List[Dict[str, Any]], bump_progress: bool) -> None:
             nonlocal processed_count
-            if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                raise asyncio.CancelledError("任务已取消")
-
-            scene = scenes[idx]
-            merged_from = scene.get("merged_from", [])
-            subtitle_for_scene = scene.get("subtitle")
-
-            segments = merged_from if merged_from else [{"start_time": scene["start_time"], "end_time": scene["end_time"]}]
-
-            vision_segments: List[Dict[str, Any]] = []
-            for seg in segments:
-                t_start = seg["start_time"]
-                t_end = seg["end_time"]
-
-                if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                    raise asyncio.CancelledError("任务已取消")
-
-                t0 = time.time()
-                async with extract_semaphore:
-                    extract_res = await loop.run_in_executor(extract_executor, _extract_segment_sync, video_path, t_start, t_end, idx)
-                t1 = time.time()
-
-                imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
-                if not (isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0):
-                    err = extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result"
-                    if err == "extract_frame_failed":
-                        vision_segments.append(
-                            {
-                                "start_time": float(t_start),
-                                "end_time": float(t_end),
-                                "status": "no_frame",
-                                "text": None,
-                                "frame_error": extract_res.get("frame_error") if isinstance(extract_res, dict) else None,
-                            }
-                        )
-                    else:
-                        vision_segments.append(
-                            {
-                                "start_time": float(t_start),
-                                "end_time": float(t_end),
-                                "status": "error",
-                                "text": None,
-                                "error": str(err or "unknown_error"),
-                            }
-                        )
-                    continue
-
-                if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                    raise asyncio.CancelledError("任务已取消")
-
-                try:
-                    logger.info(
-                        f"Online vision analyze: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
-                        f"provider={provider} key_frames={len(imgs)}"
-                    )
-                    optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
-                    prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
-
-                    async with api_semaphore:
-                        t2 = time.time()
-                        out, online_stats = await online_runner.infer_multi(optimized_imgs, prompt=prompt)
-                        t3 = time.time()
-
-                    logger.info(
-                        f"Online vision timing: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
-                        f"extract_s={t1 - t0:.3f} infer_s={t3 - t2:.3f} total_s={t3 - t0:.3f} provider={provider} model={model_name} "
-                        f"n_images={online_stats.get('n_images')}"
-                    )
-
-                    structured, display_text = _parse_online_vision_model_output(str(out or ""))
-                    txt = (display_text or "").strip()
-                    seg_out: Dict[str, Any] = {
-                        "start_time": float(t_start),
-                        "end_time": float(t_end),
-                        "status": "ok" if txt else "empty",
-                        "text": txt if txt else None,
-                    }
-                    if structured and isinstance(structured, dict):
-                        seg_out["structured"] = {
-                            "desc": structured.get("desc"),
-                            "objects": structured.get("objects"),
-                            "action": structured.get("action"),
-                            "scene": structured.get("scene"),
-                            "emotion": structured.get("emotion"),
-                        }
-                    vision_segments.append(seg_out)
-                except Exception as e:
-                    logger.error(f"Online vision analysis failed for {t_start}-{t_end}: {e}")
-                    vision_segments.append(
-                        {
-                            "start_time": float(t_start),
-                            "end_time": float(t_end),
-                            "status": "error",
-                            "text": None,
-                            "error": str(e),
-                        }
-                    )
-                    continue
-
             scene["vision"] = vision_segments
-
             has_ok = any(s.get("status") == "ok" and (s.get("text") or "").strip() for s in vision_segments)
+            has_timeout = any(s.get("status") == "infer_timeout" for s in vision_segments)
             has_error = any(s.get("status") == "error" for s in vision_segments)
             has_no_frame = any(s.get("status") == "no_frame" for s in vision_segments)
             if has_ok:
                 scene["vision_status"] = "ok"
+            elif has_timeout:
+                scene["vision_status"] = "infer_timeout"
+                last_te = next(
+                    (s.get("error") for s in reversed(vision_segments) if s.get("status") == "infer_timeout"),
+                    None,
+                )
+                if last_te:
+                    scene["vision_error"] = last_te
             elif has_error:
                 scene["vision_status"] = "error"
                 last_err = next((s.get("error") for s in reversed(vision_segments) if s.get("status") == "error"), None)
@@ -977,9 +900,9 @@ class VisionFrameAnalyzer:
             else:
                 scene["vision_status"] = "empty"
             scene["vision_analyzed"] = True
-
+            if not bump_progress:
+                return
             processed_count += 1
-
             if task_id:
                 progress = 90 + (processed_count / total_to_analyze) * 10
                 task_progress_store.set_state(
@@ -989,15 +912,163 @@ class VisionFrameAnalyzer:
                     status="processing",
                     progress=progress,
                     message=f"在线视觉分析中: {processed_count}/{total_to_analyze}",
-                    phase="analyze_vision_online"
+                    phase="analyze_vision_online",
                 )
 
-        tasks = []
+        async def analyze_single_scene(idx: int):
+            nonlocal processed_count
+            if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                raise asyncio.CancelledError("任务已取消")
+
+            scene = scenes[idx]
+            merged_from = scene.get("merged_from", [])
+            subtitle_for_scene = scene.get("subtitle")
+
+            segments = merged_from if merged_from else [{"start_time": scene["start_time"], "end_time": scene["end_time"]}]
+
+            vision_segments: List[Dict[str, Any]] = []
+            try:
+                if stop_infer_all.is_set():
+                    return
+
+                for seg in segments:
+                    if stop_infer_all.is_set():
+                        break
+                    t_start = seg["start_time"]
+                    t_end = seg["end_time"]
+
+                    if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                        raise asyncio.CancelledError("任务已取消")
+
+                    t0 = time.time()
+                    async with extract_semaphore:
+                        if stop_infer_all.is_set():
+                            break
+                        extract_res = await loop.run_in_executor(
+                            extract_executor, _extract_segment_sync, video_path, t_start, t_end, idx
+                        )
+                    t1 = time.time()
+
+                    imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
+                    if not (isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0):
+                        err = extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result"
+                        if err == "extract_frame_failed":
+                            vision_segments.append(
+                                {
+                                    "start_time": float(t_start),
+                                    "end_time": float(t_end),
+                                    "status": "no_frame",
+                                    "text": None,
+                                    "frame_error": extract_res.get("frame_error") if isinstance(extract_res, dict) else None,
+                                }
+                            )
+                        else:
+                            vision_segments.append(
+                                {
+                                    "start_time": float(t_start),
+                                    "end_time": float(t_end),
+                                    "status": "error",
+                                    "text": None,
+                                    "error": str(err or "unknown_error"),
+                                }
+                            )
+                        continue
+
+                    if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                        raise asyncio.CancelledError("任务已取消")
+
+                    try:
+                        logger.info(
+                            f"Online vision analyze: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
+                            f"provider={provider} key_frames={len(imgs)}"
+                        )
+                        optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
+                        prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
+
+                        async with api_semaphore:
+                            if stop_infer_all.is_set():
+                                break
+                            t2 = time.time()
+                            out, online_stats = await asyncio.wait_for(
+                                online_runner.infer_multi(optimized_imgs, prompt=prompt),
+                                timeout=infer_wall_sec,
+                            )
+                            t3 = time.time()
+
+                        logger.info(
+                            f"Online vision timing: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
+                            f"extract_s={t1 - t0:.3f} infer_s={t3 - t2:.3f} total_s={t3 - t0:.3f} provider={provider} model={model_name} "
+                            f"n_images={online_stats.get('n_images')}"
+                        )
+
+                        structured, display_text = _parse_online_vision_model_output(str(out or ""))
+                        txt = (display_text or "").strip()
+                        seg_out: Dict[str, Any] = {
+                            "start_time": float(t_start),
+                            "end_time": float(t_end),
+                            "status": "ok" if txt else "empty",
+                            "text": txt if txt else None,
+                        }
+                        if structured and isinstance(structured, dict):
+                            seg_out["structured"] = {
+                                "desc": structured.get("desc"),
+                                "objects": structured.get("objects"),
+                                "action": structured.get("action"),
+                                "scene": structured.get("scene"),
+                                "emotion": structured.get("emotion"),
+                            }
+                        vision_segments.append(seg_out)
+                    except asyncio.TimeoutError:
+                        msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
+                        logger.warning(
+                            "Online vision infer wall timeout scene_idx=%s segment=%.3f-%.3f wall_sec=%s",
+                            idx,
+                            float(t_start),
+                            float(t_end),
+                            infer_wall_sec,
+                        )
+                        vision_segments.append(
+                            {
+                                "start_time": float(t_start),
+                                "end_time": float(t_end),
+                                "status": "infer_timeout",
+                                "text": None,
+                                "error": msg,
+                            }
+                        )
+                        stop_infer_all.set()
+                        scene["vision_stopped_early_infer_timeout"] = True
+                        cur = asyncio.current_task()
+                        for t in scene_tasks:
+                            if t is not cur and not t.done():
+                                t.cancel()
+                        _finalize_scene_vision(scene, vision_segments, bump_progress=True)
+                        return
+                    except Exception as e:
+                        logger.error(f"Online vision analysis failed for {t_start}-{t_end}: {e}")
+                        vision_segments.append(
+                            {
+                                "start_time": float(t_start),
+                                "end_time": float(t_end),
+                                "status": "error",
+                                "text": None,
+                                "error": str(e),
+                            }
+                        )
+                        continue
+
+                if vision_segments:
+                    _finalize_scene_vision(scene, vision_segments, bump_progress=True)
+            except asyncio.CancelledError:
+                if vision_segments:
+                    _finalize_scene_vision(scene, vision_segments, bump_progress=True)
+                raise
+
         for idx in to_analyze_indices:
-            tasks.append(asyncio.create_task(analyze_single_scene(idx)))
+            scene_tasks.append(asyncio.create_task(analyze_single_scene(idx)))
 
         try:
-            if tasks:
+            if scene_tasks:
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,
@@ -1007,18 +1078,34 @@ class VisionFrameAnalyzer:
                     message="开始在线视觉分析...",
                     phase="analyze_vision_online_start"
                 )
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*scene_tasks, return_exceptions=True)
                 for r in results:
                     if isinstance(r, asyncio.CancelledError):
+                        if stop_infer_all.is_set():
+                            continue
                         raise r
+                    if isinstance(r, Exception):
+                        logger.error(f"Online vision scene task failed: {r}")
 
-            remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
-            if remaining:
-                if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                    raise asyncio.CancelledError("任务已取消")
-                processed_count = total_to_analyze - len(remaining)
-                for i in remaining:
-                    await analyze_single_scene(i)
+            if stop_infer_all.is_set():
+                if task_id:
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=95,
+                        message=f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已保存已完成的视觉分析，跳过剩余镜头",
+                        phase="analyze_vision_online_timeout_partial",
+                    )
+            else:
+                remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
+                if remaining:
+                    if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                        raise asyncio.CancelledError("任务已取消")
+                    processed_count = total_to_analyze - len(remaining)
+                    for i in remaining:
+                        await analyze_single_scene(i)
 
             return scenes
         finally:
