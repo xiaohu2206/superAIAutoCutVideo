@@ -19,7 +19,6 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.audio_normalizer import AudioNormalizer
-from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import normalize_path_str
 
 logger = logging.getLogger(__name__)
@@ -202,36 +201,43 @@ def _probe_audio_duration(audio_path: Path) -> float:
     except Exception:
         return 0.0
 
-async def _gen_blank_video_with_audio(
-    width: int,
-    height: int,
-    fps: float,
-    audio_path: Path,
+
+async def _trim_audio_silence(
+    input_path: Path,
     output_path: Path,
     *,
-    scope: Optional[str] = None,
-    project_id: Optional[str] = None,
-    task_id: Optional[str] = None,
-    cancel_event: Optional[asyncio.Event] = None,
+    start_threshold_db: float = -55.0,
+    start_duration_s: float = 0.05,
+    start_keep_silence_s: float = 0.02,
 ) -> bool:
     try:
-        fr = 30
-        try:
-            frv = float(fps or 30.0)
-            fr = int(round(frv)) if frv > 0 else 30
-        except Exception:
-            fr = 30
+        if not input_path.exists():
+            return False
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        th_start = f"{float(start_threshold_db)}dB"
+        # 只裁开头留白：末尾用 stop_periods 会把尾音、弱读当作静音切掉，故禁用末尾裁剪
+        start_dur = max(0.0, float(start_duration_s))
+        keep_lead = max(0.0, float(start_keep_silence_s))
+        af = (
+            "silenceremove="
+            f"detection=rms:start_periods=1:start_duration={start_dur}:start_threshold={th_start}:"
+            f"start_silence={keep_lead}"
+        )
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fr}",
-            "-i", str(audio_path),
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "libx264", "-preset", "superfast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
-            "-shortest",
-            "-movflags", "+faststart",
-            "-y", str(output_path),
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(input_path),
+            "-af",
+            af,
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            str(output_path),
         ]
         kwargs: Dict[str, Any] = {}
         if os.name == "nt":
@@ -242,45 +248,12 @@ async def _gen_blank_video_with_audio(
             stderr=asyncio.subprocess.PIPE,
             **kwargs,
         )
-        tracking = bool(scope and project_id and task_id and cancel_event)
-        if tracking:
-            task_cancel_store.register_process(str(scope), str(project_id), str(task_id), proc)
-        try:
-            if cancel_event:
-                comm_task = asyncio.create_task(proc.communicate())
-                cancel_task = asyncio.create_task(cancel_event.wait())
-                done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
-                if cancel_task in done:
-                    try:
-                        if proc.returncode is None:
-                            try:
-                                proc.terminate()
-                            except Exception:
-                                pass
-                    finally:
-                        try:
-                            await asyncio.wait_for(comm_task, timeout=1.5)
-                        except Exception:
-                            try:
-                                comm_task.cancel()
-                            except Exception:
-                                pass
-                    raise asyncio.CancelledError()
-                try:
-                    cancel_task.cancel()
-                except Exception:
-                    pass
-                await comm_task
-            else:
-                await proc.communicate()
-        finally:
-            if tracking:
-                task_cancel_store.unregister_process(str(scope), str(project_id), str(task_id), proc)
-        return proc.returncode == 0 and output_path.exists()
-    except asyncio.CancelledError:
-        raise
+        await proc.communicate()
+        return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
     except Exception:
         return False
+
+
 @dataclass
 class DraftGenerateFolderResult:
     task_id: str
@@ -367,10 +340,34 @@ class JianyingDraftManager:
                 "text": str(seg.get("text") or ""),
                 "subtitle": str(seg.get("subtitle") or ""),
                 "mute": False,
+                "overlay_video_path": None,
+                "overlay_duration_us": 0,
                 "narration_path": None,
                 "narration_duration_us": 0,
             })
         return items
+
+    @staticmethod
+    def _make_audio_material(material_id: str, path: Path, duration_us: int) -> dict:
+        resolved = str(path.resolve()) if path.exists() else str(path)
+        return {
+            "app_id": 0,
+            "category_id": "",
+            "category_name": "local",
+            "check_flag": 3,
+            "copyright_limit_type": "none",
+            "duration": duration_us,
+            "effect_id": "",
+            "formula_id": "",
+            "id": material_id,
+            "local_material_id": material_id,
+            "music_id": material_id,
+            "name": path.name,
+            "path": resolved,
+            "source_platform": 0,
+            "type": "extract_music",
+            "wave_points": [],
+        }
 
     @staticmethod
     def _make_video_material(material_id: str, path: Path) -> dict:
@@ -417,7 +414,11 @@ class JianyingDraftManager:
         vid_duration_us = int(video_materials[0].get("duration") or 0)
         overlay_materials_map: Dict[str, str] = {}
         overlay_track_segments: List[dict] = []
-        speed_materials: List[dict] = []
+        audio_materials_map: Dict[str, str] = {}
+        materials_audios: List[dict] = []
+        audio_segments: List[dict] = []
+        audio_speed_id = uuid.uuid4().hex
+        speed_materials: List[dict] = [{"curve_speed": None, "id": audio_speed_id, "mode": 0, "speed": 1, "type": "speed"}]
         segments: List[dict] = []
         timeline_cursor_us = 0
         for item in timeline_items:
@@ -457,7 +458,7 @@ class JianyingDraftManager:
                 "keyframe_refs": [],
                 "source_timerange": {"start": source_start_us, "duration": duration_us},
                 "speed": 1,
-                "volume": 0 if bool(item.get("mute")) else 1,
+                "volume": 0 if (bool(item.get("mute")) or bool(item.get("narration_path"))) else 1,
                 "extra_material_refs": [speed_id],
                 "clip": {
                     "alpha": 1,
@@ -471,6 +472,45 @@ class JianyingDraftManager:
                 "render_index": 0,
             }
             segments.append(seg_obj)
+            narr_path = item.get("narration_path")
+            narr_dur_us = int(item.get("narration_duration_us") or 0)
+            if narr_path and narr_dur_us > 0:
+                p = Path(str(narr_path))
+                k = str(p.resolve()) if p.exists() else str(p)
+                if k not in audio_materials_map:
+                    amat_id = uuid.uuid4().hex
+                    audio_materials_map[k] = amat_id
+                    materials_audios.append(JianyingDraftManager._make_audio_material(amat_id, p, narr_dur_us))
+                amat_id = audio_materials_map.get(k) or ""
+                if amat_id:
+                    adur_u2 = min(narr_dur_us, duration_us)
+                    audio_segments.append({
+                        "enable_adjust": True,
+                        "enable_color_correct_adjust": False,
+                        "enable_color_curves": True,
+                        "enable_color_match_adjust": False,
+                        "enable_color_wheels": True,
+                        "enable_lut": True,
+                        "enable_smart_color_adjust": False,
+                        "last_nonzero_volume": 1,
+                        "reverse": False,
+                        "track_attribute": 0,
+                        "track_render_index": 0,
+                        "visible": True,
+                        "id": uuid.uuid4().hex,
+                        "material_id": amat_id,
+                        "target_timerange": {"start": timeline_cursor_us, "duration": adur_u2},
+                        "common_keyframes": [],
+                        "keyframe_refs": [],
+                        "source_timerange": {"start": 0, "duration": adur_u2},
+                        "speed": 1,
+                        "volume": 1,
+                        "extra_material_refs": [audio_speed_id],
+                        "is_tone_modify": False,
+                        "clip": None,
+                        "hdr_settings": None,
+                        "render_index": 0,
+                    })
             ov_path = item.get("overlay_video_path")
             ov_dur_us = int(item.get("overlay_duration_us") or 0)
             if ov_path and ov_dur_us > 0:
@@ -532,7 +572,7 @@ class JianyingDraftManager:
             "audio_effects": [],
             "audio_fades": [],
             "audio_track_indexes": [],
-            "audios": [],
+            "audios": materials_audios,
             "beats": [],
             "canvases": [],
             "chromas": [],
@@ -644,14 +684,16 @@ class JianyingDraftManager:
                 "os_version": "10",
             },
         }
-        # 先生成轨道并收集音频轨道ID，便于 materials.audio_track_indexes 显示控制
+        # 轨道顺序：主视频在上，配音 audio 轨放在视频轨下方（与剪映时间轴展示一致）
         track_main_id = uuid.uuid4().hex
         track_video_id = uuid.uuid4().hex
+        track_overlay_id = uuid.uuid4().hex
         track_audio_id = uuid.uuid4().hex
         draft["tracks"] = [
-            {"attribute": 0, "flag": 0, "id": track_main_id, "is_default_name": False, "name": "main", "segments": [], "type": "video"},
-            {"attribute": 0, "flag": 0, "id": track_video_id, "is_default_name": False, "name": "video_main", "segments": segments, "type": "video"},
-            {"attribute": 0, "flag": 0, "id": uuid.uuid4().hex, "is_default_name": False, "name": "overlay_main", "segments": overlay_track_segments, "type": "video"},
+            {"attribute": 0, "flag": 0, "id": track_main_id, "is_default_name": False, "name": "main", "segments": segments, "type": "video"},
+            {"attribute": 0, "flag": 0, "id": track_video_id, "is_default_name": False, "name": "video_main", "segments": [], "type": "video"},
+            {"attribute": 0, "flag": 0, "id": track_overlay_id, "is_default_name": False, "name": "overlay_main", "segments": overlay_track_segments, "type": "video"},
+            {"attribute": 0, "flag": 0, "id": track_audio_id, "is_default_name": False, "name": "audio", "segments": audio_segments, "type": "audio"},
         ]
         mats = draft.get("materials")
         if isinstance(mats, dict):
@@ -936,6 +978,8 @@ class JianyingDraftManager:
                             "mute": False,
                             "overlay_video_path": None,
                             "overlay_duration_us": 0,
+                            "narration_path": None,
+                            "narration_duration_us": 0,
                         })
                     else:
                         tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
@@ -953,20 +997,13 @@ class JianyingDraftManager:
                         norm_out = assets_audio_dir / f"seg_{idx:04d}_norm.mp3"
                         ok_norm = await audio_norm.normalize_audio_loudness(str(tts_out), str(norm_out))
                         narr_used = norm_out if ok_norm else tts_out
-                        ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
-                        ok_ov = await _gen_blank_video_with_audio(
-                            int(meta.get("width") or 1920),
-                            int(meta.get("height") or 1080),
-                            float(meta.get("fps") or 30.0),
-                            narr_used,
-                            ov_out,
-                            scope=JianyingDraftManager.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            cancel_event=cancel_event,
-                        )
-                        if not ok_ov:
-                            raise RuntimeError(f"生成叠加视频失败: {idx}")
+                        trim_out = assets_audio_dir / f"seg_{idx:04d}_trim.mp3"
+                        ok_trim = await _trim_audio_silence(narr_used, trim_out)
+                        if ok_trim:
+                            narr_used = trim_out
+                        adur_file = _probe_audio_duration(narr_used) or 0.0
+                        if adur_file > 0.0:
+                            adur = adur_file
                         if adur > dur:
                             ext = adur - dur
                             fwd = max(0.0, video_dur - et)
@@ -983,6 +1020,7 @@ class JianyingDraftManager:
                         else:
                             new_start = st
                             new_dur = dur
+                        narr_resolved = str(narr_used.resolve()) if narr_used.exists() else str(narr_used)
                         timeline_items.append({
                             "kind": "original",
                             "duration_us": _s_to_us(new_dur),
@@ -990,8 +1028,10 @@ class JianyingDraftManager:
                             "text": text,
                             "subtitle": subtitle,
                             "mute": True,
-                            "overlay_video_path": str(ov_out),
-                            "overlay_duration_us": _s_to_us(adur),
+                            "overlay_video_path": None,
+                            "overlay_duration_us": 0,
+                            "narration_path": narr_resolved,
+                            "narration_duration_us": _s_to_us(adur),
                         })
                     try:
                         base = 40
@@ -1113,6 +1153,8 @@ class JianyingDraftManager:
                             "mute": False,
                             "overlay_video_path": None,
                             "overlay_duration_us": 0,
+                            "narration_path": None,
+                            "narration_duration_us": 0,
                         })
                     else:
                         tts_out = assets_audio_dir / f"seg_{idx:04d}.mp3"
@@ -1122,25 +1164,13 @@ class JianyingDraftManager:
                         if not res:
                             raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
                         narr_used = tts_out
-                        ov_out = assets_video_dir / f"overlay_seg_{idx:04d}.mp4"
-                        ok_ov = await _gen_blank_video_with_audio(
-                            int(meta.get("width") or 1920),
-                            int(meta.get("height") or 1080),
-                            float(meta.get("fps") or 30.0),
-                            narr_used,
-                            ov_out,
-                            scope=JianyingDraftManager.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            cancel_event=cancel_event,
-                        )
-                        if not ok_ov:
-                            raise RuntimeError(f"生成叠加视频失败: {idx}")
-                        adur = _try_parse_float(res.get("duration"))
+                        trim_out = assets_audio_dir / f"seg_{idx:04d}_trim.mp3"
+                        ok_trim = await _trim_audio_silence(narr_used, trim_out)
+                        if ok_trim:
+                            narr_used = trim_out
+                        adur = _probe_audio_duration(narr_used) or 0.0
                         if adur <= 0.0:
-                            adur = _probe_audio_duration(narr_used) or 0.0
-                        if adur <= 0.0:
-                            adur = float((_probe_video_meta(ov_out).get("duration") or 0.0))
+                            adur = _try_parse_float(res.get("duration"))
                         if adur <= 0.0:
                             raise RuntimeError(f"无法获取配音时长: {idx}")
                         if adur > dur:
@@ -1159,6 +1189,7 @@ class JianyingDraftManager:
                         else:
                             new_start = st
                             new_dur = dur
+                        narr_resolved = str(narr_used.resolve()) if narr_used.exists() else str(narr_used)
                         timeline_items.append({
                             "kind": "original",
                             "duration_us": _s_to_us(new_dur),
@@ -1166,8 +1197,10 @@ class JianyingDraftManager:
                             "text": text,
                             "subtitle": subtitle,
                             "mute": True,
-                            "overlay_video_path": str(ov_out),
-                            "overlay_duration_us": _s_to_us(adur),
+                            "overlay_video_path": None,
+                            "overlay_duration_us": 0,
+                            "narration_path": narr_resolved,
+                            "narration_duration_us": _s_to_us(adur),
                         })
                     try:
                         base = 50
@@ -1226,6 +1259,15 @@ class JianyingDraftManager:
                             v["path"] = str(new_p)
                         except Exception:
                             pass
+                    auds = list(mats.get("audios") or [])
+                    for a in auds:
+                        try:
+                            name = Path(str(a.get("path") or "")).name
+                            new_p = dest_dir / "assets" / "audio" / name
+                            a["path"] = str(new_p)
+                        except Exception:
+                            pass
+                    mats["audios"] = auds
                     data["materials"] = mats
                     info_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 meta_path = dest_dir / "draft_meta_info.json"
