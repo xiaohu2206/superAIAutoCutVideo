@@ -406,6 +406,8 @@ export function useTrimVideoModal({ isOpen, projectId, videoPath, onClose, getVi
     const dur = Number.isFinite(v.duration) ? v.duration : 0;
     seekDebugLog("video/loadedmetadata", { duration: v.duration, durationMs: Math.max(0, Math.round(dur * 1000)), src: v.currentSrc || v.src });
     setDurationMs(Math.max(0, Math.round(dur * 1000)));
+    // preload="metadata" 下部分环境很晚才触发 loadeddata；有合法时长即可播放，由 play() 继续缓冲
+    setIsVideoLoading(false);
   }, [getVideoEl]);
 
   const onTimeUpdate = useCallback(() => {

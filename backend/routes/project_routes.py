@@ -1166,6 +1166,9 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
+    # 先尝试 moov 前置（仅 mp4/mov），再按需转码为 H.264+yuv420p+AAC 的 MP4，避免 WebView2 对 HEVC/10bit/非 MP4 容器黑屏
+    await remux_faststart(out_path)
+    out_path = await video_processor.normalize_upload_for_web_preview(out_path)
     await remux_faststart(out_path)
     try:
         size = out_path.stat().st_size
