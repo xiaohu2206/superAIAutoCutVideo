@@ -1,5 +1,6 @@
 import { KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { TauriCommands } from "@/services/clients";
 import type { TtsEngineConfig, TtsTestResult } from "../../types";
 
 interface Props {
@@ -106,14 +107,17 @@ export const TtsCredentialForm: React.FC<Props> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm text-gray-700">SecretId</label>
-              <a
-                href="https://console.cloud.tencent.com/cam/capi"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+              <button
+                type="button"
+                onClick={() =>
+                  TauriCommands.openExternalLink(
+                    "https://console.cloud.tencent.com/cam/capi",
+                  )
+                }
+                className="text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
               >
                 获取SecretId
-              </a>
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <input

@@ -216,19 +216,18 @@ class ExtractSceneService:
 
                 subtitle_path = getattr(current_p, "subtitle_path", None)
                 subtitle_source = getattr(current_p, "subtitle_source", None)
-                subtitle_status = getattr(current_p, "subtitle_status", None)
-                
-                if not subtitle_path:
+
+                if not subtitle_path and subtitle_source == "user":
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,
                         task_id=task_id,
                         status="failed",
-                        message="镜头分析失败: 没有字幕信息，请先上传或提取字幕",
+                        message="镜头分析失败: 未找到上传的字幕，请先上传字幕文件",
                     )
                     return
-                
-                if subtitle_source == "user":
+
+                if subtitle_source == "user" and subtitle_path:
                     subtitle_abs_path = _resolve_path(subtitle_path)
                     if not subtitle_abs_path.exists():
                         task_progress_store.set_state(
@@ -272,12 +271,9 @@ class ExtractSceneService:
                         itn=itn,
                         hotwords=hotwords,
                     )
-                    if split_from_cache:
-                        asyncio.create_task(extract_subtitle_service.extract_subtitle(**sub_kw))
-                    else:
-                        sub_task = asyncio.create_task(
-                            extract_subtitle_service.extract_subtitle(**sub_kw)
-                        )
+                    sub_task = asyncio.create_task(
+                        extract_subtitle_service.extract_subtitle(**sub_kw)
+                    )
 
                 if split_from_cache:
                     optimized_scenes, fps, total_frames = split_loaded
@@ -289,6 +285,39 @@ class ExtractSceneService:
                         progress=88,
                         message="复用已保存的镜头分割，跳过模型检测...",
                     )
+                    if sub_task:
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=88,
+                            message="等待字幕完成以优化镜头...",
+                        )
+                        try:
+                            await sub_task
+                        except Exception as e:
+                            logger.warning("字幕提取失败，将不使用字幕优化镜头合并：%s", e)
+                        current_p = projects_store.get_project(project_id)
+                        try:
+                            scenes_np = np.array(
+                                [
+                                    [int(s["start_frame"]), int(s["end_frame"])]
+                                    for s in optimized_scenes
+                                ],
+                                dtype=np.int64,
+                            )
+                            optimized_scenes = self._optimize_scenes(scenes_np, fps, current_p)
+                            self._save_scenes_split_cache(
+                                project_id,
+                                video_abs_path,
+                                getattr(current_p, "video_path", None),
+                                fps,
+                                total_frames,
+                                optimized_scenes,
+                            )
+                        except Exception as e:
+                            logger.warning("根据字幕重新合并镜头失败: %s", e)
                 else:
                     # 2. 开始提取镜头（TransNetV2 + 字幕优化后写入 scenes_split 缓存）
                     task_progress_store.set_state(

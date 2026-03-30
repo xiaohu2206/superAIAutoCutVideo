@@ -412,20 +412,30 @@ class JianyingDraftManager:
         now_us = int(time.time() * 1_000_000)
         original_meta = _probe_video_meta(source_video)
         vid_id = uuid.uuid4().hex
-        speed_id = uuid.uuid4().hex
         video_materials: List[dict] = []
         video_materials.append(JianyingDraftManager._make_video_material(vid_id, source_video))
+        vid_duration_us = int(video_materials[0].get("duration") or 0)
         overlay_materials_map: Dict[str, str] = {}
         overlay_track_segments: List[dict] = []
-        speed_materials = [{"curve_speed": None, "id": speed_id, "mode": 0, "speed": 1, "type": "speed"}]
+        speed_materials: List[dict] = []
         segments: List[dict] = []
         timeline_cursor_us = 0
         for item in timeline_items:
             duration_us = int(item["duration_us"])
             if duration_us <= 0:
                 continue
+            source_start_us = max(0, int(item["source_start_us"]))
+            if vid_duration_us > 0:
+                if source_start_us >= vid_duration_us:
+                    continue
+                max_from_src = max(0, vid_duration_us - source_start_us)
+                if duration_us > max_from_src:
+                    duration_us = max_from_src
+                if duration_us <= 0:
+                    continue
+            speed_id = uuid.uuid4().hex
+            speed_materials.append({"curve_speed": None, "id": speed_id, "mode": 0, "speed": 1, "type": "speed"})
             material_id = vid_id
-            source_start_us = int(item["source_start_us"])
             text = str(item.get("subtitle") or item.get("text") or "").strip()
             seg_obj = {
                 "enable_adjust": True,
@@ -464,6 +474,8 @@ class JianyingDraftManager:
             ov_path = item.get("overlay_video_path")
             ov_dur_us = int(item.get("overlay_duration_us") or 0)
             if ov_path and ov_dur_us > 0:
+                # 叠加轨时长必须与主轨该片段一致；否则会伸入下一段时间轴，剪映拖动/改时长易卡死
+                ov_target_us = min(ov_dur_us, duration_us)
                 k = str(ov_path)
                 if k not in overlay_materials_map:
                     mat_id = uuid.uuid4().hex
@@ -476,6 +488,8 @@ class JianyingDraftManager:
                         pass
                 mat_id = overlay_materials_map.get(k)
                 if mat_id:
+                    ov_speed_id = uuid.uuid4().hex
+                    speed_materials.append({"curve_speed": None, "id": ov_speed_id, "mode": 0, "speed": 1, "type": "speed"})
                     overlay_track_segments.append({
                         "enable_adjust": True,
                         "enable_color_correct_adjust": False,
@@ -491,12 +505,13 @@ class JianyingDraftManager:
                         "visible": True,
                         "id": uuid.uuid4().hex,
                         "material_id": mat_id,
-                        "target_timerange": {"start": timeline_cursor_us, "duration": ov_dur_us},
+                        "target_timerange": {"start": timeline_cursor_us, "duration": ov_target_us},
                         "common_keyframes": [],
                         "keyframe_refs": [],
-                        "source_timerange": {"start": 0, "duration": ov_dur_us},
+                        "source_timerange": {"start": 0, "duration": ov_target_us},
                         "speed": 1,
                         "volume": 1,
+                        "extra_material_refs": [ov_speed_id],
                         "clip": {
                             "alpha": 0,
                             "flip": {"horizontal": False, "vertical": False},

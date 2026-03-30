@@ -1,5 +1,6 @@
 import { KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { TauriCommands } from "@/services/clients";
 import type { TtsEngineConfig, TtsTestResult } from "../../types";
 
 interface Props {
@@ -75,14 +76,17 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
             <label className="block text-sm text-gray-700">
               DashScope API Key
             </label>
-            <a
-              href="https://bailian.console.aliyun.com/cn-beijing/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+            <button
+              type="button"
+              onClick={() =>
+                TauriCommands.openExternalLink(
+                  "https://bailian.console.aliyun.com/cn-beijing/",
+                )
+              }
+              className="text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
             >
               获取API Key
-            </a>
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <input
