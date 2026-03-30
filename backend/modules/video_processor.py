@@ -929,9 +929,77 @@ class VideoProcessor:
             if not v:
                 logger.warning("normalize_upload_for_web_preview: 无视频轨，跳过: %s", path)
                 return path
+            # 1) 完全兼容：直接跳过
             if not self._upload_needs_web_transcode(path, v, a):
                 logger.info("normalize_upload_for_web_preview: 已兼容 Web 预览，跳过: %s", path.name)
                 return path
+
+            # 2) 仅“容器不兼容”，但码流已兼容：优先 remux 成 MP4（不重编码，速度极快）
+            #    典型：mkv/avi 内部其实是 h264(yuv420p) + aac
+            suf = path.suffix.lower()
+            vcodec = (v.get("codec_name") or "").lower()
+            pix = (v.get("pix_fmt") or "").lower()
+            acodec = (a.get("codec_name") or "").lower() if a else ""
+            video_codec_ok = vcodec in ("h264", "avc")
+            pix_ok = (not pix) or (pix in ("yuv420p", "yuvj420p")) or (("420" in pix or "j420" in pix) and ("p10" not in pix))
+            audio_codec_ok = (not a) or (acodec in ("aac", "mp3"))
+            if suf not in self._WEB_PREVIEW_CONTAINERS and video_codec_ok and pix_ok and audio_codec_ok:
+                tmp_out = path.parent / f".{path.stem}_remux_{uuid.uuid4().hex[:10]}.mp4"
+                try:
+                    if tmp_out.exists():
+                        tmp_out.unlink()
+                except Exception:
+                    pass
+                out_final = path.with_suffix(".mp4")
+                cmd_remux: List[str] = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-nostdin",
+                    "-i",
+                    str(path),
+                    "-map",
+                    "0:v:0",
+                ]
+                if a:
+                    cmd_remux.extend(["-map", "0:a:0"])
+                else:
+                    cmd_remux.append("-an")
+                cmd_remux.extend(["-c", "copy", "-movflags", "+faststart", "-y", str(tmp_out)])
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_remux,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW,
+                )
+                _stdout, stderr = await proc.communicate()
+                if proc.returncode == 0 and tmp_out.exists() and tmp_out.stat().st_size > 0:
+                    try:
+                        try:
+                            if path.exists():
+                                path.unlink()
+                        except Exception:
+                            pass
+                        os.replace(str(tmp_out), str(out_final))
+                        logger.info("normalize_upload_for_web_preview: remux 为 Web 预览 MP4: %s", out_final.name)
+                        return out_final
+                    except Exception as e:
+                        logger.error("normalize_upload_for_web_preview remux 替换文件失败: %s", e)
+                        try:
+                            if tmp_out.exists():
+                                tmp_out.unlink()
+                        except Exception:
+                            pass
+                        return path
+                err = (stderr or b"").decode(errors="ignore").strip()
+                logger.warning("normalize_upload_for_web_preview remux 失败，转码回退: %s | %s", path, err[:500])
+                try:
+                    if tmp_out.exists():
+                        tmp_out.unlink()
+                except Exception:
+                    pass
+
             _, enc_args = await self._pick_fast_encoder()
             tmp_out = path.parent / f".{path.stem}_web_{uuid.uuid4().hex[:10]}.mp4"
             try:
@@ -958,7 +1026,12 @@ class VideoProcessor:
             cmd.extend(enc_args)
             cmd.extend(["-pix_fmt", "yuv420p"])
             if a:
-                cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ac", "2"])
+                # 音频如果已是 AAC/MP3，直接 copy 可明显提速；否则转 AAC 保证兼容
+                ac = (a.get("codec_name") or "").lower()
+                if ac in ("aac", "mp3"):
+                    cmd.extend(["-c:a", "copy"])
+                else:
+                    cmd.extend(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"])
             cmd.extend(["-movflags", "+faststart", "-y", str(tmp_out)])
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

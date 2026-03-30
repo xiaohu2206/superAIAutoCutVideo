@@ -78,9 +78,25 @@ class VideoModelConfigManager:
                         self.configs[config_id] = VideoModelConfig(**config_data)
                     except Exception as e:
                         logger.error(f"加载视频分析模型配置 {config_id} 失败: {e}")
+
+                # 迁移旧的 DashScope 非兼容模式地址（历史默认写错会导致 404）
+                migrated = False
+                old_qwen_url = "https://dashscope.aliyuncs.com/api/v1/chat/completions"
+                new_qwen_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+                for cid, cfg in list(self.configs.items()):
+                    try:
+                        if cfg.provider == "qwen" and (cfg.base_url or "").rstrip("/") == old_qwen_url:
+                            self.configs[cid] = cfg.copy(update={"base_url": new_qwen_url})
+                            migrated = True
+                            logger.info(f"自动迁移Qwen base_url: {cid}")
+                    except Exception:
+                        continue
                 
                 # 检查并添加缺失的默认配置
                 self._ensure_default_configs()
+
+                if migrated:
+                    self.save_configs()
                 
                 logger.info(f"成功加载 {len(self.configs)} 个视频分析模型配置")
             else:
@@ -121,7 +137,7 @@ class VideoModelConfigManager:
                 'config': VideoModelConfig(
                     provider='qwen',
                     api_key='xxx',
-                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
+                    base_url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
                     model_name='qwen3-vl-flash',
                     description='通义千问视频分析模型',
                     enabled=False
@@ -193,7 +209,7 @@ class VideoModelConfigManager:
                 'config': VideoModelConfig(
                     provider='qwen',
                     api_key='xxx',
-                    base_url='https://dashscope.aliyuncs.com/api/v1/chat/completions',
+                    base_url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
                     model_name='qwen3-vl-flash',
                     description='通义千问视频分析模型',
                     enabled=False

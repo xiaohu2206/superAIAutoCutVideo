@@ -519,7 +519,8 @@ foreach ($variant in $variants) {
     $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu128" }
     $torchAlreadyOk = $false
     try {
-      $vers = & $venvPy "-c" "import torch, torchvision, torchaudio; print(torch.__version__); print(torchvision.__version__); print(torchaudio.__version__)" 2>$null
+      # torchaudio 在某些镜像源可能没有 +cuXXX 轮子；这里以 torch/torchvision 的 CUDA tag 判断是否需要重装
+      $vers = & $venvPy "-c" "import torch, torchvision; print(torch.__version__); print(torchvision.__version__)" 2>$null
       if ($LASTEXITCODE -eq 0) {
         $versText = ($vers | Out-String)
         if ($versText -match [regex]::Escape($desiredTag)) {
@@ -567,6 +568,10 @@ foreach ($variant in $variants) {
         if ($LASTEXITCODE -ne 0) {
           Info "Official PyTorch index failed; fallback to Aliyun wheels (-f)"
           & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu128/" "--extra-index-url" "$env:PIP_INDEX_URL"
+        }
+        if ($LASTEXITCODE -ne 0) {
+          Info "Aliyun cu128 wheels missing/blocked; fallback to PyPI torchaudio==2.7.1 (CPU wheel)"
+          & $venvPy "-m" "pip" "install" "torchaudio==2.7.1" "--extra-index-url" "$env:PIP_INDEX_URL"
         }
       }
       if ($LASTEXITCODE -ne 0) { throw "Torchaudio install failed (code $LASTEXITCODE)" }

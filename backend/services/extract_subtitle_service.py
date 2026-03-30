@@ -13,6 +13,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
+from modules.app_paths import (
+    app_settings_file,
+    data_base_dir,
+    normalize_path_str,
+    user_data_dir,
+)
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.fun_asr_service import fun_asr_service
@@ -50,24 +56,61 @@ def _to_web_path(p: Path) -> str:
     return "/uploads/" + str(rel).replace("\\", "/")
 
 
+def _uploads_roots_for_resolve() -> List[Path]:
+    """
+    与 main.get_app_paths / app_paths 逻辑对齐，遍历可能的 uploads 根目录。
+    避免项目里存的 /uploads/... 与实际落盘目录（仓库 uploads、用户目录 uploads）不一致时读不到字幕。
+    """
+    roots: List[Path] = []
+    seen: set[str] = set()
+
+    def add(p: Optional[Path]) -> None:
+        if p is None:
+            return
+        try:
+            pp = Path(p).expanduser()
+            key = str(pp)
+            if key not in seen:
+                seen.add(key)
+                roots.append(pp)
+        except Exception:
+            return
+
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
+    if env:
+        add(Path(env))
+    try:
+        sf = app_settings_file()
+        if sf.exists():
+            data = json.loads(sf.read_text(encoding="utf-8"))
+            root = normalize_path_str(str(data.get("uploads_root") or ""))
+            if root:
+                add(Path(root))
+    except Exception:
+        pass
+    add(_backend_root_dir() / "uploads")
+    add(data_base_dir() / "uploads")
+    add(user_data_dir() / "uploads")
+    return roots
+
+
 def _resolve_path(path_str: str) -> Path:
     s = (path_str or "").strip()
     if not s:
         return Path("")
+    s = normalize_path_str(s)
     s_norm = s.replace("\\", "/")
+    if s_norm.lower().startswith("file:"):
+        s_norm = s_norm.split("://", 1)[-1].lstrip("/")
+        if len(s_norm) > 1 and s_norm[1] == ":":
+            s_norm = s_norm[:2] + "/" + s_norm[2:]
     if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
         rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        candidates: List[Path] = []
-        try:
-            if env:
-                candidates.append(Path(env) / rel)
-        except Exception:
-            pass
-        try:
-            candidates.append((_backend_root_dir() / "uploads") / rel)
-        except Exception:
-            pass
+        rel = rel.lstrip("/")
+        if not rel:
+            return Path("")
+        roots = _uploads_roots_for_resolve()
+        candidates = [b / rel for b in roots]
         for c in candidates:
             try:
                 if c.exists():
@@ -75,6 +118,27 @@ def _resolve_path(path_str: str) -> Path:
             except Exception:
                 pass
         return candidates[0] if candidates else Path(rel)
+    if s_norm.lower().startswith("uploads/"):
+        rel = s_norm[len("uploads/") :].lstrip("/")
+        roots = _uploads_roots_for_resolve()
+        for base in roots:
+            c = base / rel
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return (roots[0] / rel) if roots else Path(s)
+    if any(s_norm.startswith(p) for p in ("subtitles/", "videos/", "audios/", "analyses/")):
+        roots = _uploads_roots_for_resolve()
+        for base in roots:
+            c = base / s_norm
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return (roots[0] / s_norm) if roots else Path(s)
     try:
         p = Path(s)
         if p.is_absolute():

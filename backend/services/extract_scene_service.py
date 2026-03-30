@@ -185,9 +185,26 @@ class ExtractSceneService:
             
         # 检查是否已有任务在运行
         running = task_progress_store.get_latest_running(self.SCOPE, project_id)
-        if running and not force:
-            if running.get("status") in ("pending", "processing"):
-                return running
+        if running:
+            r_status = str(running.get("status") or "").strip().lower()
+            r_task_id = running.get("task_id")
+            if not force:
+                if r_status in ("pending", "processing", "running"):
+                    return running
+            else:
+                # force=True：二次点击时取消旧任务并重新执行
+                if r_task_id and r_status in ("pending", "processing", "running"):
+                    try:
+                        await task_cancel_store.cancel(self.SCOPE, project_id, str(r_task_id))
+                    except Exception:
+                        pass
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=str(r_task_id),
+                        status="cancelled",
+                        message="已取消旧任务，准备重新执行",
+                    )
 
         # 生成任务ID
         if not task_id:
@@ -204,14 +221,14 @@ class ExtractSceneService:
         )
 
         async def _run():
-            sub_task = None
             try:
                 current_p = projects_store.get_project(project_id)
                 video_abs_path = _resolve_path(current_p.video_path)
                 if not video_abs_path.exists():
                     raise FileNotFoundError(f"视频文件不存在: {current_p.video_path}")
 
-                split_loaded = self._try_load_scenes_split(project_id, video_abs_path)
+                # force=True 时忽略已保存的镜头分割缓存，强制重新分析
+                split_loaded = None if force else self._try_load_scenes_split(project_id, video_abs_path)
                 split_from_cache = split_loaded is not None
 
                 subtitle_path = getattr(current_p, "subtitle_path", None)
@@ -227,111 +244,99 @@ class ExtractSceneService:
                     )
                     return
 
-                if subtitle_source == "user" and subtitle_path:
-                    subtitle_abs_path = _resolve_path(subtitle_path)
-                    if not subtitle_abs_path.exists():
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="failed",
-                            message="镜头分析失败: 本地上传的字幕文件不存在",
-                        )
-                        return
-                    parsed_subs = parse_srt(subtitle_abs_path)
-                    if not parsed_subs or len(parsed_subs) == 0:
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="failed",
-                            message="镜头分析失败: 本地字幕文件格式错误或无有效字幕，请检查SRT格式",
-                        )
-                        return
-                    logger.info(f"Using user-uploaded subtitle for scene analysis: {subtitle_path}, valid segments: {len(parsed_subs)}")
-                
-                should_start_subtitle = subtitle_source != "user" and not subtitle_path
-                if should_start_subtitle:
-                    task_progress_store.set_state(
-                        scope=self.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        status="processing",
-                        progress=5,
-                        message="正在提取字幕（并行执行）...",
-                    )
-                    sub_task_id = f"sub_{task_id}"
-                    sub_kw: Dict[str, Any] = dict(
-                        project_id=project_id,
-                        force=False,
-                        task_id=sub_task_id,
-                        asr_provider=asr_provider,
-                        asr_model_key=asr_model_key,
-                        asr_language=asr_language,
-                        itn=itn,
-                        hotwords=hotwords,
-                    )
-                    sub_task = asyncio.create_task(
-                        extract_subtitle_service.extract_subtitle(**sub_kw)
-                    )
+                async def _ensure_subtitle_ready() -> str:
+                    """
+                    确保字幕文件存在且可解析到有效内容。
+                    - 支持用户上传字幕（subtitle_source=user）
+                    - 支持自动提取字幕（无 subtitle_path 时触发）
 
-                if split_from_cache:
-                    optimized_scenes, fps, total_frames = split_loaded
-                    task_progress_store.set_state(
-                        scope=self.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        status="processing",
-                        progress=88,
-                        message="复用已保存的镜头分割，跳过模型检测...",
-                    )
-                    if sub_task:
+                    返回：项目上的 subtitle_path（web path）
+                    """
+                    p0 = projects_store.get_project(project_id)
+                    sp = getattr(p0, "subtitle_path", None)
+                    ss = getattr(p0, "subtitle_source", None)
+
+                    # 用户上传字幕：直接校验即可
+                    if ss == "user" and sp:
+                        abs_p = _resolve_path(sp)
+                        if not abs_p.exists():
+                            raise FileNotFoundError("本地上传的字幕文件不存在")
+                        subs = parse_srt(abs_p)
+                        if not subs:
+                            raise ValueError("本地字幕文件格式错误或无有效字幕，请检查SRT格式")
+                        logger.info(
+                            "Using user-uploaded subtitle for scene analysis: %s, valid segments: %d",
+                            sp,
+                            len(subs),
+                        )
+                        return sp
+
+                    # 非用户字幕：若没有字幕路径则并发触发字幕提取
+                    if not sp:
                         task_progress_store.set_state(
                             scope=self.SCOPE,
                             project_id=project_id,
                             task_id=task_id,
                             status="processing",
-                            progress=88,
-                            message="等待字幕完成以优化镜头...",
+                            progress=5,
+                            message="正在提取字幕...",
                         )
-                        try:
-                            await sub_task
-                        except Exception as e:
-                            logger.warning("字幕提取失败，将不使用字幕优化镜头合并：%s", e)
-                        current_p = projects_store.get_project(project_id)
-                        try:
-                            scenes_np = np.array(
-                                [
-                                    [int(s["start_frame"]), int(s["end_frame"])]
-                                    for s in optimized_scenes
-                                ],
-                                dtype=np.int64,
-                            )
-                            optimized_scenes = self._optimize_scenes(scenes_np, fps, current_p)
-                            self._save_scenes_split_cache(
-                                project_id,
-                                video_abs_path,
-                                getattr(current_p, "video_path", None),
-                                fps,
-                                total_frames,
-                                optimized_scenes,
-                            )
-                        except Exception as e:
-                            logger.warning("根据字幕重新合并镜头失败: %s", e)
-                else:
-                    # 2. 开始提取镜头（TransNetV2 + 字幕优化后写入 scenes_split 缓存）
+                        sub_task_id = f"sub_{task_id}"
+                        sub_kw: Dict[str, Any] = dict(
+                            project_id=project_id,
+                            force=False,
+                            task_id=sub_task_id,
+                            asr_provider=asr_provider,
+                            asr_model_key=asr_model_key,
+                            asr_language=asr_language,
+                            itn=itn,
+                            hotwords=hotwords,
+                        )
+                        await extract_subtitle_service.extract_subtitle(**sub_kw)
+                        p1 = projects_store.get_project(project_id)
+                        sp = getattr(p1, "subtitle_path", None)
+
+                    if not sp:
+                        raise ValueError("无法获取字幕信息（未生成字幕文件），请先提取字幕或上传字幕")
+
+                    abs_p = _resolve_path(sp)
+                    if not abs_p.exists():
+                        raise FileNotFoundError("字幕文件不存在")
+                    subs = parse_srt(abs_p)
+                    if not subs:
+                        raise ValueError("未能从字幕中解析到有效内容")
+                    return sp
+
+                async def _split_scenes() -> Tuple[List[Dict[str, Any]], float, int]:
+                    """
+                    获取基础镜头分割（不依赖字幕），可能来自缓存或模型预测。
+                    返回：optimized_scenes(基础)、fps、total_frames
+                    """
+                    nonlocal split_loaded, split_from_cache
+
+                    if split_from_cache:
+                        cached_scenes, fps_cached, total_frames_cached = split_loaded
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=40,
+                            message="复用已保存的镜头分割，跳过模型检测...",
+                        )
+                        return cached_scenes, fps_cached, total_frames_cached
+
+                    # 开始提取镜头（TransNetV2）
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,
                         task_id=task_id,
                         status="processing",
                         progress=10,
-                        message="正在加载模型...",
+                        message="正在加载镜头模型...",
                     )
 
-                    # 在线程中运行模型预测，避免阻塞 asyncio loop
                     loop = asyncio.get_running_loop()
-
                     model = self._get_model()
                     chunk_seconds = 180.0
                     overlap_frames = 25
@@ -358,14 +363,17 @@ class ExtractSceneService:
                         overlap_frames = 0
                     if chunk_seconds <= 0:
                         chunk_seconds = 180.0
+
                     single_frame_predictions = None
                     import cv2
+
                     cap0 = cv2.VideoCapture(str(video_abs_path))
                     fps0 = cap0.get(cv2.CAP_PROP_FPS)
                     total_frames0 = int(cap0.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
                     cap0.release()
                     if fps0 <= 0:
                         fps0 = 25.0
+
                     if total_frames0 <= 0:
                         def cb_tmp(pct):
                             mapped_pct = 10 + (pct * 0.8)
@@ -379,12 +387,14 @@ class ExtractSceneService:
                             )
                             if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                 raise asyncio.CancelledError("任务已取消")
+
                         _, sp_tmp, _ = await loop.run_in_executor(
                             None, lambda: model.predict_video(str(video_abs_path), cb_tmp)
                         )
                         if sp_tmp is None or len(sp_tmp) == 0:
                             raise ValueError("未能从视频中解码任何帧，无法进行镜头分析")
                         single_frame_predictions = sp_tmp
+                        total_frames0 = len(single_frame_predictions)
                     else:
                         chunk_frames = max(1, int(round(chunk_seconds * fps0)))
                         starts = list(range(0, total_frames0, chunk_frames))
@@ -396,6 +406,7 @@ class ExtractSceneService:
                             chunk_core[i] = (ef - sf)
                         progress_map: Dict[int, float] = {i: 0.0 for i in chunk_core}
                         prog_lock = threading.Lock()
+
                         def _update_overall():
                             with prog_lock:
                                 acc = 0.0
@@ -410,12 +421,14 @@ class ExtractSceneService:
                                 task_id,
                                 "processing",
                                 mapped_pct,
-                                f"正在分析镜头: {overall * 100.0:.1f}%"
+                                f"正在分析镜头: {overall * 100.0:.1f}%",
                             )
+
                         def _on_chunk_progress(idx: int, pct: float):
                             with prog_lock:
                                 progress_map[idx] = pct
                             _update_overall()
+
                         async def run_chunk(si, sf, ef, asf, aef):
                             if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                 raise asyncio.CancelledError("任务已取消")
@@ -437,12 +450,9 @@ class ExtractSceneService:
                                 dl = 0
                             if dr < 0:
                                 dr = 0
-                            pred = sp[int(dl):int(dl)+int(keep_l)]
+                            pred = sp[int(dl):int(dl) + int(keep_l)]
                             if len(pred) < keep_l:
-                                if len(pred) > 0:
-                                    pad_val = float(pred[-1])
-                                else:
-                                    pad_val = 0.0
+                                pad_val = float(pred[-1]) if len(pred) > 0 else 0.0
                                 pred = np.pad(pred, (0, keep_l - len(pred)), constant_values=pad_val)
                             elif len(pred) > keep_l:
                                 pred = pred[:keep_l]
@@ -450,10 +460,12 @@ class ExtractSceneService:
                                 progress_map[si] = 100.0
                             _update_overall()
                             return si, sf, ef, pred
+
                         pending = set()
                         next_i = 0
                         total_chunks = len(starts)
                         effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
+
                         def _enqueue_more():
                             nonlocal next_i
                             while next_i < total_chunks and len(pending) < effective_concurrency:
@@ -463,6 +475,7 @@ class ExtractSceneService:
                                 aef = min(total_frames0, ef + (overlap_frames if ef < total_frames0 else 0))
                                 pending.add(asyncio.create_task(run_chunk(next_i, sf, ef, asf, aef)))
                                 next_i += 1
+
                         _enqueue_more()
                         processed = 0
                         try:
@@ -470,7 +483,7 @@ class ExtractSceneService:
                                 done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                                 for t in done:
                                     si, sf, ef, pred = t.result()
-                                    final_pred[sf:ef] = pred[:(ef - sf)]
+                                    final_pred[sf:ef] = pred[: (ef - sf)]
                                     processed += (ef - sf)
                                     pct = (processed / max(1, total_core)) * 100.0
                                     mapped_pct = 10 + (pct * 0.8)
@@ -500,77 +513,105 @@ class ExtractSceneService:
                             await asyncio.gather(*pending, return_exceptions=True)
                             raise
                         single_frame_predictions = final_pred
-                    
-                    # 3. 获取场景
+
                     scenes = model.predictions_to_scenes(single_frame_predictions)
-                    # scenes is np.ndarray [[start_frame, end_frame], ...]
-                    
-                    # 4. 优化场景
-                    # 需要 fps 来转换 frame 到 time
-                    import cv2
+
                     cap = cv2.VideoCapture(str(video_abs_path))
                     fps = cap.get(cv2.CAP_PROP_FPS)
                     cap.release()
-                    
                     if fps <= 0:
-                        fps = 25.0 # default fallback
-                    
+                        fps = 25.0
+
                     analysis_dir = _uploads_dir() / "analyses"
                     analysis_dir.mkdir(parents=True, exist_ok=True)
                     raw_scenes = []
                     for idx, (start_f, end_f) in enumerate(scenes, start=1):
                         s_t = float(start_f) / float(fps)
                         e_t = float(end_f) / float(fps)
-                        raw_scenes.append({
-                            "id": idx,
-                            "start_frame": int(start_f),
-                            "end_frame": int(end_f),
-                            "start_time": s_t,
-                            "end_time": e_t,
-                            "time_range": f"{self._format_ts(s_t)} - {self._format_ts(e_t)}",
-                            "subtitle": "无"
-                        })
+                        raw_scenes.append(
+                            {
+                                "id": idx,
+                                "start_frame": int(start_f),
+                                "end_frame": int(end_f),
+                                "start_time": s_t,
+                                "end_time": e_t,
+                                "time_range": f"{self._format_ts(s_t)} - {self._format_ts(e_t)}",
+                                "subtitle": "无",
+                            }
+                        )
                     raw_out_name = f"{project_id}_scenes_raw.json"
                     raw_out_path = analysis_dir / raw_out_name
                     raw_result_data = {
                         "scenes": raw_scenes,
                         "fps": fps,
                         "total_frames": len(single_frame_predictions),
-                        "created_at": datetime.now().isoformat()
+                        "created_at": datetime.now().isoformat(),
                     }
                     with open(raw_out_path, "w", encoding="utf-8") as f:
                         json.dump(raw_result_data, f, ensure_ascii=False, indent=2)
                     raw_web_path = _to_web_path(raw_out_path)
-                    projects_store.update_project(project_id, {
-                        "scenes_raw_path": raw_web_path,
-                        "scenes_raw_updated_at": datetime.now().isoformat()
-                    })
-    
-                    if sub_task:
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="processing",
-                            progress=90,
-                            message="等待字幕完成以优化镜头...",
-                        )
-                        try:
-                            await sub_task
-                        except Exception as e:
-                            logger.warning(f"字幕提取失败，将不使用字幕优化：{e}")
-                        current_p = projects_store.get_project(project_id)
-                    
-                    optimized_scenes = self._optimize_scenes(scenes, fps, current_p)
-                    total_frames = len(single_frame_predictions)
-                    self._save_scenes_split_cache(
+                    projects_store.update_project(
                         project_id,
-                        video_abs_path,
-                        getattr(current_p, "video_path", None),
+                        {"scenes_raw_path": raw_web_path, "scenes_raw_updated_at": datetime.now().isoformat()},
+                    )
+
+                    # 这里返回“基础镜头”(未按字幕合并/补字幕列)，最终优化在字幕就绪后进行
+                    base_scenes_list = [
+                        {"start_frame": int(sf), "end_frame": int(ef)} for (sf, ef) in scenes
+                    ]
+                    scenes_np = np.array([[s["start_frame"], s["end_frame"]] for s in base_scenes_list], dtype=np.int64)
+                    total_frames = len(single_frame_predictions)
+                    # 暂时先用原始场景结构占位，后续 _optimize_scenes 会输出最终 dict 列表
+                    return (
+                        [{"start_frame": int(sf), "end_frame": int(ef)} for (sf, ef) in scenes_np],
                         fps,
                         total_frames,
-                        optimized_scenes,
                     )
+
+                # 并发执行：字幕准备 + 镜头基础分割（缓存/模型）
+                subtitle_task = asyncio.create_task(_ensure_subtitle_ready())
+                split_task = asyncio.create_task(_split_scenes())
+                try:
+                    subtitle_path_ready, split_result = await asyncio.gather(subtitle_task, split_task)
+                except Exception as e:
+                    # 任何一方失败都取消另一方，保证结果一致性
+                    for t in (subtitle_task, split_task):
+                        if not t.done():
+                            try:
+                                t.cancel()
+                            except Exception:
+                                pass
+                    await asyncio.gather(subtitle_task, split_task, return_exceptions=True)
+                    raise e
+
+                # 确保项目上的 subtitle_path 是最新且可用的（_optimize_scenes 读取 project.subtitle_path）
+                projects_store.update_project(project_id, {"subtitle_path": subtitle_path_ready})
+                current_p = projects_store.get_project(project_id)
+
+                base_scenes, fps, total_frames = split_result
+                task_progress_store.set_state(
+                    scope=self.SCOPE,
+                    project_id=project_id,
+                    task_id=task_id,
+                    status="processing",
+                    progress=88,
+                    message="字幕就绪，正在根据字幕优化镜头...",
+                )
+
+                # 统一走 _optimize_scenes（依赖字幕）生成最终结构
+                scenes_np = np.array(
+                    [[int(s["start_frame"]), int(s["end_frame"])] for s in base_scenes],
+                    dtype=np.int64,
+                )
+                optimized_scenes = self._optimize_scenes(scenes_np, fps, current_p)
+                self._save_scenes_split_cache(
+                    project_id,
+                    video_abs_path,
+                    getattr(current_p, "video_path", None),
+                    fps,
+                    total_frames,
+                    optimized_scenes,
+                )
 
                 analysis_dir = _uploads_dir() / "analyses"
                 analysis_dir.mkdir(parents=True, exist_ok=True)
@@ -664,11 +705,6 @@ class ExtractSceneService:
                 )
                 
             except asyncio.CancelledError:
-                try:
-                    if sub_task:
-                        sub_task.cancel()
-                except Exception:
-                    pass
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,

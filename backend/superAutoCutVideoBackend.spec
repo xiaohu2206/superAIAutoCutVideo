@@ -5,7 +5,11 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        # 提示词资源（markdown/json等）：运行时按模块相对路径读取，需要随包分发
+        ('modules/prompts', 'modules/prompts'),
+        ('serviceData', 'serviceData'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
