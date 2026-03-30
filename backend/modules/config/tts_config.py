@@ -349,13 +349,13 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
-            {
-                'provider': 'voxcpm_tts',
-                'display_name': 'VoxCPM(本地)',
-                'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
-                'required_fields': [],
-                'optional_fields': []
-            },
+            # {
+            #     'provider': 'voxcpm_tts',
+            #     'display_name': 'VoxCPM(本地)',
+            #     'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
+            #     'required_fields': [],
+            #     'optional_fields': []
+            # },
             {
                 'provider': 'tencent_tts',
                 'display_name': '腾讯云 TTS',
