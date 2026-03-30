@@ -72,13 +72,14 @@ export const TrimPlayerPanel: React.FC<TrimPlayerPanelProps> = ({
 
   return (
     <div className="lg:col-span-2 space-y-3">
-      <div className="bg-black rounded-lg overflow-hidden aspect-video relative">
+      <div className="bg-black rounded-lg overflow-hidden aspect-video relative isolate min-h-0">
         <video
           ref={videoRef}
           src={srcUrl}
-          className="w-full h-full"
+          className="block w-full h-full max-h-full object-contain relative z-[1] transform-gpu will-change-transform"
           controls={false}
-          preload="metadata"
+          playsInline
+          preload="auto"
           onLoadedMetadata={onLoadedMetadata}
           onLoadStart={onLoadStart}
           onLoadedData={onLoadedData}
@@ -94,12 +95,19 @@ export const TrimPlayerPanel: React.FC<TrimPlayerPanelProps> = ({
           onSeeking={onSeeking}
           onSeeked={onSeeked}
         />
-        {isVideoLoading && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+        {/* 播放中不要用全屏半透明遮罩，WebView2 下易误判为黑屏；缓冲时仅用角标 */}
+        {isVideoLoading && !isPlaying && (
+          <div className="absolute inset-0 z-[2] bg-black/50 flex items-center justify-center pointer-events-none">
             <div className="flex items-center gap-2 text-white text-sm">
               <Loader className="h-4 w-4 animate-spin" />
               视频加载中
             </div>
+          </div>
+        )}
+        {isVideoLoading && isPlaying && (
+          <div className="absolute bottom-2 right-2 z-[2] flex items-center gap-1.5 rounded bg-black/55 px-2 py-1 text-[11px] text-white pointer-events-none">
+            <Loader className="h-3 w-3 animate-spin" />
+            缓冲
           </div>
         )}
       </div>
@@ -109,7 +117,7 @@ export const TrimPlayerPanel: React.FC<TrimPlayerPanelProps> = ({
           <button
             type="button"
             onClick={onTogglePlay}
-            disabled={durationMs <= 0 || isVideoLoading}
+            disabled={!srcUrl.trim() || durationMs <= 0}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
