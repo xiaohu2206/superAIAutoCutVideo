@@ -1087,7 +1087,9 @@ class VideoProcessor:
             return "h264_amf", ["-c:v", "h264_amf"]
         if "libx264" in encoders:
             logger.info("编码器选择: libx264 (CPU)")
-            return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
+            # 上传后“只用于预览”：优先速度，避免让上传接口长时间等待
+            # crf 18 体积/耗时都偏高；改为更快的 veryfast + crf 23（在预览清晰度与速度间更平衡）
+            return "libx264", ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"]
         if "libopenh264" in encoders:
             logger.info("编码器选择: libopenh264 (CPU)")
             return "libopenh264", ["-c:v", "libopenh264", "-b:v", "4M"]
@@ -1106,7 +1108,7 @@ class VideoProcessor:
         seq: List[List[str]] = []
         cpu_seq: List[List[str]] = []
         if "libx264" in names:
-            cpu_seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
         if "libopenh264" in names:
             cpu_seq.append(["-c:v", "libopenh264", "-b:v", "4M"])
         if "h264_mf" in names:
@@ -1114,7 +1116,7 @@ class VideoProcessor:
         if "mpeg4" in names:
             cpu_seq.append(["-c:v", "mpeg4", "-q:v", "4"])
         if not cpu_seq:
-            cpu_seq.append(["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
 
         seq.extend(cpu_seq)
 
