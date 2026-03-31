@@ -286,6 +286,7 @@ class ExtractSubtitleService:
         asr_language: Optional[str] = None,
         itn: bool = True,
         hotwords: Optional[List[str]] = None,
+        funasr_max_concurrency: Optional[int] = None,
     ) -> Dict[str, Any]:
         p: Optional[Project] = projects_store.get_project(project_id)
         if not p:
@@ -450,6 +451,7 @@ class ExtractSubtitleService:
                     hotwords=hotwords_list,
                     device=None,
                     on_progress=_on_progress,
+                    max_concurrency=funasr_max_concurrency,
                 )
             except Exception as e:
                 _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
