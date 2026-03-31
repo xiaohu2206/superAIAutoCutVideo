@@ -22,6 +22,36 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 _FUNASR_DIAG_LOGGED = False
 
 
+def _env_int(name: str) -> Optional[int]:
+    try:
+        v = int(str(os.environ.get(name) or "").strip())
+        if v >= 1:
+            return v
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_funasr_max_concurrency(requested: Optional[int], runtime_device: str) -> int:
+    """
+    Controls how many VAD segments are processed concurrently.
+    - CPU: higher concurrency helps throughput.
+    - CUDA: default low to reduce OOM risk unless user overrides.
+    """
+    env = _env_int("SACV_FUNASR_MAX_CONCURRENCY")
+    if isinstance(requested, int) and requested >= 1:
+        n = requested
+    elif isinstance(env, int) and env >= 1:
+        n = env
+    else:
+        cores = max(1, int(os.cpu_count() or 1))
+        if str(runtime_device or "").startswith("cuda"):
+            n = 2
+        else:
+            n = min(8, cores)
+    return max(1, min(int(n), 32))
+
+
 def _json_dumps_safe(obj: Any) -> str:
     try:
         return json.dumps(obj, ensure_ascii=False, default=str)
@@ -875,6 +905,7 @@ class FunASRService:
         hotwords: Optional[List[str]] = None,
         device: Optional[str] = None,
         on_progress: Optional[Callable[[int, str], None]] = None,
+        max_concurrency: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         await self._load_models(asr_key=model_key, device=device)
         m_asr = cast(Any, self._asr_model)
@@ -911,34 +942,53 @@ class FunASRService:
         tmp.mkdir(parents=True, exist_ok=True)
 
         utterances: List[Dict[str, Any]] = []
+        eff_concurrency = _resolve_funasr_max_concurrency(max_concurrency, str(self._runtime_device or "cpu"))
+        sem = asyncio.Semaphore(eff_concurrency)
         try:
-            for i, (st, et) in enumerate(intervals, start=1):
-                seg_name = f"seg_{i:04d}.wav"
-                seg_path = tmp / seg_name
-                await asyncio.get_running_loop().run_in_executor(None, _extract_segment_to_wav, audio_path, int(st), int(et), seg_path)
+            total = len(intervals)
+            completed = 0
+            completed_lock = asyncio.Lock()
+            loop = asyncio.get_running_loop()
 
-                report(min(90, 10 + int(i / max(1, len(intervals)) * 70)), f"识别中 {i}/{len(intervals)}")
+            async def _process_one(idx: int, st: int, et: int) -> Optional[Dict[str, Any]]:
+                nonlocal completed
+                async with sem:
+                    seg_name = f"seg_{idx:04d}.wav"
+                    seg_path = tmp / seg_name
+                    await loop.run_in_executor(None, _extract_segment_to_wav, audio_path, int(st), int(et), seg_path)
 
-                def _run_asr() -> Any:
-                    return m_asr.generate(
-                        input=[str(seg_path)],
-                        cache={},
-                        batch_size=1,
-                        hotwords=hotwords or [],
-                        language=language,
-                        itn=bool(itn),
-                    )
+                    def _run_asr() -> Any:
+                        return m_asr.generate(
+                            input=[str(seg_path)],
+                            cache={},
+                            batch_size=1,
+                            hotwords=hotwords or [],
+                            language=language,
+                            itn=bool(itn),
+                        )
 
-                res_asr = await asyncio.get_running_loop().run_in_executor(None, _run_asr)
-                text = ""
-                try:
-                    if isinstance(res_asr, list) and res_asr and isinstance(res_asr[0], dict):
-                        text = str(res_asr[0].get("text") or "").strip()
-                except Exception:
+                    res_asr = await loop.run_in_executor(None, _run_asr)
                     text = ""
-                if not text:
-                    continue
-                utterances.append({"start_time": int(st), "end_time": int(et), "text": text})
+                    try:
+                        if isinstance(res_asr, list) and res_asr and isinstance(res_asr[0], dict):
+                            text = str(res_asr[0].get("text") or "").strip()
+                    except Exception:
+                        text = ""
+
+                    async with completed_lock:
+                        completed += 1
+                        pct = min(90, 10 + int(completed / max(1, total) * 70))
+                    report(pct, f"识别中 {completed}/{total}（并发={eff_concurrency}）")
+
+                    if not text:
+                        return None
+                    return {"start_time": int(st), "end_time": int(et), "text": text}
+
+            tasks = [asyncio.create_task(_process_one(i, int(st), int(et))) for i, (st, et) in enumerate(intervals, start=1)]
+            for fut in asyncio.as_completed(tasks):
+                item = await fut
+                if item:
+                    utterances.append(item)
         finally:
             try:
                 if tmp.exists():
@@ -956,6 +1006,7 @@ class FunASRService:
                 pass
 
         report(95, "识别完成")
+        utterances.sort(key=lambda x: (int(x.get("start_time") or 0), int(x.get("end_time") or 0)))
         return utterances
 
     async def run_default_test(

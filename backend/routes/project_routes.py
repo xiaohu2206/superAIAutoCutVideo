@@ -423,6 +423,7 @@ class ExtractSubtitleRequest(BaseModel):
     asr_language: Optional[str] = None
     itn: bool = True
     hotwords: Optional[List[str]] = None
+    funasrMaxConcurrency: Optional[int] = None
     analyzeVision: bool = False
     visionMode: str = "all"
     visionKeyFrames: int = 1
@@ -725,6 +726,7 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
             asr_language=req.asr_language,
             itn=bool(getattr(req, "itn", True)),
             hotwords=req.hotwords,
+            funasr_max_concurrency=getattr(req, "funasrMaxConcurrency", None),
         )
         return {
             "message": "字幕提取成功",
