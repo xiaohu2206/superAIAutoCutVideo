@@ -490,6 +490,48 @@ export function useProjectEditUploadStep(
         return;
       }
       try {
+        // visual 项目：一个按钮同时触发“字幕提取”和“镜头提取”，两条任务各自独立进度/日志。
+        // 字幕提取是长任务（HTTP 会阻塞直到完成），这里采用“发起后不 await”，由 WS 回调驱动进度条。
+        if (options.project.project_type === "visual") {
+          const p = options.project;
+          const canStartSubtitle =
+            !(p.subtitle_source === "user" && Boolean(p.subtitle_path)) &&
+            !extractingSubtitle &&
+            !options.subtitleLoading;
+          if (canStartSubtitle) {
+            let force = true;
+            if (p.subtitle_updated_by_user) {
+              force = window.confirm("字幕已被编辑，重新提取将覆盖修改内容，是否继续？");
+            }
+            if (force) {
+              setExtractingSubtitle(true);
+              setSubtitleExtractProgress(0);
+              setSubtitleExtractLogs([]);
+              const isFun = subtitleAsr.provider === "fun_asr";
+              const subTaskId =
+                globalThis.crypto &&
+                "randomUUID" in globalThis.crypto &&
+                typeof (globalThis.crypto as any).randomUUID === "function"
+                  ? (globalThis.crypto as any).randomUUID()
+                  : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+              void options
+                .extractSubtitle({
+                  force: true,
+                  task_id: subTaskId,
+                  asr_provider: subtitleAsr.provider,
+                  asr_model_key: isFun ? subtitleAsr.modelKey : null,
+                  asr_language: isFun ? subtitleAsr.language : "中文",
+                })
+                .catch((err) => {
+                  // 若 HTTP 本身失败（未进入 WS 流程），及时回收状态
+                  options.showError(err, "提取字幕失败");
+                  setExtractingSubtitle(false);
+                  setSubtitleExtractProgress(0);
+                });
+            }
+          }
+        }
+
         const isFun = subtitleAsr.provider === "fun_asr";
         await options.extractScenes({
           force: true,

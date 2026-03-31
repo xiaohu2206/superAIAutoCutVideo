@@ -18,7 +18,7 @@ import numpy as np
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from services.extract_subtitle_service import extract_subtitle_service, _resolve_path, _uploads_dir, _to_web_path
+from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
 from modules.config.video_model_config import video_model_config_manager
@@ -35,6 +35,58 @@ class ExtractSceneService:
     def __init__(self):
         self._model: Optional[Any] = None
         self._model_lock = asyncio.Lock()
+
+    async def _wait_for_subtitle_path(
+        self,
+        project_id: str,
+        task_id: str,
+        timeout_sec: float = 15 * 60,
+    ) -> Optional[str]:
+        """
+        等待项目字幕落盘（主要用于：字幕提取已在进行中，但镜头提取希望尽量使用字幕做优化）。
+        注意：这里不会主动触发字幕提取，确保“镜头/字幕”两条逻辑解耦。
+        """
+        start = asyncio.get_running_loop().time()
+        sleep_s = 0.6
+        last_msg_at = 0.0
+        while True:
+            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                raise asyncio.CancelledError("任务已取消")
+            p = projects_store.get_project(project_id)
+            if not p:
+                return None
+            sp = getattr(p, "subtitle_path", None)
+            status = str(getattr(p, "subtitle_status", "") or "").strip().lower()
+            if sp:
+                # 只有当字幕文件真实落盘且非空时才认为就绪
+                try:
+                    abs_sp = _resolve_path(sp)
+                    if abs_sp.exists() and abs_sp.stat().st_size > 0:
+                        return str(sp)
+                except Exception:
+                    # 若路径异常则继续等待或超时
+                    pass
+            now = asyncio.get_running_loop().time()
+            if now - start >= float(timeout_sec or 0):
+                return None
+            # 仅在“正在提取中”时等待，否则快速退出
+            if status not in {"extracting", "processing", "running"}:
+                return None
+            if now - last_msg_at >= 2.0:
+                last_msg_at = now
+                try:
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=80,
+                        message="等待字幕提取完成以优化镜头...",
+                    )
+                except Exception:
+                    pass
+            await asyncio.sleep(sleep_s)
+            sleep_s = min(2.0, sleep_s * 1.25)
 
     def _get_model(self):
         if self._model:
@@ -230,82 +282,6 @@ class ExtractSceneService:
                 # force=True 时忽略已保存的镜头分割缓存，强制重新分析
                 split_loaded = None if force else self._try_load_scenes_split(project_id, video_abs_path)
                 split_from_cache = split_loaded is not None
-
-                subtitle_path = getattr(current_p, "subtitle_path", None)
-                subtitle_source = getattr(current_p, "subtitle_source", None)
-
-                if not subtitle_path and subtitle_source == "user":
-                    task_progress_store.set_state(
-                        scope=self.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        status="failed",
-                        message="镜头分析失败: 未找到上传的字幕，请先上传字幕文件",
-                    )
-                    return
-
-                async def _ensure_subtitle_ready() -> str:
-                    """
-                    确保字幕文件存在且可解析到有效内容。
-                    - 支持用户上传字幕（subtitle_source=user）
-                    - 支持自动提取字幕（无 subtitle_path 时触发）
-
-                    返回：项目上的 subtitle_path（web path）
-                    """
-                    p0 = projects_store.get_project(project_id)
-                    sp = getattr(p0, "subtitle_path", None)
-                    ss = getattr(p0, "subtitle_source", None)
-
-                    # 用户上传字幕：直接校验即可
-                    if ss == "user" and sp:
-                        abs_p = _resolve_path(sp)
-                        if not abs_p.exists():
-                            raise FileNotFoundError("本地上传的字幕文件不存在")
-                        subs = parse_srt(abs_p)
-                        if not subs:
-                            raise ValueError("本地字幕文件格式错误或无有效字幕，请检查SRT格式")
-                        logger.info(
-                            "Using user-uploaded subtitle for scene analysis: %s, valid segments: %d",
-                            sp,
-                            len(subs),
-                        )
-                        return sp
-
-                    # 非用户字幕：若没有字幕路径则并发触发字幕提取
-                    if not sp:
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="processing",
-                            progress=5,
-                            message="正在提取字幕...",
-                        )
-                        sub_task_id = f"sub_{task_id}"
-                        sub_kw: Dict[str, Any] = dict(
-                            project_id=project_id,
-                            force=False,
-                            task_id=sub_task_id,
-                            asr_provider=asr_provider,
-                            asr_model_key=asr_model_key,
-                            asr_language=asr_language,
-                            itn=itn,
-                            hotwords=hotwords,
-                        )
-                        await extract_subtitle_service.extract_subtitle(**sub_kw)
-                        p1 = projects_store.get_project(project_id)
-                        sp = getattr(p1, "subtitle_path", None)
-
-                    if not sp:
-                        raise ValueError("无法获取字幕信息（未生成字幕文件），请先提取字幕或上传字幕")
-
-                    abs_p = _resolve_path(sp)
-                    if not abs_p.exists():
-                        raise FileNotFoundError("字幕文件不存在")
-                    subs = parse_srt(abs_p)
-                    if not subs:
-                        raise ValueError("未能从字幕中解析到有效内容")
-                    return sp
 
                 async def _split_scenes() -> Tuple[List[Dict[str, Any]], float, int]:
                     """
@@ -568,34 +544,44 @@ class ExtractSceneService:
                         total_frames,
                     )
 
-                # 并发执行：字幕准备 + 镜头基础分割（缓存/模型）
-                subtitle_task = asyncio.create_task(_ensure_subtitle_ready())
-                split_task = asyncio.create_task(_split_scenes())
-                try:
-                    subtitle_path_ready, split_result = await asyncio.gather(subtitle_task, split_task)
-                except Exception as e:
-                    # 任何一方失败都取消另一方，保证结果一致性
-                    for t in (subtitle_task, split_task):
-                        if not t.done():
-                            try:
-                                t.cancel()
-                            except Exception:
-                                pass
-                    await asyncio.gather(subtitle_task, split_task, return_exceptions=True)
-                    raise e
+                # 先做“基础镜头分割”（完全不依赖字幕）。字幕与镜头逻辑解耦：不会在镜头服务里主动触发字幕提取。
+                base_scenes, fps, total_frames = await _split_scenes()
 
-                # 确保项目上的 subtitle_path 是最新且可用的（_optimize_scenes 读取 project.subtitle_path）
-                projects_store.update_project(project_id, {"subtitle_path": subtitle_path_ready})
                 current_p = projects_store.get_project(project_id)
+                subtitle_path = getattr(current_p, "subtitle_path", None)
+                subtitle_source = getattr(current_p, "subtitle_source", None)
+                subtitle_status = str(getattr(current_p, "subtitle_status", "") or "").strip().lower()
 
-                base_scenes, fps, total_frames = split_result
+                # 用户上传字幕但路径缺失：直接失败（这是用户显式依赖）
+                if not subtitle_path and subtitle_source == "user":
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="failed",
+                        message="镜头分析失败: 未找到上传的字幕，请先上传字幕文件",
+                    )
+                    return
+
+                # 若字幕正在提取中，等待字幕就绪，以便做字幕优化；否则直接按“当前已有字幕(或无字幕)”继续
+                if not subtitle_path and subtitle_status in {"extracting", "processing", "running"}:
+                    subtitle_path = await self._wait_for_subtitle_path(project_id, task_id)
+                    if subtitle_path:
+                        try:
+                            projects_store.update_project(project_id, {"subtitle_path": subtitle_path})
+                        except Exception:
+                            pass
+                        current_p = projects_store.get_project(project_id) or current_p
+                        subtitle_path = getattr(current_p, "subtitle_path", None)
+                        subtitle_status = str(getattr(current_p, "subtitle_status", "") or "").strip().lower()
+
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,
                     task_id=task_id,
                     status="processing",
                     progress=88,
-                    message="字幕就绪，正在根据字幕优化镜头...",
+                    message="正在优化镜头（字幕可用则按字幕优化）...",
                 )
 
                 # 统一走 _optimize_scenes（依赖字幕）生成最终结构
@@ -617,7 +603,30 @@ class ExtractSceneService:
                 analysis_dir.mkdir(parents=True, exist_ok=True)
 
                 # 4.5 视觉分析 (Moondream or Online Vision)
-                if analyze_vision:
+                # 要求：视觉分析前必须已经拿到整体字幕数据（有字幕文件且已落盘，部分字幕也算有）
+                has_subtitles_for_vision = False
+                if subtitle_path:
+                    try:
+                        abs_sp = _resolve_path(subtitle_path)
+                        has_subtitles_for_vision = abs_sp.exists() and abs_sp.stat().st_size > 0
+                    except Exception:
+                        has_subtitles_for_vision = False
+                if analyze_vision and not has_subtitles_for_vision:
+                    logger.info(
+                        "Skip vision analysis because subtitles are not ready: "
+                        "project_id=%s, subtitle_status=%s",
+                        project_id,
+                        subtitle_status,
+                    )
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=90,
+                        message="字幕尚未生成或未找到，已跳过视觉分析，仅基于镜头与字幕优化结果保存",
+                    )
+                elif analyze_vision and has_subtitles_for_vision:
                     try:
                         task_progress_store.set_state(
                             scope=self.SCOPE,
@@ -627,7 +636,7 @@ class ExtractSceneService:
                             progress=90,
                             message="准备进行视觉分析...",
                         )
-                        
+
                         active_config = video_model_config_manager.get_active_config()
                         if active_config and active_config.provider in (
                             "yunwu",
@@ -636,7 +645,11 @@ class ExtractSceneService:
                             "doubao",
                             "custom_openai_vision",
                         ):
-                            logger.info(f"Using online vision model: {active_config.provider} - {active_config.model_name}")
+                            logger.info(
+                                "Using online vision model: %s - %s",
+                                active_config.provider,
+                                active_config.model_name,
+                            )
                             vk = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
                             optimized_scenes = await vision_frame_analyzer.analyze_scenes_online(
                                 project_id=project_id,
@@ -658,10 +671,10 @@ class ExtractSceneService:
                                 video_path=str(video_abs_path),
                                 scenes=optimized_scenes,
                                 mode=vision_mode,
-                                task_id=task_id
+                                task_id=task_id,
                             )
                     except Exception as e:
-                        logger.error(f"Vision analysis failed: {e}")
+                        logger.error("Vision analysis failed: %s", e)
                         task_progress_store.set_state(
                             scope=self.SCOPE,
                             project_id=project_id,
