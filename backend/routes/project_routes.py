@@ -423,6 +423,7 @@ class ExtractSubtitleRequest(BaseModel):
     asr_language: Optional[str] = None
     itn: bool = True
     hotwords: Optional[List[str]] = None
+    funasrMaxConcurrency: Optional[int] = None
     analyzeVision: bool = False
     visionMode: str = "all"
     visionKeyFrames: int = 1
@@ -725,6 +726,7 @@ async def extract_subtitle(project_id: str, req: ExtractSubtitleRequest = Body(d
             asr_language=req.asr_language,
             itn=bool(getattr(req, "itn", True)),
             hotwords=req.hotwords,
+            funasr_max_concurrency=getattr(req, "funasrMaxConcurrency", None),
         )
         return {
             "message": "字幕提取成功",
@@ -1166,14 +1168,15 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
-    # 先尝试 moov 前置（仅 mp4/mov），再按需转码为 H.264+yuv420p+AAC 的 MP4，避免 WebView2 对 HEVC/10bit/非 MP4 容器黑屏
-    await remux_faststart(out_path)
-    out_path = await video_processor.normalize_upload_for_web_preview(out_path)
-    await remux_faststart(out_path)
-    try:
-        size = out_path.stat().st_size
-    except Exception:
-        pass
+    # 上传后转码 / faststart 已关闭（按需取消下行注释以恢复）
+    # orig_path = out_path
+    # out_path = await video_processor.normalize_upload_for_web_preview(out_path)
+    # if out_path == orig_path:
+    #     await remux_faststart(out_path)
+    # try:
+    #     size = out_path.stat().st_size
+    # except Exception:
+    #     pass
 
     # 记录到项目的视频列表，并按规则更新生效路径
     web_path = to_web_path(out_path)
