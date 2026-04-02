@@ -21,7 +21,6 @@ export const SubtitleAsrSettings: React.FC = () => {
     mlt_nano_2512: "modelscope",
   });
   const [copiedOptionId, setCopiedOptionId] = useState<string | null>(null);
-  console.log("modelByKeywww: ", modelByKey)
   const getModelStatus = (keys: string[]) => {
     const list = keys.map((k) => modelByKey.get(k)).filter(Boolean) as FunAsrModelStatus[];
     const existsAll = keys.length > 0 && keys.every((k) => Boolean(modelByKey.get(k)?.exists));
