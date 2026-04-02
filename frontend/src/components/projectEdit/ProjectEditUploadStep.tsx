@@ -8,6 +8,8 @@ import SubtitleAsrSelector from "./SubtitleAsrSelector";
 import SceneListTable from "./SceneListTable";
 import ScenePlayModal from "./ScenePlayModal";
 import { projectService } from "../../services/projectService";
+import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
+import { videoModelService } from "@/services/videoModelService";
 
 interface ProjectEditUploadStepProps {
   projectId: string;
@@ -137,6 +139,28 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   const [visionKeyFrames, setVisionKeyFrames] = React.useState<1 | 3>(1);
   const analyzeVision = true;
 
+  const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
+
+  React.useEffect(() => {
+    if (project.project_type !== "visual") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await videoModelService.getConfigs();
+        if (!res?.success || cancelled) return;
+        const activeId = res.data?.active_config_id as string | undefined;
+        const configs = res.data?.configs as Record<string, { provider?: string }> | undefined;
+        const provider = activeId && configs ? configs[activeId]?.provider : undefined;
+        setVisionScopeLabel(videoVisionAnalysisScopeLabel(provider));
+      } catch {
+        if (!cancelled) setVisionScopeLabel("视觉分析");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.project_type]);
+
   return (
     <>
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
@@ -221,7 +245,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
              <div className="flex flex-col gap-2 items-end">
                <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
                   <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <span className="text-gray-600 select-none">在线视觉分析</span>
+                    <span className="text-gray-600 select-none">{visionScopeLabel}</span>
                     <span className="text-gray-300 hidden sm:inline">|</span>
                     <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
                       <input

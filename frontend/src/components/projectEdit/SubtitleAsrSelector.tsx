@@ -175,9 +175,11 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
       <div className="mt-2 text-[11px] text-gray-600">
         {provider === "bcut"
           ? "内置 API 识别字幕只支持中文。"
-          : funModels.length === 0
-            ? "未检测到可用 FunASR 模型：请先在「设置-字幕识别」下载并校验模型。"
-            : "使用 FunASR 需要先在「设置-字幕识别」下载并校验模型。"}
+          : loading
+            ? "正在加载本地模型状态…"
+            : funModels.length === 0
+              ? "未检测到可用 FunASR 模型：请先在「设置-字幕识别」下载并校验模型。"
+              : "将使用已校验的本地 FunASR 模型进行识别。"}
       </div>
     </div>
   );

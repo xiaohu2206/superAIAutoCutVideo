@@ -74,10 +74,10 @@ export const useVideoModelConfig = () => {
       // 重新加载配置以保持状态同步
       await loadVideoAnalysisConfigs();
     } else {
-      // 如果没有缓存的配置，使用默认值
+      // 没有对应缓存条目时（例如首次同步默认配置后仍缺项），用默认值并立即写回后端
       const newConfig = {
         provider: provider,
-        api_key: "",
+        api_key: provider === "moondream" ? "local" : "",
         base_url: getDefaultBaseUrl(provider),
         model_name: getDefaultModelName(provider),
         extra_params: {},
@@ -85,6 +85,20 @@ export const useVideoModelConfig = () => {
         enabled: true,
       };
       setCurrentConfig(newConfig);
+      if (newConfigId) {
+        try {
+          const response = await videoModelService.updateConfig(
+            newConfigId,
+            newConfig,
+          );
+          if (response.success) {
+            await loadVideoAnalysisConfigs();
+          }
+        } catch (e) {
+          console.error("切换提供商并保存配置失败:", e);
+          message.error("保存配置失败");
+        }
+      }
     }
 
     setTestResult(null);
