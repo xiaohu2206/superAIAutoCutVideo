@@ -1,32 +1,25 @@
-<img src="frontend/src/assets/logo.png" alt="SuperAI影视剪辑 Logo" width="120" />
+
 
 # SuperAI影视剪辑 · AI智能影视剪辑
+
 - 轻量、跨平台的一站式智能视频处理桌面应用，短剧、影视解说剪辑，开箱即用，支持通过字幕、视觉分析自动剪辑。（免费）
 - 部分电脑暂时无法使用全部功能
 
-<div align="center">
-  <h3>✨ 视觉推理（核心功能）</h3>
-  <img src="docs/image/支持视觉推理.png" alt="支持视觉推理" width="500" />
-</div>
+### ✨ 视觉推理（核心功能）
 
-<br/>
 
-<div align="center">
-  <img src="docs/image/首页.png" alt="首页" width="32%" />
-  <img src="docs/image/视觉推理.png" alt="视觉推理" width="32%" />
-  <img src="docs/image/配置.png" alt="配置" width="32%" />
-</div>
 
 ## 软件版本
-<a href="https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc" target="_blank" >v1.2.2</a>
 
+[v1.2.4 （不要在github这里下载软件，百度云下载）](https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc)
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
-<img src="docs/image/addstar.png" alt="帮忙点个star，感谢兄弟" width="300" />
 
 
 
-## 亮点特性
+## 更新功能
+
+- 2026-03-31: 剪映草稿bug、支持添加影视简介、参考文案、添加多种文案风格提示词、修复部分bug
 - 2026-03-18: 支持云雾API平台、302ai平台、qwentts配音在线版
 - 2026-03-02: 视觉推理视频功能（moondream分析帧）
 - 2026-02-20: 本地ASR识别字幕
@@ -44,52 +37,43 @@
 - 短剧解说工作流：多集上传 → 自动合并 → 生成解说脚本（暂时只支持字幕分析） → 生成解说视频
 - 多项目管理：支持创建、切换与独立配置
 
-
-## 小功能
-1. 生成视频支持停止生成
-2. 添加解说文案
-
 ## 联系方式
-<img src="docs/image/weixinqun.png" alt="微信码" width="300" />
 
-- 微信群
-  
-- <a href="https://space.bilibili.com/277405631?spm_id_from=333.1007.0.0" target="_blank">哔哩哔哩空间</a>
-  
-<img src="docs/image/douyin.png" alt="抖音码" width="160" />
+- [哔哩哔哩空间](https://space.bilibili.com/277405631?spm_id_from=333.1007.0.0)
 
 - 抖音号：`xiaohu_111`
-
-- 微信号：`interest_dog`
-
+- 添加微信号(可邀请进群)：`interest_dog`
 
 
 
 ### 解决问题
+
 1. 修复funasr无法识别外语
-3. 对uploads的垃圾数据进行清理
-4. 缓存目录uploads更新无效的问题
-5. 打开应用启动了两个后端服务，导致更改uploads目录失败问题
-6. 添加可以看到解析的字幕
-7. 添加生成时间
-8. 有时候生成的脚本不更新，一直是初次生成的脚本。
-9. edge-tts试音添加loading
-10. PC版本不会保存记录，间隔几个小时，打开需要重新配置
+2. 对uploads的垃圾数据进行清理
+3. 缓存目录uploads更新无效的问题
+4. 打开应用启动了两个后端服务，导致更改uploads目录失败问题
+5. 添加可以看到解析的字幕
+6. 添加生成时间
+7. 有时候生成的脚本不更新，一直是初次生成的脚本。
+8. edge-tts试音添加loading
+9. PC版本不会保存记录，间隔几个小时，打开需要重新配置
+
 等等若干问题....
 
-
 ## 更新计划（持续更新优化中....
+
 - 优化生成效果
 
 ## 文档与支持
+
 - 打包说明：`docs/打包说明.md`
 
-
 ## 快速开始
+
 前置要求：`Node.js ≥ 18`、`Python ≥ 3.11`、`Rust`、`FFmpeg`、`torch`
 
-
 ### Windows（PowerShell）
+
 ```powershell
 # 安装前端依赖（优先使用 cnpm）
 cd frontend
@@ -120,6 +104,7 @@ backend/.venv/bin/python backend/main.py
 ```
 
 ### Qwen3‑TTS 安装与验证
+
 Qwen3‑TTS 依赖 Python 包 `qwen-tts`（模块名 `qwen_tts`）。为避免依赖解析导致 FastAPI/Pydantic 等核心库被联动升级，项目不在 requirements 里直接安装该包，请按下述方式手动安装：
 
 - Windows（后端虚拟环境）：
@@ -147,17 +132,14 @@ backend/.venv/bin/python -c "import qwen_tts; print('qwen_tts ok')"
 - 若安装时报 SSL 错误，优先使用国内镜像（如清华镜像）；或配置全局 index-url。
 - 安装后如果看到 “SoX could not be found!” 警告，属可选工具提示，不影响核心合成；可忽略或自行安装 SoX。
 - 打包脚本会在构建阶段单独安装 `qwen-tts`（不解析依赖），以避免解析冲突。
-
 - 模型准备：
 - 通过设置页或接口拉取/放置 Qwen3‑TTS 模型（如 `base_0_6b`、`custom_0_6b`）。  
 - 可用接口：  
   - 列表状态：`GET /api/tts/qwen3/models`  
   - 下载模型：`POST /api/tts/qwen3/models/download`（provider: hf 或 modelscope）
-
 - 快速自检：
 - 能力查询：`GET /api/tts/qwen3/models/base_0_6b/capabilities`  
 - 试听接口：`POST /api/tts/voices/{voice_id}/preview`（provider 传 `qwen3_tts`）
-
 
 ## 说明
 
@@ -170,3 +152,4 @@ MIT
 ## 致谢
 
 - Tauri · React · FastAPI · FFmpeg · OpenCV
+
