@@ -1264,6 +1264,54 @@ async fn open_external_link(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| format!("打开链接失败: {}", e))
 }
 
+#[tauri::command]
+async fn minimize_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.minimize().map_err(|e| format!("最小化窗口失败: {}", e))
+}
+
+#[tauri::command]
+async fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let is_maximized = window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))?;
+    if is_maximized {
+        window
+            .unmaximize()
+            .map_err(|e| format!("还原窗口失败: {}", e))?;
+        Ok(false)
+    } else {
+        window
+            .maximize()
+            .map_err(|e| format!("最大化窗口失败: {}", e))?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+async fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))
+}
+
+#[tauri::command]
+async fn close_main_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if let Err(e) = stop_backend(state).await {
+        eprintln!("关闭应用时清理后端失败: {}", e);
+    }
+    app.exit(0);
+    Ok(())
+}
+
 // 应用启动时的初始化
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // 若未由配置自动创建窗口，则显式创建主窗口
@@ -1271,6 +1319,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
             .title("AI智能视频剪辑")
             .resizable(true)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
             .inner_size(1200.0, 800.0)
             .center()
             .build()?;
@@ -1297,15 +1348,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // 应用退出时的清理
-fn cleanup_app(app_handle: AppHandle) {
-    let state = app_handle.state::<AppState>();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    if let Err(e) = rt.block_on(stop_backend(state)) {
-        eprintln!("清理后端进程失败: {}", e);
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -1325,9 +1367,8 @@ fn main() {
         }))
         .manage(AppState::default())
         .setup(setup_app)
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                cleanup_app(window.app_handle().clone());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1338,7 +1379,11 @@ fn main() {
             select_output_directory,
             get_app_info,
             show_notification,
-            open_external_link
+            open_external_link,
+            minimize_main_window,
+            toggle_maximize_main_window,
+            is_main_window_maximized,
+            close_main_window
         ])
         .run(tauri::generate_context!())
         .expect("启动Tauri应用失败");

@@ -16,7 +16,6 @@ import {
   wsClient,
 } from "./services/clients";
 
-
 interface BackendStatus {
   running: boolean;
   port: number;
@@ -25,6 +24,14 @@ interface BackendStatus {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const detectTauriEnvironment = (): boolean => {
+  const w: any = typeof window !== "undefined" ? window : undefined;
+  const hasIpc = typeof w?.__TAURI_IPC__ === "function";
+  const hasCoreInvoke = !!w?.__TAURI__?.core?.invoke;
+  const hasMeta = !!w?.__TAURI_METADATA__ || !!w?.__TAURI_INTERNALS__;
+  return hasIpc || hasCoreInvoke || hasMeta;
+};
 
 const App: React.FC = () => {
   // 状态管理
@@ -42,10 +49,16 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const { appVersion } = useAppVersion();
-  const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
+  const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
 
   // 初始化应用
   useEffect(() => {
+    setIsTauri(detectTauriEnvironment());
+    const timer = window.setInterval(() => {
+      const detected = detectTauriEnvironment();
+      setIsTauri((prev) => (prev === detected ? prev : detected));
+    }, 300);
+
     const handleWsMessage = (message: WebSocketMessage) => {
       setMessages((prev) => [...prev, message]);
     };
@@ -70,6 +83,7 @@ const App: React.FC = () => {
     initializeApp();
 
     return () => {
+      window.clearInterval(timer);
       wsClient.off("*", handleWsMessage);
       wsClient.off("open", handleWsOpen);
       wsClient.off("close", handleWsClose);
@@ -139,12 +153,12 @@ const App: React.FC = () => {
   const checkBackendStatus = async (): Promise<BackendStatus | null> => {
     try {
       let status: BackendStatus;
-      const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
+      const isTauriRuntime = detectTauriEnvironment();
 
       const ensureHandshake = async (s: BackendStatus) => {
         if (!s?.port) return;
         configureBackend(s.port);
-        const requireBootTokenNow = isTauri && import.meta.env.PROD && !!(s.boot_token && String(s.boot_token).trim());
+        const requireBootTokenNow = isTauriRuntime && import.meta.env.PROD && !!(s.boot_token && String(s.boot_token).trim());
         await handshakeVerifyBackend(apiClient.getBaseUrl(), {
           expectedBootToken: s.boot_token ?? null,
           requireBootToken: requireBootTokenNow,
@@ -152,7 +166,7 @@ const App: React.FC = () => {
         });
       };
       // 检查是否在Tauri环境中
-      if (isTauri) {
+      if (isTauriRuntime) {
         status = await TauriCommands.getBackendStatus();
         if (status?.running && status.port) {
           await ensureHandshake(status);
