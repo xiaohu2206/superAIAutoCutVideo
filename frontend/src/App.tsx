@@ -233,37 +233,35 @@ const App: React.FC = () => {
     <div className="window-shell flex h-screen flex-col overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} isTauri={isTauri} />
 
-      <main className="main-scroll-hidden mx-auto min-h-0 w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pt-6">
-        <div className="mb-4">
+      <main className="main-scroll-hidden mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pt-6">
+        <div className="mb-4 shrink-0">
           <MessageHost />
         </div>
-        {/* 标签页内容 */}
-        {activeTab === "home" && !currentProjectId && (
-          <ProjectManagementPage
-            onEditProject={(projectId) => setCurrentProjectId(projectId)}
-          />
-        )}
+        <div className="min-h-0 flex-1">
+          {/* 标签页内容 */}
+          {activeTab === "home" && !currentProjectId && (
+            <ProjectManagementPage
+              onEditProject={(projectId) => setCurrentProjectId(projectId)}
+            />
+          )}
 
-        {activeTab === "home" && currentProjectId && (
-          <ProjectEditPage
-            projectId={currentProjectId}
-            onBack={() => setCurrentProjectId(null)}
-          />
-        )}
+          {activeTab === "home" && currentProjectId && (
+            <ProjectEditPage
+              projectId={currentProjectId}
+              onBack={() => setCurrentProjectId(null)}
+            />
+          )}
 
-        
-
-        {activeTab === "settings" && (
-          <SettingsPage
-            messages={messages}
-            backendStatus={backendStatus}
-            connections={connectionStatus}
-            onMonitorEnter={refreshConnections}
-            onMonitorRefresh={refreshConnections}
-          />
-        )}
-
-        
+          {activeTab === "settings" && (
+            <SettingsPage
+              messages={messages}
+              backendStatus={backendStatus}
+              connections={connectionStatus}
+              onMonitorEnter={refreshConnections}
+              onMonitorRefresh={refreshConnections}
+            />
+          )}
+        </div>
       </main>
     </div>
   );

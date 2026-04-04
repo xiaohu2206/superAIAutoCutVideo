@@ -1,6 +1,6 @@
 // 项目管理页面（一级页面）
 
-import { AlertCircle, CheckCircle, Plus, RefreshCw, X } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
@@ -34,16 +34,8 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
-  // 用于显示来自 hook 的全局错误，并允许手动关闭
-  const [visibleGlobalError, setVisibleGlobalError] = useState<string | null>(null);
-  const actionErrorRef = useRef<HTMLDivElement | null>(null);
-  const globalErrorRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    setVisibleGlobalError(error);
-  }, [error]);
+  const [isListScrollbarVisible, setIsListScrollbarVisible] = useState(false);
+  const listScrollHideTimerRef = useRef<number | null>(null);
 
   const getErrorMessage = useCallback((err: unknown, fallback: string): string => {
     if (err && typeof err === "object") {
@@ -59,38 +51,43 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   useEffect(() => {
     void fetchProjects().catch((e) => {
       const msg = getErrorMessage(e, "获取项目列表失败");
-      setActionErrorMessage(msg);
+      message.error(msg, 3);
     });
   }, [fetchProjects, getErrorMessage]);
 
-  const showSuccess = (message: string) => {
-    setSuccessMessage(message);
-    setActionErrorMessage(null);
-    setVisibleGlobalError(null);
+  const showSuccess = (content: string) => {
+    message.success(content);
   };
 
   const showError = async (err: unknown, fallback: string) => {
     const msg = getErrorMessage(err, fallback);
-    setActionErrorMessage(msg);
-    setSuccessMessage(null);
     message.error(msg, 3);
   };
 
   useEffect(() => {
-    if (actionErrorMessage && actionErrorRef.current) {
-      requestAnimationFrame(() => {
-        actionErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+    if (error) {
+      message.error(error, 3);
     }
-  }, [actionErrorMessage]);
+  }, [error]);
 
   useEffect(() => {
-    if (visibleGlobalError && globalErrorRef.current) {
-      requestAnimationFrame(() => {
-        globalErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+    return () => {
+      if (listScrollHideTimerRef.current !== null) {
+        window.clearTimeout(listScrollHideTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleListScroll = () => {
+    setIsListScrollbarVisible(true);
+    if (listScrollHideTimerRef.current !== null) {
+      window.clearTimeout(listScrollHideTimerRef.current);
     }
-  }, [visibleGlobalError]);
+    listScrollHideTimerRef.current = window.setTimeout(() => {
+      setIsListScrollbarVisible(false);
+      listScrollHideTimerRef.current = null;
+    }, 900);
+  };
 
   /**
    * 处理创建项目
@@ -153,10 +150,9 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   };
 
   return (
-    <div className="space-y-6 h-full min-h-0 flex flex-col">
-
+    <div className="flex h-full min-h-0 flex-col gap-6">
       {/* 区块标题：最近项目 + 搜索 + 创建按钮 */}
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between px-1 shrink-0">
         <div className="flex items-baseline space-x-2">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900">项目</h2>
           <span className="text-sm text-gray-500 font-normal">（新版本不对旧数据做兼容）</span>
@@ -166,7 +162,9 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
             type="text"
             placeholder="搜索项目..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+            }}
             className="w-44 sm:w-64 px-3 py-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
           />
            {/* 刷新按钮 */}
@@ -181,7 +179,9 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
               刷新
             </button>
           <button
-            onClick={() => setIsCreateModalOpen(true)}
+            onClick={() => {
+              setIsCreateModalOpen(true);
+            }}
             className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -190,66 +190,29 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
         </div>
       </div>
 
-      {/* 错误提示 */}
-      {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <div className="flex items-center">
-            <CheckCircle className="h-5 w-5 mr-2" />
-            {successMessage}
-          </div>
-          <button
-            onClick={() => setSuccessMessage(null)}
-            className="p-1 hover:bg-green-100 rounded-full transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {/* 项目列表 */}
+        <div
+          onScroll={handleListScroll}
+          className={`project-list-scrollbar min-h-0 flex-1 overflow-y-auto pr-2 ${isListScrollbarVisible ? "scrollbar-visible" : ""}`}
+        >
+          <ProjectList
+            projects={projects.filter((p) =>
+              p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+            )}
+            loading={loading}
+            onEdit={handleEditProject}
+            onDelete={handleDeleteProject}
+          />
         </div>
-      )}
-      {actionErrorMessage && (
-        <div ref={actionErrorRef} className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 mr-2" />
-            {actionErrorMessage}
-          </div>
-          <button
-            onClick={() => setActionErrorMessage(null)}
-            className="p-1 hover:bg-red-100 rounded-full transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-      {visibleGlobalError && (
-        <div ref={globalErrorRef} className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 mr-2" />
-            {visibleGlobalError}
-          </div>
-          <button
-            onClick={() => setVisibleGlobalError(null)}
-            className="p-1 hover:bg-red-100 rounded-full transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* 项目列表 */}
-      <div className="overflow-y-auto pr-2 min-h-0 flex-1">
-        <ProjectList
-          projects={projects.filter((p) =>
-            p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
-          )}
-          loading={loading}
-          onEdit={handleEditProject}
-          onDelete={handleDeleteProject}
-        />
       </div>
 
       {/* 创建项目模态框 */}
       <CreateProjectModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+        }}
         onCreate={handleCreateProject}
       />
 

@@ -72,7 +72,8 @@ const ProjectList: React.FC<ProjectListProps> = ({
   const reversedProjects = [...projects].reverse();
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+    <div className="px-1 pb-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
       {reversedProjects.map((project) => (
         <ProjectCard
           key={project.id}
@@ -81,6 +82,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
           onDelete={onDelete}
         />
       ))}
+      </div>
     </div>
   );
 };

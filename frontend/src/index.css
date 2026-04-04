@@ -87,6 +87,39 @@
     app-region: no-drag;
   }
 
+  .project-list-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+    transition: background-color 0.2s ease;
+  }
+
+  .project-list-scrollbar.scrollbar-visible {
+    scrollbar-width: thin;
+  }
+
+  .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+  }
+
+  .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 9999px;
+  }
+
   .main-scroll-hidden {
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -189,6 +222,14 @@ html::-webkit-scrollbar {
 
 @layer utilities {
   @media (prefers-color-scheme: dark) {
+    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
+      background: #374151;
+    }
+
+    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+      background: #6b7280;
+    }
+
     .bg-white {
       @apply bg-gray-800;
     }

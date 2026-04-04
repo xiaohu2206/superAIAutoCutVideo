@@ -25,6 +25,21 @@ export default function MessageHost() {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    const dismissMessages = () => {
+      setCurrent(null);
+      setToasts([]);
+    };
+
+    const shouldIgnoreInteraction = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(target.closest("[data-message-host]"));
+    };
+
+    const handleUserInteraction = (event: Event) => {
+      if (shouldIgnoreInteraction(event.target)) return;
+      dismissMessages();
+    };
+
     const handler = (event: Event) => {
       const e = event as CustomEvent<MessageEventDetail>;
       const detail = e.detail;
@@ -43,12 +58,19 @@ export default function MessageHost() {
       }
       
       // 注意：已移除自动定时关闭逻辑，实现持久化显示
-      // 只有点击关闭按钮或新消息到来时，当前消息才会消失/被替换
+      // 只有点击关闭按钮、用户产生新交互或新消息到来时，当前消息才会消失/被替换
     };
 
     window.addEventListener(messageEventName, handler as EventListener);
+    window.addEventListener("pointerdown", handleUserInteraction, true);
+    window.addEventListener("keydown", handleUserInteraction, true);
+    window.addEventListener("wheel", handleUserInteraction, true);
+
     return () => {
       window.removeEventListener(messageEventName, handler as EventListener);
+      window.removeEventListener("pointerdown", handleUserInteraction, true);
+      window.removeEventListener("keydown", handleUserInteraction, true);
+      window.removeEventListener("wheel", handleUserInteraction, true);
     };
   }, []);
 
@@ -65,6 +87,7 @@ export default function MessageHost() {
       {current && (
         <div
           ref={hostRef}
+          data-message-host
           className={`border shadow-md rounded-lg px-4 py-3 flex items-start gap-3 w-full transition-all duration-300 ${getTypeClassName(current.type)}`}
           role="status"
           aria-live="polite"
@@ -82,7 +105,7 @@ export default function MessageHost() {
       )}
 
       {toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-auto">
+        <div data-message-host className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-auto">
           {toasts.map((t) => (
             <div
               key={`${t.id}_${t.createdAt}`}
