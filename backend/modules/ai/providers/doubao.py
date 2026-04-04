@@ -6,8 +6,9 @@ Doubao AI模型提供商实现
 """
 
 from typing import Dict, List, Any, Optional
-import json
 import logging
+
+import httpx
 
 from ..base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse
 
@@ -107,9 +108,60 @@ class DoubaoProvider(AIProviderBase):
             
             return response_data
             
+        except httpx.HTTPStatusError as e:
+            if (
+                e.response is not None
+                and e.response.status_code == 400
+                and self._should_retry_without_response_format(payload, e.response)
+            ):
+                logger.warning("Doubao模型不支持 response_format，回退为纯提示词 JSON 输出")
+                fallback_payload = dict(payload)
+                fallback_payload.pop("response_format", None)
+                fallback_response = await self.client.post(
+                    self.config.base_url,
+                    json=fallback_payload,
+                    headers=self._get_headers()
+                )
+                fallback_response.raise_for_status()
+                fallback_data = fallback_response.json()
+                if "error" in fallback_data:
+                    error_info = fallback_data["error"]
+                    raise Exception(f"Doubao API错误: {error_info.get('message', 'Unknown error')}")
+                return fallback_data
+            
+            logger.error(f"Doubao API请求失败: {e}")
+            raise
         except Exception as e:
             logger.error(f"Doubao API请求失败: {e}")
             raise
+    
+    def _should_retry_without_response_format(self, payload: Dict[str, Any], response: httpx.Response) -> bool:
+        """判断是否需要移除 response_format 后重试"""
+        if "response_format" not in payload:
+            return False
+        
+        try:
+            error_data = response.json()
+        except Exception:
+            return False
+        
+        error_info = error_data.get("error")
+        if isinstance(error_info, dict):
+            message = str(error_info.get("message", ""))
+        else:
+            message = str(error_info or error_data)
+        
+        lowered_message = message.lower()
+        unsupported_markers = [
+            "response_format",
+            "json_object",
+            "json_schema",
+            "unsupported",
+            "not support",
+            "invalid parameter",
+            "unknown parameter",
+        ]
+        return any(marker in lowered_message for marker in unsupported_markers)
     
     def _extract_stream_content(self, chunk_data: Dict[str, Any]) -> Optional[str]:
         """从Doubao流式响应块中提取内容"""
