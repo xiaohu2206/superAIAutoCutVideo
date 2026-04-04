@@ -85,22 +85,24 @@ export default function MessageHost() {
   return (
     <>
       {current && (
-        <div
-          ref={hostRef}
-          data-message-host
-          className={`border shadow-md rounded-lg px-4 py-3 flex items-start gap-3 w-full transition-all duration-300 ${getTypeClassName(current.type)}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span className="flex-shrink-0 mt-0.5">{getTypeIcon(current.type)}</span>
-          <div className="text-sm flex-1 break-words leading-relaxed pt-0.5">{current.content}</div>
-          <button 
-            onClick={() => setCurrent(null)}
-            className="flex-shrink-0 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors ml-2 -mr-1"
-            aria-label="关闭"
+        <div className="mb-4 shrink-0">
+          <div
+            ref={hostRef}
+            data-message-host
+            className={`border shadow-md rounded-lg px-4 py-3 flex items-start gap-3 w-full transition-all duration-300 ${getTypeClassName(current.type)}`}
+            role="status"
+            aria-live="polite"
           >
-            <X className="h-4 w-4" />
-          </button>
+            <span className="flex-shrink-0 mt-0.5">{getTypeIcon(current.type)}</span>
+            <div className="text-sm flex-1 break-words leading-relaxed pt-0.5">{current.content}</div>
+            <button 
+              onClick={() => setCurrent(null)}
+              className="flex-shrink-0 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors ml-2 -mr-1"
+              aria-label="关闭"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader, Palette, X, Save } from "lucide-react";
+import AppSelect from "@/components/ui/AppSelect";
 import type { Qwen3TtsDesignCloneCreateInput, Qwen3TtsVoice, Qwen3TtsPatchVoiceInput } from "../types";
 import { LANGUAGE_OPTIONS } from "../constants";
 
@@ -177,50 +178,47 @@ export const Qwen3VoiceDesignDialog: React.FC<Qwen3VoiceDesignDialogProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm text-gray-700 mb-1">设计模型</label>
-                <select
+                <AppSelect
                   value={designModelKey}
-                  disabled={loading || !!voice} // Disable design model selection during edit if we can't update it
+                  disabled={loading || !!voice}
                   onChange={(e) => setDesignModelKey(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white disabled:bg-gray-100 disabled:text-gray-500"
                 >
                   {(voiceDesignModelKeys.length ? voiceDesignModelKeys : [defaultDesignModelKey]).map((k) => (
                     <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
               <div>
                 <label className="block text-sm text-gray-700 mb-1">基底模型</label>
-                <select
+                <AppSelect
                   value={baseModelKey}
                   disabled={loading}
                   onChange={(e) => setBaseModelKey(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
                 >
                   {(baseModelKeys.length ? baseModelKeys : [defaultBaseModelKey]).map((k) => (
                     <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
             </div>
 
             <div>
               <label className="block text-sm text-gray-700 mb-1">语言</label>
-              <select
+              <AppSelect
                 value={language}
                 disabled={loading}
                 onChange={(e) => setLanguage(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-200 bg-white"
               >
                 {LANGUAGE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
                 ))}
-              </select>
+              </AppSelect>
             </div>
 
             <div>

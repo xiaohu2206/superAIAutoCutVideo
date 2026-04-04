@@ -1,5 +1,6 @@
 import { Copy, Pause, Play, RefreshCw, Trash2 } from "lucide-react"
 import React, { useEffect, useMemo, useRef, useState } from "react"
+import AppSelect from "@/components/ui/AppSelect"
 import { useLogStream } from "../../../hooks/useLogStream"
 import type { LogItem } from "../../../services/logsService"
 
@@ -178,10 +179,11 @@ export const LogConsolePanel: React.FC<LogConsolePanelProps> = ({ enabled, proje
 
       <div className="px-4 py-3 border-b bg-white">
         <div className="flex flex-wrap gap-2 items-center">
-          <select
+          <AppSelect
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
-            className="px-2 py-1 text-xs border border-gray-200 rounded-md bg-white"
+            className="min-w-[140px] px-2 py-1 pr-8 text-xs border-gray-200 shadow-none focus:ring-2 focus:ring-blue-100"
+            iconClassName="right-2 h-3.5 w-3.5"
           >
             <option value="all">全部类型</option>
             {types.map((t) => (
@@ -189,11 +191,12 @@ export const LogConsolePanel: React.FC<LogConsolePanelProps> = ({ enabled, proje
                 {t}
               </option>
             ))}
-          </select>
-          <select
+          </AppSelect>
+          <AppSelect
             value={selectedScope}
             onChange={(e) => setSelectedScope(e.target.value)}
-            className="px-2 py-1 text-xs border border-gray-200 rounded-md bg-white"
+            className="min-w-[140px] px-2 py-1 pr-8 text-xs border-gray-200 shadow-none focus:ring-2 focus:ring-blue-100"
+            iconClassName="right-2 h-3.5 w-3.5"
           >
             <option value="all">全部范围</option>
             {scopes.map((s) => (
@@ -201,7 +204,7 @@ export const LogConsolePanel: React.FC<LogConsolePanelProps> = ({ enabled, proje
                 {s}
               </option>
             ))}
-          </select>
+          </AppSelect>
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}

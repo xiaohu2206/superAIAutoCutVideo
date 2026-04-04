@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from "react"
 import { Loader, Upload, X, FileAudio, AlertCircle, Check, Save } from "lucide-react";
 import type { VoxcpmTtsUploadVoiceInput, VoxcpmTtsVoice, VoxcpmTtsPatchVoiceInput } from "../types";
 import { createPortal } from "react-dom";
+import AppSelect from "@/components/ui/AppSelect";
 import { LANGUAGE_OPTIONS } from "../constants";
 
 export type VoxcpmVoiceUploadDialogResult = {
@@ -303,45 +304,35 @@ export const VoxcpmVoiceUploadDialog: React.FC<VoxcpmVoiceUploadDialogProps> = (
 
               <div>
                 <Label required>模型</Label>
-                <div className="relative">
-                  <select
-                    value={state.modelKey}
-                    disabled={state.loading}
-                    onChange={(e) => actions.setModelKey(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all appearance-none"
-                  >
-                    {(modelKeys.length ? modelKeys : [state.defaultModelKey]).map((k) => (
-                      <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
-                        {k}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                  </div>
-                </div>
+                <AppSelect
+                  value={state.modelKey}
+                  disabled={state.loading}
+                  onChange={(e) => actions.setModelKey(e.target.value)}
+                  className="bg-gray-50 border-gray-200 focus:border-orange-500 focus:ring-orange-500/20"
+                >
+                  {(modelKeys.length ? modelKeys : [state.defaultModelKey]).map((k) => (
+                    <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
+                      {k}
+                    </option>
+                  ))}
+                </AppSelect>
               </div>
             </div>
 
             <div>
               <Label>语言</Label>
-              <div className="relative">
-                <select
-                  value={state.language}
-                  disabled={state.loading}
-                  onChange={(e) => actions.setLanguage(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all appearance-none"
-                >
-                  {LANGUAGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                </div>
-              </div>
+              <AppSelect
+                value={state.language}
+                disabled={state.loading}
+                onChange={(e) => actions.setLanguage(e.target.value)}
+                className="bg-gray-50 border-gray-200 focus:border-orange-500 focus:ring-orange-500/20"
+              >
+                {LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </AppSelect>
             </div>
 
             <div>

@@ -66,6 +66,14 @@
   .input {
     @apply flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50;
   }
+
+  .select {
+    @apply w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 shadow-sm outline-none transition-all duration-150 hover:border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none;
+  }
+
+  .select-sm {
+    @apply h-7 rounded-md px-2 py-1 pr-8 text-[11px];
+  }
   
   .progress-bar {
     @apply w-full bg-gray-200 rounded-full h-2.5;
@@ -130,6 +138,11 @@
     -ms-overflow-style: none;
   }
 
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
   .window-shell {
     position: relative;
   }
@@ -144,6 +157,11 @@
   }
 
   .main-scroll-hidden::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
     width: 0;
     height: 0;
   }

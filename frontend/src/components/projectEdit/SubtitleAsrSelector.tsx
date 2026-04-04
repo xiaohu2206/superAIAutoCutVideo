@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from "react";
+import { ChevronDown } from "lucide-react";
 import { FUN_ASR_MLT_LANGUAGES, FUN_ASR_NANO_LANGUAGES } from "@/features/subtitleAsr/constants";
 import { useFunAsrModels } from "@/features/subtitleAsr/hooks/useFunAsrModels";
 import { message } from "@/services/message";
@@ -109,64 +110,92 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
     onChange({ provider, modelKey: resolvedModelKey, language: lang });
   };
 
+  const selectClassName =
+    "w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 pr-10 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition-all duration-150 hover:border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none";
+
+  const renderSelect = (
+    selectProps: React.SelectHTMLAttributes<HTMLSelectElement>,
+    options: React.ReactNode,
+    ariaLabel: string,
+  ) => (
+    <div className="relative">
+      <select {...selectProps} aria-label={ariaLabel} className={selectClassName}>
+        {options}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+        strokeWidth={2.25}
+      />
+    </div>
+  );
+
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="block text-xs text-gray-600 mb-1">识别引擎</label>
-          <select
-            value={provider}
-            disabled={disabled}
-            onChange={(e) => setProvider(e.target.value as SubtitleAsrProvider)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
-          >
-            <option value="bcut">内置 API（仅中文）</option>
-            <option value="fun_asr" disabled={!funAsrSelectable}>
-              FunASR（本地模型）
-            </option>
-          </select>
+          <label className="mb-1 block text-xs text-gray-600">识别引擎</label>
+          {renderSelect(
+            {
+              value: provider,
+              disabled,
+              onChange: (e) => setProvider(e.target.value as SubtitleAsrProvider),
+            },
+            <>
+              <option value="bcut">内置 API（仅中文）</option>
+              <option value="fun_asr" disabled={!funAsrSelectable}>
+                FunASR（本地模型）
+              </option>
+            </>,
+            "选择识别引擎",
+          )}
         </div>
 
         {isFun && (
           <>
             <div>
-              <label className="block text-xs text-gray-600 mb-1">模型</label>
-              <select
-                value={resolvedModelKey}
-                disabled={disabled || loading || funModels.length === 0}
-                onChange={(e) => setModelKey(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
-                title="选择 FunASR 模型"
-              >
-                {loading ? (
+              <label className="mb-1 block text-xs text-gray-600">模型</label>
+              {renderSelect(
+                {
+                  value: resolvedModelKey,
+                  disabled: disabled || loading || funModels.length === 0,
+                  onChange: (e) => setModelKey(e.target.value),
+                  title: "选择 FunASR 模型",
+                },
+                loading ? (
                   <option value={resolvedModelKey}>加载模型状态中…</option>
                 ) : funModels.length === 0 ? (
                   <option value={resolvedModelKey}>暂无可用模型（请先在设置下载并校验）</option>
                 ) : (
-                  funModels.map((m) => (
-                    <option key={m.key} value={m.key}>
-                      {m.display_name || m.key}
-                    </option>
-                  ))
-                )}
-              </select>
+                  <>
+                    {funModels.map((m) => (
+                      <option key={m.key} value={m.key}>
+                        {m.display_name || m.key}
+                      </option>
+                    ))}
+                  </>
+                ),
+                "选择 FunASR 模型",
+              )}
             </div>
 
             <div>
-              <label className="block text-xs text-gray-600 mb-1">语言</label>
-              <select
-                value={normalizedLanguage}
-                disabled={disabled || loading || funModels.length === 0}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm disabled:bg-gray-100 disabled:text-gray-500"
-                title="选择识别语言"
-              >
-                {languageOptions.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
+              <label className="mb-1 block text-xs text-gray-600">语言</label>
+              {renderSelect(
+                {
+                  value: normalizedLanguage,
+                  disabled: disabled || loading || funModels.length === 0,
+                  onChange: (e) => setLanguage(e.target.value),
+                  title: "选择识别语言",
+                },
+                <>
+                  {languageOptions.map((x) => (
+                    <option key={x} value={x}>
+                      {x}
+                    </option>
+                  ))}
+                </>,
+                "选择识别语言",
+              )}
             </div>
           </>
         )}

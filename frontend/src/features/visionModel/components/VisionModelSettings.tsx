@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, ShieldCheck, Play, Loader, FolderOpen, Download, XCircle, RefreshCw, Info } from "lucide-react";
+import AppSelect from "@/components/ui/AppSelect";
 import { useMoondreamModels } from "../hooks/useMoondreamModels";
 import { moondreamService } from "../services/moondreamService";
 import { message } from "@/services/message";
@@ -164,14 +165,15 @@ export const VisionModelSettings: React.FC = () => {
                             ) : (
                                 !status?.valid && (
                                     <>
-                                      <select 
+                                      <AppSelect 
                                         value={provider} 
                                         onChange={e => setProvider(e.target.value as any)}
-                                        className="h-7 text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        className="select-sm"
+                                        iconClassName="right-2 h-3.5 w-3.5"
                                       >
                                           <option value="modelscope">ModelScope</option>
                                           <option value="hf">HuggingFace</option>
-                                      </select>
+                                      </AppSelect>
                                       <button
                                           onClick={() => downloadModel(provider)}
                                           className="px-2.5 py-1 text-xs border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded h-7 flex items-center gap-1"

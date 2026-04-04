@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { Copy, Minus, RefreshCw, Square, X } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import Navigation from "./components/Navigation";
 import SettingsPage from "./components/settingsPage";
@@ -50,6 +50,7 @@ const App: React.FC = () => {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const { appVersion } = useAppVersion();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
+  const [isMaximized, setIsMaximized] = useState(false);
 
   // 初始化应用
   useEffect(() => {
@@ -91,6 +92,36 @@ const App: React.FC = () => {
       wsClient.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isTauri) return;
+
+    let mounted = true;
+
+    const syncMaximizedState = async () => {
+      const value = await TauriCommands.isWindowMaximized();
+      if (mounted) {
+        setIsMaximized(value);
+      }
+    };
+
+    void syncMaximizedState();
+
+    const handleResize = () => {
+      void syncMaximizedState();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      mounted = false;
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isTauri]);
+
+  const handleToggleMaximize = async () => {
+    const nextState = await TauriCommands.toggleMaximizeWindow();
+    setIsMaximized(nextState);
+  };
 
   const initializeApp = async () => {
     setIsLoading(true);
@@ -243,40 +274,127 @@ const App: React.FC = () => {
     );
   }
 
+  const handleHomeClick = () => {
+    if (currentProjectId) {
+      setCurrentProjectId(null);
+      return;
+    }
+    setActiveTab("home");
+  };
+
   return (
-    <div className="window-shell flex h-screen flex-col overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} isTauri={isTauri} />
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
+      <Navigation
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onHomeClick={handleHomeClick}
+      />
 
-      <main className="main-scroll-hidden mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pt-6">
-        <div className="mb-4 shrink-0">
-          <MessageHost />
-        </div>
-        <div className="min-h-0 flex-1">
-          {/* 标签页内容 */}
-          {activeTab === "home" && !currentProjectId && (
-            <ProjectManagementPage
-              onEditProject={(projectId) => setCurrentProjectId(projectId)}
-            />
-          )}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))]">
+        {isTauri && (
+          <header
+            className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl"
+            data-tauri-drag-region={true}
+          >
+            <div className="flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 sm:text-[15px]">
+                    SuperAI 影视剪辑
+                  </h1>
+                  {!!appVersion && (
+                    <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium leading-none text-blue-700 md:inline-flex">
+                      v{appVersion}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          {activeTab === "home" && currentProjectId && (
-            <ProjectEditPage
-              projectId={currentProjectId}
-              onBack={() => setCurrentProjectId(null)}
-            />
-          )}
+              <div className="titlebar-no-drag hidden shrink-0 items-center gap-1 sm:flex">
+                <button
+                  onClick={() => void TauriCommands.minimizeWindow()}
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  title="最小化"
+                  aria-label="最小化窗口"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={handleToggleMaximize}
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  title={isMaximized ? "还原" : "最大化"}
+                  aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
+                >
+                  {isMaximized ? (
+                    <Copy className="h-2.5 w-2.5" />
+                  ) : (
+                    <Square className="h-2.5 w-2.5" />
+                  )}
+                </button>
+                <button
+                  onClick={() => void TauriCommands.closeWindow()}
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-500 hover:text-white"
+                  title="关闭"
+                  aria-label="关闭窗口"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          </header>
+        )}
 
-          {activeTab === "settings" && (
-            <SettingsPage
-              messages={messages}
-              backendStatus={backendStatus}
-              connections={connectionStatus}
-              onMonitorEnter={refreshConnections}
-              onMonitorRefresh={refreshConnections}
-            />
-          )}
-        </div>
-      </main>
+        <main
+          className={
+            activeTab === "settings"
+              ? "main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+          }
+        >
+          <div
+            className={
+              activeTab === "settings"
+                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0"
+                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 "
+            }
+          >
+      
+              <MessageHost />
+            <div
+              className={
+                activeTab === "settings"
+                  ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+                  : "scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+              }
+            >
+              {activeTab === "home" && !currentProjectId && (
+                <ProjectManagementPage
+                  onEditProject={(projectId) => setCurrentProjectId(projectId)}
+                />
+              )}
+
+              {activeTab === "home" && currentProjectId && (
+                <ProjectEditPage
+                  projectId={currentProjectId}
+                  onBack={() => setCurrentProjectId(null)}
+                />
+              )}
+
+              {activeTab === "settings" && (
+                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+                  <SettingsPage
+                    messages={messages}
+                    backendStatus={backendStatus}
+                    connections={connectionStatus}
+                    onMonitorEnter={refreshConnections}
+                    onMonitorRefresh={refreshConnections}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 };
