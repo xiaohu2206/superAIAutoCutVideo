@@ -565,6 +565,34 @@ async fn start_backend(
         .append(true)
         .open(&early_log_path);
     append_log_line(early_log_path.clone(), "[meta] start_backend invoked");
+
+    // 最早期并发启动防护：若已有启动流程进行中，则等待其更新状态，避免重复拉起
+    if state.backend_starting.swap(true, Ordering::SeqCst) {
+        for _ in 0..40 {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let port = *state.backend_port.lock().unwrap();
+            let boot_token = state.backend_boot_token.lock().unwrap().clone();
+            let process_guard = state.backend_process.lock().unwrap();
+            let running = process_guard.is_some() || port != 0;
+            drop(process_guard);
+            if running {
+                if port != 0 {
+                    println!(
+                        "[backend] 启动中（复用已有启动流程）：http://127.0.0.1:{}",
+                        port
+                    );
+                }
+                return Ok(BackendStatus {
+                    running,
+                    port,
+                    pid: None,
+                    boot_token,
+                });
+            }
+        }
+        return Err("后端正在启动中，请稍后重试".to_string());
+    }
+
     // 先短暂持锁检查和清理状态，避免并发重复启动
     {
         let mut process_guard = state.backend_process.lock().unwrap();
@@ -915,25 +943,6 @@ async fn start_backend(
         append_log_line(path, &format!("[error] {}", err));
         return Err(err);
     };
-
-    // 并发启动防护：若已有启动流程进行中，则不再重复启动
-    if state.backend_starting.swap(true, Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let port = *state.backend_port.lock().unwrap();
-        let boot_token = state.backend_boot_token.lock().unwrap().clone();
-        if port != 0 {
-            println!(
-                "[backend] 启动中（复用已有启动流程）：http://{}:{}",
-                host, port
-            );
-        }
-        return Ok(BackendStatus {
-            running: port != 0,
-            port,
-            pid: None,
-            boot_token,
-        });
-    }
 
     // 设置环境变量
     let port_env = std::env::var("SACV_FORCE_PORT")
@@ -1316,15 +1325,21 @@ async fn close_main_window(app: AppHandle, state: State<'_, AppState>) -> Result
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // 若未由配置自动创建窗口，则显式创建主窗口
     if app.get_webview_window("main").is_none() {
-        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-            .title("AI智能视频剪辑")
-            .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .shadow(false)
-            .inner_size(1200.0, 800.0)
-            .center()
-            .build()?;
+        let window_builder =
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("AI智能视频剪辑")
+                .resizable(true)
+                .decorations(false)
+                .shadow(false)
+                .inner_size(1200.0, 800.0)
+                .center();
+
+        #[cfg(target_os = "windows")]
+        {
+            window_builder = window_builder.transparent(true);
+        }
+
+        window_builder.build()?;
     }
 
     {

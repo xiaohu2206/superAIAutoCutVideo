@@ -4,6 +4,7 @@
   "version": "1.2.4",
   "identifier": "com.superautocutvideo.app",
   "build": {
+    "beforeDevCommand": "cd ../frontend && npm run dev -- --strictPort",
     "devUrl": "http://127.0.0.1:1420/",
     "frontendDist": "../frontend/dist"
   },
@@ -20,7 +21,7 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": false,
         "dragDropEnabled": false
       }
