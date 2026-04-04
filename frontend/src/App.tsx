@@ -123,6 +123,18 @@ const App: React.FC = () => {
     setIsMaximized(nextState);
   };
 
+  const handleTitlebarPointerDown: React.PointerEventHandler<HTMLDivElement> = (event) => {
+    if (!isTauri) return;
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".titlebar-no-drag")) {
+      return;
+    }
+
+    void TauriCommands.startDragWindow();
+  };
+
   const initializeApp = async () => {
     setIsLoading(true);
 
@@ -292,12 +304,12 @@ const App: React.FC = () => {
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))]">
         {isTauri && (
-          <header
-            className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl"
-            data-tauri-drag-region={true}
-          >
-            <div className="flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3">
-              <div className="min-w-0 flex-1">
+          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl">
+            <div
+              className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
+              onPointerDown={handleTitlebarPointerDown}
+            >
+              <div className="min-w-0 flex-1 select-none">
                 <div className="flex items-center gap-2">
                   <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 sm:text-[15px]">
                     SuperAI 影视剪辑

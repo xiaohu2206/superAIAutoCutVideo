@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 #[cfg(target_os = "windows")]
 use std::process::Stdio as _;
+use tauri::image::Image;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
@@ -60,6 +63,7 @@ struct AppState {
     backend_port: Arc<Mutex<u16>>,
     backend_starting: Arc<AtomicBool>,
     backend_boot_token: Arc<Mutex<Option<String>>>,
+    app_is_quitting: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -69,6 +73,7 @@ impl Default for AppState {
             backend_port: Arc::new(Mutex::new(0)),
             backend_starting: Arc::new(AtomicBool::new(false)),
             backend_boot_token: Arc::new(Mutex::new(None)),
+            app_is_quitting: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -1282,6 +1287,16 @@ async fn minimize_main_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn start_dragging_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window
+        .start_dragging()
+        .map_err(|e| format!("拖动窗口失败: {}", e))
+}
+
+#[tauri::command]
 async fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
     let window = app
         .get_webview_window("main")
@@ -1313,18 +1328,69 @@ async fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn close_main_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    if let Err(e) = stop_backend(state).await {
-        eprintln!("关闭应用时清理后端失败: {}", e);
-    }
-    app.exit(0);
+async fn close_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+
+    window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
+
+    let _ = tauri_plugin_notification::NotificationExt::notification(&app)
+        .builder()
+        .title("SuperAI 影视剪辑")
+        .body("应用已最小化到系统托盘，可在右下角托盘中恢复或退出")
+        .show();
+
     Ok(())
 }
 
 // 应用启动时的初始化
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItem::with_id(app, "tray_show", "显示主窗口", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "tray_quit", "退出", true, None::<&str>)?;
+    let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let tray_icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or("缺少默认窗口图标，无法创建系统托盘图标")?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(Image::from(tray_icon))
+        .tooltip("SuperAI 影视剪辑")
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
     // 若未由配置自动创建窗口，则显式创建主窗口
     if app.get_webview_window("main").is_none() {
+        #[cfg(target_os = "windows")]
+        let window_builder =
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("AI智能视频剪辑")
+                .resizable(true)
+                .decorations(false)
+                .shadow(false)
+                .transparent(true)
+                .inner_size(1200.0, 800.0)
+                .center();
+
+        #[cfg(not(target_os = "windows"))]
         let window_builder =
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 .title("AI智能视频剪辑")
@@ -1333,11 +1399,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .shadow(false)
                 .inner_size(1200.0, 800.0)
                 .center();
-
-        #[cfg(target_os = "windows")]
-        {
-            window_builder = window_builder.transparent(true);
-        }
 
         window_builder.build()?;
     }
@@ -1382,8 +1443,34 @@ fn main() {
         }))
         .manage(AppState::default())
         .setup(setup_app)
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray_show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            "tray_quit" => {
+                let state = app.state::<AppState>();
+                state.app_is_quitting.store(true, Ordering::SeqCst);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                } else {
+                    app.exit(0);
+                }
+            }
+            _ => {}
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                if state.app_is_quitting.load(Ordering::SeqCst) {
+                    return;
+                }
+                let _ = window.hide();
+                api.prevent_close();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1396,6 +1483,7 @@ fn main() {
             show_notification,
             open_external_link,
             minimize_main_window,
+            start_dragging_main_window,
             toggle_maximize_main_window,
             is_main_window_maximized,
             close_main_window

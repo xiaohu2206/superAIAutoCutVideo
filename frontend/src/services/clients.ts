@@ -684,6 +684,14 @@ export class TauriCommands {
     }
   }
 
+  static async startDragWindow(): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("start_dragging_main_window");
+    } catch (error) {
+      console.error("拖动窗口失败:", error);
+    }
+  }
+
   static async toggleMaximizeWindow(): Promise<boolean> {
     try {
       return await TauriCommands.coreInvoke("toggle_maximize_main_window");
