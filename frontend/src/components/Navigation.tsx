@@ -1,121 +1,206 @@
 import {
-    Github,
-    Home,
-    Settings
-} from 'lucide-react'
-import React from 'react'
-import Logo from '@/assets/logo.png'
-import { TauriCommands } from '@/services/clients'
+  AppWindow,
+  Github,
+  Home,
+  Minus,
+  Settings,
+  Square,
+  X,
+} from "lucide-react";
+import React from "react";
+import Logo from "@/assets/logo.png";
+import { TauriCommands } from "@/services/clients";
+import { useAppVersion } from "@/hooks/useAppVersion";
 
 interface NavigationProps {
-  activeTab: string
-  onTabChange: (tab: string) => void
-  className?: string
+  activeTab: string;
+  onTabChange: (tab: string) => void;
+  isTauri?: boolean;
+  className?: string;
 }
 
-const Navigation: React.FC<NavigationProps> = ({ 
-  activeTab, 
-  onTabChange, 
-  className = '' 
+const Navigation: React.FC<NavigationProps> = ({
+  activeTab,
+  onTabChange,
+  isTauri = false,
+  className = "",
 }) => {
+  const { appVersion } = useAppVersion();
+  const [isMaximized, setIsMaximized] = React.useState(false);
+
   const navItems = [
     {
-      id: 'home',
-      label: '首页',
+      id: "home",
+      label: "项目",
       icon: Home,
-      description: '应用概览和快速操作'
+      description: "项目管理与剪辑流程",
     },
     {
-      id: 'settings',
-      label: '设置',
+      id: "settings",
+      label: "设置",
       icon: Settings,
-      description: '应用配置和偏好设置'
-    }
-  ]
+      description: "应用配置和偏好设置",
+    },
+  ];
+
+  React.useEffect(() => {
+    if (!isTauri) return;
+
+    let mounted = true;
+
+    const syncMaximizedState = async () => {
+      const value = await TauriCommands.isWindowMaximized();
+      if (mounted) {
+        setIsMaximized(value);
+      }
+    };
+
+    void syncMaximizedState();
+
+    const handleResize = () => {
+      void syncMaximizedState();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      mounted = false;
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isTauri]);
+
+  const handleToggleMaximize = async () => {
+    const nextState = await TauriCommands.toggleMaximizeWindow();
+    setIsMaximized(nextState);
+  };
 
   return (
-    <nav className={`bg-white shadow-sm border-b ${className}`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo和标题 */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-10 h-10">
-              <img src={Logo} />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">AI智能视频剪辑</h1>
-              <p className="text-xs text-gray-500">SuperAI</p>
-            </div>
+    <header
+      className={`sticky top-0 z-50 border-b border-slate-200/80 bg-white/92 backdrop-blur-xl shadow-[0_12px_40px_-24px_rgba(15,23,42,0.35)] ${className}`}
+    >
+      <div className="mx-auto flex h-[72px] max-w-7xl items-stretch px-3 sm:px-4 lg:px-6">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-3"
+          data-tauri-drag-region={isTauri ? true : undefined}
+        >
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 via-indigo-500 to-violet-500 shadow-lg shadow-blue-500/20 ring-1 ring-white/70">
+            <img src={Logo} alt="SuperAI" className="h-8 w-8 object-contain" />
           </div>
 
-          {/* 导航菜单 */}
-          <div className="hidden md:flex items-center space-x-1">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-[15px] font-semibold tracking-[0.02em] text-slate-900">
+                SuperAI 影视剪辑
+              </h1>
+              <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 sm:inline-flex">
+                Windows 桌面版
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <AppWindow className="h-3.5 w-3.5" />
+                无边框沉浸式工作区
+              </span>
+              {!!appVersion && <span>v{appVersion}</span>}
+            </div>
+          </div>
+        </div>
+
+        <div className="hidden items-center justify-center px-4 md:flex">
+          <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner shadow-slate-200/60">
             {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = activeTab === item.id
-              
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+
               return (
                 <button
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
-                  className={`
-                    flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                    ${isActive 
-                      ? 'bg-blue-100 text-blue-700 shadow-sm' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }
-                  `}
+                  className={[
+                    "group relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200",
+                    isActive
+                      ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-100"
+                      : "text-slate-600 hover:bg-white/80 hover:text-slate-900",
+                  ].join(" ")}
                   title={item.description}
                 >
-                  <Icon className={`h-4 w-4 mr-2 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
+                  <Icon
+                    className={`h-4 w-4 transition-colors ${
+                      isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
+                    }`}
+                  />
                   {item.label}
                 </button>
-              )
+              );
             })}
-          </div>
-
-          {/* 右侧操作 */}
-          <div className="flex items-center space-x-3">
-            {/* GitHub链接 */}
-            <button
-              onClick={() => TauriCommands.openExternalLink('https://github.com/xiaohu2206/superAIAutoCutVideo')}
-              className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
-              title="查看源代码"
-            >
-              <Github className="h-5 w-5" />
-            </button>
           </div>
         </div>
 
-        {/* 移动端导航 */}
-        <div className="md:hidden border-t border-gray-200">
-          <div className="flex overflow-x-auto py-2 space-x-1">
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = activeTab === item.id
-              
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`
-                    flex flex-col items-center px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 min-w-0 flex-shrink-0
-                    ${isActive 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }
-                  `}
-                >
-                  <Icon className={`h-4 w-4 mb-1 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
-                  <span className="truncate">{item.label}</span>
-                </button>
-              )
-            })}
-          </div>
+        <div className="flex items-center gap-1 pl-2">
+          <button
+            onClick={() => TauriCommands.openExternalLink("https://github.com/xiaohu2206/superAIAutoCutVideo")}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-800"
+            title="查看源代码"
+          >
+            <Github className="h-4.5 w-4.5" />
+          </button>
+
+          {isTauri && (
+            <div className="titlebar-no-drag ml-1 flex items-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50/90">
+              <button
+                onClick={() => void TauriCommands.minimizeWindow()}
+                className="titlebar-no-drag inline-flex h-10 w-11 items-center justify-center text-slate-500 transition-colors hover:bg-slate-200/80 hover:text-slate-800"
+                title="最小化"
+                aria-label="最小化窗口"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleToggleMaximize}
+                className="titlebar-no-drag inline-flex h-10 w-11 items-center justify-center border-l border-r border-slate-200 text-slate-500 transition-colors hover:bg-slate-200/80 hover:text-slate-800"
+                title={isMaximized ? "还原" : "最大化"}
+                aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
+              >
+                <Square className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => void TauriCommands.closeWindow()}
+                className="titlebar-no-drag inline-flex h-10 w-11 items-center justify-center text-slate-500 transition-colors hover:bg-rose-500 hover:text-white"
+                title="关闭"
+                aria-label="关闭窗口"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
-    </nav>
-  )
-}
 
-export default Navigation
+      <div className="border-t border-slate-100/80 px-3 py-2 md:hidden sm:px-4">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => onTabChange(item.id)}
+                className={[
+                  "inline-flex min-w-fit items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition-all duration-200",
+                  isActive
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                ].join(" ")}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default Navigation;

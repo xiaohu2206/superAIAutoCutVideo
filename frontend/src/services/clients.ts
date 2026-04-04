@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 // API客户端 - 处理与FastAPI后端的通信
 import { message } from "./message";
 
@@ -672,6 +673,45 @@ export class TauriCommands {
     } catch {
       if (typeof window !== "undefined") {
         window.open(url, "_blank");
+      }
+    }
+  }
+
+  static async minimizeWindow(): Promise<void> {
+    try {
+      await getCurrentWindow().minimize();
+    } catch {}
+  }
+
+  static async toggleMaximizeWindow(): Promise<boolean> {
+    try {
+      const currentWindow = getCurrentWindow();
+      const isMaximized = await currentWindow.isMaximized();
+      if (isMaximized) {
+        await currentWindow.unmaximize();
+        return false;
+      }
+      await currentWindow.maximize();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static async isWindowMaximized(): Promise<boolean> {
+    try {
+      return await getCurrentWindow().isMaximized();
+    } catch {
+      return false;
+    }
+  }
+
+  static async closeWindow(): Promise<void> {
+    try {
+      await getCurrentWindow().close();
+    } catch {
+      if (typeof window !== "undefined") {
+        window.close();
       }
     }
   }

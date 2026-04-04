@@ -4,14 +4,24 @@
 
 /* 全局样式 */
 @layer base {
-  body {
-    @apply bg-white text-gray-900 font-sans;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
-  
   html {
     scroll-behavior: smooth;
-    color-scheme: light dark;
+    color-scheme: light;
+    background: transparent;
+  }
+
+  body {
+    @apply text-gray-900 font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100vh;
+    min-height: 100vh;
+    overflow: hidden;
+    background: transparent;
   }
 }
 
@@ -71,6 +81,34 @@
   .text-balance {
     text-wrap: balance;
   }
+
+  .titlebar-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  .main-scroll-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .window-shell {
+    position: relative;
+  }
+
+  .window-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+
+  .main-scroll-hidden::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
   
   .animate-pulse-slow {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -88,7 +126,13 @@
 }
 
 /* 滚动条样式 */
-::-webkit-scrollbar {
+body::-webkit-scrollbar,
+html::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }

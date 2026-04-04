@@ -42,6 +42,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const { appVersion } = useAppVersion();
+  const isTauri = typeof (window as any).__TAURI_IPC__ === "function";
 
   // 初始化应用
   useEffect(() => {
@@ -229,12 +230,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 导航栏 */}
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+    <div className="window-shell flex h-screen flex-col overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} isTauri={isTauri} />
 
-      {/* 主要内容区域 */}
-      <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+      <main className="main-scroll-hidden mx-auto min-h-0 w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pt-6">
         <div className="mb-4">
           <MessageHost />
         </div>

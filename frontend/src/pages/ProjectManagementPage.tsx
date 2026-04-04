@@ -1,6 +1,6 @@
 // 项目管理页面（一级页面）
 
-import { AlertCircle, CheckCircle, Clock, Edit, Folder, Plus, RefreshCw, X } from "lucide-react";
+import { AlertCircle, CheckCircle, Plus, RefreshCw, X } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
@@ -153,72 +153,12 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* 统计信息 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* 总项目数 */}
-        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">总项目数</p>
-              <p className="text-xl font-bold text-gray-900">{projects.length}</p>
-            </div>
-            <div className="p-1.5 bg-gray-50 rounded-md">
-              <Folder className="h-4 w-4 text-gray-400" />
-            </div>
-          </div>
-        </div>
-
-        {/* 草稿箱 */}
-        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">草稿箱</p>
-              <p className="text-xl font-bold text-gray-500">
-                {projects.filter((p) => p.status === "draft").length}
-              </p>
-            </div>
-            <div className="p-1.5 bg-gray-50 rounded-md">
-              <Edit className="h-4 w-4 text-gray-400" />
-            </div>
-          </div>
-        </div>
-
-        {/* 处理中 */}
-        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">处理中</p>
-              <p className="text-xl font-bold text-blue-600">
-                {projects.filter((p) => p.status === "processing").length}
-              </p>
-            </div>
-            <div className="p-1.5 bg-blue-50 rounded-md">
-              <Clock className="h-4 w-4 text-blue-500" />
-            </div>
-          </div>
-        </div>
-
-        {/* 已完成 */}
-        <div className="bg-white rounded-lg py-3 px-4 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">已完成</p>
-              <p className="text-xl font-bold text-green-600">
-                {projects.filter((p) => p.status === "completed").length}
-              </p>
-            </div>
-            <div className="p-1.5 bg-green-50 rounded-md">
-              <CheckCircle className="h-4 w-4 text-green-500" />
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-6 h-full min-h-0 flex flex-col">
 
       {/* 区块标题：最近项目 + 搜索 + 创建按钮 */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-baseline space-x-2">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">最近项目</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">项目</h2>
           <span className="text-sm text-gray-500 font-normal">（新版本不对旧数据做兼容）</span>
         </div>
         <div className="flex items-center space-x-3">
@@ -295,14 +235,16 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       )}
 
       {/* 项目列表 */}
-      <ProjectList
-        projects={projects.filter((p) =>
-          p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
-        )}
-        loading={loading}
-        onEdit={handleEditProject}
-        onDelete={handleDeleteProject}
-      />
+      <div className="overflow-y-auto pr-2 min-h-0 flex-1">
+        <ProjectList
+          projects={projects.filter((p) =>
+            p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+          )}
+          loading={loading}
+          onEdit={handleEditProject}
+          onDelete={handleDeleteProject}
+        />
+      </div>
 
       {/* 创建项目模态框 */}
       <CreateProjectModal
