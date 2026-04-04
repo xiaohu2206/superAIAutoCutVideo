@@ -78,65 +78,57 @@ const Navigation: React.FC<NavigationProps> = ({
     <header
       className={`sticky top-0 z-50 border-b border-slate-200/80 bg-white/92 backdrop-blur-xl shadow-[0_12px_40px_-24px_rgba(15,23,42,0.35)] ${className}`}
     >
-      <div className="mx-auto flex h-[72px] max-w-7xl items-center gap-2 px-3 sm:px-4 lg:px-6">
-        <div
-          className="flex min-w-0 flex-1 items-center gap-3"
-          data-tauri-drag-region={isTauri ? true : undefined}
-        >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 via-indigo-500 to-violet-500 shadow-lg shadow-blue-500/20 ring-1 ring-white/70">
-            <img src={Logo} alt="SuperAI" className="h-8 w-8 object-contain" />
+      <div className="flex h-[72px] items-center px-3 sm:px-4 lg:px-6">
+        <div className="titlebar-drag flex min-w-0 flex-1 items-center gap-3" data-tauri-drag-region={isTauri ? true : undefined}>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl from-blue-500 via-indigo-500 to-violet-500  ring-1 ring-white/70">
+              <img src={Logo} alt="SuperAI" className="h-8 w-8 object-contain" />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="truncate text-[15px] font-semibold tracking-[0.02em] text-slate-900">
+                  SuperAI 影视剪辑
+                </h1>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+                {!!appVersion && <span>v{appVersion}</span>}
+              </div>
+            </div>
           </div>
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-[15px] font-semibold tracking-[0.02em] text-slate-900">
-                SuperAI 影视剪辑
-              </h1>
-              <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 sm:inline-flex">
-                Windows 桌面版
-              </span>
-            </div>
-            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1">
-                <AppWindow className="h-3.5 w-3.5" />
-                无边框沉浸式工作区
-              </span>
-              {!!appVersion && <span>v{appVersion}</span>}
+          <div className="hidden flex-1 justify-center px-2 md:flex lg:px-4">
+            <div className="titlebar-no-drag flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner shadow-slate-200/60">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onTabChange(item.id)}
+                    className={[
+                      "titlebar-no-drag group relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200",
+                      isActive
+                        ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-100"
+                        : "text-slate-600 hover:bg-white/80 hover:text-slate-900",
+                    ].join(" ")}
+                    title={item.description}
+                  >
+                    <Icon
+                      className={`h-4 w-4 transition-colors ${
+                        isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
+                      }`}
+                    />
+                    {item.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        <div className="hidden items-center justify-center px-2 lg:px-4 md:flex">
-          <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner shadow-slate-200/60">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={[
-                    "titlebar-no-drag group relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-100"
-                      : "text-slate-600 hover:bg-white/80 hover:text-slate-900",
-                  ].join(" ")}
-                  title={item.description}
-                >
-                  <Icon
-                    className={`h-4 w-4 transition-colors ${
-                      isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
-                    }`}
-                  />
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="titlebar-no-drag ml-auto flex shrink-0 items-center gap-1">
+        <div className="titlebar-no-drag ml-3 flex shrink-0 items-center gap-1">
           <button
             onClick={() =>
               TauriCommands.openExternalLink("https://github.com/xiaohu2206/superAIAutoCutVideo")
