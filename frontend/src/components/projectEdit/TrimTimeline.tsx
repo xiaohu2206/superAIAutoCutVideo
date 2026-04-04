@@ -20,6 +20,8 @@ import {
 
 export type TrimRange = TimelineTrimRange;
 
+const ZOOM_FACTOR = 2.5;
+
 type DragState =
   | { type: "none" }
   | { type: "create"; startMs: number; tempId: string; startClientX: number; msPerPx: number }
@@ -251,14 +253,14 @@ export const TrimTimeline: React.FC<TrimTimelineProps> = ({
     const d = Math.max(1, durationMs);
     const anchorMs = clamp(currentMs, 0, d);
     const anchorRatio = ratioFromMs(anchorMs);
-    zoomTo(viewportMs / 1.25, anchorMs, anchorRatio);
+    zoomTo(viewportMs / ZOOM_FACTOR, anchorMs, anchorRatio);
   }, [durationMs, currentMs, ratioFromMs, viewportMs, zoomTo]);
 
   const handleZoomOut = useCallback(() => {
     const d = Math.max(1, durationMs);
     const anchorMs = clamp(currentMs, 0, d);
     const anchorRatio = ratioFromMs(anchorMs);
-    zoomTo(viewportMs * 1.25, anchorMs, anchorRatio);
+    zoomTo(viewportMs * ZOOM_FACTOR, anchorMs, anchorRatio);
   }, [durationMs, currentMs, ratioFromMs, viewportMs, zoomTo]);
 
   const isDragging = dragRef.current.type !== "none";

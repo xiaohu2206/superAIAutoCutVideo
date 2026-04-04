@@ -13,12 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
-from modules.app_paths import (
-    app_settings_file,
-    data_base_dir,
-    normalize_path_str,
-    user_data_dir,
-)
+from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.fun_asr_service import fun_asr_service
@@ -34,121 +29,16 @@ def _now_ts() -> str:
     return datetime.now().isoformat()
 
 
-def _backend_root_dir() -> Path:
-    backend_dir = Path(__file__).resolve().parents[1]
-    return backend_dir.parent
-
-
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    (up / "videos").mkdir(parents=True, exist_ok=True)
-    (up / "subtitles").mkdir(parents=True, exist_ok=True)
-    (up / "audios").mkdir(parents=True, exist_ok=True)
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
-
-
-def _uploads_roots_for_resolve() -> List[Path]:
-    """
-    与 main.get_app_paths / app_paths 逻辑对齐，遍历可能的 uploads 根目录。
-    避免项目里存的 /uploads/... 与实际落盘目录（仓库 uploads、用户目录 uploads）不一致时读不到字幕。
-    """
-    roots: List[Path] = []
-    seen: set[str] = set()
-
-    def add(p: Optional[Path]) -> None:
-        if p is None:
-            return
-        try:
-            pp = Path(p).expanduser()
-            key = str(pp)
-            if key not in seen:
-                seen.add(key)
-                roots.append(pp)
-        except Exception:
-            return
-
-    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
-    if env:
-        add(Path(env))
-    try:
-        sf = app_settings_file()
-        if sf.exists():
-            data = json.loads(sf.read_text(encoding="utf-8"))
-            root = normalize_path_str(str(data.get("uploads_root") or ""))
-            if root:
-                add(Path(root))
-    except Exception:
-        pass
-    add(_backend_root_dir() / "uploads")
-    add(data_base_dir() / "uploads")
-    add(user_data_dir() / "uploads")
-    return roots
+    return to_uploads_web_path(p)
 
 
 def _resolve_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s = normalize_path_str(s)
-    s_norm = s.replace("\\", "/")
-    if s_norm.lower().startswith("file:"):
-        s_norm = s_norm.split("://", 1)[-1].lstrip("/")
-        if len(s_norm) > 1 and s_norm[1] == ":":
-            s_norm = s_norm[:2] + "/" + s_norm[2:]
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        rel = rel.lstrip("/")
-        if not rel:
-            return Path("")
-        roots = _uploads_roots_for_resolve()
-        candidates = [b / rel for b in roots]
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    if s_norm.lower().startswith("uploads/"):
-        rel = s_norm[len("uploads/") :].lstrip("/")
-        roots = _uploads_roots_for_resolve()
-        for base in roots:
-            c = base / rel
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return (roots[0] / rel) if roots else Path(s)
-    if any(s_norm.startswith(p) for p in ("subtitles/", "videos/", "audios/", "analyses/")):
-        roots = _uploads_roots_for_resolve()
-        for base in roots:
-            c = base / s_norm
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return (roots[0] / s_norm) if roots else Path(s)
-    try:
-        p = Path(s)
-        if p.is_absolute():
-            return p
-    except Exception:
-        pass
-    root = _backend_root_dir()
-    if s_norm.startswith("/"):
-        return root / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
 
 
 def _compress_srt(content: str) -> str:

@@ -3,7 +3,8 @@ import zlib
 import logging
 from pathlib import Path
 from typing import Union, Optional
-import os
+
+from modules.app_paths import uploads_dir
 
 
 class BaseASR:
@@ -38,11 +39,10 @@ class BaseASR:
         # 计算 CRC32（十六进制小写）
         self.crc32_hex = format(zlib.crc32(self.file_binary) & 0xFFFFFFFF, '08x')
 
-    # 缓存目录使用项目根下的 uploads/asr_cache
+    # 缓存目录统一使用 uploads/asr_cache
     @property
     def _cache_dir(self) -> Path:
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        root = Path(env) if env else Path(__file__).resolve().parents[2] / "uploads"
+        root = uploads_dir()
         cache_dir = root / "asr_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir

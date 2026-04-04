@@ -14,6 +14,7 @@ from modules.projects_store import projects_store, Project
 from modules.ws_manager import manager
 from modules.task_progress_store import task_progress_store
 from services.script_generation_service import ScriptGenerationService
+from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 
 logger = logging.getLogger(__name__)
@@ -23,50 +24,16 @@ def _now_ts() -> str:
     return datetime.now().isoformat()
 
 
-def _backend_root_dir() -> Path:
-    backend_dir = Path(__file__).resolve().parents[1]
-    return backend_dir.parent
-
-
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def _resolve_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s_norm = s.replace("\\", "/")
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        candidates = []
-        if env:
-            candidates.append(Path(env) / rel)
-        candidates.append((_backend_root_dir() / "uploads") / rel)
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    p = Path(s)
-    if p.is_absolute():
-        return p
-    if s_norm.startswith("/"):
-        return _backend_root_dir() / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
 
 
 def _load_subtitle_text(p: Project, subtitle_path: Optional[str]) -> str:

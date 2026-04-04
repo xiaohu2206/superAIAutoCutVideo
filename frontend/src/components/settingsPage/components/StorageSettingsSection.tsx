@@ -43,7 +43,7 @@ const StorageSettingsSection: React.FC = () => {
         <div>
           <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm font-medium text-gray-700">当前 uploads 根路径（缓存数据存储目录,建议卸载时手动清理）</p>
+              <p className="text-sm font-medium text-gray-700">当前 uploads 根路径（缓存数据存储目录）</p>
               <p className="text-xs text-red-500 ">更改后重启应用可生效</p>
             </div>
             <div className="flex items-center space-x-2">

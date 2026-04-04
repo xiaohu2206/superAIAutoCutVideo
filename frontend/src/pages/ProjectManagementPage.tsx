@@ -194,7 +194,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
         {/* 项目列表 */}
         <div
           onScroll={handleListScroll}
-          className={`project-list-scrollbar min-h-0 flex-1 overflow-y-auto pr-2 ${isListScrollbarVisible ? "scrollbar-visible" : ""}`}
+          className={`project-list-scrollbar pt-2 min-h-0 flex-1 overflow-y-auto pr-2 ${isListScrollbarVisible ? "scrollbar-visible" : ""}`}
         >
           <ProjectList
             projects={projects.filter((p) =>

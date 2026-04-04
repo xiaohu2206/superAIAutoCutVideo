@@ -2,7 +2,10 @@ import { AlertCircle, AlertTriangle, CheckCircle, Info, Loader2, X } from "lucid
 import { useEffect, useRef, useState } from "react";
 import { messageEventName, type MessageEventDetail, type MessageType } from "../../services/message";
 
+
 type MessageItem = MessageEventDetail & { createdAt: number };
+
+const INTERACTION_DISMISS_DELAY_MS = 10_000;
 
 function getTypeClassName(type: MessageType): string {
   if (type === "success") return "border-green-200 text-green-700 bg-green-50";
@@ -23,11 +26,27 @@ export default function MessageHost() {
   const [current, setCurrent] = useState<MessageItem | null>(null);
   const [toasts, setToasts] = useState<MessageItem[]>([]);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const dismissTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const clearDismissTimer = () => {
+      if (dismissTimerRef.current !== null) {
+        window.clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+
     const dismissMessages = () => {
       setCurrent(null);
       setToasts([]);
+    };
+
+    const scheduleDismissMessages = () => {
+      clearDismissTimer();
+      dismissTimerRef.current = window.setTimeout(() => {
+        dismissTimerRef.current = null;
+        dismissMessages();
+      }, INTERACTION_DISMISS_DELAY_MS);
     };
 
     const shouldIgnoreInteraction = (target: EventTarget | null) => {
@@ -37,10 +56,12 @@ export default function MessageHost() {
 
     const handleUserInteraction = (event: Event) => {
       if (shouldIgnoreInteraction(event.target)) return;
-      dismissMessages();
+      scheduleDismissMessages();
     };
 
     const handler = (event: Event) => {
+      clearDismissTimer();
+
       const e = event as CustomEvent<MessageEventDetail>;
       const detail = e.detail;
       if (!detail || !detail.id) return;
@@ -56,21 +77,19 @@ export default function MessageHost() {
           setToasts((prev) => prev.filter((t) => t.createdAt !== item.createdAt));
         }, ms);
       }
-      
-      // 注意：已移除自动定时关闭逻辑，实现持久化显示
-      // 只有点击关闭按钮、用户产生新交互或新消息到来时，当前消息才会消失/被替换
     };
 
     window.addEventListener(messageEventName, handler as EventListener);
-    window.addEventListener("pointerdown", handleUserInteraction, true);
-    window.addEventListener("keydown", handleUserInteraction, true);
-    window.addEventListener("wheel", handleUserInteraction, true);
+    window.addEventListener("pointerdown", handleUserInteraction);
+    window.addEventListener("keydown", handleUserInteraction);
+    window.addEventListener("wheel", handleUserInteraction, { passive: true });
 
     return () => {
+      clearDismissTimer();
       window.removeEventListener(messageEventName, handler as EventListener);
-      window.removeEventListener("pointerdown", handleUserInteraction, true);
-      window.removeEventListener("keydown", handleUserInteraction, true);
-      window.removeEventListener("wheel", handleUserInteraction, true);
+      window.removeEventListener("pointerdown", handleUserInteraction);
+      window.removeEventListener("keydown", handleUserInteraction);
+      window.removeEventListener("wheel", handleUserInteraction);
     };
   }, []);
 

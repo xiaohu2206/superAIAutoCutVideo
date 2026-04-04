@@ -16,6 +16,7 @@ from modules.projects_store import projects_store, Project
 from modules.ws_manager import manager
 from services.script_generation_service import ScriptGenerationService
 from modules.config.content_model_config import content_model_config_manager
+from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 
 logger = logging.getLogger(__name__)
@@ -25,63 +26,16 @@ def _now_ts() -> str:
     return datetime.now().isoformat()
 
 
-def _backend_root_dir() -> Path:
-    backend_dir = Path(__file__).resolve().parents[1]
-    return backend_dir.parent
-
-
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    (up / "videos").mkdir(parents=True, exist_ok=True)
-    (up / "subtitles").mkdir(parents=True, exist_ok=True)
-    (up / "audios").mkdir(parents=True, exist_ok=True)
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def _resolve_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s_norm = s.replace("\\", "/")
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        candidates: List[Path] = []
-        try:
-            if env:
-                candidates.append(Path(env) / rel)
-        except Exception:
-            pass
-        try:
-            candidates.append((_backend_root_dir() / "uploads") / rel)
-        except Exception:
-            pass
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    try:
-        p = Path(s)
-        if p.is_absolute():
-            return p
-    except Exception:
-        pass
-    root = _backend_root_dir()
-    if s_norm.startswith("/"):
-        return root / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
 
 
 def _compress_srt(content: str) -> str:
@@ -367,9 +321,8 @@ class GenerateScriptService:
             raise HTTPException(status_code=404, detail="项目不存在")
 
         try:
-            uploads_env = os.environ.get("SACV_UPLOADS_DIR")
             logger.info(
-                f"generate_script start project_id={project_id} video_path={video_path} subtitle_path={subtitle_path} uploads_env={uploads_env}"
+                f"generate_script start project_id={project_id} video_path={video_path} subtitle_path={subtitle_path} uploads_root={_uploads_dir()}"
             )
         except Exception:
             pass
@@ -388,10 +341,9 @@ class GenerateScriptService:
 
         # await _ensure_models_ready_for_script(project_id)
 
-        root = _backend_root_dir()
         video_abs = _resolve_path(video_path)
         try:
-            logger.info(f"resolved video path project_id={project_id} input={video_path} resolved={video_abs} exists={video_abs.exists()} backend_root={root}")
+            logger.info(f"resolved video path project_id={project_id} input={video_path} resolved={video_abs} exists={video_abs.exists()}")
         except Exception:
             pass
         if not video_abs.exists():
@@ -407,7 +359,7 @@ class GenerateScriptService:
             except Exception:
                 pass
             try:
-                logger.error(f"video missing project_id={project_id} input={video_path} resolved={video_abs} uploads_env={os.environ.get('SACV_UPLOADS_DIR')}")
+                logger.error(f"video missing project_id={project_id} input={video_path} resolved={video_abs} uploads_root={_uploads_dir()}")
             except Exception:
                 pass
             raise HTTPException(status_code=400, detail="视频文件不存在")

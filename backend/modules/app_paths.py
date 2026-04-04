@@ -3,6 +3,7 @@ import sys
 import json
 import shutil
 from pathlib import Path
+from typing import Optional, List
 
 def _strip_invisible_chars(s: str) -> str:
     s = s.replace("\ufeff", "")
@@ -60,21 +61,7 @@ def app_settings_file() -> Path:
     return user_config_dir() / "app_settings.json"
 
 def uploads_dir() -> Path:
-    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
-    candidates = []
-    if env:
-        candidates.append(Path(env).expanduser())
-    try:
-        settings_path = app_settings_file()
-        if settings_path.exists():
-            data = json.loads(settings_path.read_text(encoding="utf-8"))
-            root = normalize_path_str(str(data.get("uploads_root") or ""))
-            if root:
-                candidates.append(Path(root).expanduser())
-    except Exception:
-        pass
-    candidates.append(data_base_dir() / "uploads")
-    candidates.append(user_data_dir() / "uploads")
+    candidates = uploads_roots_for_resolve()
     for d in candidates:
         try:
             d.mkdir(parents=True, exist_ok=True)
@@ -82,6 +69,103 @@ def uploads_dir() -> Path:
         except Exception:
             continue
     return candidates[0]
+
+
+def uploads_roots_for_resolve(include_legacy_repo_uploads: bool = True) -> List[Path]:
+    roots: List[Path] = []
+    seen: set[str] = set()
+
+    def add(p: Optional[Path]) -> None:
+        if p is None:
+            return
+        try:
+            pp = Path(p).expanduser()
+            key = str(pp)
+            if key not in seen:
+                seen.add(key)
+                roots.append(pp)
+        except Exception:
+            return
+
+    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
+    if env:
+        add(Path(env))
+    try:
+        settings_path = app_settings_file()
+        if settings_path.exists():
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            root = normalize_path_str(str(data.get("uploads_root") or ""))
+            if root:
+                add(Path(root))
+    except Exception:
+        pass
+    add(data_base_dir() / "uploads")
+    add(user_data_dir() / "uploads")
+    if include_legacy_repo_uploads:
+        backend_dir = Path(__file__).resolve().parents[1]
+        add(backend_dir.parent / "uploads")
+    return roots
+
+
+def to_uploads_web_path(p: Path) -> str:
+    path = Path(p)
+    for root in uploads_roots_for_resolve():
+        try:
+            rel = path.resolve().relative_to(root.resolve())
+            return "/uploads/" + str(rel).replace("\\", "/")
+        except Exception:
+            continue
+    raise ValueError(f"Path is outside uploads roots: {path}")
+
+
+def resolve_uploads_path(path_str: str) -> Path:
+    s = normalize_path_str(str(path_str or "").strip())
+    if not s:
+        return Path("")
+
+    s_norm = s.replace("\\", "/")
+    if s_norm.lower().startswith("file:"):
+        s_norm = s_norm.split("://", 1)[-1].lstrip("/")
+        if len(s_norm) > 1 and s_norm[1] == ":":
+            s_norm = s_norm[:2] + "/" + s_norm[2:]
+
+    roots = uploads_roots_for_resolve()
+
+    def first_existing_or_default(rel: str) -> Path:
+        rel_clean = rel.lstrip("/")
+        candidates = [base / rel_clean for base in roots]
+        for c in candidates:
+            try:
+                if c.exists():
+                    return c
+            except Exception:
+                pass
+        return candidates[0] if candidates else Path(rel_clean)
+
+    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
+        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
+        return first_existing_or_default(rel)
+
+    if s_norm.lower().startswith("uploads/"):
+        rel = s_norm[len("uploads/"):]
+        return first_existing_or_default(rel)
+
+    if any(s_norm.startswith(prefix) for prefix in ("videos/", "subtitles/", "audios/", "analyses/", "jianying_drafts/", "tmp/", "models/")):
+        return first_existing_or_default(s_norm)
+
+    try:
+        p = Path(s)
+        if p.is_absolute():
+            return p
+    except Exception:
+        pass
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    project_root = backend_dir.parent
+    if s_norm.startswith("/"):
+        return project_root / s_norm[1:]
+    return Path(s)
+
 
 def ensure_defaults_migrated() -> None:
     backend_dir = Path(__file__).resolve().parents[1]

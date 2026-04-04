@@ -34,6 +34,7 @@ import platform
 from threading import RLock
 import subprocess
 
+from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_path, resolve_uploads_path
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor
 from services.video_generation_service import video_generation_service
@@ -68,13 +69,7 @@ def project_root_dir() -> Path:
 
 
 def uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (project_root_dir() / "uploads")
-    (up / "videos").mkdir(parents=True, exist_ok=True)
-    (up / "subtitles").mkdir(parents=True, exist_ok=True)
-    (up / "audios").mkdir(parents=True, exist_ok=True)
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def safe_dir_name(name: str, fallback: str) -> str:
@@ -88,40 +83,11 @@ def safe_dir_name(name: str, fallback: str) -> str:
 
 
 def to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (project_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def resolve_abs_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s_norm = s.replace("\\", "/")
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        candidates = []
-        if env:
-            try:
-                candidates.append(Path(env) / rel)
-            except Exception:
-                pass
-        try:
-            candidates.append((project_root_dir() / "uploads") / rel)
-        except Exception:
-            pass
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    if s_norm.startswith("/"):
-        return project_root_dir() / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
 
 
 def resolve_any_path(path_str: str) -> Path:

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from modules.app_paths import uploads_dir, user_data_dir
+from modules.app_paths import uploads_dir, to_uploads_web_path, user_data_dir
 
 
 def _now_iso() -> str:
@@ -28,18 +28,12 @@ def _safe_filename(name: str, fallback: str) -> str:
 
 
 def _uploads_root() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    if env:
-        return Path(env).expanduser()
-    up = uploads_dir()
-    return up if isinstance(up, Path) else Path(str(up))
+    return uploads_dir()
 
 
 def _to_uploads_web_path(p: Path) -> Optional[str]:
     try:
-        root = _uploads_root()
-        rel = p.resolve().relative_to(root.resolve())
-        return "/uploads/" + str(rel).replace("\\", "/")
+        return to_uploads_web_path(p)
     except Exception:
         return None
 
