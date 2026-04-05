@@ -557,7 +557,7 @@ class ExtractSceneService:
                         pending = set()
                         next_i = 0
                         total_chunks = len(starts)
-                        effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
+                        effective_concurrency = max_chunk_concurrency if max_chunk_concurrency > 0 else 1
 
                         def _enqueue_more():
                             nonlocal next_i

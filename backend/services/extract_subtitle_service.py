@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +24,23 @@ from services.asr_utils import utterances_to_srt
 
 
 logger = logging.getLogger(__name__)
+
+
+def _subtitle_executor_max_workers() -> int:
+    raw = str(os.environ.get("SUBTITLE_EXECUTOR_MAX_WORKERS") or "").strip()
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return 2
+
+
+_SUBTITLE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_subtitle_executor_max_workers(),
+    thread_name_prefix="subtitle_worker",
+)
 
 
 def _now_ts() -> str:
@@ -102,7 +120,10 @@ def _parse_srt_content(content: str) -> List[Dict[str, Any]]:
 
 async def _run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+    return await loop.run_in_executor(
+        _SUBTITLE_EXECUTOR,
+        lambda: func(*args, **kwargs),
+    )
 
 
 async def _ws(
@@ -213,7 +234,19 @@ class ExtractSubtitleService:
         if subtitle_updated_by_user and not force:
             raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
         if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
-            raise HTTPException(status_code=409, detail="已存在提取字幕，若需重提请传 force=true")
+            subtitle_text = ""
+            try:
+                subtitle_abs = _resolve_path(str(getattr(p, "subtitle_path", "") or ""))
+                if subtitle_abs.exists():
+                    subtitle_text = subtitle_abs.read_text(encoding="utf-8")
+            except Exception:
+                subtitle_text = ""
+            await _ws(project_id, "completed", "done", "复用已提取字幕", 100, task_id=task_id)
+            return {
+                "segments": _parse_srt_content(subtitle_text),
+                "subtitle_meta": _subtitle_meta(p),
+                "task_id": task_id,
+            }
 
         run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
 
