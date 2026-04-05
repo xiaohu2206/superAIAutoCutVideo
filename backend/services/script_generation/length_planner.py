@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, List
 
 from .constants import (
+    AUTO_SCRIPT_CHARS_PER_20_SEGMENTS,
+    AUTO_SCRIPT_SEGMENT_BASE,
     CUSTOM_SCRIPT_LENGTH_MIN,
     CUSTOM_SCRIPT_LENGTH_MAX,
     DEFAULT_SCRIPT_LENGTH_SELECTION,
@@ -57,7 +59,7 @@ def _normalize_custom_range(a: int, b: int) -> str:
 def _estimate_preferred_calls(target_max: int) -> int:
     if target_max <= 0:
         return 1
-    base_per_call = 20.0
+    base_per_call = float(AUTO_SCRIPT_SEGMENT_BASE)
     soft = float(SOFT_INPUT_FACTOR or 1.2)
     if soft <= 0:
         soft = 1.2
@@ -134,7 +136,7 @@ def parse_script_length_selection(value: Optional[str]) -> ScriptTargetPlan:
 def estimate_auto_script_length_plan(copywriting_text: str) -> ScriptTargetPlan:
     text = str(copywriting_text or "")
     non_ws_len = len(re.sub(r"\s+", "", text))
-    target = int(math.ceil((float(non_ws_len) / 500.0) * 20.0)) if non_ws_len > 0 else 0
+    target = int(math.ceil((float(non_ws_len) / float(AUTO_SCRIPT_CHARS_PER_20_SEGMENTS)) * float(AUTO_SCRIPT_SEGMENT_BASE))) if non_ws_len > 0 else 0
     if target <= 0:
         target = int(CUSTOM_SCRIPT_LENGTH_MIN)
     target = max(int(CUSTOM_SCRIPT_LENGTH_MIN), min(int(CUSTOM_SCRIPT_LENGTH_MAX), int(target)))

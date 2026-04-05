@@ -236,7 +236,7 @@ async def _generate_visual_script_chunk(
                     f"你必须仅输出一个JSON对象，键为'items'。"
                     # f"items数组长度大约控制为{n}条"
                     "每条时间段长度不能低于1秒。"
-                    "每条必须包含'_id','timestamp','picture','narration','OST'。"
+                    "每条必须包含'_id','timestamp','narration','OST'。"
                     "不得输出除JSON以外的任何文字。"
                 ),
             ),
@@ -303,7 +303,6 @@ async def _generate_visual_script_chunk(
                         {
                             "_id": it.get("_id"),
                             "timestamp": str(it.get("timestamp")),
-                            "picture": it.get("picture"),
                             "narration": str(it.get("narration", "")),
                             "OST": 1 if it.get("OST") == 1 else 0,
                             "_chunk_idx": chunk_idx,

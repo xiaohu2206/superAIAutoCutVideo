@@ -234,7 +234,7 @@ async def _generate_script_chunk(
                     f"你必须仅输出一个JSON对象，键为'items'。"
                     # f"items数组长度大约控制为{n}条"
                     "每条时间段长度不能低于1秒。"
-                    "每条必须包含'_id','timestamp','picture','narration','OST'。"
+                    "每条必须包含'_id','timestamp','narration','OST'。"
                     "不得输出除JSON以外的任何文字。"
                 ),
             ),
@@ -303,7 +303,6 @@ async def _generate_script_chunk(
                         {
                             "_id": it.get("_id"),
                             "timestamp": str(it.get("timestamp")),
-                            "picture": it.get("picture"),
                             "narration": str(it.get("narration", "")),
                             "OST": 1 if it.get("OST") == 1 else 0,
                             "_chunk_idx": chunk_idx,
@@ -421,8 +420,8 @@ async def _refine_full_script(
         + "当需要删减时，优先删除那些时间上紧贴上一条/下一条、信息密度低、重复、过渡或铺垫过长的条目；避免出现大量连续衔接的时间戳导致覆盖整片。"
         + "对于单一条目，仅对部分的 'narration' 进行小幅润色，比如补充必要的连接词、消除重复或断裂，让上下文自然连贯；不要改变原有信息与含义。"
         "对于所有脚本内容，是通过多个模型生成的，每个模型生成的脚本段容易出现开头语和结尾语，但可能是中间段，如果是中间段应该把开头语或结尾语条目删除"
-        "对于单一条目，一般不修改 'picture' 与 'OST'，如无必要变更则原样返回。"
-        "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'picture', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
+        "对于单一条目，一般不修改 'OST'，如无必要变更则原样返回。"
+        "仅返回一个 JSON 对象，键为 'items'，每个元素包含 '_id', 'timestamp', 'narration', 'OST'；不要输出除 JSON 以外的任何内容。"
     )
     if script_language:
         lang = str(script_language).strip().lower()
@@ -462,7 +461,6 @@ async def _refine_full_script(
                 _id_val = int(orig.get("_id") or 0)
                 if new_it:
                     orig["narration"] = str(new_it.get("narration", orig.get("narration", "")))
-                    orig["picture"] = new_it.get("picture")
                     try:
                         ost_val = 1 if new_it.get("OST") == 1 else 0
                         orig["OST"] = ost_val

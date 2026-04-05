@@ -7,6 +7,8 @@ import VideoSourcesManager from "./VideoSourcesManager";
 import SubtitleAsrSelector from "./SubtitleAsrSelector";
 import SceneListTable from "./SceneListTable";
 import ScenePlayModal from "./ScenePlayModal";
+import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
+import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
 import { videoModelService } from "@/services/videoModelService";
@@ -62,12 +64,19 @@ interface ProjectEditUploadStepProps {
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
   onNextStep: () => void;
   
-  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => void;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
+  visionChoiceModalOpen: boolean;
+  onVisionChoiceContinue: () => void;
+  onVisionChoiceRestart: () => void;
+  onVisionChoiceCancel: () => void;
+  subtitleOverwriteModalOpen: boolean;
+  onSubtitleOverwriteConfirm: () => void;
+  onSubtitleOverwriteCancel: () => void;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -119,6 +128,13 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   sceneExtractProgress,
   sceneResult,
   sceneExtractMessage,
+  visionChoiceModalOpen,
+  onVisionChoiceContinue,
+  onVisionChoiceRestart,
+  onVisionChoiceCancel,
+  subtitleOverwriteModalOpen,
+  onSubtitleOverwriteConfirm,
+  onSubtitleOverwriteCancel,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
@@ -136,7 +152,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   });
 
   const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("all");
-  const [visionKeyFrames, setVisionKeyFrames] = React.useState<1 | 3>(1);
+  const visionKeyFrames: 1 | 3 = 1;
   const analyzeVision = true;
 
   const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
@@ -442,6 +458,21 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             onChange={onSubtitleDraftChange}
           />
         )}
+      <VisionAnalysisChoiceModal
+        isOpen={visionChoiceModalOpen}
+        onClose={onVisionChoiceCancel}
+        onContinueIncomplete={onVisionChoiceContinue}
+        onRestartAll={onVisionChoiceRestart}
+      />
+      <OverwriteConfirmModal
+        isOpen={subtitleOverwriteModalOpen}
+        title="重新提取字幕"
+        message="字幕已被编辑，重新提取将覆盖修改内容，是否继续？"
+        confirmLabel="继续提取"
+        cancelLabel="取消"
+        onConfirm={onSubtitleOverwriteConfirm}
+        onCancel={onSubtitleOverwriteCancel}
+      />
       <ScenePlayModal
         isOpen={scenePlayState.isOpen}
         onClose={() => setScenePlayState((prev) => ({ ...prev, isOpen: false }))}

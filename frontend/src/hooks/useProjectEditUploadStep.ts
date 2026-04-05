@@ -24,26 +24,21 @@ export interface UseProjectEditUploadStepOptions {
   uploadVideos: UploadVideosFn;
   uploadSubtitle: UploadSubtitleFn;
   deleteSubtitle: () => Promise<void>;
-  extractSubtitle: (
-    options?:
-      | boolean
-      | {
-          force?: boolean;
-          task_id?: string | null;
-          asr_provider?: "bcut" | "fun_asr";
-          asr_model_key?: string | null;
-          asr_language?: string | null;
-          itn?: boolean;
-          hotwords?: string[];
-        }
-  ) => Promise<void>;
+  extractSubtitle: (options?: {
+    task_id?: string | null;
+    asr_provider?: "bcut" | "fun_asr";
+    asr_model_key?: string | null;
+    asr_language?: string | null;
+    itn?: boolean;
+    hotwords?: string[];
+  }) => Promise<void>;
   fetchSubtitle: () => Promise<any>;
   saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
   deleteVideoItem: (path: string) => Promise<void>;
   reorderVideos: (videoPaths: string[]) => Promise<void>;
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
-  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string; visionKeyFrames?: 1 | 3 }) => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => Promise<void>;
   sceneResult: any | null;
   extractingScene: boolean;
   sceneExtractProgress: number;
@@ -91,12 +86,19 @@ export interface UseProjectEditUploadStepReturn {
   onReloadSubtitle: () => void;
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
-  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => void;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
+  visionChoiceModalOpen: boolean;
+  onVisionChoiceContinue: () => void;
+  onVisionChoiceRestart: () => void;
+  onVisionChoiceCancel: () => void;
+  subtitleOverwriteModalOpen: boolean;
+  onSubtitleOverwriteConfirm: () => void;
+  onSubtitleOverwriteCancel: () => void;
 }
 
 export function useProjectEditUploadStep(
@@ -127,6 +129,16 @@ export function useProjectEditUploadStep(
   const uploadingVideoRef = useRef(false);
   const subtitleSegmentsSerializedRef = useRef<string | null>(null);
   const lastAsrSnapshotRef = useRef<string>("");
+  const pendingVisionExtractOptsRef = useRef<{
+    analyzeVision: boolean;
+    visionMode: string;
+    visionKeyFrames?: 1 | 3;
+    visionAction?: "auto" | "continue" | "restart";
+  } | null>(null);
+  const subtitleOverwriteResolverRef = useRef<((value: boolean) => void) | null>(null);
+
+  const [visionChoiceModalOpen, setVisionChoiceModalOpen] = useState(false);
+  const [subtitleOverwriteModalOpen, setSubtitleOverwriteModalOpen] = useState(false);
 
   useEffect(() => {
     const p = options.project;
@@ -372,6 +384,27 @@ export function useProjectEditUploadStep(
     )
   );
 
+  const askSubtitleOverwrite = useCallback((): Promise<boolean> => {
+    return new Promise((resolve) => {
+      subtitleOverwriteResolverRef.current = resolve;
+      setSubtitleOverwriteModalOpen(true);
+    });
+  }, []);
+
+  const onSubtitleOverwriteConfirm = useCallback(() => {
+    setSubtitleOverwriteModalOpen(false);
+    const r = subtitleOverwriteResolverRef.current;
+    subtitleOverwriteResolverRef.current = null;
+    r?.(true);
+  }, []);
+
+  const onSubtitleOverwriteCancel = useCallback(() => {
+    setSubtitleOverwriteModalOpen(false);
+    const r = subtitleOverwriteResolverRef.current;
+    subtitleOverwriteResolverRef.current = null;
+    r?.(false);
+  }, []);
+
   const onExtractSubtitle = useCallback(async () => {
     const project = options.project;
     if (!project) return;
@@ -384,10 +417,9 @@ export function useProjectEditUploadStep(
       return;
     }
     // 每次都强制重新提取，不使用缓存的音频
-    let force = true;
     if (project.subtitle_updated_by_user) {
-      force = window.confirm("字幕已被编辑，重新提取将覆盖修改内容，是否继续？");
-      if (!force) return;
+      const ok = await askSubtitleOverwrite();
+      if (!ok) return;
     }
 
     setExtractingSubtitle(true);
@@ -402,7 +434,6 @@ export function useProjectEditUploadStep(
           ? (globalThis.crypto as any).randomUUID()
           : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
       await options.extractSubtitle({
-        force,
         task_id: taskId,
         asr_provider: subtitleAsr.provider,
         asr_model_key: isFun ? subtitleAsr.modelKey : null,
@@ -419,7 +450,7 @@ export function useProjectEditUploadStep(
       setExtractingSubtitle(false);
       setSubtitleExtractProgress(0);
     }
-  }, [options, subtitleAsr]);
+  }, [options, subtitleAsr, askSubtitleOverwrite]);
 
   useWsTaskProgress({
     scope: "extract_subtitle",
@@ -482,70 +513,109 @@ export function useProjectEditUploadStep(
     }
   }, [options, subtitleDraft]);
 
+  const executeExtractScenes = useCallback(
+    async (
+      opts: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" } | undefined,
+      visionAction: "auto" | "continue" | "restart"
+    ) => {
+      // visual 项目：一个按钮同时触发“字幕提取”和“镜头提取”，两条任务各自独立进度/日志。
+      // 字幕提取是长任务（HTTP 会阻塞直到完成），这里采用“发起后不 await”，由 WS 回调驱动进度条。
+      if (options.project?.project_type === "visual") {
+        const p = options.project;
+        const canStartSubtitle =
+          !(p.subtitle_source === "user" && Boolean(p.subtitle_path)) &&
+          !extractingSubtitle &&
+          !options.subtitleLoading;
+        if (canStartSubtitle) {
+          let shouldStartSubtitle = true;
+          if (p.subtitle_updated_by_user) {
+            shouldStartSubtitle = await askSubtitleOverwrite();
+          }
+          if (shouldStartSubtitle) {
+            setExtractingSubtitle(true);
+            setSubtitleExtractProgress(0);
+            setSubtitleExtractLogs([]);
+            const isFun = subtitleAsr.provider === "fun_asr";
+            const subTaskId =
+              globalThis.crypto &&
+              "randomUUID" in globalThis.crypto &&
+              typeof (globalThis.crypto as any).randomUUID === "function"
+                ? (globalThis.crypto as any).randomUUID()
+                : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+            void options
+              .extractSubtitle({
+                task_id: subTaskId,
+                asr_provider: subtitleAsr.provider,
+                asr_model_key: isFun ? subtitleAsr.modelKey : null,
+                asr_language: isFun ? subtitleAsr.language : "中文",
+              })
+              .catch((err) => {
+                options.showError(err, "提取字幕失败");
+                setExtractingSubtitle(false);
+                setSubtitleExtractProgress(0);
+              });
+          }
+        }
+      }
+
+      const isFun = subtitleAsr.provider === "fun_asr";
+      await options.extractScenes({
+        force: false,
+        asr_provider: subtitleAsr.provider,
+        asr_model_key: isFun ? subtitleAsr.modelKey : null,
+        asr_language: isFun ? subtitleAsr.language : "中文",
+        ...(opts || {}),
+        visionAction,
+      });
+      options.showSuccess("镜头提取任务已提交");
+    },
+    [options, subtitleAsr, extractingSubtitle, askSubtitleOverwrite]
+  );
+
+  const onVisionChoiceContinue = useCallback(() => {
+    setVisionChoiceModalOpen(false);
+    const opts = pendingVisionExtractOptsRef.current;
+    pendingVisionExtractOptsRef.current = null;
+    if (opts) {
+      void executeExtractScenes(opts, "continue").catch((err) => options.showError(err, "镜头提取失败"));
+    }
+  }, [executeExtractScenes, options]);
+
+  const onVisionChoiceRestart = useCallback(() => {
+    setVisionChoiceModalOpen(false);
+    const opts = pendingVisionExtractOptsRef.current;
+    pendingVisionExtractOptsRef.current = null;
+    if (opts) {
+      void executeExtractScenes(opts, "restart").catch((err) => options.showError(err, "镜头提取失败"));
+    }
+  }, [executeExtractScenes, options]);
+
+  const onVisionChoiceCancel = useCallback(() => {
+    setVisionChoiceModalOpen(false);
+    pendingVisionExtractOptsRef.current = null;
+  }, []);
+
   const onExtractScenes = useCallback(
-    async (opts?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => {
+    async (opts?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => {
       if (!options.project) return;
       if (!options.project.video_path) {
         options.showErrorText("请先上传视频文件");
         return;
       }
       try {
-        // visual 项目：一个按钮同时触发“字幕提取”和“镜头提取”，两条任务各自独立进度/日志。
-        // 字幕提取是长任务（HTTP 会阻塞直到完成），这里采用“发起后不 await”，由 WS 回调驱动进度条。
-        if (options.project.project_type === "visual") {
-          const p = options.project;
-          const canStartSubtitle =
-            !(p.subtitle_source === "user" && Boolean(p.subtitle_path)) &&
-            !extractingSubtitle &&
-            !options.subtitleLoading;
-          if (canStartSubtitle) {
-            let force = true;
-            if (p.subtitle_updated_by_user) {
-              force = window.confirm("字幕已被编辑，重新提取将覆盖修改内容，是否继续？");
-            }
-            if (force) {
-              setExtractingSubtitle(true);
-              setSubtitleExtractProgress(0);
-              setSubtitleExtractLogs([]);
-              const isFun = subtitleAsr.provider === "fun_asr";
-              const subTaskId =
-                globalThis.crypto &&
-                "randomUUID" in globalThis.crypto &&
-                typeof (globalThis.crypto as any).randomUUID === "function"
-                  ? (globalThis.crypto as any).randomUUID()
-                  : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-              void options
-                .extractSubtitle({
-                  force: true,
-                  task_id: subTaskId,
-                  asr_provider: subtitleAsr.provider,
-                  asr_model_key: isFun ? subtitleAsr.modelKey : null,
-                  asr_language: isFun ? subtitleAsr.language : "中文",
-                })
-                .catch((err) => {
-                  // 若 HTTP 本身失败（未进入 WS 流程），及时回收状态
-                  options.showError(err, "提取字幕失败");
-                  setExtractingSubtitle(false);
-                  setSubtitleExtractProgress(0);
-                });
-            }
-          }
+        const p = options.project;
+        const visionAction: "auto" | "continue" | "restart" = opts?.visionAction ?? "auto";
+        if (opts?.analyzeVision && p.scenes_path && visionAction === "auto") {
+          pendingVisionExtractOptsRef.current = opts;
+          setVisionChoiceModalOpen(true);
+          return;
         }
-
-        const isFun = subtitleAsr.provider === "fun_asr";
-        await options.extractScenes({
-          force: true,
-          asr_provider: subtitleAsr.provider,
-          asr_model_key: isFun ? subtitleAsr.modelKey : null,
-          asr_language: isFun ? subtitleAsr.language : "中文",
-          ...(opts || {}),
-        });
-        options.showSuccess("镜头提取任务已提交");
+        await executeExtractScenes(opts, visionAction);
       } catch (err) {
         options.showError(err, "镜头提取失败");
       }
     },
-    [options, subtitleAsr]
+    [options, executeExtractScenes]
   );
 
   return {
@@ -591,5 +661,12 @@ export function useProjectEditUploadStep(
     sceneResult: options.sceneResult,
     sceneExtractMessage: options.sceneExtractMessage,
     sceneExtractPhase: options.sceneExtractPhase,
+    visionChoiceModalOpen,
+    onVisionChoiceContinue,
+    onVisionChoiceRestart,
+    onVisionChoiceCancel,
+    subtitleOverwriteModalOpen,
+    onSubtitleOverwriteConfirm,
+    onSubtitleOverwriteCancel,
   };
 }

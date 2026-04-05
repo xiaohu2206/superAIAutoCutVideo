@@ -372,34 +372,25 @@ export class ProjectService {
 
   async extractSubtitle(
     projectId: string,
-    options?:
-      | boolean
-      | {
-          force?: boolean;
-          task_id?: string | null;
-          asr_provider?: "bcut" | "fun_asr";
-          asr_model_key?: string | null;
-          asr_language?: string | null;
-          itn?: boolean;
-          hotwords?: string[];
-        }
+    options?: {
+      task_id?: string | null;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+    }
   ): Promise<SubtitleResult> {
-    const payload =
-      typeof options === "boolean"
-        ? options
-          ? { force: true }
-          : undefined
-        : options
-          ? {
-              force: Boolean(options.force),
-              task_id: options.task_id ?? undefined,
-              asr_provider: options.asr_provider,
-              asr_model_key: options.asr_model_key ?? undefined,
-              asr_language: options.asr_language ?? undefined,
-              itn: typeof options.itn === "boolean" ? options.itn : undefined,
-              hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
-            }
-          : undefined;
+    const payload = options
+      ? {
+          task_id: options.task_id ?? undefined,
+          asr_provider: options.asr_provider,
+          asr_model_key: options.asr_model_key ?? undefined,
+          asr_language: options.asr_language ?? undefined,
+          itn: typeof options.itn === "boolean" ? options.itn : undefined,
+          hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
+        }
+      : undefined;
     const response = await apiClient.post<ApiResponse<SubtitleResult>>(
       `/api/projects/${projectId}/extract-subtitle`,
       payload
@@ -599,6 +590,7 @@ export class ProjectService {
       analyzeVision?: boolean;
       visionMode?: string;
       visionKeyFrames?: 1 | 3;
+      visionAction?: "auto" | "continue" | "restart";
     }
   ): Promise<{ task_id: string; status: string; message: string }> {
     const payload = options
@@ -613,6 +605,7 @@ export class ProjectService {
           analyzeVision: Boolean(options.analyzeVision),
           visionMode: options.visionMode ?? "all",
           visionKeyFrames: options.visionKeyFrames === 3 ? 3 : 1,
+          visionAction: options.visionAction ?? "auto",
         }
       : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(

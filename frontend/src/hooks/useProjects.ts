@@ -154,16 +154,14 @@ export interface UseProjectDetailReturn {
   uploadSubtitle: (file: File, onProgress?: (percent: number) => void) => Promise<void>;
   deleteSubtitle: () => Promise<void>;
   extractSubtitle: (
-    options?:
-      | boolean
-      | {
-          force?: boolean;
-          asr_provider?: "bcut" | "fun_asr";
-          asr_model_key?: string | null;
-          asr_language?: string | null;
-          itn?: boolean;
-          hotwords?: string[];
-        }
+    options?: {
+      task_id?: string | null;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+    }
   ) => Promise<void>;
   fetchSubtitle: () => Promise<{ segments: SubtitleSegment[]; subtitle_meta: SubtitleMeta } | null>;
   saveSubtitle: (payload: { segments?: SubtitleSegment[]; content?: string }) => Promise<void>;
@@ -396,23 +394,20 @@ export const useProjectDetail = (
 
   const extractSubtitle = useCallback(
     async (
-      options?:
-        | boolean
-        | {
-            force?: boolean;
-            task_id?: string | null;
-            asr_provider?: "bcut" | "fun_asr";
-            asr_model_key?: string | null;
-            asr_language?: string | null;
-            itn?: boolean;
-            hotwords?: string[];
-          }
+      options?: {
+        task_id?: string | null;
+        asr_provider?: "bcut" | "fun_asr";
+        asr_model_key?: string | null;
+        asr_language?: string | null;
+        itn?: boolean;
+        hotwords?: string[];
+      }
     ) => {
       if (!project) return;
       setError(null);
       setSubtitleLoading(true);
       try {
-        const res = await projectService.extractSubtitle(project.id, options as any);
+        const res = await projectService.extractSubtitle(project.id, options);
         setSubtitleSegments(res.segments || []);
         setSubtitleMeta(res.subtitle_meta || null);
         await fetchProject(project.id);

@@ -455,7 +455,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 def get_app_paths():
     """
-    获取应用路径配置，兼容开发环境和打包环境（PyInstaller）
+    获取应用路径配置。以 Windows（Tauri / PyInstaller）为主：
+    - uploads 默认走 app_paths（LOCALAPPDATA 下持久化）
+    - 打包环境下勿用 __file__ 推导安装目录；legacy 仅扫描安装目录与 exe 旁 uploads
     """
     base_path = Path(__file__).resolve().parent
     project_root = base_path.parent
@@ -471,10 +473,11 @@ def get_app_paths():
 
         install_dir_raw = os.environ.get("SACV_INSTALL_DIR") or ""
         install_dir = Path(install_dir_raw).expanduser() if install_dir_raw.strip() else (exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir)
-        legacy_candidates = [
-            install_dir / "uploads",
-            project_root / "uploads",
-        ]
+        # 打包后 project_root 可能落在临时解包目录，不能当作「旧版 uploads」来源
+        legacy_candidates = [install_dir / "uploads"]
+        if os.name == "nt":
+            # 便携版或安装器把 uploads 放在 exe 同目录的情况
+            legacy_candidates.append(exe_dir / "uploads")
         seen_legacy: set[str] = set()
         for legacy_uploads_dir in legacy_candidates:
             try:
@@ -509,6 +512,7 @@ def get_app_paths():
     else:
         service_data_dir = base_path / "serviceData"
         uploads_dir = uploads_roots_for_resolve()[0]
+        # 开发环境：仓库根目录 uploads 已由 uploads_roots_for_resolve 纳入；此处无需再迁
 
     logger.info(f"App paths selected service_data_dir={service_data_dir} uploads_dir={uploads_dir} frozen={getattr(sys, 'frozen', False)}")
     return service_data_dir, uploads_dir

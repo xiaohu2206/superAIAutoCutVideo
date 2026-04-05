@@ -143,6 +143,29 @@ def _segment_key_frame_seek_times(t_start: float, t_end: float, count: int) -> L
     return [(ts + te) / 2.0]
 
 
+def _log_skip_existing_vision_analysis(
+    project_id: str,
+    scene_idx: int,
+    scene: Dict[str, Any],
+    mode: str,
+    backend_label: str,
+) -> None:
+    """历史已合并视觉结果时跳过重复推理，便于排查与统计。"""
+    try:
+        tr = f"{float(scene.get('start_time')):.3f}-{float(scene.get('end_time')):.3f}"
+    except (TypeError, ValueError):
+        tr = "?"
+    logger.info(
+        "跳过重复视觉推理 (already analyzed): project_id=%s scene_idx=%s time_range=%s mode=%s vision_status=%s backend=%s",
+        project_id,
+        scene_idx,
+        tr,
+        mode,
+        scene.get("vision_status"),
+        backend_label,
+    )
+
+
 def _normalize_subtitle_for_vision(sub: Any) -> str:
     s = (str(sub).strip() if sub is not None else "") or ""
     if not s or s == "无":
@@ -152,35 +175,10 @@ def _normalize_subtitle_for_vision(sub: Any) -> str:
 
 def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> str:
     sub = _normalize_subtitle_for_vision(subtitle_text)
-    frame_hint = "单张关键帧" if int(num_frames) <= 1 else f"按时间顺序排列的 {int(num_frames)} 张关键帧"
-    return f"""你是一个影视镜头分析专家，请根据提供的{frame_hint}和字幕内容，对该镜头进行语义理解。
-
-【要求】
-1. 综合多帧信息，不要只描述单帧
-2. 优先识别人物、动作、场景、情绪
-3. 如果字幕提供了语义，结合字幕理解（但不要照抄字幕）
-4. 输出必须结构化 JSON
-
-【输出字段定义】
-- desc：一句话描述这个镜头发生了什么（自然语言）
-- objects：画面中主要物体（数组）
-- action：核心动作（动词，如：离开/奔跑/对话）
-- scene：场景（室内/室外/街道/房间等）
-- emotion：整体情绪（如：开心/悲伤/紧张/平静）
-
-字幕：
-{sub}
-
-【输出JSON格式】
-{{
-  "desc": "",
-  "objects": [],
-  "action": "",
-  "scene": "",
-  "emotion": ""
-}}
-
-"""
+    return f"""描述这个影视画面，主体人物与动作、环境与背景、字幕与剧情暗示等信息（自然语言）。
+    字幕：
+    {sub}
+    """
 
 
 def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
@@ -234,13 +232,6 @@ def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
 
 
 def _parse_online_vision_model_output(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    parsed = _try_parse_vision_json(raw)
-    if parsed:
-        display = _vision_structured_to_display_text(parsed)
-        if display.strip():
-            return parsed, display
-        tail = (raw or "").strip()
-        return parsed, tail if tail else json.dumps(parsed, ensure_ascii=False)
     return None, (raw or "").strip()
 
 
@@ -846,8 +837,12 @@ class VisionFrameAnalyzer:
                 sub = scene.get("subtitle")
                 if not sub or sub == "无":
                     should_analyze = True
-            if should_analyze:
-                to_analyze_indices.append(idx)
+            if not should_analyze:
+                continue
+            if bool(scene.get("vision_analyzed")):
+                _log_skip_existing_vision_analysis(project_id, idx, scene, mode, str(provider or "online"))
+                continue
+            to_analyze_indices.append(idx)
 
         total_to_analyze = len(to_analyze_indices)
         if total_to_analyze == 0:
@@ -1001,7 +996,7 @@ class VisionFrameAnalyzer:
                             f"n_images={online_stats.get('n_images')}"
                         )
 
-                        structured, display_text = _parse_online_vision_model_output(str(out or ""))
+                        _, display_text = _parse_online_vision_model_output(str(out or ""))
                         txt = (display_text or "").strip()
                         seg_out: Dict[str, Any] = {
                             "start_time": float(t_start),
@@ -1009,14 +1004,6 @@ class VisionFrameAnalyzer:
                             "status": "ok" if txt else "empty",
                             "text": txt if txt else None,
                         }
-                        if structured and isinstance(structured, dict):
-                            seg_out["structured"] = {
-                                "desc": structured.get("desc"),
-                                "objects": structured.get("objects"),
-                                "action": structured.get("action"),
-                                "scene": structured.get("scene"),
-                                "emotion": structured.get("emotion"),
-                            }
                         vision_segments.append(seg_out)
                     except asyncio.TimeoutError:
                         msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
@@ -1160,9 +1147,13 @@ class VisionFrameAnalyzer:
                 sub = scene.get("subtitle")
                 if not sub or sub == "无":
                     should_analyze = True
-            
-            if should_analyze:
-                to_analyze_indices.append(idx)
+
+            if not should_analyze:
+                continue
+            if bool(scene.get("vision_analyzed")):
+                _log_skip_existing_vision_analysis(project_id, idx, scene, mode, "moondream")
+                continue
+            to_analyze_indices.append(idx)
 
         total_to_analyze = len(to_analyze_indices)
         if total_to_analyze == 0:

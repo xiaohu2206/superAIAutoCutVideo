@@ -52,7 +52,6 @@ ${subtitle_content}
     {
       "timestamp": "时间段，格式为xx:xx:xx,xxx-xx:xx:xx,xxx",
       "title": "关键剧情的主题",
-      "picture": "关键剧情前后的详细剧情描述，包括人物对话、动作、情感变化等"
     }
   ]
 }

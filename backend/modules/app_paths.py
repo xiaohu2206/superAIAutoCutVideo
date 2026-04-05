@@ -1,3 +1,11 @@
+"""
+应用数据与 uploads 根路径解析。
+
+设计以 Windows（含 Tauri / PyInstaller 打包）为主路径：
+- 默认持久化目录：%LOCALAPPDATA%\\SuperAutoCutVideo\\uploads
+- 支持盘符路径、UNC、以及从设置/环境变量传入的 %VAR% 展开
+非 Windows 仍可用，但优先级与测试以 Windows 为准。
+"""
 import os
 import sys
 import json
@@ -28,7 +36,26 @@ def normalize_path_str(path_str: str) -> str:
         s = s.replace("%", "\\")
     if len(s) >= 3 and s[1] == ":" and s[2] not in ("\\", "/"):
         s = s[:2] + "\\" + s[2:]
+    # 用户可能在设置里填写 %LOCALAPPDATA%\\... 等形式
+    if "%" in s:
+        try:
+            s = os.path.expandvars(s)
+        except Exception:
+            pass
     return s
+
+
+def _is_windows_abs_path_str(s: str) -> bool:
+    """判断是否为 Windows 绝对路径（盘符+根 或 UNC）。不含 C:relative 这类相对盘符路径。"""
+    if os.name != "nt" or not s:
+        return False
+    t = s.strip()
+    if t.startswith("\\\\"):
+        return True
+    # C:\ 或 C:/ 为绝对；单独 C:foo 为相对当前目录，不按绝对路径短路
+    if len(t) >= 3 and t[1] == ":" and t[2] in "/\\":
+        return True
+    return False
 
 
 def windows_local_appdata_dir() -> Path:
@@ -99,6 +126,7 @@ def uploads_roots_for_resolve(include_legacy_repo_uploads: bool = True) -> List[
                 add(Path(root))
     except Exception:
         pass
+    # 默认：…/SuperAutoCutVideo/uploads，其次 …/SuperAutoCutVideo/data/uploads（Windows 下顺序同上）
     add(data_base_dir() / "uploads")
     add(user_data_dir() / "uploads")
     if include_legacy_repo_uploads:
@@ -111,7 +139,12 @@ def to_uploads_web_path(p: Path) -> str:
     path = Path(p)
     for root in uploads_roots_for_resolve():
         try:
-            rel = path.resolve().relative_to(root.resolve())
+            r = root.resolve()
+            try:
+                rp = path.resolve(strict=False)
+            except TypeError:
+                rp = path.resolve()
+            rel = rp.relative_to(r)
             return "/uploads/" + str(rel).replace("\\", "/")
         except Exception:
             continue
@@ -122,6 +155,13 @@ def resolve_uploads_path(path_str: str) -> Path:
     s = normalize_path_str(str(path_str or "").strip())
     if not s:
         return Path("")
+
+    # Windows：已是绝对路径（含 UNC）时直接返回，避免被当作「以 / 开头的相对路径」处理
+    if _is_windows_abs_path_str(s):
+        try:
+            return Path(s)
+        except Exception:
+            return Path("")
 
     s_norm = s.replace("\\", "/")
     if s_norm.lower().startswith("file:"):
