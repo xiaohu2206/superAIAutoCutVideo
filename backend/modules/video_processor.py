@@ -24,8 +24,8 @@ WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def _concat_list_file_encoding() -> str:
-    """Windows 上部分 ffmpeg 构建依赖带 BOM 的 UTF-8 才能正确解析 concat 列表中的非 ASCII 路径。"""
-    return "utf-8-sig" if os.name == "nt" else "utf-8"
+    """concat 列表必须用无 BOM 的 UTF-8：带 BOM 时首行会变成「\\ufefffile ...」，ffmpeg 报 unknown keyword file。"""
+    return "utf-8"
 
 class VideoProcessor:
     """视频处理器类"""
