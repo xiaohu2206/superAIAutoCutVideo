@@ -65,7 +65,12 @@ from routes.storage_routes import router as settings_router
 from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import uploads_dir, uploads_roots_for_resolve, user_data_dir
+from modules.app_paths import (
+    uploads_dir as pick_uploads_root,
+    uploads_roots_for_resolve,
+    user_data_dir,
+    ensure_defaults_migrated,
+)
 from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
@@ -469,7 +474,7 @@ def get_app_paths():
         if not service_data_dir.exists():
             service_data_dir = base_path / "serviceData"
 
-        uploads_dir = uploads_roots_for_resolve(include_legacy_repo_uploads=False)[0]
+        uploads_dir = pick_uploads_root(include_legacy_repo_uploads=False)
 
         install_dir_raw = os.environ.get("SACV_INSTALL_DIR") or ""
         install_dir = Path(install_dir_raw).expanduser() if install_dir_raw.strip() else (exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir)
@@ -511,7 +516,7 @@ def get_app_paths():
                 logger.warning(f"Legacy uploads migration failed: {e}")
     else:
         service_data_dir = base_path / "serviceData"
-        uploads_dir = uploads_roots_for_resolve()[0]
+        uploads_dir = pick_uploads_root()
         # 开发环境：仓库根目录 uploads 已由 uploads_roots_for_resolve 纳入；此处无需再迁
 
     logger.info(f"App paths selected service_data_dir={service_data_dir} uploads_dir={uploads_dir} frozen={getattr(sys, 'frozen', False)}")

@@ -87,8 +87,16 @@ def user_data_dir() -> Path:
 def app_settings_file() -> Path:
     return user_config_dir() / "app_settings.json"
 
-def uploads_dir() -> Path:
-    candidates = uploads_roots_for_resolve()
+def _looks_like_unix_only_abs_path(s: str) -> bool:
+    """Windows 上排除从 macOS/Linux 同步来的 POSIX 绝对路径，避免误解析为当前盘符根下路径。"""
+    t = str(s or "").strip().replace("\\", "/")
+    if not t.startswith("/") or t.startswith("//"):
+        return False
+    return t.startswith(("/Users/", "/home/", "/Volumes/", "/private/", "/var/", "/tmp/", "/opt/", "/usr/"))
+
+
+def uploads_dir(include_legacy_repo_uploads: bool = True) -> Path:
+    candidates = uploads_roots_for_resolve(include_legacy_repo_uploads=include_legacy_repo_uploads)
     for d in candidates:
         try:
             d.mkdir(parents=True, exist_ok=True)
@@ -123,7 +131,10 @@ def uploads_roots_for_resolve(include_legacy_repo_uploads: bool = True) -> List[
             data = json.loads(settings_path.read_text(encoding="utf-8"))
             root = normalize_path_str(str(data.get("uploads_root") or ""))
             if root:
-                add(Path(root))
+                if os.name == "nt" and _looks_like_unix_only_abs_path(root):
+                    pass
+                else:
+                    add(Path(root))
     except Exception:
         pass
     # 默认：…/SuperAutoCutVideo/uploads，其次 …/SuperAutoCutVideo/data/uploads（Windows 下顺序同上）

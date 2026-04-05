@@ -23,18 +23,19 @@
 
 | 函数 | 作用 |
 |------|------|
-| `uploads_dir()` | 选取当前进程应使用的 uploads 根目录（对候选列表依次 `mkdir`，第一个成功即返回） |
+| `uploads_dir(include_legacy_repo_uploads=True)` | 选取当前进程应使用的 uploads 根目录（对候选列表依次 `mkdir`，第一个成功即返回；打包场景可传 `include_legacy_repo_uploads=False` 以排除仓库 legacy `uploads`） |
 | `uploads_roots_for_resolve()` | 枚举可能的 uploads 根目录，供解析 `/uploads/...` 时按存在性回退 |
 | `to_uploads_web_path()` | 物理路径 → `/uploads/...` |
 | `resolve_uploads_path()` | `/uploads/...`、uploads 相对片段、或（非 web）路径字符串 → 物理路径 |
 | `normalize_path_str()` | Windows 下 URL 解码、盘符修补、`os.path.expandvars`（如 `%LOCALAPPDATA%\...`） |
 | `_is_windows_abs_path_str()` | 识别 `C:\...`、UNC，**排除** `C:相对` 误当绝对路径 |
 | `app_settings_file()` | 承接设置页写入的 `uploads_root`（`app_settings.json`） |
+| `_looks_like_unix_only_abs_path()`（内部） | 在 **Windows** 上识别来自 macOS/Linux 的 POSIX 绝对路径前缀，用于过滤无效的 `uploads_root` |
 
 **候选根目录优先级（`uploads_roots_for_resolve` 顺序）**
 
-1. `SACV_UPLOADS_DIR`（由 `main.py` 在启动时设为当前生效根目录）
-2. `app_settings.json` 中的 `uploads_root`
+1. `SACV_UPLOADS_DIR`（由 `main.py` 在启动末尾设为当前生效根目录；首轮解析时通常仍为空）
+2. `app_settings.json` 中的 `uploads_root`（**Windows 下**若为典型 Unix 绝对路径，如 `/Users/...`、`/home/...`、`/Volumes/...` 等，**会跳过**，以免被 `Path` 误解析为当前盘符下的 `\Users\...`；跨机同步配置后应在当前系统用设置页或手工改为本机路径）
 3. `data_base_dir() / "uploads"` → Windows 下通常为 `%LOCALAPPDATA%\SuperAutoCutVideo\uploads`
 4. `user_data_dir() / "uploads"` → `...\SuperAutoCutVideo\data\uploads`
 5. （可选）仓库根目录下的 `uploads`：`include_legacy_repo_uploads=False` 时省略，用于打包启动避免误用临时解包路径
@@ -43,6 +44,11 @@
 
 - `resolve_uploads_path()`：若判定为 Windows 绝对路径（盘符+根或 UNC），直接 `Path(s)`，不再走「以 `/` 拼项目根」的分支。
 - `to_uploads_web_path()`：对根目录做 `resolve` 时尽量使用 `strict=False`（兼容 Python 版本差异），减少目标尚未存在时的异常。
+
+**与 `uploads_roots_for_resolve()[0]` 的区别（重要）**
+
+- **`uploads_dir()`** 与 **`uploads_roots_for_resolve()`** 使用同一候选顺序，但前者对每一项尝试 `mkdir(parents=True)`，**以第一个创建成功的目录作为进程实际使用的根**。若某候选无权限或不可用，会自动尝试下一项。
+- **禁止**单独用 `uploads_roots_for_resolve(...)[0]` 作为「生效 uploads 根」写入 `SACV_UPLOADS_DIR`，否则可能与全应用调用的 `uploads_dir()` 不一致。`main.get_app_paths()` 应调用与 `app_paths.uploads_dir()` 相同的选取逻辑（在 `main.py` 中为与模块级路径变量区分，以 **`pick_uploads_root`** 为别名导入）。
 
 ---
 
@@ -121,12 +127,13 @@
 
 ### `backend/main.py`
 
-**改动目的：启动时确定 `service_data_dir` 与 `uploads_dir`，并写入 `SACV_UPLOADS_DIR`；打包场景下 legacy 迁移路径与 Windows 安装布局对齐。**
+**改动目的：启动时确定 `service_data_dir` 与 uploads 根路径，并写入 `SACV_UPLOADS_DIR`；打包场景下 legacy 迁移路径与 Windows 安装布局对齐。**
 
-- **开发**：`service_data_dir = backend/serviceData`，`uploads_dir` 来自 `uploads_roots_for_resolve()`（含仓库下 legacy `uploads` 候选）。
-- **打包（frozen）**：`uploads_dir` 来自 `uploads_roots_for_resolve(include_legacy_repo_uploads=False)`，**不再**用「`__file__` 推导的 `project_root/uploads`」做迁移来源（避免指向 PyInstaller 解包临时目录）。
+- **开发**：`service_data_dir = backend/serviceData`；uploads 根通过 **`pick_uploads_root()`**（即 `app_paths.uploads_dir()`，默认含仓库下 legacy `uploads` 候选）选取，语义与全应用一致。
+- **打包（frozen）**：uploads 根通过 **`pick_uploads_root(include_legacy_repo_uploads=False)`** 选取，**不再**用「`__file__` 推导的 `project_root/uploads`」做迁移来源（避免指向 PyInstaller 解包临时目录）。
 - **Legacy 迁移（frozen）**：优先 `install_dir/uploads`（`SACV_INSTALL_DIR` 或 exe 推导）；**Windows 额外尝试 `exe_dir/uploads`**（便携或安装器把数据放在 exe 旁的情况）。
-- 最终将选定目录写入 **`os.environ["SACV_UPLOADS_DIR"]`**，与 `app_paths` 内读取顺序一致。
+- 最终将选定目录写入 **`os.environ["SACV_UPLOADS_DIR"]`**；随后调用 **`ensure_defaults_migrated()`**（须从 `modules.app_paths` 导入），将仓库内默认配置与数据文件首次复制到用户配置/数据目录（`user_config_dir`、`user_data_dir`）。
+- **命名**：模块级变量仍命名为 `uploads_dir`（`Path`），与 `app_paths.uploads_dir` 函数区分；函数以 **`pick_uploads_root`** 别名导入，避免遮蔽。
 
 ---
 
@@ -142,8 +149,8 @@
 
 | 文件 | 备注 |
 |------|------|
-| `backend/modules/app_paths.py` | 统一入口 + Windows 路径增强 |
-| `backend/main.py` | `get_app_paths()` 与 frozen legacy |
+| `backend/modules/app_paths.py` | 统一入口 + Windows 路径增强；`uploads_dir` 可选参数；Unix 风格 `uploads_root` 在 Windows 上过滤 |
+| `backend/main.py` | `get_app_paths()` 使用 `pick_uploads_root`；`ensure_defaults_migrated` 导入；frozen legacy |
 | `backend/routes/project_routes.py` | 委托 `app_paths` |
 | `backend/routes/storage_routes.py` | `POST` 路径 `normalize_path_str` |
 | `backend/services/extract_subtitle_service.py` | 委托 `app_paths` |
@@ -169,6 +176,15 @@
 - **设置改目录**：写入 `app_settings.json` 后**重启后端**生效；`POST` 路径经规范化，减少 Windows 下手工输入错误。
 - **历史数据**：开发环境仍可解析仓库 legacy `uploads`；打包环境从安装目录/exe 旁迁移，避免误用临时解包路径。
 - **Windows / Tauri**：默认持久化在 `%LOCALAPPDATA%\SuperAutoCutVideo\...`，重装应用一般不删除该目录，有利于上传与项目数据保留。
+- **启动与配置迁移**：`ensure_defaults_migrated()` 在设置好 `SACV_UPLOADS_DIR` 后执行，保证用户目录侧默认配置文件与项目列表等与仓库模板对齐（若尚不存在）。
+
+---
+
+## 跨平台开发与排错
+
+- **解释器**：请使用仓库内 **venv**（例如 `.venv_pack_gpu\Scripts\python.exe`）运行或调试后端；`.vscode/launch.json` 已指向该解释器。若用系统 Python（如单独安装的 3.14）搭配 venv 的 `site-packages` 混跑，可能出现 `Could not find platform independent libraries <prefix>` 或依赖导入异常。
+- **从 macOS 换到 Windows**：除 `app_settings.json` 中无效的 Unix `uploads_root` 会被忽略外，**业务数据中的绝对路径**（例如旧项目里存的视频路径）仍可能是 Mac 路径，需在 Windows 上重新上传或自行迁移文件并修正项目数据。
+- **同步 `app_settings.json`**：建议在目标系统打开设置页确认 **uploads 根目录** 为本机可写路径（盘符或 `%LOCALAPPDATA%\...` 等）。
 
 ---
 
