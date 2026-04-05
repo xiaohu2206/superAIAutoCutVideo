@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Play, Eye, X } from "lucide-react";
 import { SceneResult } from "../../types/scene";
 
@@ -9,6 +9,20 @@ interface SceneListTableProps {
 
 const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScene }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const analyzedVisionCount = useMemo(
+    () =>
+      sceneResult?.scenes?.filter(
+        (scene) =>
+          scene.vision_analyzed ||
+          scene.vision_status === "ok" ||
+          scene.vision_status === "empty" ||
+          scene.vision_status === "no_frame" ||
+          scene.vision_status === "error" ||
+          scene.vision_status === "infer_timeout"
+      ).length ?? 0,
+    [sceneResult]
+  );
 
   if (!sceneResult || !sceneResult.scenes || sceneResult.scenes.length === 0) {
     return null;
@@ -32,6 +46,8 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
     return "";
   };
 
+  const unanalyzedVisionCount = Math.max(sceneResult.scenes.length - analyzedVisionCount, 0);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -46,8 +62,13 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
         className="relative group cursor-pointer"
         onClick={() => setIsModalOpen(true)}
       >
-        <div className="w-full h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-blue-400 hover:ring-1 hover:ring-blue-400 transition-all flex items-center justify-between">
-          <span>共 {sceneResult.scenes.length} 个镜头</span>
+        <div className="w-full min-h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-blue-400 hover:ring-1 hover:ring-blue-400 transition-all flex items-center justify-between gap-4">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>共 {sceneResult.scenes.length} 个镜头，已分析画面 {analyzedVisionCount} 个</span>
+            {unanalyzedVisionCount > 0 && (
+              <span className="text-red-500 text-xs font-medium">还有 {unanalyzedVisionCount} 个镜头未分析完成</span>
+            )}
+          </span>
           <span className="text-gray-500 text-xs">总帧数: {sceneResult.total_frames} (FPS: {sceneResult.fps})</span>
         </div>
         
