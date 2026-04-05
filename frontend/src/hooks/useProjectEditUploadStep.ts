@@ -518,8 +518,7 @@ export function useProjectEditUploadStep(
       opts: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" } | undefined,
       visionAction: "auto" | "continue" | "restart"
     ) => {
-      // visual 项目：一个按钮同时触发“字幕提取”和“镜头提取”，两条任务各自独立进度/日志。
-      // 字幕提取是长任务（HTTP 会阻塞直到完成），这里采用“发起后不 await”，由 WS 回调驱动进度条。
+      // visual 项目：先同步完成字幕提取（HTTP 阻塞至结束），再提交镜头提取任务；进度仍由 WS 驱动。
       if (options.project?.project_type === "visual") {
         const p = options.project;
         const canStartSubtitle =
@@ -542,18 +541,23 @@ export function useProjectEditUploadStep(
               typeof (globalThis.crypto as any).randomUUID === "function"
                 ? (globalThis.crypto as any).randomUUID()
                 : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-            void options
-              .extractSubtitle({
+            try {
+              await options.extractSubtitle({
                 task_id: subTaskId,
                 asr_provider: subtitleAsr.provider,
                 asr_model_key: isFun ? subtitleAsr.modelKey : null,
                 asr_language: isFun ? subtitleAsr.language : "中文",
-              })
-              .catch((err) => {
-                options.showError(err, "提取字幕失败");
-                setExtractingSubtitle(false);
-                setSubtitleExtractProgress(0);
               });
+              setSubtitleExtractProgress(100);
+              setExtractingSubtitle(false);
+              void options.refreshProject();
+              void options.fetchSubtitle().catch(() => void 0);
+            } catch (err) {
+              options.showError(err, "提取字幕失败");
+              setExtractingSubtitle(false);
+              setSubtitleExtractProgress(0);
+              return;
+            }
           }
         }
       }

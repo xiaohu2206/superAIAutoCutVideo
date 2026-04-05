@@ -20,6 +20,7 @@ from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
+from services.vision_scene_status import scene_vision_success_ok
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -839,7 +840,7 @@ class VisionFrameAnalyzer:
                     should_analyze = True
             if not should_analyze:
                 continue
-            if bool(scene.get("vision_analyzed")):
+            if scene_vision_success_ok(scene):
                 _log_skip_existing_vision_analysis(project_id, idx, scene, mode, str(provider or "online"))
                 continue
             to_analyze_indices.append(idx)
@@ -1086,7 +1087,7 @@ class VisionFrameAnalyzer:
                         phase="analyze_vision_online_timeout_partial",
                     )
             else:
-                remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
+                remaining = [i for i in to_analyze_indices if not scene_vision_success_ok(scenes[i])]
                 if remaining:
                     if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                         raise asyncio.CancelledError("任务已取消")
@@ -1150,7 +1151,7 @@ class VisionFrameAnalyzer:
 
             if not should_analyze:
                 continue
-            if bool(scene.get("vision_analyzed")):
+            if scene_vision_success_ok(scene):
                 _log_skip_existing_vision_analysis(project_id, idx, scene, mode, "moondream")
                 continue
             to_analyze_indices.append(idx)
@@ -1319,7 +1320,7 @@ class VisionFrameAnalyzer:
                     if isinstance(r, asyncio.CancelledError):
                         raise r
 
-            remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
+            remaining = [i for i in to_analyze_indices if not scene_vision_success_ok(scenes[i])]
             if remaining:
                 if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError("任务已取消")

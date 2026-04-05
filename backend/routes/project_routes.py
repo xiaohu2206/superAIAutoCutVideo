@@ -393,6 +393,7 @@ class ExtractSubtitleRequest(BaseModel):
     analyzeVision: bool = False
     visionMode: str = "all"
     visionKeyFrames: int = 1
+    visionAction: str = "auto"
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -719,6 +720,9 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
         vk = int(getattr(req, "visionKeyFrames", 1) or 1)
         if vk not in (1, 3):
             vk = 1
+        va = str(getattr(req, "visionAction", "auto") or "auto").strip().lower()
+        if va not in ("auto", "continue", "restart"):
+            va = "auto"
         data = await extract_scene_service.extract_scenes(
             project_id=project_id,
             force=bool(req.force),
@@ -731,6 +735,7 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
             analyze_vision=bool(req.analyzeVision),
             vision_mode=req.visionMode,
             vision_key_frames=vk,
+            vision_action=va,
         )
         return {
             "message": "镜头提取任务已提交",

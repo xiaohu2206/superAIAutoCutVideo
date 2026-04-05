@@ -19,6 +19,7 @@ from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
+from services.vision_scene_status import scene_vision_success_ok
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
 from modules.config.video_model_config import video_model_config_manager
@@ -223,7 +224,7 @@ class ExtractSceneService:
         for scene in scenes:
             if not self._scene_needs_vision_analysis(scene, mode):
                 continue
-            if not bool(scene.get("vision_analyzed")):
+            if not scene_vision_success_ok(scene):
                 return True
         return False
 
