@@ -496,7 +496,7 @@ class VideoProcessor:
                         ]
                         if acodec0 == "aac":
                             cmd.extend(["-bsf:a", "aac_adtstoasc"])
-                        cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        cmd.extend(["-progress", "pipe:1", "-y", output_path])
                         self.last_concat_cmd = cmd
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
@@ -596,7 +596,6 @@ class VideoProcessor:
                     "-f", "concat", "-safe", "0",
                     "-i", str(list_path),
                     "-c", "copy",
-                    "-movflags", "+faststart",
                     "-progress", "pipe:1",
                     "-y", output_path,
                 ]
@@ -691,16 +690,39 @@ class VideoProcessor:
             for p in inputs:
                 cmd.extend(["-i", str(p)])
 
+            # concat 要求各段视频分辨率、SAR、帧率等一致；仅做偶数对齐不足以统一不同尺寸的素材
+            tw, th = 0, 0
+            for vi in vinfo_list:
+                if not vi:
+                    continue
+                try:
+                    w = int(vi.get("width") or 0)
+                    h = int(vi.get("height") or 0)
+                except Exception:
+                    w, h = 0, 0
+                tw = max(tw, w)
+                th = max(th, h)
+            if tw < 2:
+                tw = 1280
+            if th < 2:
+                th = 720
+            tw = tw - (tw % 2)
+            th = th - (th % 2)
+
             vf_parts = []
             for i in range(n):
                 base_fr_val = _fr_to_float(vinfo_list[0].get("r_frame_rate")) if vinfo_list and vinfo_list[0] else None
+                v_norm = (
+                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p"
+                )
                 if base_fr_val is not None:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]{v_norm},fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
                     )
                 else:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]{v_norm},setpts=PTS-STARTPTS[v{i}]"
                     )
                 if has_audio[i]:
                     vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
@@ -1107,6 +1129,14 @@ class VideoProcessor:
         names = await self._detect_encoders()
         seq: List[List[str]] = []
         cpu_seq: List[List[str]] = []
+
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names) and await self._is_encoder_usable("h264_nvenc"):
+            seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
+        if "h264_qsv" in names and await self._is_encoder_usable("h264_qsv"):
+            seq.append(["-c:v", "h264_qsv"])
+        if "h264_amf" in names and await self._is_encoder_usable("h264_amf"):
+            seq.append(["-c:v", "h264_amf"])
+
         if "libx264" in names:
             cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
         if "libopenh264" in names:
@@ -1119,13 +1149,6 @@ class VideoProcessor:
             cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
 
         seq.extend(cpu_seq)
-
-        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names) and await self._is_encoder_usable("h264_nvenc"):
-            seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
-        if "h264_qsv" in names and await self._is_encoder_usable("h264_qsv"):
-            seq.append(["-c:v", "h264_qsv"])
-        if "h264_amf" in names and await self._is_encoder_usable("h264_amf"):
-            seq.append(["-c:v", "h264_amf"])
         return seq
 
     async def _detect_encoders(self) -> List[str]:

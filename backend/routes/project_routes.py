@@ -1393,7 +1393,11 @@ async def merge_videos(project_id: str):
                 except Exception:
                     pass
 
-            ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
+            ok = await video_processor.concat_videos(
+                [str(x) for x in inputs],
+                str(out_path),
+                on_progress,
+            )
             if not ok:
                 MERGE_TASKS[task_id].status = "failed"
                 err = getattr(video_processor, "last_concat_error", None) or ""

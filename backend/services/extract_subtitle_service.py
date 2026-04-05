@@ -196,7 +196,20 @@ class ExtractSubtitleService:
         if subtitle_source == "user" and getattr(p, "subtitle_path", None):
             raise HTTPException(status_code=409, detail="已上传字幕，无法提取；请先删除字幕")
         if subtitle_status == "extracting" and not force:
-            raise HTTPException(status_code=409, detail="正在提取中")
+            current_run_id = str(getattr(p, "subtitle_extract_run_id", "") or "").strip()
+            request_run_id = str(task_id or "").strip()
+            if current_run_id and request_run_id and current_run_id == request_run_id:
+                raise HTTPException(status_code=409, detail="正在提取中")
+            refreshed = projects_store.get_project(project_id) or p
+            refreshed_status = str(getattr(refreshed, "subtitle_status", "") or "").strip().lower()
+            refreshed_path = getattr(refreshed, "subtitle_path", None)
+            if refreshed_status == "extracting" and not refreshed_path:
+                try:
+                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                except Exception:
+                    pass
+            else:
+                raise HTTPException(status_code=409, detail="正在提取中")
         if subtitle_updated_by_user and not force:
             raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
         if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
