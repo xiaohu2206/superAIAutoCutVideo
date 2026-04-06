@@ -24,8 +24,21 @@ WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def _concat_list_file_encoding() -> str:
-    """concat 列表必须用无 BOM 的 UTF-8：带 BOM 时首行会变成「\\ufefffile ...」，ffmpeg 报 unknown keyword file。"""
+    """concat 列表必须用无 BOM 的 UTF-8：带 BOM 时首行会变成「\ufefffile ...」，ffmpeg 报 unknown keyword file。"""
     return "utf-8"
+
+
+def _trim_log_tag(project_id: Optional[str], task_id: Optional[str]) -> str:
+    pid = (project_id or "-")[:8]
+    tid = (task_id or "-").split("_")[-1][:6]
+    return f"[trim][p={pid}][t={tid}]"
+
+
+def _trim_timeout_label(seconds: float) -> str:
+    if seconds >= 60:
+        return f"{seconds / 60.0:.1f}min"
+    return f"{seconds:.0f}s"
+
 
 class VideoProcessor:
     """视频处理器类"""
@@ -56,14 +69,24 @@ class VideoProcessor:
         self,
         proc: asyncio.subprocess.Process,
         cancel_event: Optional[asyncio.Event],
+        *,
+        timeout: Optional[float] = None,
+        timeout_message: Optional[str] = None,
+        timeout_log: Optional[str] = None,
     ) -> Tuple[bytes, bytes]:
-        if not cancel_event:
-            return await proc.communicate()
-
         comm_task = asyncio.create_task(proc.communicate())
-        cancel_task = asyncio.create_task(cancel_event.wait())
-        done, pending = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
-        if cancel_task in done:
+        cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+        timeout_task = asyncio.create_task(asyncio.sleep(float(timeout))) if timeout and timeout > 0 else None
+
+        wait_set = {comm_task}
+        if cancel_task:
+            wait_set.add(cancel_task)
+        if timeout_task:
+            wait_set.add(timeout_task)
+
+        done, pending = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
+
+        if cancel_task and cancel_task in done:
             try:
                 if proc.returncode is None:
                     try:
@@ -78,11 +101,55 @@ class VideoProcessor:
                         comm_task.cancel()
                     except Exception:
                         pass
+                if timeout_task:
+                    try:
+                        timeout_task.cancel()
+                    except Exception:
+                        pass
             raise asyncio.CancelledError()
-        try:
-            cancel_task.cancel()
-        except Exception:
-            pass
+
+        if timeout_task and timeout_task in done:
+            log_text = (timeout_log or timeout_message or "ffmpeg timeout").strip()
+            logger.error(log_text)
+            try:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    await asyncio.wait_for(comm_task, timeout=1.5)
+                except Exception:
+                    try:
+                        if proc.returncode is None:
+                            proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.wait_for(comm_task, timeout=1.0)
+                    except Exception:
+                        try:
+                            comm_task.cancel()
+                        except Exception:
+                            pass
+                if cancel_task:
+                    try:
+                        cancel_task.cancel()
+                    except Exception:
+                        pass
+            raise asyncio.TimeoutError(timeout_message or "子进程执行超时")
+
+        if cancel_task:
+            try:
+                cancel_task.cancel()
+            except Exception:
+                pass
+        if timeout_task:
+            try:
+                timeout_task.cancel()
+            except Exception:
+                pass
         return await comm_task
     
     async def cut_video_segment(
@@ -102,6 +169,8 @@ class VideoProcessor:
         以便按关键帧就近截取（仍使用 `-c copy` 保持高效）。
         """
         try:
+            trim_tag = _trim_log_tag(project_id, task_id) if scope == "trim_video" else ""
+            clip_timeout = max(45.0, min(12 * 60.0, float(duration or 0.0) * 3.0 + 30.0))
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -114,7 +183,14 @@ class VideoProcessor:
                 output_path
             ]
 
-            logger.info(f"剪切视频片段(关键帧对齐): {start_time}s-{start_time+duration}s -> {output_path}")
+            logger.info(
+                "%s cut start mode=copy range=%.3fs-%.3fs dur=%.3fs timeout=%s",
+                trim_tag,
+                float(start_time),
+                float(start_time + duration),
+                float(duration),
+                _trim_timeout_label(clip_timeout),
+            )
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -127,7 +203,17 @@ class VideoProcessor:
             if tracking:
                 self._register_proc(str(scope), str(project_id), str(task_id), process)
             try:
-                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                stdout, stderr = await self._communicate_with_cancel(
+                    process,
+                    cancel_event,
+                    timeout=clip_timeout,
+                    timeout_message=f"裁剪超时（copy，{_trim_timeout_label(clip_timeout)}）",
+                    timeout_log=(
+                        f"{trim_tag} cut timeout mode=copy "
+                        f"range={float(start_time):.3f}s-{float(start_time + duration):.3f}s "
+                        f"dur={float(duration):.3f}s timeout={_trim_timeout_label(clip_timeout)}"
+                    ).strip(),
+                )
             finally:
                 if tracking:
                     self._unregister_proc(str(scope), str(project_id), str(task_id), process)
@@ -146,24 +232,25 @@ class VideoProcessor:
                     tol = 0.20
                     if a_dur_val > 0.0 and (a_dur_val + tol) < float(dur):
                         logger.warning(
-                            "剪切结果音画时长不一致，进入重编码回退: audio=%.3fs video=%.3fs target=%.3fs path=%s",
+                            "%s cut fallback reason=av_duration_mismatch audio=%.3fs video=%.3fs target=%.3fs",
+                            trim_tag,
                             a_dur_val,
                             float(dur),
                             float(duration),
-                            output_path,
                         )
                     else:
-                        logger.info(f"视频剪切成功: {output_path}")
+                        logger.info("%s cut done mode=copy out=%s", trim_tag, output_path)
                         return True
-                logger.warning("剪切结果时长异常，进入重编码回退")
+                logger.warning("%s cut fallback reason=output_duration_invalid", trim_tag)
             else:
-                err = stderr.decode(errors="ignore")
-                logger.error(f"视频剪切失败，进入重编码回退: {err}")
+                err = stderr.decode(errors="ignore").strip()
+                logger.error("%s cut fallback reason=copy_failed err=%s", trim_tag, err[:300])
 
             try:
                 enc_name, vcodec_args = await self._pick_fast_encoder()
             except Exception:
                 enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
             reencode_cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -178,6 +265,12 @@ class VideoProcessor:
                 "-y",
                 output_path
             ]
+            logger.info(
+                "%s cut start mode=reencode encoder=%s timeout=%s",
+                trim_tag,
+                enc_name,
+                _trim_timeout_label(reencode_timeout),
+            )
             p2 = await asyncio.create_subprocess_exec(
                 *reencode_cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -188,7 +281,17 @@ class VideoProcessor:
             if tracking2:
                 self._register_proc(str(scope), str(project_id), str(task_id), p2)
             try:
-                _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+                _, e2 = await self._communicate_with_cancel(
+                    p2,
+                    cancel_event,
+                    timeout=reencode_timeout,
+                    timeout_message=f"裁剪超时（重编码，{_trim_timeout_label(reencode_timeout)}）",
+                    timeout_log=(
+                        f"{trim_tag} cut timeout mode=reencode encoder={enc_name} "
+                        f"range={float(start_time):.3f}s-{float(start_time + duration):.3f}s "
+                        f"dur={float(duration):.3f}s timeout={_trim_timeout_label(reencode_timeout)}"
+                    ).strip(),
+                )
             finally:
                 if tracking2:
                     self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
@@ -198,14 +301,17 @@ class VideoProcessor:
                 except Exception:
                     dur2 = None
                 if dur2 is not None and dur2 > 0.01:
-                    logger.info(f"视频剪切成功(重编码): {output_path}")
+                    logger.info("%s cut done mode=reencode out=%s", trim_tag, output_path)
                     return True
-                logger.error("重编码剪切后时长仍为0")
+                logger.error("%s cut failed reason=reencode_output_duration_zero", trim_tag)
                 return False
             else:
-                logger.error(f"视频剪切失败(重编码): {e2.decode(errors='ignore')}")
+                logger.error("%s cut failed mode=reencode err=%s", trim_tag, e2.decode(errors='ignore').strip()[:300])
                 return False
 
+        except asyncio.TimeoutError as e:
+            logger.error("%s cut aborted reason=timeout detail=%s", trim_tag if 'trim_tag' in locals() else "", str(e))
+            return False
         except Exception as e:
             logger.error(f"剪切视频时出错: {e}")
             return False

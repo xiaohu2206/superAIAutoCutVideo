@@ -36,7 +36,7 @@ import subprocess
 
 from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_path, resolve_uploads_path
 from modules.projects_store import projects_store
-from modules.video_processor import video_processor
+from modules.video_processor import video_processor, _trim_log_tag, _trim_timeout_label
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
 from services.generate_copywriting_service import generate_copywriting_service
@@ -1547,6 +1547,7 @@ def _invert_ranges_ms(ranges: List[List[int]], duration_ms: int) -> List[List[in
 
 @router.post("/{project_id}/trim/video")
 async def trim_video(project_id: str, req: TrimVideoRequest):
+    trim_tag = _trim_log_tag(project_id, None)
     p = projects_store.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -1600,6 +1601,17 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
         _active_trim_keys[trim_key] = task_id
         TRIM_TASKS[task_id] = TrimTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备裁剪")
 
+    trim_tag = _trim_log_tag(project_id, task_id)
+    logger.info(
+        "%s request file=%s mode=%s ranges=%d keep_ranges=%d duration=%.3fs",
+        trim_tag,
+        Path(file_path).name,
+        mode,
+        len(req.ranges or []),
+        len(keep_ranges),
+        float(duration_ms) / 1000.0,
+    )
+
     async def _broadcast(payload: Dict[str, Any]):
         try:
             await manager.broadcast(json.dumps(payload, ensure_ascii=False))
@@ -1609,7 +1621,9 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
     async def _run():
         seg_paths: List[Path] = []
         out_tmp: Optional[Path] = None
+        trim_cancel_event = asyncio.Event()
         try:
+            logger.info("%s task start", trim_tag)
             TRIM_TASKS[task_id].status = "processing"
             TRIM_TASKS[task_id].message = "正在裁剪"
             await _broadcast(
@@ -1633,7 +1647,25 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 seg_paths.append(seg_out)
                 start_sec = float(s_ms) / 1000.0
                 dur_sec = float(e_ms - s_ms) / 1000.0
-                ok = await video_processor.cut_video_segment(str(abs_in), str(seg_out), start_sec, dur_sec)
+                logger.info(
+                    "%s clip %d/%d start range=%.3fs-%.3fs dur=%.3fs",
+                    trim_tag,
+                    idx + 1,
+                    total_segments,
+                    start_sec,
+                    start_sec + dur_sec,
+                    dur_sec,
+                )
+                ok = await video_processor.cut_video_segment(
+                    str(abs_in),
+                    str(seg_out),
+                    start_sec,
+                    dur_sec,
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=trim_cancel_event,
+                )
                 if not ok:
                     raise RuntimeError(f"剪切第 {idx + 1} 段失败")
                 pct = 10.0 + (40.0 * float(idx + 1) / float(max(total_segments, 1)))
@@ -1678,7 +1710,25 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     }
                 )
 
-            ok = await video_processor.concat_videos([str(x) for x in seg_paths], str(out_tmp), _on_concat_progress)
+            concat_timeout = max(90.0, min(30 * 60.0, (float(duration_ms) / 1000.0) * 4.0 + 60.0))
+            logger.info(
+                "%s concat start segments=%d timeout=%s",
+                trim_tag,
+                len(seg_paths),
+                _trim_timeout_label(concat_timeout),
+            )
+            ok = await asyncio.wait_for(
+                video_processor.concat_videos(
+                    [str(x) for x in seg_paths],
+                    str(out_tmp),
+                    _on_concat_progress,
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=trim_cancel_event,
+                ),
+                timeout=concat_timeout,
+            )
             if not ok or not out_tmp.exists():
                 err = getattr(video_processor, "last_concat_error", None) or ""
                 if err:
@@ -1765,6 +1815,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 except Exception:
                     pass
 
+            logger.info("%s concat done replace=%s output=%s", trim_tag, "inplace" if out_web_path == file_path else "fallback", Path(out_web_path).name)
             out_ver = datetime.now().strftime("%Y%m%d%H%M%S%f")
             TRIM_TASKS[task_id].status = "completed"
             TRIM_TASKS[task_id].progress = 100.0
@@ -1784,9 +1835,45 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     "timestamp": now_ts(),
                 }
             )
+            logger.info("%s task completed", trim_tag)
+        except asyncio.TimeoutError:
+            TRIM_TASKS[task_id].status = "failed"
+            TRIM_TASKS[task_id].message = f"拼接超时（{_trim_timeout_label(concat_timeout)}）"
+            try:
+                trim_cancel_event.set()
+            except Exception:
+                pass
+            logger.error("%s concat timeout timeout=%s", trim_tag, _trim_timeout_label(concat_timeout))
+            if out_tmp:
+                try:
+                    if out_tmp.exists():
+                        out_tmp.unlink()
+                except Exception:
+                    pass
+            for sp in seg_paths:
+                try:
+                    if sp.exists():
+                        sp.unlink()
+                except Exception:
+                    pass
+            await _broadcast(
+                {
+                    "type": "error",
+                    "scope": "trim_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": TRIM_TASKS[task_id].message,
+                    "progress": float(TRIM_TASKS[task_id].progress or 0.0),
+                    "timestamp": now_ts(),
+                }
+            )
         except Exception as e:
             TRIM_TASKS[task_id].status = "failed"
             TRIM_TASKS[task_id].message = str(e) or "裁剪失败"
+            try:
+                trim_cancel_event.set()
+            except Exception:
+                pass
             if out_tmp:
                 try:
                     if out_tmp.exists():
@@ -1811,6 +1898,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 }
             )
         finally:
+            logger.info("%s task end status=%s progress=%.1f", trim_tag, TRIM_TASKS[task_id].status, float(TRIM_TASKS[task_id].progress or 0.0))
             with _trim_lock:
                 cur = _active_trim_keys.get(trim_key)
                 if cur == task_id:
