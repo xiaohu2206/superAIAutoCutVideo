@@ -1763,6 +1763,11 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 }
             )
 
+            logger.info(
+                "%s keep ranges sample=%s",
+                trim_tag,
+                ", ".join([f"{float(s)/1000.0:.3f}-{float(e)/1000.0:.3f}s" for s, e in keep_ranges[:8]]) + (" ..." if len(keep_ranges) > 8 else ""),
+            )
             tmp_dir = uploads_dir() / "videos" / "tmp"
             tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1792,6 +1797,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     cancel_event=trim_cancel_event,
                 )
                 if not ok:
+                    logger.error("%s clip %d/%d failed output_exists=%s output=%s", trim_tag, idx + 1, total_segments, seg_out.exists(), seg_out)
                     raise RuntimeError(f"剪切第 {idx + 1} 段失败")
                 pct = 10.0 + (40.0 * float(idx + 1) / float(max(total_segments, 1)))
                 TRIM_TASKS[task_id].progress = float(f"{pct:.2f}")
@@ -1837,6 +1843,12 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
 
             concat_timeout = max(90.0, min(30 * 60.0, (float(duration_ms) / 1000.0) * 4.0 + 60.0))
             logger.info(
+                "%s concat input sample=%s output_tmp=%s",
+                trim_tag,
+                ", ".join([Path(x).name for x in seg_paths[:8]]) + (" ..." if len(seg_paths) > 8 else ""),
+                out_tmp,
+            )
+            logger.info(
                 "%s concat start segments=%d timeout=%s",
                 trim_tag,
                 len(seg_paths),
@@ -1856,6 +1868,15 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
             )
             if not ok or not out_tmp.exists():
                 err = getattr(video_processor, "last_concat_error", None) or ""
+                last_cmd = getattr(video_processor, "last_concat_cmd", None) or []
+                logger.error(
+                    "%s concat failed ok=%s out_exists=%s err=%s cmd=%s",
+                    trim_tag,
+                    ok,
+                    bool(out_tmp and out_tmp.exists()),
+                    str(err).strip()[:500],
+                    " ".join(str(x) for x in last_cmd)[:1000],
+                )
                 if err:
                     raise RuntimeError(f"拼接失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接失败")

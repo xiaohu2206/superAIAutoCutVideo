@@ -477,7 +477,7 @@ class ExtractSceneService:
                                 task_id=task_id,
                                 status="processing",
                                 progress=mapped_pct,
-                                message=f"正在拆分镜头: {pct:.1f}%",
+                                message=f"正在拆分镜头: {pct:.2f}%",
                             )
                             if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                 raise asyncio.CancelledError("任务已取消")
@@ -515,7 +515,7 @@ class ExtractSceneService:
                                 task_id,
                                 "processing",
                                 mapped_pct,
-                                f"正在拆分镜头: {overall * 100.0:.1f}%",
+                                f"正在拆分镜头: {overall * 100.0:.2f}%",
                             )
 
                         def _on_chunk_progress(idx: int, pct: float):
@@ -587,7 +587,7 @@ class ExtractSceneService:
                                         task_id=task_id,
                                         status="processing",
                                         progress=mapped_pct,
-                                        message=f"正在拆分镜头: {pct:.1f}%",
+                                        message=f"正在拆分镜头: {pct:.2f}%",
                                     )
                                     if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                         for pt in pending:

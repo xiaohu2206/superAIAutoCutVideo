@@ -74,83 +74,111 @@ class VideoProcessor:
         timeout_message: Optional[str] = None,
         timeout_log: Optional[str] = None,
     ) -> Tuple[bytes, bytes]:
-        comm_task = asyncio.create_task(proc.communicate())
+        return await self._wait_process_with_cancel(
+            proc,
+            cancel_event,
+            timeout=timeout,
+            timeout_message=timeout_message,
+            timeout_log=timeout_log,
+            capture_output=True,
+        )
+
+    async def _wait_process_with_cancel(
+        self,
+        proc: asyncio.subprocess.Process,
+        cancel_event: Optional[asyncio.Event],
+        *,
+        timeout: Optional[float] = None,
+        timeout_message: Optional[str] = None,
+        timeout_log: Optional[str] = None,
+        capture_output: bool = True,
+    ) -> Tuple[bytes, bytes]:
+        wait_task = asyncio.create_task(proc.wait())
         cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
         timeout_task = asyncio.create_task(asyncio.sleep(float(timeout))) if timeout and timeout > 0 else None
 
-        wait_set = {comm_task}
+        wait_set = {wait_task}
         if cancel_task:
             wait_set.add(cancel_task)
         if timeout_task:
             wait_set.add(timeout_task)
 
-        done, pending = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
+        stdout = b""
+        stderr = b""
 
-        if cancel_task and cancel_task in done:
-            try:
-                if proc.returncode is None:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-            finally:
-                try:
-                    await asyncio.wait_for(comm_task, timeout=1.5)
-                except Exception:
-                    try:
-                        comm_task.cancel()
-                    except Exception:
-                        pass
-                if timeout_task:
-                    try:
-                        timeout_task.cancel()
-                    except Exception:
-                        pass
-            raise asyncio.CancelledError()
+        try:
+            done, _ = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
 
-        if timeout_task and timeout_task in done:
-            log_text = (timeout_log or timeout_message or "ffmpeg timeout").strip()
-            logger.error(log_text)
-            try:
-                if proc.returncode is None:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-            finally:
+            if cancel_task and cancel_task in done:
                 try:
-                    await asyncio.wait_for(comm_task, timeout=1.5)
-                except Exception:
-                    try:
-                        if proc.returncode is None:
-                            proc.kill()
-                    except Exception:
-                        pass
-                    try:
-                        await asyncio.wait_for(comm_task, timeout=1.0)
-                    except Exception:
+                    if proc.returncode is None:
                         try:
-                            comm_task.cancel()
+                            proc.terminate()
                         except Exception:
                             pass
-                if cancel_task:
+                finally:
                     try:
-                        cancel_task.cancel()
+                        await asyncio.wait_for(wait_task, timeout=1.5)
                     except Exception:
-                        pass
-            raise asyncio.TimeoutError(timeout_message or "子进程执行超时")
+                        try:
+                            if proc.returncode is None:
+                                proc.kill()
+                        except Exception:
+                            pass
+                        try:
+                            await asyncio.wait_for(wait_task, timeout=1.0)
+                        except Exception:
+                            pass
+                raise asyncio.CancelledError()
 
-        if cancel_task:
-            try:
-                cancel_task.cancel()
-            except Exception:
-                pass
-        if timeout_task:
-            try:
-                timeout_task.cancel()
-            except Exception:
-                pass
-        return await comm_task
+            if timeout_task and timeout_task in done:
+                log_text = (timeout_log or timeout_message or "ffmpeg timeout").strip()
+                logger.error(log_text)
+                try:
+                    if proc.returncode is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        await asyncio.wait_for(wait_task, timeout=1.5)
+                    except Exception:
+                        try:
+                            if proc.returncode is None:
+                                proc.kill()
+                        except Exception:
+                            pass
+                        try:
+                            await asyncio.wait_for(wait_task, timeout=1.0)
+                        except Exception:
+                            pass
+                raise asyncio.TimeoutError(timeout_message or "子进程执行超时")
+
+            await wait_task
+            if capture_output:
+                try:
+                    if proc.stdout:
+                        stdout = await proc.stdout.read()
+                except Exception:
+                    pass
+                try:
+                    if proc.stderr:
+                        stderr = await proc.stderr.read()
+                except Exception:
+                    pass
+            return stdout, stderr
+        finally:
+            if cancel_task:
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+            if timeout_task:
+                try:
+                    timeout_task.cancel()
+                except Exception:
+                    pass
     
     async def cut_video_segment(
         self,
@@ -505,6 +533,60 @@ class VideoProcessor:
             if force_reencode:
                 copy_possible = False
             token = uuid.uuid4().hex[:10]
+            total_duration = sum(durations)
+            async def _consume_progress_stream(process: asyncio.subprocess.Process) -> None:
+                if not on_progress:
+                    return
+                try:
+                    last_bucket = -1
+                    seen_end = False
+                    while True:
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        rl = asyncio.create_task(process.stdout.readline())
+                        wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                        if wt:
+                            done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
+                            if wt in done:
+                                try:
+                                    rl.cancel()
+                                except Exception:
+                                    pass
+                                raise asyncio.CancelledError()
+                            line = await rl
+                            try:
+                                wt.cancel()
+                            except Exception:
+                                pass
+                        else:
+                            line = await rl
+                        if not line:
+                            break
+                        s = line.decode(errors="ignore").strip()
+                        if s.startswith("out_time_ms="):
+                            try:
+                                ms = float(s.split("=", 1)[1])
+                                if total_duration > 0:
+                                    pct = (ms / (total_duration * 1000.0)) * 100.0
+                                    if pct < 0:
+                                        pct = 0.0
+                                    if pct > 100:
+                                        pct = 100.0
+                                    if not seen_end and pct >= 100.0:
+                                        pct = 99.0
+                                    await on_progress(pct)
+                                    bucket = int(pct // 5)
+                                    if bucket > last_bucket:
+                                        logger.info(f"拼接进度: {pct:.1f}%")
+                                        last_bucket = bucket
+                            except Exception:
+                                pass
+                        elif s.startswith("progress=") and s.endswith("end"):
+                            seen_end = True
+                            logger.info("拼接进度: 99.0% (等待完成)")
+                except Exception as e:
+                    logger.warning("拼接进度读取异常: %s", e)
+
             can_concat_demuxer = False
             list_path = Path(output_path).with_suffix(f".{token}.concat.txt")
             if copy_possible:
@@ -614,59 +696,19 @@ class VideoProcessor:
                         if tracking:
                             self._register_proc(str(scope), str(project_id), str(task_id), process)
                         total_duration = sum(durations)
-                        if on_progress:
-                            try:
-                                last_bucket = -1
-                                seen_end = False
-                                while True:
-                                    if cancel_event and cancel_event.is_set():
-                                        raise asyncio.CancelledError()
-                                    rl = asyncio.create_task(process.stdout.readline())
-                                    wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                                    if wt:
-                                        done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                        if wt in done:
-                                            try:
-                                                rl.cancel()
-                                            except Exception:
-                                                pass
-                                            raise asyncio.CancelledError()
-                                        line = await rl
-                                        try:
-                                            wt.cancel()
-                                        except Exception:
-                                            pass
-                                    else:
-                                        line = await rl
-                                    if not line:
-                                        break
-                                    s = line.decode(errors="ignore").strip()
-                                    if s.startswith("out_time_ms="):
-                                        try:
-                                            ms = float(s.split("=", 1)[1])
-                                            if total_duration > 0:
-                                                pct = (ms / (total_duration * 1000.0)) * 100.0
-                                                if pct < 0:
-                                                    pct = 0.0
-                                                if pct > 100:
-                                                    pct = 100.0
-                                                if not seen_end and pct >= 100.0:
-                                                    pct = 99.0
-                                                await on_progress(pct)
-                                                bucket = int(pct // 5)
-                                                if bucket > last_bucket:
-                                                    logger.info(f"拼接进度: {pct:.1f}%")
-                                                    last_bucket = bucket
-                                        except Exception:
-                                            pass
-                                    elif s.startswith("progress=") and s.endswith("end"):
-                                        seen_end = True
-                                        logger.info("拼接进度: 99.0% (等待完成)")
-                            except Exception:
-                                pass
+                        progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
                         try:
-                            stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                            stdout, stderr = await self._wait_process_with_cancel(
+                                process,
+                                cancel_event,
+                                capture_output=not bool(on_progress),
+                            )
                         finally:
+                            if progress_task:
+                                try:
+                                    await progress_task
+                                except Exception:
+                                    pass
                             if tracking:
                                 self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                         for f in ts_files:
@@ -716,59 +758,19 @@ class VideoProcessor:
                 if tracking:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
                 total_duration = sum(durations)
-                if on_progress:
-                    try:
-                        last_bucket = -1
-                        seen_end = False
-                        while True:
-                            if cancel_event and cancel_event.is_set():
-                                raise asyncio.CancelledError()
-                            rl = asyncio.create_task(process.stdout.readline())
-                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                            if wt:
-                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                if wt in done:
-                                    try:
-                                        rl.cancel()
-                                    except Exception:
-                                        pass
-                                    raise asyncio.CancelledError()
-                                line = await rl
-                                try:
-                                    wt.cancel()
-                                except Exception:
-                                    pass
-                            else:
-                                line = await rl
-                            if not line:
-                                break
-                            s = line.decode(errors="ignore").strip()
-                            if s.startswith("out_time_ms="):
-                                try:
-                                    ms = float(s.split("=", 1)[1])
-                                    if total_duration > 0:
-                                        pct = (ms / (total_duration * 1000.0)) * 100.0
-                                        if pct < 0:
-                                            pct = 0.0
-                                        if pct > 100:
-                                            pct = 100.0
-                                        if not seen_end and pct >= 100.0:
-                                            pct = 99.0
-                                        await on_progress(pct)
-                                        bucket = int(pct // 5)
-                                        if bucket > last_bucket:
-                                            logger.info(f"拼接进度: {pct:.1f}%")
-                                            last_bucket = bucket
-                                except Exception:
-                                    pass
-                            elif s.startswith("progress=") and s.endswith("end"):
-                                seen_end = True
-                                logger.info("拼接进度: 99.0% (等待完成)")
-                    except Exception:
-                        pass
+                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
                 try:
-                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                    stdout, stderr = await self._wait_process_with_cancel(
+                        process,
+                        cancel_event,
+                        capture_output=not bool(on_progress),
+                    )
                 finally:
+                    if progress_task:
+                        try:
+                            await progress_task
+                        except Exception:
+                            pass
                     if tracking:
                         self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 try:
@@ -884,60 +886,20 @@ class VideoProcessor:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
 
                 total_duration = sum(durations)
-                if on_progress:
-                    try:
-                        last_bucket = -1
-                        seen_end = False
-                        while True:
-                            if cancel_event and cancel_event.is_set():
-                                raise asyncio.CancelledError()
-                            rl = asyncio.create_task(process.stdout.readline())
-                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                            if wt:
-                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                if wt in done:
-                                    try:
-                                        rl.cancel()
-                                    except Exception:
-                                        pass
-                                    raise asyncio.CancelledError()
-                                line = await rl
-                                try:
-                                    wt.cancel()
-                                except Exception:
-                                    pass
-                            else:
-                                line = await rl
-                            if not line:
-                                break
-                            s = line.decode(errors="ignore").strip()
-                            if s.startswith("out_time_ms="):
-                                try:
-                                    ms = float(s.split("=", 1)[1])
-                                    if total_duration > 0:
-                                        pct = (ms / (total_duration * 1000.0)) * 100.0
-                                        if pct < 0:
-                                            pct = 0.0
-                                        if pct > 100:
-                                            pct = 100.0
-                                        if not seen_end and pct >= 100.0:
-                                            pct = 99.0
-                                        await on_progress(pct)
-                                        bucket = int(pct // 5)
-                                        if bucket > last_bucket:
-                                            logger.info(f"拼接进度: {pct:.1f}%")
-                                            last_bucket = bucket
-                                except Exception:
-                                    pass
-                            elif s.startswith("progress=") and s.endswith("end"):
-                                seen_end = True
-                                logger.info("拼接进度: 99.0% (等待完成)")
-                    except Exception:
-                        pass
+                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
 
                 try:
-                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                    stdout, stderr = await self._wait_process_with_cancel(
+                        process,
+                        cancel_event,
+                        capture_output=not bool(on_progress),
+                    )
                 finally:
+                    if progress_task:
+                        try:
+                            await progress_task
+                        except Exception:
+                            pass
                     if tracking:
                         self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 try:
