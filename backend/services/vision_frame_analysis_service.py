@@ -834,7 +834,7 @@ class VisionFrameAnalyzer:
         kf = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
 
         concurrency_cap = max(1, min(int(max_concurrency or 1), 32))
-        extract_concurrency = min(8, concurrency_cap)
+        extract_concurrency = min(4, concurrency_cap)
         api_concurrency = min(32, concurrency_cap)
         loop = asyncio.get_running_loop()
         stop_infer_all = asyncio.Event()
@@ -873,15 +873,36 @@ class VisionFrameAnalyzer:
         extract_executor = ThreadPoolExecutor(max_workers=extract_concurrency, thread_name_prefix="online_vision_extract")
         infer_semaphore = asyncio.Semaphore(api_concurrency)
 
-        def _extract_segment_sync(v_path: str, t_s: float, t_e: float, scene_idx: int):
+        def _extract_segment_sync(
+            v_path: str, t_s: float, t_e: float, scene_idx: int, scheduled_at: float
+        ):
+            thread_start = time.time()
+            queue_wait_sec = max(0.0, thread_start - float(scheduled_at))
+            t_work0 = time.time()
             try:
                 imgs, frame_err = self.extract_segment_key_frames_with_reason(v_path, t_s, t_e, kf)
+                extract_work_sec = time.time() - t_work0
+                base = {"queue_wait_sec": queue_wait_sec, "extract_work_sec": extract_work_sec}
                 if not imgs:
-                    return {"ok": False, "imgs": None, "error": "extract_frame_failed", "frame_error": frame_err}
-                return {"ok": True, "imgs": imgs, "error": None, "frame_error": None}
+                    return {
+                        **base,
+                        "ok": False,
+                        "imgs": None,
+                        "error": "extract_frame_failed",
+                        "frame_error": frame_err,
+                    }
+                return {**base, "ok": True, "imgs": imgs, "error": None, "frame_error": None}
             except Exception as e:
+                extract_work_sec = time.time() - t_work0
                 logger.error("在线视觉抽帧失败：镜头%s，时间段%.3f-%.3f，错误=%s", scene_idx, float(t_s), float(t_e), e)
-                return {"ok": False, "imgs": None, "error": str(e), "frame_error": None}
+                return {
+                    "queue_wait_sec": queue_wait_sec,
+                    "extract_work_sec": extract_work_sec,
+                    "ok": False,
+                    "imgs": None,
+                    "error": str(e),
+                    "frame_error": None,
+                }
 
         def _finalize_scene_vision(scene: Dict[str, Any], vision_segments: List[Dict[str, Any]], bump_progress: bool) -> None:
             nonlocal processed_count
@@ -952,27 +973,39 @@ class VisionFrameAnalyzer:
                     t_end = seg["end_time"]
                     t0 = time.time()
                     extract_res = await loop.run_in_executor(
-                        extract_executor, _extract_segment_sync, video_path, t_start, t_end, idx
+                        extract_executor,
+                        _extract_segment_sync,
+                        video_path,
+                        t_start,
+                        t_end,
+                        idx,
+                        t0,
                     )
                     t1 = time.time()
                     extract_elapsed = t1 - t0
                     imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
+                    q_wait = float(extract_res.get("queue_wait_sec") or 0) if isinstance(extract_res, dict) else 0.0
+                    ex_work = float(extract_res.get("extract_work_sec") or 0) if isinstance(extract_res, dict) else 0.0
 
                     if isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0:
                         logger.info(
-                            "在线视觉抽帧完成：镜头%s，时间段%.3f-%.3f，耗时%.3fs，帧数=%s",
+                            "在线视觉抽帧完成：镜头%s，时间段%.3f-%.3f，排队%.3fs，抽帧执行%.3fs，合计%.3fs，帧数=%s",
                             idx,
                             float(t_start),
                             float(t_end),
+                            q_wait,
+                            ex_work,
                             extract_elapsed,
                             len(imgs),
                         )
                     else:
                         logger.warning(
-                            "在线视觉抽帧结果异常：镜头%s，时间段%.3f-%.3f，耗时%.3fs，错误=%s",
+                            "在线视觉抽帧结果异常：镜头%s，时间段%.3f-%.3f，排队%.3fs，抽帧执行%.3fs，合计%.3fs，错误=%s",
                             idx,
                             float(t_start),
                             float(t_end),
+                            q_wait,
+                            ex_work,
                             extract_elapsed,
                             extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result",
                         )
@@ -1027,10 +1060,12 @@ class VisionFrameAnalyzer:
                             t3 = time.time()
 
                         logger.info(
-                            "在线视觉分析完成：镜头%s，时间段%.3f-%.3f，抽帧%.3fs，推理%.3fs，总耗时%.3fs，provider=%s，model=%s，图片数=%s",
+                            "在线视觉分析完成：镜头%s，时间段%.3f-%.3f，抽帧(排队%.3fs+执行%.3fs=%.3fs)，推理%.3fs，总耗时%.3fs，provider=%s，model=%s，图片数=%s",
                             idx,
                             float(t_start),
                             float(t_end),
+                            q_wait,
+                            ex_work,
                             extract_elapsed,
                             t3 - t2,
                             extract_elapsed + (t3 - t2),

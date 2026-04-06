@@ -30,8 +30,8 @@ export const TrimVideoModal: React.FC<TrimVideoModalProps> = ({ isOpen, projectI
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={vm.close} />
-      <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl">
+      <div className="flex items-center justify-center min-h-screen p-3 lg:p-6">
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-9xl min-h-[85vh]">
           <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100">
             <div className="flex items-center gap-3">
               <div className="p-1.5 bg-violet-50 rounded-lg">
