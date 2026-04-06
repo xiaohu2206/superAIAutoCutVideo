@@ -392,7 +392,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         {extractingScene && (
           <div className="w-full mt-4">
              <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1">
-              <span>镜头提取进度</span>
+              <span>镜头提取进度 <span className="text-gray-400" >（提取时间跟视频大小、电脑配置有关系，视频大于2G偏慢，请耐心等待）</span></span>
               <div className="flex items-center gap-2">
                 <span>{Math.round(sceneExtractProgress)}%</span>
                 <button
