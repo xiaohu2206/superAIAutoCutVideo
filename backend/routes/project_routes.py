@@ -1063,6 +1063,32 @@ async def stream_project_merged_video(project_id: str, request: Request):
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 FASTSTART_EXTS = {".mp4", ".mov"}
+VIDEO_UPLOAD_SESSIONS: Dict[str, Dict[str, Any]] = {}
+VIDEO_UPLOAD_SESSIONS_LOCK = RLock()
+
+
+def _register_uploaded_video(project_id: str, out_path: Path, file_name: str, size: int) -> Dict[str, Any]:
+    web_path = to_web_path(out_path)
+    projects_store.append_video_path(project_id, web_path, file_name)
+    upload_time = now_ts()
+    return {
+        "message": "视频上传成功",
+        "data": {
+            "file_path": web_path,
+            "file_name": file_name,
+            "file_size": size,
+            "upload_time": upload_time,
+        },
+        "timestamp": upload_time,
+    }
+
+
+def _build_video_upload_path(project_id: str, suffix: str) -> Path:
+    up_dir = uploads_dir() / "videos"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    unique = uuid.uuid4().hex[:8]
+    out_name = f"{project_id}_video_{ts}_{unique}{suffix}"
+    return up_dir / out_name
 
 
 async def remux_faststart(path: Path) -> bool:
@@ -1108,7 +1134,7 @@ async def remux_faststart(path: Path) -> bool:
 
 
 @router.post("/{project_id}/upload/video")
-async def upload_video(project_id: str, file: UploadFile = File(...), project_id_form: str = Form(None)):
+async def upload_video(project_id: str, file: UploadFile = File(...)):
     # 校验项目存在
     p = projects_store.get_project(project_id)
     if not p:
@@ -1119,12 +1145,7 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     if suffix not in VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="文件格式不支持")
 
-    # 保存文件
-    up_dir = uploads_dir() / "videos"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    unique = uuid.uuid4().hex[:8]
-    out_name = f"{project_id}_video_{ts}_{unique}{suffix}"
-    out_path = up_dir / out_name
+    out_path = _build_video_upload_path(project_id, suffix)
 
     size = 0
     try:
@@ -1139,31 +1160,135 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
-    # 上传后转码 / faststart 已关闭（按需取消下行注释以恢复）
-    # orig_path = out_path
-    # out_path = await video_processor.normalize_upload_for_web_preview(out_path)
-    # if out_path == orig_path:
-    #     await remux_faststart(out_path)
-    # try:
-    #     size = out_path.stat().st_size
-    # except Exception:
-    #     pass
+    return _register_uploaded_video(project_id, out_path, file.filename, size)
 
-    # 记录到项目的视频列表，并按规则更新生效路径
-    web_path = to_web_path(out_path)
-    # 记录路径与原始文件名
-    projects_store.append_video_path(project_id, web_path, file.filename)
+
+@router.post("/{project_id}/upload/video/chunk")
+async def upload_video_chunk(
+    project_id: str,
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    file_name: str = Form(...),
+    file_size: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    if total_chunks <= 0:
+        raise HTTPException(status_code=400, detail="total_chunks 无效")
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=400, detail="chunk_index 无效")
+
+    suffix = Path(file_name or chunk.filename or "").suffix.lower()
+    if suffix not in VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail="文件格式不支持")
+
+    tmp_dir = uploads_dir() / "videos" / "chunks" / project_id / upload_id
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    chunk_path = tmp_dir / f"{chunk_index:06d}.part"
+
+    chunk_size = 0
+    try:
+        with open(chunk_path, "wb") as buffer:
+            while True:
+                piece = await chunk.read(1024 * 1024)
+                if not piece:
+                    break
+                chunk_size += len(piece)
+                buffer.write(piece)
+    finally:
+        await chunk.close()
+
+    with VIDEO_UPLOAD_SESSIONS_LOCK:
+        session = VIDEO_UPLOAD_SESSIONS.get(upload_id)
+        if not session:
+            session = {
+                "project_id": project_id,
+                "upload_id": upload_id,
+                "file_name": file_name,
+                "file_size": file_size,
+                "total_chunks": total_chunks,
+                "suffix": suffix,
+            }
+            VIDEO_UPLOAD_SESSIONS[upload_id] = session
+        elif session.get("project_id") != project_id:
+            raise HTTPException(status_code=400, detail="upload_id 与项目不匹配")
 
     return {
-        "message": "视频上传成功",
+        "message": "分片上传成功",
         "data": {
-            "file_path": web_path,
-            "file_name": file.filename,
-            "file_size": size,
-            "upload_time": now_ts(),
+            "upload_id": upload_id,
+            "chunk_index": chunk_index,
+            "chunk_size": chunk_size,
+            "uploaded_chunks": len(list(tmp_dir.glob("*.part"))),
+            "total_chunks": total_chunks,
         },
         "timestamp": now_ts(),
     }
+
+
+class FinalizeVideoUploadRequest(BaseModel):
+    upload_id: str
+    file_name: str
+    file_size: int
+    total_chunks: int
+
+
+@router.post("/{project_id}/upload/video/complete")
+async def complete_video_upload(project_id: str, req: FinalizeVideoUploadRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    with VIDEO_UPLOAD_SESSIONS_LOCK:
+        session = VIDEO_UPLOAD_SESSIONS.get(req.upload_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="上传会话不存在")
+    if session.get("project_id") != project_id:
+        raise HTTPException(status_code=400, detail="upload_id 与项目不匹配")
+
+    total_chunks = int(session.get("total_chunks") or req.total_chunks)
+    file_name = str(session.get("file_name") or req.file_name)
+    file_size = int(session.get("file_size") or req.file_size or 0)
+    suffix = str(session.get("suffix") or Path(file_name).suffix.lower())
+    if suffix not in VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail="文件格式不支持")
+
+    tmp_dir = uploads_dir() / "videos" / "chunks" / project_id / req.upload_id
+    if not tmp_dir.exists():
+        raise HTTPException(status_code=404, detail="上传分片不存在")
+
+    missing_chunks = [index for index in range(total_chunks) if not (tmp_dir / f"{index:06d}.part").exists()]
+    if missing_chunks:
+        raise HTTPException(status_code=400, detail=f"缺少分片: {missing_chunks[0]}")
+
+    out_path = _build_video_upload_path(project_id, suffix)
+    merged_size = 0
+    try:
+        with open(out_path, "wb") as output:
+            for index in range(total_chunks):
+                chunk_path = tmp_dir / f"{index:06d}.part"
+                with open(chunk_path, "rb") as chunk_file:
+                    shutil.copyfileobj(chunk_file, output)
+                merged_size += chunk_path.stat().st_size
+    except Exception as e:
+        try:
+            if out_path.exists():
+                out_path.unlink()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"合并上传分片失败: {str(e)}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        with VIDEO_UPLOAD_SESSIONS_LOCK:
+            VIDEO_UPLOAD_SESSIONS.pop(req.upload_id, None)
+
+    actual_size = merged_size or file_size
+    return _register_uploaded_video(project_id, out_path, file_name, actual_size)
 
 
 @router.post("/{project_id}/video/prepare")
