@@ -1,6 +1,6 @@
 // 项目管理自定义Hook
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { projectService } from "../services/projectService";
 import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
 import type {
@@ -181,7 +181,8 @@ export interface UseProjectDetailReturn {
   refreshProject: () => Promise<void>;
   mergeProgress: number;
   merging: boolean;
-  extractScenes: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => Promise<void>;
+  cancelSceneExtraction: () => Promise<void>;
   sceneResult: any | null; // using any for now or define SceneResult
   extractingScene: boolean;
   sceneExtractProgress: number;
@@ -209,10 +210,96 @@ export const useProjectDetail = (
   const [sceneExtractProgress, setSceneExtractProgress] = useState(0);
   const [sceneExtractMessage, setSceneExtractMessage] = useState<string>("");
   const [sceneExtractPhase, setSceneExtractPhase] = useState<string | null>(null);
+  const [sceneTaskId, setSceneTaskId] = useState<string | null>(null);
+  const scenePollingTimeoutRef = useRef<number | null>(null);
 
-  /**
-   * 获取项目详情
-   */
+  const syncSceneTaskState = useCallback((task: { task_id?: string | null; status?: string; progress?: number; message?: string; phase?: string } | null | undefined) => {
+    if (!task?.task_id) {
+      setExtractingScene(false);
+      setSceneTaskId(null);
+      setSceneExtractProgress(0);
+      setSceneExtractMessage("");
+      setSceneExtractPhase(null);
+      return;
+    }
+
+    setSceneTaskId(task.task_id || null);
+    setExtractingScene(task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled");
+    setSceneExtractProgress(typeof task.progress === "number" ? task.progress : 0);
+    setSceneExtractMessage(task.message || "");
+    setSceneExtractPhase(task.phase || null);
+  }, []);
+
+  const stopScenePolling = useCallback(() => {
+    if (scenePollingTimeoutRef.current !== null) {
+      window.clearTimeout(scenePollingTimeoutRef.current);
+      scenePollingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startScenePolling = useCallback((projectId: string, taskId: string, reloadProject?: (id: string) => Promise<void>) => {
+    stopScenePolling();
+
+    const poll = async () => {
+      try {
+        const status = await projectService.getSceneStatus(projectId, taskId);
+        if (status.status === "completed") {
+          setExtractingScene(false);
+          setSceneExtractProgress(100);
+          setSceneExtractMessage(status.message || "镜头提取完成");
+          setSceneExtractPhase(status.phase || null);
+          setSceneTaskId(null);
+          scenePollingTimeoutRef.current = null;
+          const scenes = await projectService.getScenes(projectId);
+          setSceneResult(scenes);
+          if (reloadProject) {
+            void reloadProject(projectId);
+          }
+        } else if (status.status === "failed" || status.status === "cancelled") {
+          setExtractingScene(false);
+          setSceneTaskId(null);
+          if (status.status === "failed") {
+            setError(status.message || "镜头提取失败");
+          }
+          setSceneExtractMessage(status.message || (status.status === "cancelled" ? "镜头提取已停止" : "镜头提取失败"));
+          setSceneExtractPhase(status.phase || null);
+          setSceneExtractProgress(typeof status.progress === "number" ? status.progress : 0);
+          scenePollingTimeoutRef.current = null;
+        } else {
+          setExtractingScene(true);
+          setSceneExtractProgress(typeof status.progress === "number" ? status.progress : 0);
+          setSceneExtractMessage(status.message || "");
+          setSceneExtractPhase(status.phase || null);
+          scenePollingTimeoutRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        }
+      } catch (e: any) {
+        console.error(e);
+        scenePollingTimeoutRef.current = null;
+
+        const detail = typeof e?.detail === "string" ? e.detail : "";
+        const message = typeof e?.message === "string" ? e.message : "";
+        const notFound = detail.includes("任务不存在") || message.includes("任务不存在");
+
+        if (notFound) {
+          setExtractingScene(false);
+          setSceneTaskId(null);
+          setSceneExtractProgress(0);
+          setSceneExtractPhase(null);
+          setSceneExtractMessage("");
+          return;
+        }
+
+        scenePollingTimeoutRef.current = window.setTimeout(() => {
+          void poll();
+        }, 1500);
+      }
+    };
+
+    void poll();
+  }, [stopScenePolling]);
+
   const fetchProject = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
@@ -721,52 +808,31 @@ export const useProjectDetail = (
     setSceneExtractProgress(0);
     setSceneExtractMessage("");
     setSceneExtractPhase(null);
+    stopScenePolling();
     try {
         const res = await projectService.extractScenes(project.id, options);
-        // Start polling for progress
         const taskId = res.task_id;
-        
-        // Simple polling
-        const poll = async () => {
-            try {
-                const status = await projectService.getSceneStatus(project.id, taskId);
-                if (status.status === "completed") {
-                    setExtractingScene(false);
-                    setSceneExtractProgress(100);
-                    setSceneExtractMessage(status.message || "镜头提取完成");
-                    setSceneExtractPhase(status.phase || null);
-                    // Fetch result
-                    const scenes = await projectService.getScenes(project.id);
-                    setSceneResult(scenes);
-                    // Refresh project
-                    fetchProject(project.id);
-                } else if (status.status === "failed" || status.status === "cancelled") {
-                    setExtractingScene(false);
-                    setError(status.message || "镜头提取失败");
-                    setSceneExtractMessage(status.message || "镜头提取失败");
-                    setSceneExtractPhase(status.phase || null);
-                } else {
-                    // processing
-                    setSceneExtractProgress(status.progress || 0);
-                    setSceneExtractMessage(status.message || "");
-                    setSceneExtractPhase(status.phase || null);
-                    setTimeout(poll, 1000);
-                }
-            } catch (e) {
-                console.error(e);
-                setExtractingScene(false);
-            }
-        };
-        poll();
-        
+        setSceneTaskId(taskId || null);
+
+        if (taskId) {
+          startScenePolling(project.id, taskId, fetchProject);
+        }
+
     } catch (err) {
         setError(getErrorMessage(err, "镜头提取失败"));
         setExtractingScene(false);
+        setSceneTaskId(null);
         setSceneExtractMessage(getErrorMessage(err, "镜头提取失败"));
         setSceneExtractPhase(null);
         throw err;
     }
-  }, [project, fetchProject]);
+  }, [project, startScenePolling, stopScenePolling]);
+
+  const cancelSceneExtraction = useCallback(async () => {
+    if (!project) return;
+    const taskId = sceneTaskId || undefined;
+    await projectService.cancelTask(project.id, { scope: "extract_scene", task_id: taskId });
+  }, [project, sceneTaskId]);
 
   // Load scenes if exist
   useEffect(() => {
@@ -774,6 +840,45 @@ export const useProjectDetail = (
         projectService.getScenes(project.id).then(setSceneResult).catch(console.error);
     }
   }, [project?.scenes_path]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSceneTask = async () => {
+      if (!project?.id) {
+        if (!cancelled) {
+          stopScenePolling();
+          syncSceneTaskState(null);
+        }
+        return;
+      }
+      try {
+        const running = await projectService.getProjectRunningTasks(project.id);
+        if (cancelled || !running) return;
+        const task = running.extract_scene;
+        syncSceneTaskState(task);
+        if (task?.task_id) {
+          setSceneResult(null);
+          startScenePolling(project.id, task.task_id, fetchProject);
+        } else {
+          stopScenePolling();
+        }
+      } catch (err) {
+        console.error("同步镜头任务状态失败:", err);
+      }
+    };
+
+    void syncSceneTask();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id, startScenePolling, stopScenePolling, syncSceneTaskState]);
+
+  useEffect(() => {
+    return () => {
+      stopScenePolling();
+    };
+  }, [stopScenePolling]);
 
   return {
     project,
@@ -805,6 +910,7 @@ export const useProjectDetail = (
     refreshProject,
     merging,
     extractScenes,
+    cancelSceneExtraction,
     sceneResult,
     extractingScene,
     sceneExtractProgress,

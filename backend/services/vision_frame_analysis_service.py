@@ -176,7 +176,7 @@ def _normalize_subtitle_for_vision(sub: Any) -> str:
 
 def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> str:
     sub = _normalize_subtitle_for_vision(subtitle_text)
-    return f"""描述这个影视画面，主体人物与动作、环境与背景、字幕与剧情暗示等信息（自然语言）。
+    return f"""200字以内，描述这个影视画面，主体人物与动作、环境与背景、字幕与剧情暗示等信息（自然语言）。
     字幕：
     {sub}
     """

@@ -39,6 +39,7 @@ export interface UseProjectEditUploadStepOptions {
   mergeVideos: () => Promise<void>;
   refreshProject: () => Promise<void>;
   extractScenes: (options?: { force?: boolean; task_id?: string | null; asr_provider?: "bcut" | "fun_asr"; asr_model_key?: string | null; asr_language?: string | null; itn?: boolean; hotwords?: string[]; analyzeVision?: boolean; visionMode?: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => Promise<void>;
+  cancelSceneExtraction: () => Promise<void>;
   sceneResult: any | null;
   extractingScene: boolean;
   sceneExtractProgress: number;
@@ -87,6 +88,8 @@ export interface UseProjectEditUploadStepReturn {
   onSaveSubtitle: () => void;
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
   onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => void;
+  onStopSceneExtraction: () => void;
+  isStoppingSceneExtraction: boolean;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
@@ -139,6 +142,7 @@ export function useProjectEditUploadStep(
 
   const [visionChoiceModalOpen, setVisionChoiceModalOpen] = useState(false);
   const [subtitleOverwriteModalOpen, setSubtitleOverwriteModalOpen] = useState(false);
+  const [isStoppingSceneExtraction, setIsStoppingSceneExtraction] = useState(false);
 
   useEffect(() => {
     const p = options.project;
@@ -622,6 +626,19 @@ export function useProjectEditUploadStep(
     [options, executeExtractScenes]
   );
 
+  const onStopSceneExtraction = useCallback(async () => {
+    if (isStoppingSceneExtraction) return;
+    try {
+      setIsStoppingSceneExtraction(true);
+      await options.cancelSceneExtraction();
+      options.showSuccess("正在停止镜头提取...");
+    } catch (err) {
+      options.showError(err, "停止镜头提取失败");
+    } finally {
+      setIsStoppingSceneExtraction(false);
+    }
+  }, [options, isStoppingSceneExtraction]);
+
   return {
     showAdvancedConfig,
     setShowAdvancedConfig,
@@ -660,6 +677,8 @@ export function useProjectEditUploadStep(
     onSaveSubtitle,
     onSubtitleDraftChange: setSubtitleDraft,
     onExtractScenes,
+    onStopSceneExtraction,
+    isStoppingSceneExtraction,
     extractingScene: options.extractingScene,
     sceneExtractProgress: options.sceneExtractProgress,
     sceneResult: options.sceneResult,

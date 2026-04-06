@@ -2207,6 +2207,7 @@ async def get_project_running_tasks(project_id: str):
         "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
+        "extract_scene": task_progress_store.get_latest_running(extract_scene_service.SCOPE, project_id),
     }
     return {
         "message": "获取任务进度",
@@ -2226,6 +2227,7 @@ async def get_project_latest_tasks(project_id: str):
                 "generate_script": None,
                 "generate_video": None,
                 "generate_jianying_draft": None,
+                "extract_scene": None,
             },
             "timestamp": now_ts(),
         }
@@ -2236,6 +2238,7 @@ async def get_project_latest_tasks(project_id: str):
             "generate_script": task_progress_store.get_state("generate_script", project_id),
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
+            "extract_scene": task_progress_store.get_state(extract_scene_service.SCOPE, project_id),
         },
         "timestamp": now_ts(),
     }

@@ -1,4 +1,4 @@
-import { ArrowRight, Loader } from "lucide-react";
+import { ArrowRight, Loader, Square } from "lucide-react";
 import React from "react";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../../types/project";
 import AdvancedConfigSection from "./AdvancedConfigSection";
@@ -65,11 +65,12 @@ interface ProjectEditUploadStepProps {
   onNextStep: () => void;
   
   onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => void;
+  onStopSceneExtraction: () => void;
+  isStoppingSceneExtraction: boolean;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
   sceneExtractMessage: string;
-  sceneExtractPhase: string | null;
   visionChoiceModalOpen: boolean;
   onVisionChoiceContinue: () => void;
   onVisionChoiceRestart: () => void;
@@ -124,6 +125,8 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onSubtitleDraftChange,
   onNextStep,
   onExtractScenes,
+  onStopSceneExtraction,
+  isStoppingSceneExtraction,
   extractingScene,
   sceneExtractProgress,
   sceneResult,
@@ -386,11 +389,26 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
         )}
 
-        {(extractingScene || (sceneExtractProgress > 0 && sceneExtractProgress < 100)) && (
+        {extractingScene && (
           <div className="w-full mt-4">
-             <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+             <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1">
               <span>镜头提取进度</span>
-              <span>{Math.round(sceneExtractProgress)}%</span>
+              <div className="flex items-center gap-2">
+                <span>{Math.round(sceneExtractProgress)}%</span>
+                <button
+                  onClick={onStopSceneExtraction}
+                  disabled={isStoppingSceneExtraction}
+                  title="停止镜头提取"
+                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isStoppingSceneExtraction ? (
+                    <Loader className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Square className="h-3 w-3 fill-current" />
+                  )}
+                  <span className="text-xs font-medium">停止</span>
+                </button>
+              </div>
             </div>
             <div className="w-full h-2 bg-gray-200 rounded">
               <div
@@ -405,6 +423,12 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             ) : null}
           </div>
         )}
+
+        {!extractingScene && sceneExtractMessage ? (
+          <div className="w-full mt-4">
+            <div className="text-xs text-gray-700 break-all">{sceneExtractMessage}</div>
+          </div>
+        ) : null}
       </div>
       <div className="flex justify-end">
           <button
