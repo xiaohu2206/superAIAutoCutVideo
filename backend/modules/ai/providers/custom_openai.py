@@ -126,6 +126,21 @@ class CustomOpenAIProvider(AIProviderBase):
                     raise Exception(error_info.get("message", "Unknown error"))
                 raise Exception(str(error_info))
 
+            try:
+                choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
+                first_choice = choices[0] if choices else {}
+                message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+                content = message.get("content") if isinstance(message, dict) else None
+                if content is not None:
+                    logger.info(
+                        "自定义 OpenAI 兼容模型输出内容: %s",
+                        content if isinstance(content, str) else str(content),
+                    )
+                else:
+                    logger.info("自定义 OpenAI 兼容接口响应: %s", response_data)
+            except Exception as log_error:
+                logger.warning("记录自定义 OpenAI 兼容模型输出失败: %s", log_error)
+
             return response_data
         except Exception as e:
             logger.error(f"自定义 OpenAI 兼容 API 请求失败: {e}")

@@ -27,7 +27,86 @@ from modules.config.video_model_config import video_model_config_manager
 logger = logging.getLogger(__name__)
 
 _SCENES_SPLIT_VERSION = 1
-_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed", "vision_error", "vision_frame_error"})
+_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed", "vision_error", "vision_frame_error", "vision_stopped_early_infer_timeout"})
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.hex()
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return str(value)
+
+
+def _short_repr(value: Any, limit: int = 240) -> str:
+    try:
+        text = repr(value)
+    except Exception as e:
+        text = f"<repr_failed {type(e).__name__}: {e}>"
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _find_json_unsafe_path(value: Any, path: str = "$") -> Optional[Dict[str, Any]]:
+    try:
+        json.dumps(value, ensure_ascii=False)
+        return None
+    except TypeError as e:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                key_path = f"{path}.{k}" if isinstance(k, str) and k.isidentifier() else f"{path}[{_short_repr(k, 80)}]"
+                child = _find_json_unsafe_path(v, key_path)
+                if child is not None:
+                    return child
+            return {
+                "path": path,
+                "type": type(value).__name__,
+                "error": str(e),
+                "value": _short_repr(value),
+            }
+        if isinstance(value, (list, tuple, set)):
+            for idx, item in enumerate(value):
+                child = _find_json_unsafe_path(item, f"{path}[{idx}]")
+                if child is not None:
+                    return child
+            return {
+                "path": path,
+                "type": type(value).__name__,
+                "error": str(e),
+                "value": _short_repr(value),
+            }
+        return {
+            "path": path,
+            "type": type(value).__name__,
+            "error": str(e),
+            "value": _short_repr(value),
+        }
+    except Exception as e:
+        return {
+            "path": path,
+            "type": type(value).__name__,
+            "error": f"{type(e).__name__}: {e}",
+            "value": _short_repr(value),
+        }
 
 
 class ExtractSceneService:
@@ -234,12 +313,12 @@ class ExtractSceneService:
         fps: float,
         total_frames: int,
     ) -> Dict[str, Any]:
-        return {
+        return _json_safe({
             "scenes": scenes,
             "fps": fps,
             "total_frames": total_frames,
             "created_at": datetime.now().isoformat(),
-        }
+        })
 
     def _write_scenes_result_file(
         self,
@@ -248,8 +327,51 @@ class ExtractSceneService:
     ) -> Path:
         out_path = self._scenes_analysis_path(project_id)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        unsafe = _find_json_unsafe_path(result_data)
+        if unsafe is not None:
+            logger.error(
+                "镜头结果写入前检测到非 JSON 字段: project_id=%s path=%s type=%s error=%s value=%s",
+                project_id,
+                unsafe.get("path"),
+                unsafe.get("type"),
+                unsafe.get("error"),
+                unsafe.get("value"),
+            )
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(result_data, f, ensure_ascii=False, indent=2)
+            logger.info(
+                "镜头结果写入成功: project_id=%s path=%s scenes=%s",
+                project_id,
+                out_path,
+                len(result_data.get("scenes") or []),
+            )
+        except Exception as e:
+            scene_count = len(result_data.get("scenes") or []) if isinstance(result_data, dict) else -1
+            logger.exception(
+                "镜头结果写入失败: project_id=%s path=%s scenes=%s payload_keys=%s",
+                project_id,
+                out_path,
+                scene_count,
+                list(result_data.keys()) if isinstance(result_data, dict) else None,
+            )
+            if scene_count > 0:
+                for idx, scene in enumerate((result_data.get("scenes") or [])):
+                    scene_unsafe = _find_json_unsafe_path(scene, path=f"$.scenes[{idx}]")
+                    if scene_unsafe is not None:
+                        logger.error(
+                            "镜头结果写入失败-定位到场景字段: project_id=%s scene_index=%s scene_id=%s path=%s type=%s error=%s value=%s scene_keys=%s",
+                            project_id,
+                            idx,
+                            scene.get("id") if isinstance(scene, dict) else None,
+                            scene_unsafe.get("path"),
+                            scene_unsafe.get("type"),
+                            scene_unsafe.get("error"),
+                            scene_unsafe.get("value"),
+                            list(scene.keys()) if isinstance(scene, dict) else None,
+                        )
+                        break
+            raise
         return out_path
 
     def _save_project_scenes_path(self, project_id: str, out_path: Path) -> None:

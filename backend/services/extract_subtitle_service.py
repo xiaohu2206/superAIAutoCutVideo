@@ -59,6 +59,11 @@ def _resolve_path(path_str: str) -> Path:
     return resolve_uploads_path(path_str)
 
 
+def _ensure_parent_dir(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _compress_srt(content: str) -> str:
     text = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
     blocks = [b for b in text.split("\n\n") if b.strip()]
@@ -344,7 +349,7 @@ class ExtractSubtitleService:
                     pass
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            audio_out = _uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3"
+            audio_out = _ensure_parent_dir(_uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3")
             await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)
             ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
             if not ok_audio:
@@ -413,7 +418,7 @@ class ExtractSubtitleService:
             }
 
         ts2 = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt"
+        srt_out = _ensure_parent_dir(_uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt")
         try:
             srt_out.write_text(compressed, encoding="utf-8")
         except Exception:

@@ -1719,6 +1719,7 @@ class VideoProcessor:
 
     async def extract_audio_mp3(self, input_video: str, output_mp3: str) -> bool:
         try:
+            Path(output_mp3).parent.mkdir(parents=True, exist_ok=True)
             cmd = [
                 "ffmpeg",
                 "-hide_banner",

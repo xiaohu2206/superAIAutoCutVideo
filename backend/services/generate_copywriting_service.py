@@ -258,6 +258,7 @@ class GenerateCopywritingService:
         }
 
         out_dir = _uploads_dir() / "analyses"
+        out_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = out_dir / f"{project_id}_copywriting_{ts}.json"
         out_path.write_text(json.dumps(copywriting, ensure_ascii=False, indent=2), encoding="utf-8")
