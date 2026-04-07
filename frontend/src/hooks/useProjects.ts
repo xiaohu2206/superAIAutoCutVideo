@@ -696,6 +696,7 @@ export const useProjectDetail = (
     try {
       setMergeProgress(0);
       setMerging(true);
+      setProject((prev) => (prev ? { ...prev, merged_video_path: undefined } : prev));
       const start = await projectService.startMergeVideos(project.id);
       const taskId = start.task_id;
 

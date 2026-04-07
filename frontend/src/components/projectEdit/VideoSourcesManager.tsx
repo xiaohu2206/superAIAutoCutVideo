@@ -173,7 +173,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
         </div>
       </div>
 
-      {merging && Array.isArray(project.video_paths) && project.video_paths.length >= 2 && !project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
+      {merging && Array.isArray(project.video_paths) && project.video_paths.length >= 2 && mergeProgress >= 0 && mergeProgress < 100 && (
         <div className="mt-2">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>合并进度（预计2分钟）</span>
