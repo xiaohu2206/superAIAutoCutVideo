@@ -23,6 +23,7 @@ export const useVideoModelConfig = () => {
     base_url: "",
     model_name: "",
     extra_params: {},
+    stream_output: false,
     description: "",
   });
   const [testingConnection, setTestingConnection] = useState(false);
@@ -81,6 +82,7 @@ export const useVideoModelConfig = () => {
         base_url: getDefaultBaseUrl(provider),
         model_name: getDefaultModelName(provider),
         extra_params: {},
+        stream_output: false,
         description: getDefaultDescription(provider),
         enabled: true,
       };
@@ -141,13 +143,21 @@ export const useVideoModelConfig = () => {
 
       const configId = getConfigIdByProvider(selectedProvider);
       const response = await videoModelService.testConnection(configId);
+      const raw =
+        response.data?.raw_content ??
+        response.data?.response_preview ??
+        response.data?.message ??
+        null;
 
-      if (response.success) {
-        setTestResult({ success: true, message: "连接测试成功！" });
+      if (response.success && raw) {
+        setTestResult({ success: true, message: String(raw) });
       } else {
         setTestResult({
           success: false,
-          message: response.data?.error || "连接测试失败",
+          message:
+            response.data?.error ||
+            response.data?.message ||
+            "连接测试失败：模型未返回有效内容",
         });
       }
     } catch (error) {

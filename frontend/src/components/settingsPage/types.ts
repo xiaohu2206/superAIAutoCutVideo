@@ -7,6 +7,7 @@ export interface VideoModelConfig {
   base_url: string;
   model_name: string;
   extra_params: Record<string, any>;
+  stream_output?: boolean;
   description?: string;
   enabled?: boolean;
 }
@@ -20,6 +21,7 @@ export interface ContentModelConfig {
   base_url: string;
   model_name: string;
   extra_params: Record<string, any>;
+  stream_output?: boolean;
   description?: string;
   enabled?: boolean;
 }

@@ -476,6 +476,22 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
             </div>
           )}
 
+          {selectedProvider === "custom_openai_vision" && (
+            <div>
+              <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(currentConfig.stream_output)}
+                  onChange={(e) =>
+                    void updateCurrentConfig("stream_output", e.target.checked)
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>开启流式输出（失败尝试勾选）</span>
+              </label>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               API密钥

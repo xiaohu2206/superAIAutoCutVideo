@@ -159,6 +159,22 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         </div>
       )}
 
+      {contentSelectedProvider === "custom_openai" && (
+        <div>
+          <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={Boolean(currentContentConfig.stream_output)}
+              onChange={(e) =>
+                void updateCurrentContentConfig("stream_output", e.target.checked)
+              }
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>开启流式输出（失败尝试勾选）</span>
+          </label>
+        </div>
+      )}
+
       {/* 模型名称 */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
