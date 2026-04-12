@@ -11,12 +11,13 @@
 
 ## 软件版本
 
-[v1.2.4 （不要在github这里下载软件，百度云下载）](https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc)
+[v1.2.5 （不要在github这里下载软件，百度云下载）](https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc)
 
 ### 帮忙点个star，感谢兄弟 ❤❤❤
 
 
-## 亮点特性
+## 更新内容
+- 2026-04-06: 优化功能，修复bug
 - 2026-03-18: 支持云雾API平台、302ai平台、qwentts配音在线版
 - 2026-03-02: 视觉推理视频功能（moondream分析帧）
 - 2026-02-20: 本地ASR识别字幕
