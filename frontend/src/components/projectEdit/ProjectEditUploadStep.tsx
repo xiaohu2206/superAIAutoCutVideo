@@ -144,6 +144,8 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
     Boolean(project.subtitle_path) &&
     project.subtitle_status === "ready";
 
+  const canReExtractScenes = Boolean(project.scenes_path);
+
   const [scenePlayState, setScenePlayState] = React.useState<{
     isOpen: boolean;
     startTime: number;
@@ -333,7 +335,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                     镜头提取中...
                   </>
                 ) : (
-                  "提取镜头"
+                  <>{canReExtractScenes ? "重新分析镜头" : "分析镜头"}</>
                 )}
               </button>
              </div>

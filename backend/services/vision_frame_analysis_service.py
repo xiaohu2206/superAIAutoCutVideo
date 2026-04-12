@@ -25,6 +25,11 @@ from services.vision_scene_status import scene_vision_success_ok
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
+# 在线视觉大模型调用：失败后重试间隔（秒），共 3 次重试即最多 4 次请求
+_ONLINE_VISION_INFER_RETRY_DELAYS_SEC: Tuple[float, float, float] = (1.0, 2.0, 3.0)
+# 并发调用大模型：相邻两次发起请求的最小间隔（秒），减轻瞬时打满上游
+_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0.1
+
 
 class _OnlineVisionRunner:
     def __init__(self, provider: str, api_key: str, base_url: str, model_name: str, timeout: int = 120):
@@ -1065,6 +1070,17 @@ class VisionFrameAnalyzer:
         processed_count = 0
         stop_infer_all = asyncio.Event()
         infer_semaphore = asyncio.Semaphore(api_concurrency)
+        infer_start_lock = asyncio.Lock()
+        infer_last_start_mono = 0.0
+
+        async def _pace_online_infer_start() -> None:
+            nonlocal infer_last_start_mono
+            async with infer_start_lock:
+                now = time.monotonic()
+                gap = _ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC - (now - infer_last_start_mono)
+                if gap > 0:
+                    await asyncio.sleep(gap)
+                infer_last_start_mono = time.monotonic()
 
         def _finalize_scene_vision(scene: Dict[str, Any], vision_segments: List[Dict[str, Any]], bump_progress: bool) -> None:
             nonlocal processed_count
@@ -1163,24 +1179,126 @@ class VisionFrameAnalyzer:
                         optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
                         prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
 
-                        async with infer_semaphore:
+                        retry_delays = _ONLINE_VISION_INFER_RETRY_DELAYS_SEC
+                        max_attempts = 1 + len(retry_delays)
+                        out: Optional[str] = None
+                        online_stats: Dict[str, Any] = {}
+                        t2 = 0.0
+                        t3 = 0.0
+                        last_fail: Optional[BaseException] = None
+                        last_was_timeout = False
+
+                        for attempt in range(max_attempts):
                             if stop_infer_all.is_set():
                                 break
-                            logger.info(
-                                "在线视觉分析发起调用：镜头%s，分段%s/%s，时间段%.3f-%.3f，当前大模型并发上限=%s",
-                                idx,
-                                seg_idx,
-                                len(extracted_segments),
-                                float(t_start),
-                                float(t_end),
-                                api_concurrency,
-                            )
-                            t2 = time.time()
-                            out, online_stats = await asyncio.wait_for(
-                                online_runner.infer_multi(optimized_imgs, prompt=prompt),
-                                timeout=infer_wall_sec,
-                            )
-                            t3 = time.time()
+                            if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError("任务已取消")
+                            try:
+                                await _pace_online_infer_start()
+                                async with infer_semaphore:
+                                    if stop_infer_all.is_set():
+                                        break
+                                    logger.info(
+                                        "在线视觉分析发起调用：镜头%s，分段%s/%s，时间段%.3f-%.3f，当前大模型并发上限=%s，第%s/%s次",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        api_concurrency,
+                                        attempt + 1,
+                                        max_attempts,
+                                    )
+                                    t2 = time.time()
+                                    out, online_stats = await asyncio.wait_for(
+                                        online_runner.infer_multi(optimized_imgs, prompt=prompt),
+                                        timeout=infer_wall_sec,
+                                    )
+                                    t3 = time.time()
+                                last_fail = None
+                                break
+                            except asyncio.TimeoutError as te:
+                                last_fail = te
+                                last_was_timeout = True
+                                if attempt < max_attempts - 1:
+                                    logger.warning(
+                                        "在线视觉分析超时：镜头%s，分段%s/%s，时间段%.3f-%.3f，%.1fs 后重试 (%s/%s)，超时阈值%s秒",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        retry_delays[attempt],
+                                        attempt + 1,
+                                        max_attempts - 1,
+                                        infer_wall_sec,
+                                    )
+                                    await asyncio.sleep(retry_delays[attempt])
+                            except Exception as e:
+                                last_fail = e
+                                last_was_timeout = False
+                                if attempt < max_attempts - 1:
+                                    logger.warning(
+                                        "在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，%.1fs 后重试 (%s/%s)，错误=%s",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        retry_delays[attempt],
+                                        attempt + 1,
+                                        max_attempts - 1,
+                                        e,
+                                    )
+                                    await asyncio.sleep(retry_delays[attempt])
+
+                        if out is None:
+                            if last_fail is not None:
+                                if last_was_timeout:
+                                    msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
+                                    logger.warning(
+                                        "在线视觉分析超时：镜头%s，分段%s/%s，时间段%.3f-%.3f，超时阈值%s秒（已重试%s次），已停止后续批次调用",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        infer_wall_sec,
+                                        len(retry_delays),
+                                    )
+                                    vision_segments.append(
+                                        {
+                                            "start_time": float(t_start),
+                                            "end_time": float(t_end),
+                                            "status": "infer_timeout",
+                                            "text": None,
+                                            "error": msg,
+                                        }
+                                    )
+                                    stop_infer_all.set()
+                                    scene["vision_stopped_early_infer_timeout"] = True
+                                    _finalize_scene_vision(scene, vision_segments, bump_progress=True)
+                                    return
+                                logger.error(
+                                    "在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，错误=%s",
+                                    idx,
+                                    seg_idx,
+                                    len(extracted_segments),
+                                    float(t_start),
+                                    float(t_end),
+                                    last_fail,
+                                )
+                                vision_segments.append(
+                                    {
+                                        "start_time": float(t_start),
+                                        "end_time": float(t_end),
+                                        "status": "error",
+                                        "text": None,
+                                        "error": str(last_fail),
+                                    }
+                                )
+                                continue
+                            break
 
                         logger.info(
                             "在线视觉分析完成：镜头%s，分段%s/%s，时间段%.3f-%.3f，抽帧(排队%.3fs+执行%.3fs=%.3fs)，推理%.3fs，总耗时%.3fs，provider=%s，model=%s，图片数=%s",
@@ -1209,30 +1327,6 @@ class VisionFrameAnalyzer:
                                 "text": txt if txt else None,
                             }
                         )
-                    except asyncio.TimeoutError:
-                        msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
-                        logger.warning(
-                            "在线视觉分析超时：镜头%s，分段%s/%s，时间段%.3f-%.3f，超时阈值%s秒，已停止后续批次调用",
-                            idx,
-                            seg_idx,
-                            len(extracted_segments),
-                            float(t_start),
-                            float(t_end),
-                            infer_wall_sec,
-                        )
-                        vision_segments.append(
-                            {
-                                "start_time": float(t_start),
-                                "end_time": float(t_end),
-                                "status": "infer_timeout",
-                                "text": None,
-                                "error": msg,
-                            }
-                        )
-                        stop_infer_all.set()
-                        scene["vision_stopped_early_infer_timeout"] = True
-                        _finalize_scene_vision(scene, vision_segments, bump_progress=True)
-                        return
                     except Exception as e:
                         logger.error("在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，错误=%s", idx, seg_idx, len(extracted_segments), float(t_start), float(t_end), e)
                         vision_segments.append(
@@ -1303,7 +1397,7 @@ class VisionFrameAnalyzer:
 
         concurrency_cap = max(1, int(max_concurrency or 1))
         extract_concurrency = min(8, concurrency_cap)
-        api_concurrency = min(128, concurrency_cap)
+        api_concurrency = min(64, concurrency_cap)
 
         to_analyze_indices = []
         for idx, scene in enumerate(scenes):

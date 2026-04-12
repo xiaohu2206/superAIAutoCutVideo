@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
@@ -10,6 +12,63 @@ from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
 from modules.prompts.common.output_format_blocks import movie, short_drama
 
 logger = logging.getLogger(__name__)
+
+_VISUAL_SCRIPT_MD_CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "cache"
+
+
+def _markdown_fenced_block(info: str, body: str) -> str:
+    fence_len = 3
+    while True:
+        fence = "`" * fence_len
+        if fence not in body:
+            return f"{fence}{info}\n{body}\n{fence}\n"
+        fence_len += 1
+
+
+def _write_visual_script_chat_cache_md(
+    *,
+    messages: List[ChatMessage],
+    response_content: str,
+    chunk_idx: int,
+    chunk_total: int,
+    drama_name: str,
+    project_id: Optional[str],
+    attempt: int,
+) -> None:
+    """将本次 visual script 的 send_chat 请求与响应写入 backend/docs/cache 下的 .md 文件。"""
+    try:
+        _VISUAL_SCRIPT_MD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        safe_drama = "".join(c if c.isalnum() or c in "._- " else "_" for c in drama_name)[:80].strip() or "script"
+        pid = (project_id or "noproject").replace("/", "_")[:48]
+        fname = f"visual_script_{pid}_c{chunk_idx + 1}of{chunk_total}_a{attempt + 1}_{ts}.md"
+        path = _VISUAL_SCRIPT_MD_CACHE_DIR / fname
+        parts: List[str] = [
+            "# Visual script generation (send_chat)",
+            "",
+            f"- **time (UTC)**: {datetime.now(timezone.utc).isoformat()}",
+            f"- **chunk**: {chunk_idx + 1} / {chunk_total}",
+            f"- **drama**: {drama_name}",
+            f"- **project_id**: {project_id or ''}",
+            f"- **attempt**: {attempt + 1}",
+            "",
+            "## Messages",
+            "",
+        ]
+        for i, m in enumerate(messages):
+            role = m.role or "unknown"
+            raw = m.content
+            content = raw if isinstance(raw, str) else (str(raw) if raw is not None else "")
+            parts.append(f"### {role} ({i + 1})")
+            parts.append("")
+            parts.append(_markdown_fenced_block("text", content))
+            parts.append("")
+        parts.append("## Response")
+        parts.append("")
+        parts.append(_markdown_fenced_block("json", response_content))
+        path.write_text("\n".join(parts), encoding="utf-8")
+    except Exception as ex:
+        logger.warning("写入 visual script MD 缓存失败: %s", ex)
 
 
 def _normalize_original_ratio(value: Optional[int]) -> int:
@@ -289,6 +348,15 @@ async def _generate_visual_script_chunk(
     for attempt in range(max_retries + 1):
         try:
             resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+            _write_visual_script_chat_cache_md(
+                messages=messages,
+                response_content=resp.content or "",
+                chunk_idx=chunk_idx,
+                chunk_total=chunk_total,
+                drama_name=drama_name,
+                project_id=project_id,
+                attempt=attempt,
+            )
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             items = data.get("items") or []
