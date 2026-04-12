@@ -25,6 +25,7 @@ export const useContentModelConfig = () => {
       base_url: getContentDefaultBaseUrl("yunwu"),
       model_name: getContentDefaultModelName("yunwu"),
       extra_params: {},
+      stream_output: false,
       description: getContentDefaultDescription("yunwu"),
     });
   const [testingContentConnection, setTestingContentConnection] = useState(false);
@@ -84,6 +85,7 @@ export const useContentModelConfig = () => {
         base_url: getContentDefaultBaseUrl(provider),
         model_name: getContentDefaultModelName(provider),
         extra_params: {},
+        stream_output: false,
         description: getContentDefaultDescription(provider),
         enabled: true,
       };
@@ -136,16 +138,17 @@ export const useContentModelConfig = () => {
 
       const configId = getContentConfigIdByProvider(contentSelectedProvider);
       const response = await contentModelService.testConnection(configId);
+      const structured = response.data?.structured_output ?? null;
+      const raw =
+        response.data?.raw_content ??
+        response.data?.response_preview ??
+        response.data?.message ??
+        null;
+      const hasResult = Boolean(structured || raw);
 
-      if (response.success) {
-        const structured =
-          response.data?.structured_output ??
-          null;
-        const raw =
-          response.data?.raw_content ??
-          response.data?.response_preview ??
-          null;
-        setContentTestResult({ success: true, message: "连接测试成功！" });
+      if (response.success && hasResult) {
+        const successMessage = raw ? String(raw) : "连接测试成功！";
+        setContentTestResult({ success: true, message: successMessage });
         if (structured) {
           try {
             setContentTestStructured(JSON.stringify(structured, null, 2));

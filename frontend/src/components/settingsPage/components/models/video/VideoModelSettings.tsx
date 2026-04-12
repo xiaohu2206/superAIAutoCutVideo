@@ -21,6 +21,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import AppSelect from "@/components/ui/AppSelect";
 import type { TestResult, VideoModelConfig } from "../../../types";
 import { getVideoVisionModelOptions } from "../../../utils";
 import { useMoondreamModels } from "@/features/visionModel/hooks/useMoondreamModels";
@@ -195,17 +196,16 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
         <label className="block text-sm font-medium text-gray-700 mb-2">
           选择模型
         </label>
-        <select
+        <AppSelect
           value={selectedProvider}
           onChange={(e) => handleProviderChange(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           {MODEL_PROVIDERS.map((provider) => (
             <option key={provider.id} value={provider.id}>
               {provider.label}
             </option>
           ))}
-        </select>
+        </AppSelect>
         <p className="text-xs text-gray-500 mt-1">
           {isLocalModel
             ? "选择本地视觉分析模型"
@@ -310,14 +310,15 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
                   ) : (
                     !status?.valid && (
                       <>
-                        <select
+                        <AppSelect
                           value={provider}
                           onChange={(e) => setProvider(e.target.value as any)}
-                          className="h-7 text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                          className="select-sm"
+                          iconClassName="right-2 h-3.5 w-3.5"
                         >
                           <option value="modelscope">ModelScope</option>
                           <option value="hf">HuggingFace</option>
-                        </select>
+                        </AppSelect>
                         <button
                           onClick={() => downloadModel(provider)}
                           className="px-2.5 py-1 text-xs border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded h-7 flex items-center gap-1"
@@ -472,6 +473,22 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
               <p className="text-xs text-gray-500 mt-1">
                 Chat Completions 完整 URL；未以 /chat/completions 结尾时会自动补全
               </p>
+            </div>
+          )}
+
+          {selectedProvider === "custom_openai_vision" && (
+            <div>
+              <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(currentConfig.stream_output)}
+                  onChange={(e) =>
+                    void updateCurrentConfig("stream_output", e.target.checked)
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>开启流式输出（失败尝试勾选）</span>
+              </label>
             </div>
           )}
 

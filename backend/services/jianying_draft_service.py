@@ -15,7 +15,7 @@ from modules.projects_store import Project, projects_store
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import normalize_path_str
+from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 
 def _now_ts() -> str:
@@ -26,60 +26,16 @@ async def _to_thread(func, *args, **kwargs):
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-def _backend_root_dir() -> Path:
-    backend_dir = Path(__file__).resolve().parents[1]
-    return backend_dir.parent
-
-
 def _uploads_dir() -> Path:
-    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    (up / "jianying_drafts").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def _to_web_path(p: Path) -> str:
-    env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def _resolve_path(path_or_web: str) -> Path:
-    root = _backend_root_dir()
-    path_str = (path_or_web or "").strip()
-    if not path_str:
-        return Path("")
-    s_norm = path_str.replace("\\", "/")
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        env = normalize_path_str(os.environ.get("SACV_UPLOADS_DIR") or "")
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        candidates: List[Path] = []
-        try:
-            if env:
-                candidates.append(Path(env) / rel)
-        except Exception:
-            pass
-        try:
-            candidates.append((_backend_root_dir() / "uploads") / rel)
-        except Exception:
-            pass
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    if s_norm.startswith("/"):
-        return root / s_norm[1:]
-    try:
-        p = Path(path_str)
-        if p.is_absolute():
-            return p
-    except Exception:
-        pass
-    return Path(path_str)
+    return resolve_uploads_path(path_or_web)
 
 
 def _safe_file_stem(name: str, fallback: str) -> str:

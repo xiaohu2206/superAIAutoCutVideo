@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Loader, Play, RefreshCw, ShieldCheck } from "lucide-react";
-import { message } from "@/services/message";
+import AppSelect from "@/components/ui/AppSelect";
 import { FUN_ASR_MODEL_OPTIONS } from "../constants";
 import { useFunAsrModels } from "../hooks/useFunAsrModels";
 import { funAsrService } from "../services/funAsrService";
@@ -231,22 +230,20 @@ export const SubtitleAsrSettings: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-sm text-gray-700 mb-1">模型</label>
-            <select
+            <AppSelect
               value={testModelKey}
               onChange={(e) => setTestModelKey(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
               disabled={testing}
             >
               <option value="fun_asr_nano_2512">Fun-ASR-Nano-2512</option>
               <option value="fun_asr_mlt_nano_2512">Fun-ASR-MLT-Nano-2512</option>
-            </select>
+            </AppSelect>
           </div>
           <div>
             <label className="block text-sm text-gray-700 mb-1">语言</label>
-            <select
+            <AppSelect
               value={testLanguage}
               onChange={(e) => setTestLanguage(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
               disabled={testing}
             >
               {supportedLangs.map((x) => (
@@ -254,7 +251,7 @@ export const SubtitleAsrSettings: React.FC = () => {
                   {x}
                 </option>
               ))}
-            </select>
+            </AppSelect>
           </div>
           <div className="flex items-end">
             <label className="flex items-center gap-2 text-sm text-gray-700">

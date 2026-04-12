@@ -126,7 +126,6 @@ def validate_script_items(data: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError("items 中元素必须为对象")
         _id = it.get("_id", idx)
         ts = it.get("timestamp")
-        pic = it.get("picture")
         narr = it.get("narration")
         ost = it.get("OST")
         if ts is None or narr is None:
@@ -134,7 +133,6 @@ def validate_script_items(data: Dict[str, Any]) -> Dict[str, Any]:
         normalized.append({
             "_id": _id,
             "timestamp": str(ts),
-            "picture": pic,
             "narration": str(narr),
             "OST": 1 if ost == 1 else 0,
         })

@@ -1,11 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
-import os
 import json
 import shutil
-import sys
-from modules.app_paths import data_base_dir, app_settings_file, uploads_dir
+from modules.app_paths import data_base_dir, app_settings_file, uploads_dir, normalize_path_str
 
 router = APIRouter(prefix="/api/settings", tags=["设置"])
 
@@ -52,7 +50,7 @@ async def get_storage_settings():
 
 @router.post("/storage")
 async def update_storage_settings(req: StorageUpdateRequest):
-    dest = Path(req.uploads_root).expanduser()
+    dest = Path(normalize_path_str(req.uploads_root or "")).expanduser()
     try:
         dest.mkdir(parents=True, exist_ok=True)
     except Exception as e:

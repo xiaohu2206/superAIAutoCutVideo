@@ -155,6 +155,7 @@ export interface ProjectRunningTasks {
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
+  extract_scene?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
@@ -162,6 +163,7 @@ export interface ProjectLatestTasks {
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
+  extract_scene?: TaskProgressState | null;
 }
 
 /**

@@ -4,14 +4,24 @@
 
 /* 全局样式 */
 @layer base {
-  body {
-    @apply bg-white text-gray-900 font-sans;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
-  
   html {
     scroll-behavior: smooth;
-    color-scheme: light dark;
+    color-scheme: light;
+    background: transparent;
+  }
+
+  body {
+    @apply text-gray-900 font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100vh;
+    min-height: 100vh;
+    overflow: hidden;
+    background: transparent;
   }
 }
 
@@ -56,6 +66,14 @@
   .input {
     @apply flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50;
   }
+
+  .select {
+    @apply w-full appearance-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 shadow-sm outline-none transition-all duration-150 hover:border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none;
+  }
+
+  .select-sm {
+    @apply h-7 rounded-md px-2 py-1 pr-8 text-[11px];
+  }
   
   .progress-bar {
     @apply w-full bg-gray-200 rounded-full h-2.5;
@@ -70,6 +88,82 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  .titlebar-drag {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  .titlebar-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  .project-list-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .project-list-scrollbar::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+    transition: background-color 0.2s ease;
+  }
+
+  .project-list-scrollbar.scrollbar-visible {
+    scrollbar-width: thin;
+  }
+
+  .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+  }
+
+  .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 9999px;
+  }
+
+  .main-scroll-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .window-shell {
+    position: relative;
+  }
+
+  .window-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+
+  .main-scroll-hidden::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
   
   .animate-pulse-slow {
@@ -88,7 +182,13 @@
 }
 
 /* 滚动条样式 */
-::-webkit-scrollbar {
+body::-webkit-scrollbar,
+html::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -145,6 +245,14 @@
 
 @layer utilities {
   @media (prefers-color-scheme: dark) {
+    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
+      background: #374151;
+    }
+
+    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+      background: #6b7280;
+    }
+
     .bg-white {
       @apply bg-gray-800;
     }

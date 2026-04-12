@@ -1,6 +1,7 @@
 import { KeyRound, Loader, ShieldAlert, ShieldCheck } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { TauriCommands } from "@/services/clients";
+import AppSelect from "@/components/ui/AppSelect";
 import type { TtsEngineConfig, TtsTestResult } from "../../types";
 
 interface Props {
@@ -108,11 +109,10 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
           <label className="block text-sm text-gray-700 mb-1">
             LanguageType（可选）
           </label>
-          <select
+          <AppSelect
             value={languageInput}
             onChange={(e) => setLanguageInput(e.target.value)}
             onBlur={handleBlurExtraParams}
-            className="px-3 py-2 border border-gray-300 rounded-md w-full"
           >
             <option value="Auto">Auto（自动）</option>
             <option value="Chinese">Chinese（中文）</option>
@@ -125,7 +125,7 @@ export const TtsCredentialFormQwenOnline: React.FC<Props> = ({
             <option value="Korean">Korean（韩语）</option>
             <option value="French">French（法语）</option>
             <option value="Russian">Russian（俄语）</option>
-          </select>
+          </AppSelect>
         </div>
         {/* <div>
           <label className="block text-sm text-gray-700 mb-1">

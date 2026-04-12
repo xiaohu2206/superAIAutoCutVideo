@@ -1,6 +1,6 @@
 [package]
 name = "super-auto-cut-video"
-version = "1.2.4"
+version = "1.2.5"
 description = "AI智能视频剪辑桌面应用"
 authors = ["SuperAIAutoCutVideo Team"]
 license = "MIT"
@@ -13,7 +13,7 @@ edition = "2021"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = [] }
+tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-shell = "2.0"
 tauri-plugin-opener = "2.0"
 tauri-plugin-fs = "2.0"

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import json
 import re
-import os
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
+
+from modules.app_paths import uploads_dir
 
 def slugify(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", s or "").strip("_").lower() or "voice"
@@ -21,7 +22,7 @@ def get_ext_from_url(u: str) -> str:
 def main():
     project_root = Path(__file__).resolve().parent.parent.parent
     json_path = project_root / "backend" / "serviceData" / "tencent_tts_data.json"
-    base_up = Path(os.environ.get("SACV_UPLOADS_DIR") or (project_root / "uploads"))
+    base_up = uploads_dir()
     out_dir = base_up / "tts-samples" / "tencent"
     out_dir.mkdir(parents=True, exist_ok=True)
 

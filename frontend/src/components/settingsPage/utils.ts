@@ -21,6 +21,7 @@ export const getDefaultBaseUrl = (provider: string): string => {
     deepseek: "https://api.deepseek.com/chat/completions",
     openrouter: "https://openrouter.ai/api/v1/chat/completions",
     custom_openai_vision: "https://api.openai.com/v1/chat/completions",
+    moondream: "",
   };
   return defaults[provider] || "";
 };
@@ -53,6 +54,7 @@ export const VIDEO_VISION_MODEL_OPTIONS: Record<
     },
   ],
   custom_openai_vision: [],
+  moondream: [{ value: "moondream2", label: "moondream2" }],
 };
 
 export const getVideoVisionModelOptions = (
@@ -86,6 +88,7 @@ export const getDefaultDescription = (provider: string): string => {
     deepseek: "DeepSeek视频生成模型",
     openrouter: "OpenRouter视频生成模型",
     custom_openai_vision: "自定义视觉模型（OpenAI 兼容 Chat Completions，支持图片）",
+    moondream: "Moondream2 本地视觉分析",
   };
   return defaults[provider] || "";
 };

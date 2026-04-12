@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Download, Check, Square, Info } from "lucide-react";
+import AppSelect from "@/components/ui/AppSelect";
 import type { Qwen3TtsDownloadProvider } from "../types";
 import { Qwen3DownloadProgress } from "./Qwen3DownloadProgress";
 import { TauriCommands } from "@/services/clients";
@@ -112,18 +113,19 @@ const Qwen3ModelOptionsList: React.FC<Qwen3ModelOptionsListProps> = ({
 
                 <div className="flex items-center gap-2 self-end sm:self-center">
                   {!status.validAll && (
-                    <select
+                    <AppSelect
                       value={getProvider(option.id)}
                       onChange={(e) =>
                         onChangeProvider(option.id, e.target.value as Qwen3TtsDownloadProvider)
                       }
-                      className="text-[11px] border rounded px-1.5 py-1 bg-gray-50 text-gray-600 h-7"
+                      className="select-sm bg-gray-50 text-gray-600"
                       disabled={modelsLoading || isDownloading}
                       title="下载源"
+                      iconClassName="right-2 h-3.5 w-3.5"
                     >
                       <option value="modelscope">国内</option>
                       <option value="hf">国外</option>
-                    </select>
+                    </AppSelect>
                   )}
 
                   <div className="flex items-center border rounded-md overflow-hidden bg-white">

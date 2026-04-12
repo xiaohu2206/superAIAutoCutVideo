@@ -675,6 +675,51 @@ export class TauriCommands {
       }
     }
   }
+
+  static async minimizeWindow(): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("minimize_main_window");
+    } catch (error) {
+      console.error("最小化窗口失败:", error);
+    }
+  }
+
+  static async startDragWindow(): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("start_dragging_main_window");
+    } catch (error) {
+      console.error("拖动窗口失败:", error);
+    }
+  }
+
+  static async toggleMaximizeWindow(): Promise<boolean> {
+    try {
+      return await TauriCommands.coreInvoke("toggle_maximize_main_window");
+    } catch (error) {
+      console.error("切换窗口最大化失败:", error);
+      return false;
+    }
+  }
+
+  static async isWindowMaximized(): Promise<boolean> {
+    try {
+      return await TauriCommands.coreInvoke("is_main_window_maximized");
+    } catch (error) {
+      console.error("读取窗口最大化状态失败:", error);
+      return false;
+    }
+  }
+
+  static async closeWindow(): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("close_main_window");
+    } catch (error) {
+      console.error("关闭窗口失败:", error);
+      if (typeof window !== "undefined") {
+        window.close();
+      }
+    }
+  }
 }
 
 // 导出单例实例

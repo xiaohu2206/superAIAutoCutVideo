@@ -8,7 +8,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Optional, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,24 +24,31 @@ class VideoModelConfig(BaseModel):
     temperature: Optional[float] = Field(0.7, description="温度参数", ge=0.0, le=2.0)
     timeout: Optional[int] = Field(600, description="超时时间（秒）", ge=1, le=10000)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外参数")
+    stream_output: Optional[bool] = Field(False, description="是否使用流式接收后再聚合返回")
     enabled: bool = Field(True, description="是否启用")
     description: Optional[str] = Field(None, description="配置描述")
     
-    @validator('provider')
-    def validate_provider(cls, v):
+    @field_validator('provider')
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
         allowed_providers = [
             'qwen', 'doubao', 'deepseek', 'openai', 'claude', 'openrouter',
-            'yunwu', '302ai', 'custom_openai_vision',
+            'yunwu', '302ai', 'custom_openai_vision', 'moondream',
         ]
         if v.lower() not in allowed_providers:
             raise ValueError(f'提供商必须是以下之一: {allowed_providers}')
         return v.lower()
-    
-    @validator('api_key')
-    def validate_api_key(cls, v):
-        if not v or len(v.strip()) == 0:
+
+    @field_validator('api_key')
+    @classmethod
+    def validate_api_key(cls, v: str, info: ValidationInfo) -> str:
+        provider = (info.data or {}).get('provider')
+        if provider and str(provider).lower() == 'moondream':
+            s = (v or '').strip()
+            return s if s else 'local'
+        if not v or len(str(v).strip()) == 0:
             raise ValueError('API密钥不能为空')
-        return v.strip()
+        return str(v).strip()
 
 
 class VideoModelConfigManager:
@@ -164,6 +171,17 @@ class VideoModelConfigManager:
                     description='自定义视觉模型（OpenAI 兼容，支持图片）',
                     enabled=False
                 )
+            },
+            {
+                'id': 'moondream_video_analysis',
+                'config': VideoModelConfig(
+                    provider='moondream',
+                    api_key='local',
+                    base_url='',
+                    model_name='moondream2',
+                    description='Moondream2 本地视觉分析',
+                    enabled=False
+                )
             }
         ]
         
@@ -256,6 +274,17 @@ class VideoModelConfigManager:
                     base_url='https://api.openai.com/v1/chat/completions',
                     model_name='gpt-4o-mini',
                     description='自定义视觉模型（OpenAI 兼容，支持图片）',
+                    enabled=False
+                )
+            },
+            {
+                'id': 'moondream_video_analysis',
+                'config': VideoModelConfig(
+                    provider='moondream',
+                    api_key='local',
+                    base_url='',
+                    model_name='moondream2',
+                    description='Moondream2 本地视觉分析',
                     enabled=False
                 )
             }
@@ -372,7 +401,10 @@ class VideoModelConfigManager:
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 timeout=config.timeout,
-                extra_params=config.extra_params or {}
+                extra_params={
+                    **(config.extra_params or {}),
+                    "stream_output": bool(config.stream_output),
+                }
             )
             
             # 创建提供商实例并测试连接

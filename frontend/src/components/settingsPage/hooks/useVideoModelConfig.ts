@@ -23,6 +23,7 @@ export const useVideoModelConfig = () => {
     base_url: "",
     model_name: "",
     extra_params: {},
+    stream_output: false,
     description: "",
   });
   const [testingConnection, setTestingConnection] = useState(false);
@@ -74,17 +75,32 @@ export const useVideoModelConfig = () => {
       // 重新加载配置以保持状态同步
       await loadVideoAnalysisConfigs();
     } else {
-      // 如果没有缓存的配置，使用默认值
+      // 没有对应缓存条目时（例如首次同步默认配置后仍缺项），用默认值并立即写回后端
       const newConfig = {
         provider: provider,
-        api_key: "",
+        api_key: provider === "moondream" ? "local" : "",
         base_url: getDefaultBaseUrl(provider),
         model_name: getDefaultModelName(provider),
         extra_params: {},
+        stream_output: false,
         description: getDefaultDescription(provider),
         enabled: true,
       };
       setCurrentConfig(newConfig);
+      if (newConfigId) {
+        try {
+          const response = await videoModelService.updateConfig(
+            newConfigId,
+            newConfig,
+          );
+          if (response.success) {
+            await loadVideoAnalysisConfigs();
+          }
+        } catch (e) {
+          console.error("切换提供商并保存配置失败:", e);
+          message.error("保存配置失败");
+        }
+      }
     }
 
     setTestResult(null);
@@ -127,13 +143,21 @@ export const useVideoModelConfig = () => {
 
       const configId = getConfigIdByProvider(selectedProvider);
       const response = await videoModelService.testConnection(configId);
+      const raw =
+        response.data?.raw_content ??
+        response.data?.response_preview ??
+        response.data?.message ??
+        null;
 
-      if (response.success) {
-        setTestResult({ success: true, message: "连接测试成功！" });
+      if (response.success && raw) {
+        setTestResult({ success: true, message: String(raw) });
       } else {
         setTestResult({
           success: false,
-          message: response.data?.error || "连接测试失败",
+          message:
+            response.data?.error ||
+            response.data?.message ||
+            "连接测试失败：模型未返回有效内容",
         });
       }
     } catch (error) {

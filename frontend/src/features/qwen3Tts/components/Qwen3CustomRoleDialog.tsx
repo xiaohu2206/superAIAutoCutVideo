@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader, Mic2, X, ChevronDown, Check, Save } from "lucide-react";
+import AppSelect from "@/components/ui/AppSelect";
 import { useQwen3Voices } from "../hooks/useQwen3Voices";
 import { LANGUAGE_OPTIONS } from "../constants";
 import type { Qwen3TtsCustomRoleCreateInput, Qwen3TtsVoice, Qwen3TtsPatchVoiceInput } from "../types";
@@ -189,36 +190,34 @@ export const Qwen3CustomRoleDialog: React.FC<Qwen3CustomRoleDialogProps> = ({ is
               </div>
               <div>
                 <label className="block text-sm text-gray-700 mb-1">模型</label>
-                <select
+                <AppSelect
                   value={modelKey}
                   disabled={loading}
                   onChange={(e) => setModelKey(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
                 >
                   {(modelKeys.length ? modelKeys : [defaultModelKey]).map((k) => (
                     <option key={k} value={k} disabled={isModelAvailable ? !isModelAvailable(k) : false}>
                       {k}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm text-gray-700 mb-1">语言</label>
-                <select
+                <AppSelect
                   value={language}
                   disabled={loading}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-200 bg-white"
                 >
                   {LANGUAGE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
               <div className="relative">
                 <label className="block text-sm text-gray-700 mb-1">

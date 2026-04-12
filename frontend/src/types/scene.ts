@@ -8,7 +8,7 @@ export interface Scene {
   time_range: string;
   subtitle: string;
   vision?: string | VisionSegment[];
-  vision_status?: "ok" | "empty" | "no_frame" | "error";
+  vision_status?: "ok" | "empty" | "no_frame" | "error" | "infer_timeout";
   vision_analyzed?: boolean;
 }
 

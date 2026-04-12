@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 #[cfg(target_os = "windows")]
 use std::process::Stdio as _;
+use tauri::image::Image;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
@@ -60,6 +63,7 @@ struct AppState {
     backend_port: Arc<Mutex<u16>>,
     backend_starting: Arc<AtomicBool>,
     backend_boot_token: Arc<Mutex<Option<String>>>,
+    app_is_quitting: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -69,6 +73,7 @@ impl Default for AppState {
             backend_port: Arc::new(Mutex::new(0)),
             backend_starting: Arc::new(AtomicBool::new(false)),
             backend_boot_token: Arc::new(Mutex::new(None)),
+            app_is_quitting: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -565,6 +570,34 @@ async fn start_backend(
         .append(true)
         .open(&early_log_path);
     append_log_line(early_log_path.clone(), "[meta] start_backend invoked");
+
+    // 最早期并发启动防护：若已有启动流程进行中，则等待其更新状态，避免重复拉起
+    if state.backend_starting.swap(true, Ordering::SeqCst) {
+        for _ in 0..40 {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let port = *state.backend_port.lock().unwrap();
+            let boot_token = state.backend_boot_token.lock().unwrap().clone();
+            let process_guard = state.backend_process.lock().unwrap();
+            let running = process_guard.is_some() || port != 0;
+            drop(process_guard);
+            if running {
+                if port != 0 {
+                    println!(
+                        "[backend] 启动中（复用已有启动流程）：http://127.0.0.1:{}",
+                        port
+                    );
+                }
+                return Ok(BackendStatus {
+                    running,
+                    port,
+                    pid: None,
+                    boot_token,
+                });
+            }
+        }
+        return Err("后端正在启动中，请稍后重试".to_string());
+    }
+
     // 先短暂持锁检查和清理状态，避免并发重复启动
     {
         let mut process_guard = state.backend_process.lock().unwrap();
@@ -916,25 +949,6 @@ async fn start_backend(
         return Err(err);
     };
 
-    // 并发启动防护：若已有启动流程进行中，则不再重复启动
-    if state.backend_starting.swap(true, Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let port = *state.backend_port.lock().unwrap();
-        let boot_token = state.backend_boot_token.lock().unwrap().clone();
-        if port != 0 {
-            println!(
-                "[backend] 启动中（复用已有启动流程）：http://{}:{}",
-                host, port
-            );
-        }
-        return Ok(BackendStatus {
-            running: port != 0,
-            port,
-            pid: None,
-            boot_token,
-        });
-    }
-
     // 设置环境变量
     let port_env = std::env::var("SACV_FORCE_PORT")
         .ok()
@@ -1264,16 +1278,129 @@ async fn open_external_link(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| format!("打开链接失败: {}", e))
 }
 
+#[tauri::command]
+async fn minimize_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.minimize().map_err(|e| format!("最小化窗口失败: {}", e))
+}
+
+#[tauri::command]
+async fn start_dragging_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window
+        .start_dragging()
+        .map_err(|e| format!("拖动窗口失败: {}", e))
+}
+
+#[tauri::command]
+async fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let is_maximized = window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))?;
+    if is_maximized {
+        window
+            .unmaximize()
+            .map_err(|e| format!("还原窗口失败: {}", e))?;
+        Ok(false)
+    } else {
+        window
+            .maximize()
+            .map_err(|e| format!("最大化窗口失败: {}", e))?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+async fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))
+}
+
+#[tauri::command]
+async fn close_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+
+    window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
+
+    let _ = tauri_plugin_notification::NotificationExt::notification(&app)
+        .builder()
+        .title("SuperAI 影视剪辑")
+        .body("应用已最小化到系统托盘，可在右下角托盘中恢复或退出")
+        .show();
+
+    Ok(())
+}
+
 // 应用启动时的初始化
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItem::with_id(app, "tray_show", "显示主窗口", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "tray_quit", "退出", true, None::<&str>)?;
+    let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let tray_icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or("缺少默认窗口图标，无法创建系统托盘图标")?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(Image::from(tray_icon))
+        .tooltip("SuperAI 影视剪辑")
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
     // 若未由配置自动创建窗口，则显式创建主窗口
     if app.get_webview_window("main").is_none() {
-        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-            .title("AI智能视频剪辑")
-            .resizable(true)
-            .inner_size(1200.0, 800.0)
-            .center()
-            .build()?;
+        #[cfg(target_os = "windows")]
+        let window_builder =
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("AI智能视频剪辑")
+                .resizable(true)
+                .decorations(false)
+                .shadow(false)
+                .transparent(true)
+                .inner_size(1200.0, 800.0)
+                .center();
+
+        #[cfg(not(target_os = "windows"))]
+        let window_builder =
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("AI智能视频剪辑")
+                .resizable(true)
+                .decorations(false)
+                .shadow(false)
+                .inner_size(1200.0, 800.0)
+                .center();
+
+        window_builder.build()?;
     }
 
     {
@@ -1297,15 +1424,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // 应用退出时的清理
-fn cleanup_app(app_handle: AppHandle) {
-    let state = app_handle.state::<AppState>();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    if let Err(e) = rt.block_on(stop_backend(state)) {
-        eprintln!("清理后端进程失败: {}", e);
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -1325,9 +1443,34 @@ fn main() {
         }))
         .manage(AppState::default())
         .setup(setup_app)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray_show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            "tray_quit" => {
+                let state = app.state::<AppState>();
+                state.app_is_quitting.store(true, Ordering::SeqCst);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                } else {
+                    app.exit(0);
+                }
+            }
+            _ => {}
+        })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                cleanup_app(window.app_handle().clone());
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                if state.app_is_quitting.load(Ordering::SeqCst) {
+                    return;
+                }
+                let _ = window.hide();
+                api.prevent_close();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1338,7 +1481,12 @@ fn main() {
             select_output_directory,
             get_app_info,
             show_notification,
-            open_external_link
+            open_external_link,
+            minimize_main_window,
+            start_dragging_main_window,
+            toggle_maximize_main_window,
+            is_main_window_maximized,
+            close_main_window
         ])
         .run(tauri::generate_context!())
         .expect("启动Tauri应用失败");

@@ -2,7 +2,10 @@ import { AlertCircle, AlertTriangle, CheckCircle, Info, Loader2, X } from "lucid
 import { useEffect, useRef, useState } from "react";
 import { messageEventName, type MessageEventDetail, type MessageType } from "../../services/message";
 
+
 type MessageItem = MessageEventDetail & { createdAt: number };
+
+const INTERACTION_DISMISS_DELAY_MS = 10_000;
 
 function getTypeClassName(type: MessageType): string {
   if (type === "success") return "border-green-200 text-green-700 bg-green-50";
@@ -23,9 +26,42 @@ export default function MessageHost() {
   const [current, setCurrent] = useState<MessageItem | null>(null);
   const [toasts, setToasts] = useState<MessageItem[]>([]);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const dismissTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const clearDismissTimer = () => {
+      if (dismissTimerRef.current !== null) {
+        window.clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+
+    const dismissMessages = () => {
+      setCurrent(null);
+      setToasts([]);
+    };
+
+    const scheduleDismissMessages = () => {
+      clearDismissTimer();
+      dismissTimerRef.current = window.setTimeout(() => {
+        dismissTimerRef.current = null;
+        dismissMessages();
+      }, INTERACTION_DISMISS_DELAY_MS);
+    };
+
+    const shouldIgnoreInteraction = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(target.closest("[data-message-host]"));
+    };
+
+    const handleUserInteraction = (event: Event) => {
+      if (shouldIgnoreInteraction(event.target)) return;
+      scheduleDismissMessages();
+    };
+
     const handler = (event: Event) => {
+      clearDismissTimer();
+
       const e = event as CustomEvent<MessageEventDetail>;
       const detail = e.detail;
       if (!detail || !detail.id) return;
@@ -41,14 +77,19 @@ export default function MessageHost() {
           setToasts((prev) => prev.filter((t) => t.createdAt !== item.createdAt));
         }, ms);
       }
-      
-      // 注意：已移除自动定时关闭逻辑，实现持久化显示
-      // 只有点击关闭按钮或新消息到来时，当前消息才会消失/被替换
     };
 
     window.addEventListener(messageEventName, handler as EventListener);
+    window.addEventListener("pointerdown", handleUserInteraction);
+    window.addEventListener("keydown", handleUserInteraction);
+    window.addEventListener("wheel", handleUserInteraction, { passive: true });
+
     return () => {
+      clearDismissTimer();
       window.removeEventListener(messageEventName, handler as EventListener);
+      window.removeEventListener("pointerdown", handleUserInteraction);
+      window.removeEventListener("keydown", handleUserInteraction);
+      window.removeEventListener("wheel", handleUserInteraction);
     };
   }, []);
 
@@ -63,26 +104,29 @@ export default function MessageHost() {
   return (
     <>
       {current && (
-        <div
-          ref={hostRef}
-          className={`border shadow-md rounded-lg px-4 py-3 flex items-start gap-3 w-full transition-all duration-300 ${getTypeClassName(current.type)}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span className="flex-shrink-0 mt-0.5">{getTypeIcon(current.type)}</span>
-          <div className="text-sm flex-1 break-words leading-relaxed pt-0.5">{current.content}</div>
-          <button 
-            onClick={() => setCurrent(null)}
-            className="flex-shrink-0 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors ml-2 -mr-1"
-            aria-label="关闭"
+        <div className="mb-4 shrink-0">
+          <div
+            ref={hostRef}
+            data-message-host
+            className={`border shadow-md rounded-lg px-4 py-3 flex items-start gap-3 w-full transition-all duration-300 ${getTypeClassName(current.type)}`}
+            role="status"
+            aria-live="polite"
           >
-            <X className="h-4 w-4" />
-          </button>
+            <span className="flex-shrink-0 mt-0.5">{getTypeIcon(current.type)}</span>
+            <div className="text-sm flex-1 break-words leading-relaxed pt-0.5">{current.content}</div>
+            <button 
+              onClick={() => setCurrent(null)}
+              className="flex-shrink-0 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors ml-2 -mr-1"
+              aria-label="关闭"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 
       {toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-auto">
+        <div data-message-host className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-auto">
           {toasts.map((t) => (
             <div
               key={`${t.id}_${t.createdAt}`}

@@ -1,4 +1,4 @@
-import { ArrowRight, Loader } from "lucide-react";
+import { ArrowRight, Loader, Square } from "lucide-react";
 import React from "react";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../../types/project";
 import AdvancedConfigSection from "./AdvancedConfigSection";
@@ -7,7 +7,11 @@ import VideoSourcesManager from "./VideoSourcesManager";
 import SubtitleAsrSelector from "./SubtitleAsrSelector";
 import SceneListTable from "./SceneListTable";
 import ScenePlayModal from "./ScenePlayModal";
+import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
+import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
+import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
+import { videoModelService } from "@/services/videoModelService";
 
 interface ProjectEditUploadStepProps {
   projectId: string;
@@ -60,12 +64,20 @@ interface ProjectEditUploadStepProps {
   onSubtitleDraftChange: (next: SubtitleSegment[]) => void;
   onNextStep: () => void;
   
-  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3 }) => void;
+  onExtractScenes: (options?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => void;
+  onStopSceneExtraction: () => void;
+  isStoppingSceneExtraction: boolean;
   extractingScene: boolean;
   sceneExtractProgress: number;
   sceneResult: any | null;
   sceneExtractMessage: string;
-  sceneExtractPhase: string | null;
+  visionChoiceModalOpen: boolean;
+  onVisionChoiceContinue: () => void;
+  onVisionChoiceRestart: () => void;
+  onVisionChoiceCancel: () => void;
+  subtitleOverwriteModalOpen: boolean;
+  onSubtitleOverwriteConfirm: () => void;
+  onSubtitleOverwriteCancel: () => void;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -113,15 +125,26 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onSubtitleDraftChange,
   onNextStep,
   onExtractScenes,
+  onStopSceneExtraction,
+  isStoppingSceneExtraction,
   extractingScene,
   sceneExtractProgress,
   sceneResult,
   sceneExtractMessage,
+  visionChoiceModalOpen,
+  onVisionChoiceContinue,
+  onVisionChoiceRestart,
+  onVisionChoiceCancel,
+  subtitleOverwriteModalOpen,
+  onSubtitleOverwriteConfirm,
+  onSubtitleOverwriteCancel,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
     Boolean(project.subtitle_path) &&
     project.subtitle_status === "ready";
+
+  const canReExtractScenes = Boolean(project.scenes_path);
 
   const [scenePlayState, setScenePlayState] = React.useState<{
     isOpen: boolean;
@@ -134,8 +157,30 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   });
 
   const [visionMode, setVisionMode] = React.useState<"no_subtitles" | "all">("all");
-  const [visionKeyFrames, setVisionKeyFrames] = React.useState<1 | 3>(1);
+  const visionKeyFrames: 1 | 3 = 1;
   const analyzeVision = true;
+
+  const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
+
+  React.useEffect(() => {
+    if (project.project_type !== "visual") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await videoModelService.getConfigs();
+        if (!res?.success || cancelled) return;
+        const activeId = res.data?.active_config_id as string | undefined;
+        const configs = res.data?.configs as Record<string, { provider?: string }> | undefined;
+        const provider = activeId && configs ? configs[activeId]?.provider : undefined;
+        setVisionScopeLabel(videoVisionAnalysisScopeLabel(provider));
+      } catch {
+        if (!cancelled) setVisionScopeLabel("视觉分析");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.project_type]);
 
   return (
     <>
@@ -221,7 +266,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
              <div className="flex flex-col gap-2 items-end">
                <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
                   <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <span className="text-gray-600 select-none">在线视觉分析</span>
+                    <span className="text-gray-600 select-none">{visionScopeLabel}</span>
                     <span className="text-gray-300 hidden sm:inline">|</span>
                     <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
                       <input
@@ -290,7 +335,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                     镜头提取中...
                   </>
                 ) : (
-                  "提取镜头"
+                  <>{canReExtractScenes ? "重新分析镜头" : "分析镜头"}</>
                 )}
               </button>
              </div>
@@ -346,11 +391,26 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
         )}
 
-        {(extractingScene || (sceneExtractProgress > 0 && sceneExtractProgress < 100)) && (
+        {extractingScene && (
           <div className="w-full mt-4">
-             <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-              <span>镜头提取进度</span>
-              <span>{Math.round(sceneExtractProgress)}%</span>
+             <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1">
+              <span>镜头提取进度 </span>
+              <div className="flex items-center gap-2">
+                <span>{Math.round(sceneExtractProgress)}%</span>
+                <button
+                  onClick={onStopSceneExtraction}
+                  disabled={isStoppingSceneExtraction}
+                  title="停止镜头提取"
+                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isStoppingSceneExtraction ? (
+                    <Loader className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Square className="h-3 w-3 fill-current" />
+                  )}
+                  <span className="text-xs font-medium">停止</span>
+                </button>
+              </div>
             </div>
             <div className="w-full h-2 bg-gray-200 rounded">
               <div
@@ -365,6 +425,12 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             ) : null}
           </div>
         )}
+
+        {!extractingScene && sceneExtractMessage ? (
+          <div className="w-full mt-4">
+            <div className="text-xs text-gray-700 break-all">{sceneExtractMessage}</div>
+          </div>
+        ) : null}
       </div>
       <div className="flex justify-end">
           <button
@@ -418,6 +484,21 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             onChange={onSubtitleDraftChange}
           />
         )}
+      <VisionAnalysisChoiceModal
+        isOpen={visionChoiceModalOpen}
+        onClose={onVisionChoiceCancel}
+        onContinueIncomplete={onVisionChoiceContinue}
+        onRestartAll={onVisionChoiceRestart}
+      />
+      <OverwriteConfirmModal
+        isOpen={subtitleOverwriteModalOpen}
+        title="重新提取字幕"
+        message="字幕已被编辑，重新提取将覆盖修改内容，是否继续？"
+        confirmLabel="继续提取"
+        cancelLabel="取消"
+        onConfirm={onSubtitleOverwriteConfirm}
+        onCancel={onSubtitleOverwriteCancel}
+      />
       <ScenePlayModal
         isOpen={scenePlayState.isOpen}
         onClose={() => setScenePlayState((prev) => ({ ...prev, isOpen: false }))}

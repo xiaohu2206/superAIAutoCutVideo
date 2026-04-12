@@ -65,7 +65,12 @@ from routes.storage_routes import router as settings_router
 from routes.moondream_routes import router as moondream_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
-from modules.app_paths import ensure_defaults_migrated, user_data_dir, normalize_path_str, windows_local_appdata_dir
+from modules.app_paths import (
+    uploads_dir as pick_uploads_root,
+    uploads_roots_for_resolve,
+    user_data_dir,
+    ensure_defaults_migrated,
+)
 from modules.runtime_log_store import runtime_log_store
 
 # 配置日志
@@ -455,64 +460,48 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 def get_app_paths():
     """
-    获取应用路径配置，兼容开发环境和打包环境（PyInstaller）
+    获取应用路径配置。以 Windows（Tauri / PyInstaller）为主：
+    - uploads 默认走 app_paths（LOCALAPPDATA 下持久化）
+    - 打包环境下勿用 __file__ 推导安装目录；legacy 仅扫描安装目录与 exe 旁 uploads
     """
+    base_path = Path(__file__).resolve().parent
+    project_root = base_path.parent
+
     if getattr(sys, 'frozen', False):
         base_path = Path(sys._MEIPASS)
         exe_dir = Path(sys.executable).parent
         service_data_dir = base_path / "backend" / "serviceData"
         if not service_data_dir.exists():
             service_data_dir = base_path / "serviceData"
-        if sys.platform == "win32":
-            base_data = windows_local_appdata_dir()
-        elif sys.platform == "darwin":
-            base_data = Path.home() / "Library" / "Application Support"
-        else:
-            base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-        settings_dir = base_data / "SuperAutoCutVideo" / "config"
-        settings_file = settings_dir / "app_settings.json"
-        # 注意：打包版默认必须落在“用户数据目录”，不能落在安装目录，否则卸载/重装会丢文件
-        uploads_dir_default_fallback = base_data / "SuperAutoCutVideo" / "uploads"
-        install_dir_raw = normalize_path_str(os.environ.get("SACV_INSTALL_DIR") or "")
-        if install_dir_raw:
-            install_dir = Path(install_dir_raw).expanduser()
-        else:
-            install_dir = exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir
-        # 历史版本可能把 uploads 放在安装目录；保留 legacy 路径用于迁移
-        legacy_uploads_dir = install_dir / "uploads"
-        # 新默认：用户目录（持久化）
-        uploads_dir_default = uploads_dir_default_fallback
-        try:
-            used_default = True
-            if settings_file.exists():
-                data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = normalize_path_str(str(data.get("uploads_root") or ""))
-                if cand:
-                    uploads_dir = Path(cand).expanduser()
-                    used_default = False
-                else:
-                    uploads_dir = uploads_dir_default
-            else:
-                uploads_dir = uploads_dir_default
-        except Exception:
-            uploads_dir = uploads_dir_default
-            used_default = True
-        if used_default:
+
+        uploads_dir = pick_uploads_root(include_legacy_repo_uploads=False)
+
+        install_dir_raw = os.environ.get("SACV_INSTALL_DIR") or ""
+        install_dir = Path(install_dir_raw).expanduser() if install_dir_raw.strip() else (exe_dir.parent if exe_dir.name.lower() == "resources" else exe_dir)
+        # 打包后 project_root 可能落在临时解包目录，不能当作「旧版 uploads」来源
+        legacy_candidates = [install_dir / "uploads"]
+        if os.name == "nt":
+            # 便携版或安装器把 uploads 放在 exe 同目录的情况
+            legacy_candidates.append(exe_dir / "uploads")
+        seen_legacy: set[str] = set()
+        for legacy_uploads_dir in legacy_candidates:
             try:
-                uploads_dir.mkdir(parents=True, exist_ok=True)
+                key = str(legacy_uploads_dir.resolve())
             except Exception:
-                uploads_dir = uploads_dir_default_fallback
-            # 兼容迁移：若老版本把 uploads 存在安装目录，则首次运行时复制到新的用户目录
+                key = str(legacy_uploads_dir)
+            if key in seen_legacy:
+                continue
+            seen_legacy.add(key)
             try:
-                if legacy_uploads_dir.exists() and legacy_uploads_dir.is_dir():
-                    # 避免重复迁移：仅在目标目录为空/不存在时迁移
-                    should_migrate = True
-                    if uploads_dir.exists():
-                        try:
-                            should_migrate = not any(uploads_dir.iterdir())
-                        except Exception:
-                            should_migrate = False
-                    if should_migrate:
+                if legacy_uploads_dir.exists() and legacy_uploads_dir.resolve() != uploads_dir.resolve():
+                    uploads_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        next(legacy_uploads_dir.iterdir())
+                        legacy_nonempty = True
+                    except StopIteration:
+                        legacy_nonempty = False
+                    if legacy_nonempty:
+                        logger.info(f"Legacy uploads detected at {legacy_uploads_dir}, migrating to {uploads_dir}")
                         for item in legacy_uploads_dir.iterdir():
                             src = item
                             dst = uploads_dir / item.name
@@ -526,29 +515,10 @@ def get_app_paths():
             except Exception as e:
                 logger.warning(f"Legacy uploads migration failed: {e}")
     else:
-        base_path = Path(__file__).resolve().parent
-        project_root = base_path.parent
         service_data_dir = base_path / "serviceData"
-        # 在开发环境也读取用户设置文件，保证重启后生效
-        if sys.platform == "win32":
-            base_data = windows_local_appdata_dir()
-        elif sys.platform == "darwin":
-            base_data = Path.home() / "Library" / "Application Support"
-        else:
-            base_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-        settings_dir = base_data / "SuperAutoCutVideo" / "config"
-        settings_file = settings_dir / "app_settings.json"
-        uploads_dir_default = project_root / "uploads"
-        try:
-            if settings_file.exists():
-                data = json.loads(settings_file.read_text(encoding="utf-8"))
-                cand = normalize_path_str(str(data.get("uploads_root") or ""))
-                uploads_dir = Path(cand).expanduser() if cand else uploads_dir_default
-            else:
-                uploads_dir = uploads_dir_default
-        except Exception:
-            uploads_dir = uploads_dir_default
-        
+        uploads_dir = pick_uploads_root()
+        # 开发环境：仓库根目录 uploads 已由 uploads_roots_for_resolve 纳入；此处无需再迁
+
     logger.info(f"App paths selected service_data_dir={service_data_dir} uploads_dir={uploads_dir} frozen={getattr(sys, 'frozen', False)}")
     return service_data_dir, uploads_dir
 

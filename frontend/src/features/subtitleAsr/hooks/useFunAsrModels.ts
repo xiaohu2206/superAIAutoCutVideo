@@ -22,7 +22,8 @@ type DownloadState = {
 
 export function useFunAsrModels() {
   const [models, setModels] = useState<FunAsrModelStatus[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  /** 首屏为 true：避免在 mount 后、listModels 返回前误判为「无可用模型」或触发自动切回内置 API。 */
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadsByKey, setDownloadsByKey] = useState<Record<string, DownloadState>>({});
 

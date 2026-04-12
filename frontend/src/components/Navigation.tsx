@@ -1,121 +1,90 @@
 import {
-    Github,
-    Home,
-    Settings
-} from 'lucide-react'
-import React from 'react'
-import Logo from '@/assets/logo.png'
-import { TauriCommands } from '@/services/clients'
+  Github,
+  Home,
+  Settings,
+} from "lucide-react";
+import React from "react";
+import Logo from "@/assets/logo.png";
+import { TauriCommands } from "@/services/clients";
 
 interface NavigationProps {
-  activeTab: string
-  onTabChange: (tab: string) => void
-  className?: string
+  activeTab: string;
+  onTabChange: (tab: string) => void;
+  onHomeClick?: () => void;
+  className?: string;
 }
 
-const Navigation: React.FC<NavigationProps> = ({ 
-  activeTab, 
-  onTabChange, 
-  className = '' 
+const Navigation: React.FC<NavigationProps> = ({
+  activeTab,
+  onTabChange,
+  onHomeClick,
+  className = "",
 }) => {
   const navItems = [
     {
-      id: 'home',
-      label: '首页',
+      id: "home",
+      label: "项目",
       icon: Home,
-      description: '应用概览和快速操作'
+      description: "项目管理与剪辑流程",
     },
     {
-      id: 'settings',
-      label: '设置',
+      id: "settings",
+      label: "设置",
       icon: Settings,
-      description: '应用配置和偏好设置'
-    }
-  ]
+      description: "应用配置和偏好设置",
+    },
+  ];
 
   return (
-    <nav className={`bg-white shadow-sm border-b ${className}`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo和标题 */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-10 h-10">
-              <img src={Logo} />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">AI智能视频剪辑</h1>
-              <p className="text-xs text-gray-500">SuperAI</p>
-            </div>
-          </div>
-
-          {/* 导航菜单 */}
-          <div className="hidden md:flex items-center space-x-1">
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = activeTab === item.id
-              
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`
-                    flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                    ${isActive 
-                      ? 'bg-blue-100 text-blue-700 shadow-sm' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }
-                  `}
-                  title={item.description}
-                >
-                  <Icon className={`h-4 w-4 mr-2 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
-                  {item.label}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* 右侧操作 */}
-          <div className="flex items-center space-x-3">
-            {/* GitHub链接 */}
-            <button
-              onClick={() => TauriCommands.openExternalLink('https://github.com/xiaohu2206/superAIAutoCutVideo')}
-              className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
-              title="查看源代码"
-            >
-              <Github className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* 移动端导航 */}
-        <div className="md:hidden border-t border-gray-200">
-          <div className="flex overflow-x-auto py-2 space-x-1">
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = activeTab === item.id
-              
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`
-                    flex flex-col items-center px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 min-w-0 flex-shrink-0
-                    ${isActive 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }
-                  `}
-                >
-                  <Icon className={`h-4 w-4 mb-1 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
-                  <span className="truncate">{item.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+    <aside
+      className={`flex h-full w-[40px] shrink-0 flex-col items-center border-r border-slate-200/80 bg-white/90 py-3 shadow-[10px_0_30px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl ${className}`}
+    >
+      <div className="flex items-center justify-center">
+        <img src={Logo} alt="SuperAI" className="h-6 w-6 object-contain" />
       </div>
-    </nav>
-  )
-}
 
-export default Navigation
+      <div className="mt-5 flex flex-1 flex-col items-center gap-2">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+
+          return (
+            <button
+              key={item.id}
+              onClick={() => {
+                if (item.id === "home") {
+                  onHomeClick?.();
+                  return;
+                }
+                onTabChange(item.id);
+              }}
+              className={[
+                "group flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200",
+                isActive
+                  ? "text-blue-600"
+                  : "text-slate-400 hover:bg-slate-100 hover:text-slate-700",
+              ].join(" ")}
+              title={item.description}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="border-t border-slate-200/80 pt-3">
+        <button
+          onClick={() =>
+            TauriCommands.openExternalLink("https://github.com/xiaohu2206/superAIAutoCutVideo")
+          }
+          className="group flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+          title="查看源代码"
+        >
+          <Github className="h-4 w-4" />
+        </button>
+      </div>
+    </aside>
+  );
+};
+
+export default Navigation;

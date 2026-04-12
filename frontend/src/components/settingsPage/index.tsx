@@ -1,4 +1,3 @@
-import { Settings } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { WebSocketMessage } from "../../services/clients";
 import AboutSection from "./components/AboutSection";
@@ -25,7 +24,7 @@ interface SettingsPageProps {
   onMonitorRefresh?: () => Promise<void> | void;
 }
 
-const SettingsPage: React.FC<SettingsPageProps> = ({
+const SettingsPage: React.FC<SettingsPageProps> = ({ 
   messages = [],
   backendStatus = { running: false, port: 8000 },
   connections = { api: false, websocket: false },
@@ -66,6 +65,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
       onMonitorEnter?.();
     }
   }, [activeSection]);
+
+  const activeLabel =
+    sections.find((s) => s.id === activeSection)?.label ?? "设置";
 
   // 渲染当前激活的设置区域内容
   const renderSectionContent = () => {
@@ -128,62 +130,70 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        {/* 头部 */}
-        <div className="px-6 py-4 bg-gray-50 border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Settings className="h-6 w-6 text-gray-600" />
-              <h2 className="text-xl font-semibold text-gray-900">设置</h2>
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col md:flex-row md:items-stretch">
+        {/* 左侧：分区导航（md+ 固定宽度；长页滚动时侧栏 sticky） */}
+        <aside
+          className={`
+            shrink-0 self-stretch border-b border-slate-200/80 bg-slate-50/90 md:sticky md:top-0 md:z-10 md:w-[232px] md:border-b-0 md:border-r
+          `}
+        >
+          <div className="border-b border-slate-200/60 px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold tracking-tight text-slate-900">
+                  设置
+                </h2>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex">
-          {/* 侧边栏 */}
-          <div className="w-64 bg-gray-50 border-r">
-            <nav className="p-4 space-y-1">
-              {sections.map((section) => {
-                const Icon = section.icon;
-                const isActive = activeSection === section.id;
+          <nav className="flex flex-col gap-1 p-3" aria-label="设置分区">
+            {sections.map((section) => {
+              const Icon = section.icon;
+              const isActive = activeSection === section.id;
 
-                return (
-                  <button
-                    key={section.id}
-                    onClick={() => setActiveSection(section.id)}
-                    className={`
-                      w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors
-                      ${
-                        isActive
-                          ? "bg-blue-100 text-blue-700"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-                      }
-                    `}
-                  >
-                    <Icon
-                      className={`h-4 w-4 mr-3 ${
-                        isActive ? "text-blue-600" : "text-gray-500"
-                      }`}
-                    />
-                    {section.label}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`
+                    flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors
+                    ${
+                      isActive
+                        ? "bg-blue-50 text-blue-800 ring-1 ring-blue-200/80"
+                        : "text-slate-600 hover:bg-white/80 hover:text-slate-900"
+                    }
+                  `}
+                >
+                  <Icon
+                    className={`h-4 w-4 shrink-0 ${
+                      isActive ? "text-blue-600" : "text-slate-400"
+                    }`}
+                    aria-hidden
+                  />
+                  {section.label}
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
 
-          {/* 主内容区 */}
-          <div className="flex-1 p-6">
-            <div className="max-w-2xl">
-              <h3 className="text-lg font-medium text-gray-900 mb-6">
-                {sections.find((s) => s.id === activeSection)?.label}
-              </h3>
-
+        {/* 右侧：分区标题 + 表单内容（与 App 主区域共用外层滚动） */}
+        <section className="scrollbar-hidden flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-white/70">
+          <header className="border-b border-slate-100 px-5 py-4 sm:px-6">
+            <h3 className="text-lg font-semibold tracking-tight text-slate-900">
+              {activeLabel}
+            </h3>
+          </header>
+          <div className="flex flex-1 flex-col px-5 py-6 sm:px-6">
+            <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-1 flex-col">
               {renderSectionContent()}
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

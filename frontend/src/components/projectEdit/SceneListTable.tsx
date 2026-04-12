@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Play, Eye, X } from "lucide-react";
 import { SceneResult } from "../../types/scene";
 
@@ -9,6 +9,17 @@ interface SceneListTableProps {
 
 const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScene }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  /** 仅 vision_status === "ok" 视为画面分析成功；error / empty / 缺字段等不计入「已分析」 */
+  const analyzedVisionCount = useMemo(
+    () => sceneResult?.scenes?.filter((scene) => scene.vision_status === "ok").length ?? 0,
+    [sceneResult]
+  );
+
+  const visionErrorCount = useMemo(
+    () => sceneResult?.scenes?.filter((scene) => scene.vision_status === "error").length ?? 0,
+    [sceneResult]
+  );
 
   if (!sceneResult || !sceneResult.scenes || sceneResult.scenes.length === 0) {
     return null;
@@ -32,6 +43,10 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
     return "";
   };
 
+  const notOkCount = Math.max(sceneResult.scenes.length - analyzedVisionCount, 0);
+  /** 非 ok 且非 error（如 empty / no_frame / infer_timeout / 缺字段），需与「分析失败」区分展示 */
+  const nonErrorNotOkCount = Math.max(notOkCount - visionErrorCount, 0);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -46,8 +61,20 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
         className="relative group cursor-pointer"
         onClick={() => setIsModalOpen(true)}
       >
-        <div className="w-full h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-blue-400 hover:ring-1 hover:ring-blue-400 transition-all flex items-center justify-between">
-          <span>共 {sceneResult.scenes.length} 个镜头</span>
+        <div className="w-full min-h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-blue-400 hover:ring-1 hover:ring-blue-400 transition-all flex items-center justify-between gap-4">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              共 {sceneResult.scenes.length} 个镜头，已成功分析画面 {analyzedVisionCount} 个
+              {visionErrorCount > 0 && (
+                <span className="text-amber-600">（分析失败 {visionErrorCount} 个）</span>
+              )}
+            </span>
+            {nonErrorNotOkCount > 0 && (
+              <span className="text-red-500 text-xs font-medium">
+                还有 {nonErrorNotOkCount} 个镜头未成功完成画面分析
+              </span>
+            )}
+          </span>
           <span className="text-gray-500 text-xs">总帧数: {sceneResult.total_frames} (FPS: {sceneResult.fps})</span>
         </div>
         

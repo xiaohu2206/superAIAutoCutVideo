@@ -20,9 +20,225 @@ from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
+from services.vision_scene_status import scene_vision_success_ok
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+# 在线视觉大模型调用：失败后重试间隔（秒），共 3 次重试即最多 4 次请求
+_ONLINE_VISION_INFER_RETRY_DELAYS_SEC: Tuple[float, float, float] = (1.0, 2.0, 3.0)
+# 并发调用大模型：相邻两次发起请求的最小间隔（秒），减轻瞬时打满上游
+_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0.1
+
+
+class _OnlineVisionRunner:
+    def __init__(self, provider: str, api_key: str, base_url: str, model_name: str, timeout: int = 120):
+        self._provider = provider
+        self._model_name = model_name
+        self._signature = (str(provider or ""), str(api_key or ""), str(base_url or ""), str(model_name or ""), int(timeout or 0))
+
+        provider_cls = get_provider_class(provider)
+        if not provider_cls:
+            raise ValueError(f"不支持的AI提供商: {provider}")
+
+        ai_cfg = AIModelConfig(
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+            timeout=timeout,
+            extra_params={"max_tokens": 512},
+        )
+        self._provider_impl = provider_cls(ai_cfg)
+
+    @property
+    def signature(self) -> Tuple[str, str, str, str, int]:
+        return self._signature
+
+    async def close(self):
+        await self._provider_impl.close()
+
+    async def infer(self, img: Image.Image, prompt: str = "Describe this image briefly.") -> Tuple[str, Dict[str, Any]]:
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        data_uri = f"data:image/jpeg;base64,{img_base64}"
+
+        t0 = time.time()
+        resp = await self._provider_impl.chat_completion(
+            [
+                ChatMessage(
+                    role="user",
+                    content=[
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                    ],
+                )
+            ]
+        )
+        t1 = time.time()
+        usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
+
+        stats = {
+            "backend": "online",
+            "provider": self._provider,
+            "model": self._model_name,
+            "infer_s": t1 - t0,
+            "prompt_tokens": int((usage or {}).get("prompt_tokens", 0) or 0),
+            "completion_tokens": int((usage or {}).get("completion_tokens", 0) or 0),
+            "total_tokens": int((usage or {}).get("total_tokens", 0) or 0),
+        }
+
+        return (resp.content or ""), stats
+
+    async def infer_multi(
+        self,
+        images: List[Image.Image],
+        prompt: str,
+        max_tokens: int = 1024,
+    ) -> Tuple[str, Dict[str, Any]]:
+        if not images:
+            raise ValueError("infer_multi 需要至少一张图片")
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for img in images:
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            data_uri = f"data:image/jpeg;base64,{img_base64}"
+            content.append({"type": "image_url", "image_url": {"url": data_uri}})
+            
+
+        t0 = time.time()
+        resp = await self._provider_impl.chat_completion(
+            [
+                ChatMessage(
+                    role="user",
+                    content=content,
+                )
+            ],
+            extra_params={"max_tokens": int(max_tokens)},
+        )
+        t1 = time.time()
+        usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
+
+        stats = {
+            "backend": "online",
+            "provider": self._provider,
+            "model": self._model_name,
+            "infer_s": t1 - t0,
+            "n_images": len(images),
+            "prompt_tokens": int((usage or {}).get("prompt_tokens", 0) or 0),
+            "completion_tokens": int((usage or {}).get("completion_tokens", 0) or 0),
+            "total_tokens": int((usage or {}).get("total_tokens", 0) or 0),
+        }
+
+        return (resp.content or ""), stats
+
+
+def _segment_key_frame_seek_times(t_start: float, t_end: float, count: int) -> List[float]:
+    ts = float(t_start)
+    te = float(t_end)
+    if te < ts:
+        ts, te = te, ts
+    span = te - ts
+    if count <= 1 or span <= 1e-6:
+        return [(ts + te) / 2.0]
+    if count >= 3:
+        eps = min(0.05, span / 6.0)
+        return [ts + eps, (ts + te) / 2.0, te - eps]
+    return [(ts + te) / 2.0]
+
+
+def _log_skip_existing_vision_analysis(
+    project_id: str,
+    scene_idx: int,
+    scene: Dict[str, Any],
+    mode: str,
+    backend_label: str,
+) -> None:
+    """历史已合并视觉结果时跳过重复推理，便于排查与统计。"""
+    try:
+        tr = f"{float(scene.get('start_time')):.3f}-{float(scene.get('end_time')):.3f}"
+    except (TypeError, ValueError):
+        tr = "?"
+    logger.info(
+        "跳过重复视觉推理 (already analyzed): project_id=%s scene_idx=%s time_range=%s mode=%s vision_status=%s backend=%s",
+        project_id,
+        scene_idx,
+        tr,
+        mode,
+        scene.get("vision_status"),
+        backend_label,
+    )
+
+
+def _normalize_subtitle_for_vision(sub: Any) -> str:
+    s = (str(sub).strip() if sub is not None else "") or ""
+    if not s or s == "无":
+        return "（本镜头无对白或未识别字幕）"
+    return s
+
+
+def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> str:
+    sub = _normalize_subtitle_for_vision(subtitle_text)
+    return f"""200字以内，描述这个影视画面，主体人物与动作、环境与背景、字幕与剧情暗示等信息（自然语言）。
+    字幕：
+    {sub}
+    """
+
+
+def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s, re.IGNORECASE)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except Exception:
+            pass
+    try:
+        out = json.loads(s)
+        return out if isinstance(out, dict) else None
+    except Exception:
+        pass
+    i = s.find("{")
+    j = s.rfind("}")
+    if i >= 0 and j > i:
+        try:
+            out = json.loads(s[i : j + 1])
+            return out if isinstance(out, dict) else None
+        except Exception:
+            pass
+    return None
+
+
+def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
+    desc = str(d.get("desc") or "").strip()
+    objs = d.get("objects")
+    if isinstance(objs, list):
+        obj_str = "、".join(str(x).strip() for x in objs if str(x).strip())
+    else:
+        obj_str = str(objs or "").strip()
+    action = str(d.get("action") or "").strip()
+    scene = str(d.get("scene") or "").strip()
+    emotion = str(d.get("emotion") or "").strip()
+    lines: List[str] = []
+    if desc:
+        lines.append(f"画面：{desc}")
+    if obj_str:
+        lines.append(f"物体：{obj_str}")
+    if action:
+        lines.append(f"动作：{action}")
+    if scene:
+        lines.append(f"场景：{scene}")
+    if emotion:
+        lines.append(f"情绪：{emotion}")
+    return "\n".join(lines)
+
+
+def _parse_online_vision_model_output(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    return None, (raw or "").strip()
 
 
 class _OnlineVisionRunner:
@@ -571,6 +787,217 @@ class VisionFrameAnalyzer:
             
         return img
 
+    def _read_frame_from_capture(
+        self,
+        cap: cv2.VideoCapture,
+        seek_t: float,
+        mode: str,
+        fps: float,
+        frame_count: float,
+    ) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
+        fps_ok = fps > 0.0
+        frame_count_ok = frame_count > 0.0
+        fps_safe = float(fps) if fps_ok else 25.0
+
+        try:
+            if mode == "msec":
+                ok_seek = cap.set(cv2.CAP_PROP_POS_MSEC, float(seek_t) * 1000.0)
+                ret, frame = cap.read()
+            else:
+                target_frame = int(round(float(seek_t) * float(fps_safe)))
+                if frame_count_ok:
+                    target_frame = max(0, min(int(frame_count) - 1, target_frame))
+                ok_seek = cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                ret, frame = cap.read()
+
+            if (not ret) or frame is None:
+                return None, {
+                    "code": "read_failed",
+                    "message": "读取帧失败",
+                    "seek_mode": mode,
+                    "seek_time": float(seek_t),
+                    "fps": float(fps),
+                    "frame_count": float(frame_count),
+                    "seek_ok": bool(ok_seek),
+                }
+
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(frame), None
+        except Exception as e:
+            return None, {
+                "code": "cv2_exception",
+                "message": str(e),
+                "seek_mode": mode,
+                "seek_time": float(seek_t),
+            }
+
+    def _extract_frames_with_cv2_with_reason(
+        self, video_path: str, seek_times: List[float]
+    ) -> Tuple[Optional[List[Image.Image]], Optional[Dict[str, Any]]]:
+        if not seek_times:
+            return [], None
+
+        seek_times_normalized = [max(0.0, float(t)) for t in seek_times]
+        last_err: Optional[Dict[str, Any]] = None
+
+        for mode in ("msec", "frame"):
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                last_err = {"code": "open_failed", "message": "无法打开视频文件", "seek_mode": mode}
+                continue
+
+            fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
+            images: List[Image.Image] = []
+
+            try:
+                for seek_t in seek_times_normalized:
+                    img, err = self._read_frame_from_capture(cap, seek_t, mode, fps, frame_count)
+                    if img is None:
+                        last_err = err
+                        images = []
+                        break
+                    images.append(img)
+                if images:
+                    return images, None
+            finally:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+        return None, last_err
+
+    def _extract_frame_with_ffmpeg_with_reason(
+        self, video_path: str, seek_t: float
+    ) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
+        def run_one(args: List[str]) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]:
+            try:
+                kwargs: Dict[str, Any] = {
+                    "stdout": subprocess.PIPE,
+                    "stderr": subprocess.PIPE,
+                    "timeout": 12,
+                    "check": False,
+                }
+                if os.name == "nt":
+                    kwargs["creationflags"] = WIN_NO_WINDOW
+                p = subprocess.run(args, **kwargs)
+                if p.returncode != 0 or not p.stdout:
+                    return None, {
+                        "code": "ffmpeg_failed",
+                        "message": "ffmpeg 抽帧失败",
+                        "returncode": int(p.returncode),
+                        "stderr": (p.stderr or b"")[:2000].decode("utf-8", errors="ignore"),
+                    }
+                return p.stdout, None
+            except FileNotFoundError:
+                return None, {"code": "ffmpeg_not_found", "message": "未找到 ffmpeg 可执行文件"}
+            except subprocess.TimeoutExpired:
+                return None, {"code": "ffmpeg_timeout", "message": "ffmpeg 抽帧超时"}
+            except Exception as e:
+                return None, {"code": "ffmpeg_exception", "message": str(e)}
+
+        ts = f"{float(seek_t):.3f}"
+        cmd_fast = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-ss",
+            ts,
+            "-i",
+            video_path,
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "pipe:1",
+        ]
+        out, err = run_one(cmd_fast)
+        if out is None:
+            cmd_acc = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-i",
+                video_path,
+                "-ss",
+                ts,
+                "-frames:v",
+                "1",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "mjpeg",
+                "pipe:1",
+            ]
+            out, err2 = run_one(cmd_acc)
+            err = err2 if err2 else err
+        if out is None:
+            return None, err
+        try:
+            img = Image.open(BytesIO(out)).convert("RGB")
+            return img, None
+        except Exception as e:
+            return None, {"code": "ffmpeg_decode_failed", "message": str(e)}
+
+    def _extract_frames_ffmpeg_concurrent_with_reason(
+        self, video_path: str, seek_times: List[float], max_workers: int
+    ) -> Tuple[Optional[List[Image.Image]], Optional[Dict[str, Any]]]:
+        if not seek_times:
+            return [], None
+        if not video_path:
+            return None, {"code": "invalid_path", "message": "video_path 为空", "seek_times": seek_times}
+        if not Path(video_path).exists():
+            return None, {"code": "path_not_found", "message": "视频文件不存在", "video_path": video_path, "seek_times": seek_times}
+
+        seek_times_normalized = [max(0.0, float(t)) for t in seek_times]
+        workers = max(1, min(int(max_workers or 1), len(seek_times_normalized)))
+        results: List[Optional[Image.Image]] = [None] * len(seek_times_normalized)
+        first_error: Optional[Dict[str, Any]] = None
+        lock = threading.Lock()
+
+        def _extract_one(index: int, seek_t: float) -> None:
+            nonlocal first_error
+            img, err = self._extract_frame_with_ffmpeg_with_reason(video_path, seek_t)
+            with lock:
+                if img is not None:
+                    results[index] = img
+                    return
+                if first_error is None:
+                    merged = dict(err or {})
+                    merged["code"] = merged.get("code") or "extract_frame_failed"
+                    merged["seek_times"] = seek_times_normalized
+                    merged["failed_seek_time"] = float(seek_t)
+                    first_error = merged
+
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ffmpeg_frame_extract") as executor:
+            futures = [
+                executor.submit(_extract_one, index, seek_t)
+                for index, seek_t in enumerate(seek_times_normalized)
+            ]
+            for future in futures:
+                future.result()
+
+        if first_error is not None:
+            return None, first_error
+        if any(img is None for img in results):
+            return None, {
+                "code": "extract_frame_failed",
+                "message": "并发 ffmpeg 抽帧结果不完整",
+                "seek_times": seek_times_normalized,
+            }
+        return [img for img in results if img is not None], None
+
     def extract_frame_at_time_with_reason(self, video_path: str, seek_time: float) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
         try:
             if not video_path:
@@ -578,182 +1005,19 @@ class VisionFrameAnalyzer:
             if not Path(video_path).exists():
                 return None, {"code": "path_not_found", "message": "视频文件不存在", "video_path": video_path}
 
-            seek_t = float(seek_time)
-            if seek_t < 0:
-                seek_t = 0.0
+            seek_t = max(0.0, float(seek_time))
+            images, cv_err = self._extract_frames_with_cv2_with_reason(video_path, [seek_t])
+            if images:
+                return images[0], None
 
-            def _try_cv2(mode: str) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
-                cap = cv2.VideoCapture(video_path)
-                if not cap.isOpened():
-                    try:
-                        cap.release()
-                    except Exception:
-                        pass
-                    return None, {"code": "open_failed", "message": "无法打开视频文件", "seek_mode": mode}
-
-                fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
-                fps_ok = fps > 0.0
-                frame_count_ok = frame_count > 0.0
-                fps_safe = float(fps) if fps_ok else 25.0
-
-                try:
-                    if mode == "msec":
-                        ok_seek = cap.set(cv2.CAP_PROP_POS_MSEC, float(seek_t) * 1000.0)
-                        ret, frame = cap.read()
-                        if (not ret) or frame is None:
-                            back = max(0.0, float(seek_t) - 2.0)
-                            cap.set(cv2.CAP_PROP_POS_MSEC, back * 1000.0)
-                            frame = None
-                            for _ in range(int(round(2.0 * fps_safe)) + 5):
-                                ret_i, fr_i = cap.read()
-                                if not ret_i or fr_i is None:
-                                    continue
-                                frame = fr_i
-                            ret = frame is not None
-                    else:
-                        target_frame = int(round(float(seek_t) * float(fps_safe)))
-                        if frame_count_ok:
-                            target_frame = max(0, min(int(frame_count) - 1, target_frame))
-                        ok_seek = cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-                        ret, frame = cap.read()
-                        if (not ret) or frame is None:
-                            back_frames = max(0, target_frame - int(round(2.0 * fps_safe)))
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, back_frames)
-                            frame = None
-                            steps = max(1, target_frame - back_frames) + 5
-                            for _ in range(steps):
-                                ret_i, fr_i = cap.read()
-                                if not ret_i or fr_i is None:
-                                    continue
-                                frame = fr_i
-                            ret = frame is not None
-
-                    if (not ret) or frame is None:
-                        try:
-                            cap.release()
-                        except Exception:
-                            pass
-                        return None, {
-                            "code": "read_failed",
-                            "message": "读取帧失败",
-                            "seek_mode": mode,
-                            "seek_time": float(seek_t),
-                            "fps": float(fps),
-                            "frame_count": float(frame_count),
-                            "seek_ok": bool(ok_seek),
-                        }
-
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    try:
-                        cap.release()
-                    except Exception:
-                        pass
-                    return Image.fromarray(frame), None
-                except Exception as e:
-                    try:
-                        cap.release()
-                    except Exception:
-                        pass
-                    return None, {
-                        "code": "cv2_exception",
-                        "message": str(e),
-                        "seek_mode": mode,
-                        "seek_time": float(seek_t),
-                    }
-
-            def _try_ffmpeg() -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
-                def run_one(args: List[str]) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]:
-                    try:
-                        kwargs: Dict[str, Any] = {
-                            "stdout": subprocess.PIPE,
-                            "stderr": subprocess.PIPE,
-                            "timeout": 12,
-                            "check": False,
-                        }
-                        if os.name == "nt":
-                            kwargs["creationflags"] = WIN_NO_WINDOW
-                        p = subprocess.run(args, **kwargs)
-                        if p.returncode != 0 or not p.stdout:
-                            return None, {
-                                "code": "ffmpeg_failed",
-                                "message": "ffmpeg 抽帧失败",
-                                "returncode": int(p.returncode),
-                                "stderr": (p.stderr or b"")[:2000].decode("utf-8", errors="ignore"),
-                            }
-                        return p.stdout, None
-                    except FileNotFoundError:
-                        return None, {"code": "ffmpeg_not_found", "message": "未找到 ffmpeg 可执行文件"}
-                    except subprocess.TimeoutExpired:
-                        return None, {"code": "ffmpeg_timeout", "message": "ffmpeg 抽帧超时"}
-                    except Exception as e:
-                        return None, {"code": "ffmpeg_exception", "message": str(e)}
-
-                ts = f"{float(seek_t):.3f}"
-                cmd_fast = [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-nostdin",
-                    "-ss",
-                    ts,
-                    "-i",
-                    video_path,
-                    "-frames:v",
-                    "1",
-                    "-f",
-                    "image2pipe",
-                    "-vcodec",
-                    "mjpeg",
-                    "pipe:1",
-                ]
-                out, err = run_one(cmd_fast)
-                if out is None:
-                    cmd_acc = [
-                        "ffmpeg",
-                        "-hide_banner",
-                        "-loglevel",
-                        "error",
-                        "-nostdin",
-                        "-i",
-                        video_path,
-                        "-ss",
-                        ts,
-                        "-frames:v",
-                        "1",
-                        "-f",
-                        "image2pipe",
-                        "-vcodec",
-                        "mjpeg",
-                        "pipe:1",
-                    ]
-                    out, err2 = run_one(cmd_acc)
-                    err = err2 if err2 else err
-                if out is None:
-                    return None, err
-                try:
-                    img = Image.open(BytesIO(out)).convert("RGB")
-                    return img, None
-                except Exception as e:
-                    return None, {"code": "ffmpeg_decode_failed", "message": str(e)}
-
-            cv_img, cv_err = _try_cv2("msec")
-            if cv_img is not None:
-                return cv_img, None
-            cv_img2, cv_err2 = _try_cv2("frame")
-            if cv_img2 is not None:
-                return cv_img2, None
-
-            ff_img, ff_err = _try_ffmpeg()
+            ff_img, ff_err = self._extract_frame_with_ffmpeg_with_reason(video_path, seek_t)
             if ff_img is not None:
                 return ff_img, None
 
             return None, {
                 "code": "extract_frame_failed",
                 "message": "抽帧失败（cv2 与 ffmpeg 均失败）",
-                "cv2_msec": cv_err,
-                "cv2_frame": cv_err2,
+                "cv2": cv_err,
                 "ffmpeg": ff_err,
             }
         except Exception as e:
@@ -774,19 +1038,31 @@ class VisionFrameAnalyzer:
         self, video_path: str, t_start: float, t_end: float, key_frame_count: int
     ) -> Tuple[Optional[List[Image.Image]], Optional[Dict[str, Any]]]:
         times = _segment_key_frame_seek_times(t_start, t_end, int(key_frame_count))
-        images: List[Image.Image] = []
-        for t in times:
-            img, err = self.extract_frame_at_time_with_reason(video_path, t)
-            if not img:
-                merged = dict(err or {})
-                merged["code"] = merged.get("code") or "extract_frame_failed"
-                merged["seek_times"] = times
-                merged["failed_seek_time"] = float(t)
-                merged["t_start"] = float(t_start)
-                merged["t_end"] = float(t_end)
-                return None, merged
-            images.append(img)
-        return images, None
+        ffmpeg_images, ffmpeg_err = self._extract_frames_ffmpeg_concurrent_with_reason(
+            video_path,
+            times,
+            max_workers=max(1, len(times)),
+        )
+        if ffmpeg_images:
+            return ffmpeg_images, None
+
+        if not video_path:
+            return None, {"code": "invalid_path", "message": "video_path 为空", "seek_times": times}
+        if not Path(video_path).exists():
+            return None, {"code": "path_not_found", "message": "视频文件不存在", "video_path": video_path, "seek_times": times}
+
+        images, cv_err = self._extract_frames_with_cv2_with_reason(video_path, times)
+        if images:
+            return images, None
+
+        merged = dict(ffmpeg_err or {})
+        merged["code"] = merged.get("code") or "extract_frame_failed"
+        merged["seek_times"] = times
+        merged["t_start"] = float(t_start)
+        merged["t_end"] = float(t_end)
+        if cv_err is not None:
+            merged["cv2"] = cv_err
+        return None, merged
 
     def infer_with_moondream(self, img: Image.Image, prompt: str = "Describe this image briefly.", return_stats: bool = False):
         optimized_img = self._optimize_image(img)
@@ -797,78 +1073,233 @@ class VisionFrameAnalyzer:
     def get_moondream_runtime_status(self) -> Dict[str, Any]:
         return self._moondream.get_runtime_status()
 
-    async def analyze_scenes_online(
+    async def _extract_scenes_online_frames(
         self,
         project_id: str,
         video_path: str,
         scenes: List[Dict[str, Any]],
-        provider: str,
-        api_key: str,
-        base_url: str,
-        model_name: str,
-        timeout: int = 120,
-        mode: str = "all",
-        task_id: Optional[str] = None,
-        max_concurrency: int = 128,
-        vision_key_frames: int = 1,
-    ) -> List[Dict[str, Any]]:
-        """
-        Analyze scenes using online vision models (302ai, yunwu, etc.).
-        mode: "no_subtitles" or "all"
-        vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
-        max_concurrency: 抽帧与 API 调用的默认并发上限（默认 200，单参数同时约束两侧，硬顶 32）。
-        """
-        try:
-            infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
-        except Exception:
-            infer_wall_sec = 300.0
-        if infer_wall_sec < 1.0:
-            infer_wall_sec = 300.0
-
-        effective_http_timeout = max(int(timeout or 0), int(infer_wall_sec + 0.999))
-        online_runner = await self._get_online_runner(
-            provider, api_key, base_url, model_name, effective_http_timeout
-        )
+        to_analyze_indices: List[int],
+        task_id: Optional[str],
+        extract_concurrency: int,
+        vision_key_frames: int,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """先并发完成所有镜头的在线视觉抽帧。"""
         kf = int(vision_key_frames) if int(vision_key_frames) in (1, 3) else 1
-
-        cap = max(1, min(int(max_concurrency or 1), 32))
-        extract_concurrency = cap
-        api_concurrency = cap
-        extract_semaphore = asyncio.Semaphore(extract_concurrency)
-        api_semaphore = asyncio.Semaphore(api_concurrency)
-
-        to_analyze_indices = []
-        for idx, scene in enumerate(scenes):
-            should_analyze = False
-            if mode == "all":
-                should_analyze = True
-            elif mode == "no_subtitles":
-                sub = scene.get("subtitle")
-                if not sub or sub == "无":
-                    should_analyze = True
-            if should_analyze:
-                to_analyze_indices.append(idx)
-
-        total_to_analyze = len(to_analyze_indices)
-        if total_to_analyze == 0:
-            return scenes
-
-        processed_count = 0
         loop = asyncio.get_running_loop()
-        stop_infer_all = asyncio.Event()
-        scene_tasks: List[asyncio.Task] = []
+        total_to_analyze = len(to_analyze_indices)
+        extract_done_count = 0
+
+        def _update_extract_progress_state() -> None:
+            if not task_id or total_to_analyze <= 0:
+                return
+            progress = 90 + (extract_done_count / total_to_analyze) * 5
+            task_progress_store.set_state(
+                scope=self.SCOPE,
+                project_id=project_id,
+                task_id=task_id,
+                status="processing",
+                progress=progress,
+                message=f"在线视觉抽帧中: {extract_done_count}/{total_to_analyze}",
+                phase="analyze_vision_online_extract",
+            )
 
         extract_executor = ThreadPoolExecutor(max_workers=extract_concurrency, thread_name_prefix="online_vision_extract")
 
-        def _extract_segment_sync(v_path: str, t_s: float, t_e: float, scene_idx: int):
+        def _extract_segment_sync(
+            v_path: str, t_s: float, t_e: float, scene_idx: int, scheduled_at: float
+        ):
+            thread_start = time.time()
+            queue_wait_sec = max(0.0, thread_start - float(scheduled_at))
+            t_work0 = time.time()
             try:
                 imgs, frame_err = self.extract_segment_key_frames_with_reason(v_path, t_s, t_e, kf)
+                extract_work_sec = time.time() - t_work0
+                base = {"queue_wait_sec": queue_wait_sec, "extract_work_sec": extract_work_sec}
                 if not imgs:
-                    return {"ok": False, "imgs": None, "error": "extract_frame_failed", "frame_error": frame_err}
-                return {"ok": True, "imgs": imgs, "error": None, "frame_error": None}
+                    return {
+                        **base,
+                        "ok": False,
+                        "imgs": None,
+                        "error": "extract_frame_failed",
+                        "frame_error": frame_err,
+                    }
+                return {**base, "ok": True, "imgs": imgs, "error": None, "frame_error": None}
             except Exception as e:
-                logger.error(f"Frame extract failed for {t_s}-{t_e}: {e}")
-                return {"ok": False, "imgs": None, "error": str(e), "frame_error": None}
+                extract_work_sec = time.time() - t_work0
+                logger.error("在线视觉抽帧失败：镜头%s，时间段%.3f-%.3f，错误=%s", scene_idx, float(t_s), float(t_e), e)
+                return {
+                    "queue_wait_sec": queue_wait_sec,
+                    "extract_work_sec": extract_work_sec,
+                    "ok": False,
+                    "imgs": None,
+                    "error": str(e),
+                    "frame_error": None,
+                }
+
+        async def extract_single_scene_online(idx: int) -> Dict[str, Any]:
+            nonlocal extract_done_count
+            if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                raise asyncio.CancelledError("任务已取消")
+
+            scene = scenes[idx]
+            merged_from = scene.get("merged_from", [])
+            segments = merged_from if merged_from else [{"start_time": scene["start_time"], "end_time": scene["end_time"]}]
+            extracted_segments: List[Dict[str, Any]] = []
+
+            for seg_idx, seg in enumerate(segments, start=1):
+                if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                    raise asyncio.CancelledError("任务已取消")
+
+                t_start = seg["start_time"]
+                t_end = seg["end_time"]
+                t0 = time.time()
+                logger.info(
+                    "在线视觉抽帧开始：镜头%s，分段%s/%s，时间段%.3f-%.3f",
+                    idx,
+                    seg_idx,
+                    len(segments),
+                    float(t_start),
+                    float(t_end),
+                )
+                extract_res = await loop.run_in_executor(
+                    extract_executor,
+                    _extract_segment_sync,
+                    video_path,
+                    t_start,
+                    t_end,
+                    idx,
+                    t0,
+                )
+                t1 = time.time()
+                extract_elapsed = t1 - t0
+                imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
+                q_wait = float(extract_res.get("queue_wait_sec") or 0) if isinstance(extract_res, dict) else 0.0
+                ex_work = float(extract_res.get("extract_work_sec") or 0) if isinstance(extract_res, dict) else 0.0
+
+                if isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0:
+                    logger.info(
+                        "在线视觉抽帧完成：镜头%s，分段%s/%s，时间段%.3f-%.3f，排队%.3fs，抽帧执行%.3fs，合计%.3fs，帧数=%s",
+                        idx,
+                        seg_idx,
+                        len(segments),
+                        float(t_start),
+                        float(t_end),
+                        q_wait,
+                        ex_work,
+                        extract_elapsed,
+                        len(imgs),
+                    )
+                    extracted_segments.append(
+                        {
+                            "start_time": float(t_start),
+                            "end_time": float(t_end),
+                            "extract_status": "ok",
+                            "imgs": imgs,
+                            "queue_wait_sec": q_wait,
+                            "extract_work_sec": ex_work,
+                            "extract_elapsed_sec": extract_elapsed,
+                            "frame_error": None,
+                            "error": None,
+                        }
+                    )
+                else:
+                    err = extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result"
+                    logger.warning(
+                        "在线视觉抽帧结果异常：镜头%s，分段%s/%s，时间段%.3f-%.3f，排队%.3fs，抽帧执行%.3fs，合计%.3fs，错误=%s",
+                        idx,
+                        seg_idx,
+                        len(segments),
+                        float(t_start),
+                        float(t_end),
+                        q_wait,
+                        ex_work,
+                        extract_elapsed,
+                        err,
+                    )
+                    extracted_segments.append(
+                        {
+                            "start_time": float(t_start),
+                            "end_time": float(t_end),
+                            "extract_status": "no_frame" if err == "extract_frame_failed" else "error",
+                            "imgs": None,
+                            "queue_wait_sec": q_wait,
+                            "extract_work_sec": ex_work,
+                            "extract_elapsed_sec": extract_elapsed,
+                            "frame_error": extract_res.get("frame_error") if isinstance(extract_res, dict) else None,
+                            "error": None if err == "extract_frame_failed" else str(err or "unknown_error"),
+                        }
+                    )
+
+            extract_done_count += 1
+            logger.info(
+                "在线视觉抽帧进度：已完成%s/%s个镜头",
+                extract_done_count,
+                total_to_analyze,
+            )
+            _update_extract_progress_state()
+            return {"idx": idx, "segments": extracted_segments}
+
+        try:
+            logger.info("在线视觉分析阶段一开始：并发抽帧。")
+            _update_extract_progress_state()
+            extract_results = await asyncio.gather(
+                *(extract_single_scene_online(idx) for idx in to_analyze_indices),
+                return_exceptions=True,
+            )
+
+            extracted_by_scene: Dict[int, List[Dict[str, Any]]] = {}
+            for r in extract_results:
+                if isinstance(r, asyncio.CancelledError):
+                    raise r
+                if isinstance(r, Exception):
+                    logger.error("在线视觉抽帧任务失败：%s", r)
+                    continue
+                extracted_by_scene[r["idx"]] = r["segments"]
+
+            logger.info(
+                "在线视觉分析阶段一结束：抽帧完成，成功收集%s/%s个镜头的抽帧结果。",
+                len(extracted_by_scene),
+                total_to_analyze,
+            )
+            return extracted_by_scene
+        finally:
+            try:
+                extract_executor.shutdown(wait=True, cancel_futures=True)
+            except Exception:
+                try:
+                    extract_executor.shutdown(wait=True)
+                except Exception:
+                    pass
+
+    async def _infer_scenes_online_from_frames(
+        self,
+        project_id: str,
+        scenes: List[Dict[str, Any]],
+        to_analyze_indices: List[int],
+        extracted_by_scene: Dict[int, List[Dict[str, Any]]],
+        online_runner: Any,
+        provider: str,
+        model_name: str,
+        infer_wall_sec: float,
+        api_concurrency: int,
+        task_id: Optional[str],
+    ) -> bool:
+        """使用已抽取好的帧并发调用在线视觉模型。"""
+        total_to_analyze = len(to_analyze_indices)
+        processed_count = 0
+        stop_infer_all = asyncio.Event()
+        infer_semaphore = asyncio.Semaphore(api_concurrency)
+        infer_start_lock = asyncio.Lock()
+        infer_last_start_mono = 0.0
+
+        async def _pace_online_infer_start() -> None:
+            nonlocal infer_last_start_mono
+            async with infer_start_lock:
+                now = time.monotonic()
+                gap = _ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC - (now - infer_last_start_mono)
+                if gap > 0:
+                    await asyncio.sleep(gap)
+                infer_last_start_mono = time.monotonic()
 
         def _finalize_scene_vision(scene: Dict[str, Any], vision_segments: List[Dict[str, Any]], bump_progress: bool) -> None:
             nonlocal processed_count
@@ -915,51 +1346,40 @@ class VisionFrameAnalyzer:
                     phase="analyze_vision_online",
                 )
 
-        async def analyze_single_scene(idx: int):
-            nonlocal processed_count
+        async def infer_single_scene_online(idx: int, extracted_segments: List[Dict[str, Any]]):
             if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                 raise asyncio.CancelledError("任务已取消")
+            if stop_infer_all.is_set():
+                return
 
             scene = scenes[idx]
-            merged_from = scene.get("merged_from", [])
             subtitle_for_scene = scene.get("subtitle")
-
-            segments = merged_from if merged_from else [{"start_time": scene["start_time"], "end_time": scene["end_time"]}]
-
             vision_segments: List[Dict[str, Any]] = []
-            try:
-                if stop_infer_all.is_set():
-                    return
 
-                for seg in segments:
+            try:
+                for seg_idx, seg in enumerate(extracted_segments, start=1):
                     if stop_infer_all.is_set():
                         break
-                    t_start = seg["start_time"]
-                    t_end = seg["end_time"]
-
                     if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                         raise asyncio.CancelledError("任务已取消")
 
-                    t0 = time.time()
-                    async with extract_semaphore:
-                        if stop_infer_all.is_set():
-                            break
-                        extract_res = await loop.run_in_executor(
-                            extract_executor, _extract_segment_sync, video_path, t_start, t_end, idx
-                        )
-                    t1 = time.time()
+                    t_start = seg["start_time"]
+                    t_end = seg["end_time"]
+                    imgs = seg.get("imgs")
+                    q_wait = float(seg.get("queue_wait_sec") or 0)
+                    ex_work = float(seg.get("extract_work_sec") or 0)
+                    extract_elapsed = float(seg.get("extract_elapsed_sec") or 0)
+                    extract_status = seg.get("extract_status")
 
-                    imgs = extract_res.get("imgs") if isinstance(extract_res, dict) else None
-                    if not (isinstance(extract_res, dict) and extract_res.get("ok") and isinstance(imgs, list) and len(imgs) > 0):
-                        err = extract_res.get("error") if isinstance(extract_res, dict) else "invalid_result"
-                        if err == "extract_frame_failed":
+                    if extract_status != "ok" or not isinstance(imgs, list) or len(imgs) == 0:
+                        if extract_status == "no_frame":
                             vision_segments.append(
                                 {
                                     "start_time": float(t_start),
                                     "end_time": float(t_end),
                                     "status": "no_frame",
                                     "text": None,
-                                    "frame_error": extract_res.get("frame_error") if isinstance(extract_res, dict) else None,
+                                    "frame_error": seg.get("frame_error"),
                                 }
                             )
                         else:
@@ -969,83 +1389,165 @@ class VisionFrameAnalyzer:
                                     "end_time": float(t_end),
                                     "status": "error",
                                     "text": None,
-                                    "error": str(err or "unknown_error"),
+                                    "error": str(seg.get("error") or "unknown_error"),
                                 }
                             )
                         continue
 
-                    if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                        raise asyncio.CancelledError("任务已取消")
-
                     try:
-                        logger.info(
-                            f"Online vision analyze: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
-                            f"provider={provider} key_frames={len(imgs)}"
-                        )
                         optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
                         prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
 
-                        async with api_semaphore:
+                        retry_delays = _ONLINE_VISION_INFER_RETRY_DELAYS_SEC
+                        max_attempts = 1 + len(retry_delays)
+                        out: Optional[str] = None
+                        online_stats: Dict[str, Any] = {}
+                        t2 = 0.0
+                        t3 = 0.0
+                        last_fail: Optional[BaseException] = None
+                        last_was_timeout = False
+
+                        for attempt in range(max_attempts):
                             if stop_infer_all.is_set():
                                 break
-                            t2 = time.time()
-                            out, online_stats = await asyncio.wait_for(
-                                online_runner.infer_multi(optimized_imgs, prompt=prompt),
-                                timeout=infer_wall_sec,
-                            )
-                            t3 = time.time()
+                            if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError("任务已取消")
+                            try:
+                                await _pace_online_infer_start()
+                                async with infer_semaphore:
+                                    if stop_infer_all.is_set():
+                                        break
+                                    logger.info(
+                                        "在线视觉分析发起调用：镜头%s，分段%s/%s，时间段%.3f-%.3f，当前大模型并发上限=%s，第%s/%s次",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        api_concurrency,
+                                        attempt + 1,
+                                        max_attempts,
+                                    )
+                                    t2 = time.time()
+                                    out, online_stats = await asyncio.wait_for(
+                                        online_runner.infer_multi(optimized_imgs, prompt=prompt),
+                                        timeout=infer_wall_sec,
+                                    )
+                                    t3 = time.time()
+                                last_fail = None
+                                break
+                            except asyncio.TimeoutError as te:
+                                last_fail = te
+                                last_was_timeout = True
+                                if attempt < max_attempts - 1:
+                                    logger.warning(
+                                        "在线视觉分析超时：镜头%s，分段%s/%s，时间段%.3f-%.3f，%.1fs 后重试 (%s/%s)，超时阈值%s秒",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        retry_delays[attempt],
+                                        attempt + 1,
+                                        max_attempts - 1,
+                                        infer_wall_sec,
+                                    )
+                                    await asyncio.sleep(retry_delays[attempt])
+                            except Exception as e:
+                                last_fail = e
+                                last_was_timeout = False
+                                if attempt < max_attempts - 1:
+                                    logger.warning(
+                                        "在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，%.1fs 后重试 (%s/%s)，错误=%s",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        retry_delays[attempt],
+                                        attempt + 1,
+                                        max_attempts - 1,
+                                        e,
+                                    )
+                                    await asyncio.sleep(retry_delays[attempt])
+
+                        if out is None:
+                            if last_fail is not None:
+                                if last_was_timeout:
+                                    msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
+                                    logger.warning(
+                                        "在线视觉分析超时：镜头%s，分段%s/%s，时间段%.3f-%.3f，超时阈值%s秒（已重试%s次），已停止后续批次调用",
+                                        idx,
+                                        seg_idx,
+                                        len(extracted_segments),
+                                        float(t_start),
+                                        float(t_end),
+                                        infer_wall_sec,
+                                        len(retry_delays),
+                                    )
+                                    vision_segments.append(
+                                        {
+                                            "start_time": float(t_start),
+                                            "end_time": float(t_end),
+                                            "status": "infer_timeout",
+                                            "text": None,
+                                            "error": msg,
+                                        }
+                                    )
+                                    stop_infer_all.set()
+                                    scene["vision_stopped_early_infer_timeout"] = True
+                                    _finalize_scene_vision(scene, vision_segments, bump_progress=True)
+                                    return
+                                logger.error(
+                                    "在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，错误=%s",
+                                    idx,
+                                    seg_idx,
+                                    len(extracted_segments),
+                                    float(t_start),
+                                    float(t_end),
+                                    last_fail,
+                                )
+                                vision_segments.append(
+                                    {
+                                        "start_time": float(t_start),
+                                        "end_time": float(t_end),
+                                        "status": "error",
+                                        "text": None,
+                                        "error": str(last_fail),
+                                    }
+                                )
+                                continue
+                            break
 
                         logger.info(
-                            f"Online vision timing: scene_idx={idx} segment={float(t_start):.3f}-{float(t_end):.3f} "
-                            f"extract_s={t1 - t0:.3f} infer_s={t3 - t2:.3f} total_s={t3 - t0:.3f} provider={provider} model={model_name} "
-                            f"n_images={online_stats.get('n_images')}"
-                        )
-
-                        structured, display_text = _parse_online_vision_model_output(str(out or ""))
-                        txt = (display_text or "").strip()
-                        seg_out: Dict[str, Any] = {
-                            "start_time": float(t_start),
-                            "end_time": float(t_end),
-                            "status": "ok" if txt else "empty",
-                            "text": txt if txt else None,
-                        }
-                        if structured and isinstance(structured, dict):
-                            seg_out["structured"] = {
-                                "desc": structured.get("desc"),
-                                "objects": structured.get("objects"),
-                                "action": structured.get("action"),
-                                "scene": structured.get("scene"),
-                                "emotion": structured.get("emotion"),
-                            }
-                        vision_segments.append(seg_out)
-                    except asyncio.TimeoutError:
-                        msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已中止其余视觉分析"
-                        logger.warning(
-                            "Online vision infer wall timeout scene_idx=%s segment=%.3f-%.3f wall_sec=%s",
+                            "在线视觉分析完成：镜头%s，分段%s/%s，时间段%.3f-%.3f，抽帧(排队%.3fs+执行%.3fs=%.3fs)，推理%.3fs，总耗时%.3fs，provider=%s，model=%s，图片数=%s",
                             idx,
+                            seg_idx,
+                            len(extracted_segments),
                             float(t_start),
                             float(t_end),
-                            infer_wall_sec,
+                            q_wait,
+                            ex_work,
+                            extract_elapsed,
+                            t3 - t2,
+                            extract_elapsed + (t3 - t2),
+                            provider,
+                            model_name,
+                            online_stats.get("n_images"),
                         )
+
+                        _, display_text = _parse_online_vision_model_output(str(out or ""))
+                        txt = (display_text or "").strip()
                         vision_segments.append(
                             {
                                 "start_time": float(t_start),
                                 "end_time": float(t_end),
-                                "status": "infer_timeout",
-                                "text": None,
-                                "error": msg,
+                                "status": "ok" if txt else "empty",
+                                "text": txt if txt else None,
                             }
                         )
-                        stop_infer_all.set()
-                        scene["vision_stopped_early_infer_timeout"] = True
-                        cur = asyncio.current_task()
-                        for t in scene_tasks:
-                            if t is not cur and not t.done():
-                                t.cancel()
-                        _finalize_scene_vision(scene, vision_segments, bump_progress=True)
-                        return
                     except Exception as e:
-                        logger.error(f"Online vision analysis failed for {t_start}-{t_end}: {e}")
+                        logger.error("在线视觉分析失败：镜头%s，分段%s/%s，时间段%.3f-%.3f，错误=%s", idx, seg_idx, len(extracted_segments), float(t_start), float(t_end), e)
                         vision_segments.append(
                             {
                                 "start_time": float(t_start),
@@ -1064,58 +1566,144 @@ class VisionFrameAnalyzer:
                     _finalize_scene_vision(scene, vision_segments, bump_progress=True)
                 raise
 
-        for idx in to_analyze_indices:
-            scene_tasks.append(asyncio.create_task(analyze_single_scene(idx)))
+        logger.info("在线视觉分析阶段二开始：并发调用大模型。")
+        results = await asyncio.gather(
+            *(infer_single_scene_online(idx, extracted_by_scene.get(idx, [])) for idx in to_analyze_indices),
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, asyncio.CancelledError):
+                if stop_infer_all.is_set():
+                    continue
+                raise r
+            if isinstance(r, Exception):
+                logger.error("在线视觉分析任务失败：%s", r)
 
+        return stop_infer_all.is_set()
+
+    async def analyze_scenes_online(
+        self,
+        project_id: str,
+        video_path: str,
+        scenes: List[Dict[str, Any]],
+        provider: str,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        timeout: int = 120,
+        mode: str = "all",
+        task_id: Optional[str] = None,
+        max_concurrency: int = 128,
+        vision_key_frames: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze scenes using online vision models (302ai, yunwu, etc.).
+        mode: "no_subtitles" or "all"
+        vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
+        max_concurrency: 兼容旧参数；抽帧默认 8 并发，API 调用默认 32 并发，都会受该参数上限约束。
+        """
         try:
-            if scene_tasks:
+            infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
+        except Exception:
+            infer_wall_sec = 300.0
+        if infer_wall_sec < 1.0:
+            infer_wall_sec = 300.0
+
+        effective_http_timeout = max(int(timeout or 0), int(infer_wall_sec + 0.999))
+        online_runner = await self._get_online_runner(
+            provider, api_key, base_url, model_name, effective_http_timeout
+        )
+
+        concurrency_cap = max(1, int(max_concurrency or 1))
+        extract_concurrency = min(8, concurrency_cap)
+        api_concurrency = min(64, concurrency_cap)
+
+        to_analyze_indices = []
+        for idx, scene in enumerate(scenes):
+            should_analyze = False
+            if mode == "all":
+                should_analyze = True
+            elif mode == "no_subtitles":
+                sub = scene.get("subtitle")
+                if not sub or sub == "无":
+                    should_analyze = True
+            if not should_analyze:
+                continue
+            if scene_vision_success_ok(scene):
+                _log_skip_existing_vision_analysis(project_id, idx, scene, mode, str(provider or "online"))
+                continue
+            to_analyze_indices.append(idx)
+
+        total_to_analyze = len(to_analyze_indices)
+        if total_to_analyze == 0:
+            return scenes
+
+        waiting_count = max(0, total_to_analyze - api_concurrency)
+        logger.info(
+            "在线视觉分析准备开始：待分析%s个镜头，抽帧并发=%s，大模型并发=%s，预计首批调用%s个，剩余%s个等待下一批",
+            total_to_analyze,
+            extract_concurrency,
+            api_concurrency,
+            min(total_to_analyze, api_concurrency),
+            waiting_count,
+        )
+        logger.info(
+            "在线视觉分析已切换为两阶段执行：先并发抽帧，再并发调用大模型。"
+        )
+
+        task_progress_store.set_state(
+            scope=self.SCOPE,
+            project_id=project_id,
+            task_id=task_id,
+            status="processing",
+            progress=90,
+            message="开始在线视觉分析...",
+            phase="analyze_vision_online_start"
+        )
+
+        logger.info(
+            "在线视觉分析开始：待处理镜头=%s，抽帧并发=%s，大模型并发=%s",
+            total_to_analyze,
+            extract_concurrency,
+            api_concurrency,
+        )
+
+        extracted_by_scene = await self._extract_scenes_online_frames(
+            project_id=project_id,
+            video_path=video_path,
+            scenes=scenes,
+            to_analyze_indices=to_analyze_indices,
+            task_id=task_id,
+            extract_concurrency=extract_concurrency,
+            vision_key_frames=vision_key_frames,
+        )
+
+        stopped_early = await self._infer_scenes_online_from_frames(
+            project_id=project_id,
+            scenes=scenes,
+            to_analyze_indices=to_analyze_indices,
+            extracted_by_scene=extracted_by_scene,
+            online_runner=online_runner,
+            provider=provider,
+            model_name=model_name,
+            infer_wall_sec=infer_wall_sec,
+            api_concurrency=api_concurrency,
+            task_id=task_id,
+        )
+
+        if stopped_early:
+            if task_id:
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,
                     task_id=task_id,
                     status="processing",
-                    progress=90,
-                    message="开始在线视觉分析...",
-                    phase="analyze_vision_online_start"
+                    progress=95,
+                    message=f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已保存已完成的视觉分析，跳过剩余镜头",
+                    phase="analyze_vision_online_timeout_partial",
                 )
-                results = await asyncio.gather(*scene_tasks, return_exceptions=True)
-                for r in results:
-                    if isinstance(r, asyncio.CancelledError):
-                        if stop_infer_all.is_set():
-                            continue
-                        raise r
-                    if isinstance(r, Exception):
-                        logger.error(f"Online vision scene task failed: {r}")
 
-            if stop_infer_all.is_set():
-                if task_id:
-                    task_progress_store.set_state(
-                        scope=self.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        status="processing",
-                        progress=95,
-                        message=f"单次模型调用超过{int(infer_wall_sec)}秒未返回，已保存已完成的视觉分析，跳过剩余镜头",
-                        phase="analyze_vision_online_timeout_partial",
-                    )
-            else:
-                remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
-                if remaining:
-                    if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                        raise asyncio.CancelledError("任务已取消")
-                    processed_count = total_to_analyze - len(remaining)
-                    for i in remaining:
-                        await analyze_single_scene(i)
-
-            return scenes
-        finally:
-            try:
-                extract_executor.shutdown(wait=True, cancel_futures=True)
-            except Exception:
-                try:
-                    extract_executor.shutdown(wait=True)
-                except Exception:
-                    pass
+        return scenes
 
     async def analyze_scenes(
         self, 
@@ -1160,9 +1748,13 @@ class VisionFrameAnalyzer:
                 sub = scene.get("subtitle")
                 if not sub or sub == "无":
                     should_analyze = True
-            
-            if should_analyze:
-                to_analyze_indices.append(idx)
+
+            if not should_analyze:
+                continue
+            if scene_vision_success_ok(scene):
+                _log_skip_existing_vision_analysis(project_id, idx, scene, mode, "moondream")
+                continue
+            to_analyze_indices.append(idx)
 
         total_to_analyze = len(to_analyze_indices)
         if total_to_analyze == 0:
@@ -1328,7 +1920,7 @@ class VisionFrameAnalyzer:
                     if isinstance(r, asyncio.CancelledError):
                         raise r
 
-            remaining = [i for i in to_analyze_indices if not bool(scenes[i].get("vision_analyzed"))]
+            remaining = [i for i in to_analyze_indices if not scene_vision_success_ok(scenes[i])]
             if remaining:
                 if task_id and task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError("任务已取消")

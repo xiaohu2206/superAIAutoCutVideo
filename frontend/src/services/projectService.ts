@@ -157,60 +157,100 @@ export class ProjectService {
     file: File,
     onProgress?: (percent: number) => void
   ): Promise<FileUploadResponse> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("project_id", projectId);
+    const chunkSize = 5 * 1024 * 1024;
+    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
+    const uploadId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    // 使用 XMLHttpRequest 以支持上传进度回调
-    return new Promise<FileUploadResponse>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open(
-        "POST",
-        `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/video`
-      );
+    onProgress?.(0);
 
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(percent);
-        }
-      };
+    try {
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
+        const formData = new FormData();
+        formData.append("upload_id", uploadId);
+        formData.append("chunk_index", String(chunkIndex));
+        formData.append("total_chunks", String(totalChunks));
+        formData.append("file_name", file.name);
+        formData.append("file_size", String(file.size));
+        formData.append("chunk", file.slice(start, end), file.name);
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const result = JSON.parse(xhr.responseText);
-            resolve(result.data as FileUploadResponse);
-          } catch (e) {
-            reject(new Error("解析响应失败"));
+        const chunkResponse = await fetch(
+          `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/video/chunk`,
+          {
+            method: "POST",
+            body: formData,
           }
-        } else {
-          // 尝试解析错误响应中的具体提示信息（detail 或 message）
-          let msg = `上传视频失败: ${xhr.statusText || xhr.status}`;
+        );
+
+        if (!chunkResponse.ok) {
+          let msg = `上传视频分片失败: ${chunkResponse.statusText || chunkResponse.status}`;
           try {
-            if (xhr.responseText) {
-              const errJson = JSON.parse(xhr.responseText);
-              if (typeof errJson === "string") {
-                msg = errJson;
-              } else if (errJson?.detail) {
-                msg = errJson.detail;
-              } else if (errJson?.message) {
-                msg = errJson.message;
-              }
+            const errJson = await chunkResponse.json();
+            if (typeof errJson === "string") {
+              msg = errJson;
+            } else if (errJson?.detail) {
+              msg = errJson.detail;
+            } else if (errJson?.message) {
+              msg = errJson.message;
             }
           } catch {
             // 忽略解析错误，保留默认错误信息
           }
-          reject(new Error(msg));
+          throw new Error(msg);
         }
-      };
 
-      xhr.onerror = () => {
-        reject(new Error("网络错误，上传视频失败"));
-      };
+        onProgress?.(Math.round(((chunkIndex + 1) / totalChunks) * 100));
+      }
 
-      xhr.send(formData);
-    });
+      const completeResponse = await fetch(
+        `${apiClient.getBaseUrl()}/api/projects/${projectId}/upload/video/complete`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            upload_id: uploadId,
+            file_name: file.name,
+            file_size: file.size,
+            total_chunks: totalChunks,
+          }),
+        }
+      );
+
+      if (!completeResponse.ok) {
+        let msg = `完成视频上传失败: ${completeResponse.statusText || completeResponse.status}`;
+        try {
+          const errJson = await completeResponse.json();
+          if (typeof errJson === "string") {
+            msg = errJson;
+          } else if (errJson?.detail) {
+            msg = errJson.detail;
+          } else if (errJson?.message) {
+            msg = errJson.message;
+          }
+        } catch {
+          // 忽略解析错误，保留默认错误信息
+        }
+        throw new Error(msg);
+      }
+
+      const result = (await completeResponse.json()) as ApiResponse<FileUploadResponse>;
+      if (!result.data) {
+        throw new Error("解析响应失败");
+      }
+      onProgress?.(100);
+      return result.data;
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("网络错误，上传视频失败");
+    }
   }
 
   async uploadSubtitle(
@@ -372,34 +412,25 @@ export class ProjectService {
 
   async extractSubtitle(
     projectId: string,
-    options?:
-      | boolean
-      | {
-          force?: boolean;
-          task_id?: string | null;
-          asr_provider?: "bcut" | "fun_asr";
-          asr_model_key?: string | null;
-          asr_language?: string | null;
-          itn?: boolean;
-          hotwords?: string[];
-        }
+    options?: {
+      task_id?: string | null;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+    }
   ): Promise<SubtitleResult> {
-    const payload =
-      typeof options === "boolean"
-        ? options
-          ? { force: true }
-          : undefined
-        : options
-          ? {
-              force: Boolean(options.force),
-              task_id: options.task_id ?? undefined,
-              asr_provider: options.asr_provider,
-              asr_model_key: options.asr_model_key ?? undefined,
-              asr_language: options.asr_language ?? undefined,
-              itn: typeof options.itn === "boolean" ? options.itn : undefined,
-              hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
-            }
-          : undefined;
+    const payload = options
+      ? {
+          task_id: options.task_id ?? undefined,
+          asr_provider: options.asr_provider,
+          asr_model_key: options.asr_model_key ?? undefined,
+          asr_language: options.asr_language ?? undefined,
+          itn: typeof options.itn === "boolean" ? options.itn : undefined,
+          hotwords: Array.isArray(options.hotwords) ? options.hotwords : undefined,
+        }
+      : undefined;
     const response = await apiClient.post<ApiResponse<SubtitleResult>>(
       `/api/projects/${projectId}/extract-subtitle`,
       payload
@@ -599,6 +630,7 @@ export class ProjectService {
       analyzeVision?: boolean;
       visionMode?: string;
       visionKeyFrames?: 1 | 3;
+      visionAction?: "auto" | "continue" | "restart";
     }
   ): Promise<{ task_id: string; status: string; message: string }> {
     const payload = options
@@ -613,6 +645,7 @@ export class ProjectService {
           analyzeVision: Boolean(options.analyzeVision),
           visionMode: options.visionMode ?? "all",
           visionKeyFrames: options.visionKeyFrames === 3 ? 3 : 1,
+          visionAction: options.visionAction ?? "auto",
         }
       : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,12 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
-from modules.app_paths import (
-    app_settings_file,
-    data_base_dir,
-    normalize_path_str,
-    user_data_dir,
-)
+from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.fun_asr_service import fun_asr_service
@@ -30,30 +26,33 @@ from services.asr_utils import utterances_to_srt
 logger = logging.getLogger(__name__)
 
 
+def _subtitle_executor_max_workers() -> int:
+    raw = str(os.environ.get("SUBTITLE_EXECUTOR_MAX_WORKERS") or "").strip()
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return 2
+
+
+_SUBTITLE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_subtitle_executor_max_workers(),
+    thread_name_prefix="subtitle_worker",
+)
+
+
 def _now_ts() -> str:
     return datetime.now().isoformat()
 
 
-def _backend_root_dir() -> Path:
-    backend_dir = Path(__file__).resolve().parents[1]
-    return backend_dir.parent
-
-
 def _uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    (up / "videos").mkdir(parents=True, exist_ok=True)
-    (up / "subtitles").mkdir(parents=True, exist_ok=True)
-    (up / "audios").mkdir(parents=True, exist_ok=True)
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def _to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (_backend_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def _uploads_roots_for_resolve() -> List[Path]:
@@ -95,60 +94,12 @@ def _uploads_roots_for_resolve() -> List[Path]:
 
 
 def _resolve_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s = normalize_path_str(s)
-    s_norm = s.replace("\\", "/")
-    if s_norm.lower().startswith("file:"):
-        s_norm = s_norm.split("://", 1)[-1].lstrip("/")
-        if len(s_norm) > 1 and s_norm[1] == ":":
-            s_norm = s_norm[:2] + "/" + s_norm[2:]
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        rel = rel.lstrip("/")
-        if not rel:
-            return Path("")
-        roots = _uploads_roots_for_resolve()
-        candidates = [b / rel for b in roots]
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    if s_norm.lower().startswith("uploads/"):
-        rel = s_norm[len("uploads/") :].lstrip("/")
-        roots = _uploads_roots_for_resolve()
-        for base in roots:
-            c = base / rel
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return (roots[0] / rel) if roots else Path(s)
-    if any(s_norm.startswith(p) for p in ("subtitles/", "videos/", "audios/", "analyses/")):
-        roots = _uploads_roots_for_resolve()
-        for base in roots:
-            c = base / s_norm
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return (roots[0] / s_norm) if roots else Path(s)
-    try:
-        p = Path(s)
-        if p.is_absolute():
-            return p
-    except Exception:
-        pass
-    root = _backend_root_dir()
-    if s_norm.startswith("/"):
-        return root / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
+
+
+def _ensure_parent_dir(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _compress_srt(content: str) -> str:
@@ -212,7 +163,10 @@ def _parse_srt_content(content: str) -> List[Dict[str, Any]]:
 
 async def _run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+    return await loop.run_in_executor(
+        _SUBTITLE_EXECUTOR,
+        lambda: func(*args, **kwargs),
+    )
 
 
 async def _ws(
@@ -306,11 +260,36 @@ class ExtractSubtitleService:
         if subtitle_source == "user" and getattr(p, "subtitle_path", None):
             raise HTTPException(status_code=409, detail="已上传字幕，无法提取；请先删除字幕")
         if subtitle_status == "extracting" and not force:
-            raise HTTPException(status_code=409, detail="正在提取中")
+            current_run_id = str(getattr(p, "subtitle_extract_run_id", "") or "").strip()
+            request_run_id = str(task_id or "").strip()
+            if current_run_id and request_run_id and current_run_id == request_run_id:
+                raise HTTPException(status_code=409, detail="正在提取中")
+            refreshed = projects_store.get_project(project_id) or p
+            refreshed_status = str(getattr(refreshed, "subtitle_status", "") or "").strip().lower()
+            refreshed_path = getattr(refreshed, "subtitle_path", None)
+            if refreshed_status == "extracting" and not refreshed_path:
+                try:
+                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                except Exception:
+                    pass
+            else:
+                raise HTTPException(status_code=409, detail="正在提取中")
         if subtitle_updated_by_user and not force:
             raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
         if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
-            raise HTTPException(status_code=409, detail="已存在提取字幕，若需重提请传 force=true")
+            subtitle_text = ""
+            try:
+                subtitle_abs = _resolve_path(str(getattr(p, "subtitle_path", "") or ""))
+                if subtitle_abs.exists():
+                    subtitle_text = subtitle_abs.read_text(encoding="utf-8")
+            except Exception:
+                subtitle_text = ""
+            await _ws(project_id, "completed", "done", "复用已提取字幕", 100, task_id=task_id)
+            return {
+                "segments": _parse_srt_content(subtitle_text),
+                "subtitle_meta": _subtitle_meta(p),
+                "task_id": task_id,
+            }
 
         run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
 
@@ -408,7 +387,7 @@ class ExtractSubtitleService:
                     pass
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            audio_out = _uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3"
+            audio_out = _ensure_parent_dir(_uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3")
             await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)
             ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
             if not ok_audio:
@@ -477,7 +456,7 @@ class ExtractSubtitleService:
             }
 
         ts2 = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        srt_out = _uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt"
+        srt_out = _ensure_parent_dir(_uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt")
         try:
             srt_out.write_text(compressed, encoding="utf-8")
         except Exception:

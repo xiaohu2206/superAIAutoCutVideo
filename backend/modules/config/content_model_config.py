@@ -24,6 +24,7 @@ class ContentModelConfig(BaseModel):
     temperature: Optional[float] = Field(0.7, description="温度参数", ge=0.0, le=2.0)
     timeout: Optional[int] = Field(600, description="超时时间（秒）", ge=1, le=10000)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外参数")
+    stream_output: Optional[bool] = Field(False, description="是否使用流式接收后再聚合返回")
     enabled: bool = Field(True, description="是否启用")
     description: Optional[str] = Field(None, description="配置描述")
     
@@ -326,7 +327,10 @@ class ContentModelConfigManager:
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 timeout=config.timeout,
-                extra_params=config.extra_params or {}
+                extra_params={
+                    **(config.extra_params or {}),
+                    "stream_output": bool(config.stream_output),
+                }
             )
             
             # 创建提供商实例并测试连接

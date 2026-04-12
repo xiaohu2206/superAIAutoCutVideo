@@ -1,5 +1,6 @@
 import React from "react";
 import type { TtsEngineMeta } from "../../types";
+import AppSelect from "@/components/ui/AppSelect";
 
 interface Props {
   engines: TtsEngineMeta[];
@@ -18,8 +19,8 @@ export const TtsEngineSelect: React.FC<Props> = ({ engines, provider, onProvider
     <div>
       <h4 className="text-md font-semibold text-gray-900 mb-2">引擎选择</h4>
       <div className="flex items-center gap-3">
-        <select
-          className="px-3 py-2 border border-gray-300 rounded-md"
+        <AppSelect
+          className="w-[240px]"
           value={provider}
           onChange={handleChange}
         >
@@ -29,7 +30,7 @@ export const TtsEngineSelect: React.FC<Props> = ({ engines, provider, onProvider
           {engines.length === 0 && (
             <option value="tencent_tts">腾讯云 TTS</option>
           )}
-        </select>
+        </AppSelect>
         {current && (
           <span className="text-gray-500 text-sm">{current.display_name}</span>
         )}

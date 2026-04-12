@@ -19,6 +19,7 @@ from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
+from services.vision_scene_status import scene_vision_success_ok
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
 from modules.config.video_model_config import video_model_config_manager
@@ -26,7 +27,86 @@ from modules.config.video_model_config import video_model_config_manager
 logger = logging.getLogger(__name__)
 
 _SCENES_SPLIT_VERSION = 1
-_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed"})
+_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed", "vision_error", "vision_frame_error", "vision_stopped_early_infer_timeout"})
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.hex()
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return str(value)
+
+
+def _short_repr(value: Any, limit: int = 240) -> str:
+    try:
+        text = repr(value)
+    except Exception as e:
+        text = f"<repr_failed {type(e).__name__}: {e}>"
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _find_json_unsafe_path(value: Any, path: str = "$") -> Optional[Dict[str, Any]]:
+    try:
+        json.dumps(value, ensure_ascii=False)
+        return None
+    except TypeError as e:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                key_path = f"{path}.{k}" if isinstance(k, str) and k.isidentifier() else f"{path}[{_short_repr(k, 80)}]"
+                child = _find_json_unsafe_path(v, key_path)
+                if child is not None:
+                    return child
+            return {
+                "path": path,
+                "type": type(value).__name__,
+                "error": str(e),
+                "value": _short_repr(value),
+            }
+        if isinstance(value, (list, tuple, set)):
+            for idx, item in enumerate(value):
+                child = _find_json_unsafe_path(item, f"{path}[{idx}]")
+                if child is not None:
+                    return child
+            return {
+                "path": path,
+                "type": type(value).__name__,
+                "error": str(e),
+                "value": _short_repr(value),
+            }
+        return {
+            "path": path,
+            "type": type(value).__name__,
+            "error": str(e),
+            "value": _short_repr(value),
+        }
+    except Exception as e:
+        return {
+            "path": path,
+            "type": type(value).__name__,
+            "error": f"{type(e).__name__}: {e}",
+            "value": _short_repr(value),
+        }
 
 
 class ExtractSceneService:
@@ -154,6 +234,165 @@ class ExtractSceneService:
     def _scene_dict_without_vision(self, scene: Dict[str, Any]) -> Dict[str, Any]:
         return {k: v for k, v in scene.items() if k not in _VISION_SCENE_KEYS}
 
+    def _scenes_analysis_path(self, project_id: str) -> Path:
+        return _uploads_dir() / "analyses" / f"{project_id}_scenes.json"
+
+    def _scene_needs_vision_analysis(self, scene: Dict[str, Any], mode: str) -> bool:
+        if mode == "all":
+            return True
+        if mode == "no_subtitles":
+            sub = scene.get("subtitle")
+            return not sub or sub == "无"
+        return False
+
+    def _load_existing_scene_analysis(
+        self,
+        project_id: str,
+    ) -> Optional[Tuple[List[Dict[str, Any]], float, int, Path]]:
+        path = self._scenes_analysis_path(project_id)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("读取镜头分析结果失败: %s", e)
+            return None
+        scenes = data.get("scenes")
+        if not isinstance(scenes, list) or len(scenes) == 0:
+            return None
+        try:
+            fps = float(data.get("fps") or 0)
+            total_frames = int(data.get("total_frames") or 0)
+        except (TypeError, ValueError):
+            fps = 0.0
+            total_frames = 0
+        if fps <= 0:
+            fps = 25.0
+        return [dict(s) for s in scenes], fps, total_frames, path
+
+    def _merge_existing_vision_results(
+        self,
+        base_scenes: List[Dict[str, Any]],
+        existing_scenes: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        existing_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for scene in existing_scenes:
+            try:
+                key = (f"{float(scene.get('start_time')):.6f}", f"{float(scene.get('end_time')):.6f}")
+            except (TypeError, ValueError):
+                continue
+            existing_map[key] = scene
+
+        merged: List[Dict[str, Any]] = []
+        for scene in base_scenes:
+            current = dict(scene)
+            try:
+                key = (f"{float(scene.get('start_time')):.6f}", f"{float(scene.get('end_time')):.6f}")
+            except (TypeError, ValueError):
+                merged.append(current)
+                continue
+            prev = existing_map.get(key)
+            if prev:
+                for field in _VISION_SCENE_KEYS:
+                    if field in prev:
+                        current[field] = prev[field]
+            merged.append(current)
+        return merged
+
+    def _has_pending_vision_scenes(self, scenes: List[Dict[str, Any]], mode: str) -> bool:
+        for scene in scenes:
+            if not self._scene_needs_vision_analysis(scene, mode):
+                continue
+            if not scene_vision_success_ok(scene):
+                return True
+        return False
+
+    def _build_scenes_result_payload(
+        self,
+        scenes: List[Dict[str, Any]],
+        fps: float,
+        total_frames: int,
+    ) -> Dict[str, Any]:
+        return _json_safe({
+            "scenes": scenes,
+            "fps": fps,
+            "total_frames": total_frames,
+            "created_at": datetime.now().isoformat(),
+        })
+
+    def _write_scenes_result_file(
+        self,
+        project_id: str,
+        result_data: Dict[str, Any],
+    ) -> Path:
+        out_path = self._scenes_analysis_path(project_id)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        unsafe = _find_json_unsafe_path(result_data)
+        if unsafe is not None:
+            logger.error(
+                "镜头结果写入前检测到非 JSON 字段: project_id=%s path=%s type=%s error=%s value=%s",
+                project_id,
+                unsafe.get("path"),
+                unsafe.get("type"),
+                unsafe.get("error"),
+                unsafe.get("value"),
+            )
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(result_data, f, ensure_ascii=False, indent=2)
+            logger.info(
+                "镜头结果写入成功: project_id=%s path=%s scenes=%s",
+                project_id,
+                out_path,
+                len(result_data.get("scenes") or []),
+            )
+        except Exception as e:
+            scene_count = len(result_data.get("scenes") or []) if isinstance(result_data, dict) else -1
+            logger.exception(
+                "镜头结果写入失败: project_id=%s path=%s scenes=%s payload_keys=%s",
+                project_id,
+                out_path,
+                scene_count,
+                list(result_data.keys()) if isinstance(result_data, dict) else None,
+            )
+            if scene_count > 0:
+                for idx, scene in enumerate((result_data.get("scenes") or [])):
+                    scene_unsafe = _find_json_unsafe_path(scene, path=f"$.scenes[{idx}]")
+                    if scene_unsafe is not None:
+                        logger.error(
+                            "镜头结果写入失败-定位到场景字段: project_id=%s scene_index=%s scene_id=%s path=%s type=%s error=%s value=%s scene_keys=%s",
+                            project_id,
+                            idx,
+                            scene.get("id") if isinstance(scene, dict) else None,
+                            scene_unsafe.get("path"),
+                            scene_unsafe.get("type"),
+                            scene_unsafe.get("error"),
+                            scene_unsafe.get("value"),
+                            list(scene.keys()) if isinstance(scene, dict) else None,
+                        )
+                        break
+            raise
+        return out_path
+
+    def _save_project_scenes_path(self, project_id: str, out_path: Path) -> None:
+        web_path = _to_web_path(out_path)
+        projects_store.update_project(project_id, {
+            "scenes_path": web_path,
+            "scenes_updated_at": datetime.now().isoformat()
+        })
+
+    def _save_scenes_result(
+        self,
+        project_id: str,
+        scenes: List[Dict[str, Any]],
+        fps: float,
+        total_frames: int,
+    ) -> Path:
+        result_data = self._build_scenes_result_payload(scenes, fps, total_frames)
+        out_path = self._write_scenes_result_file(project_id, result_data)
+        self._save_project_scenes_path(project_id, out_path)
+        return out_path
+
     def _scenes_list_without_vision(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [self._scene_dict_without_vision(dict(s)) for s in scenes]
 
@@ -227,6 +466,7 @@ class ExtractSceneService:
         analyze_vision: bool = False,
         vision_mode: str = "all",
         vision_key_frames: int = 1,
+        vision_action: str = "auto",
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -359,7 +599,7 @@ class ExtractSceneService:
                                 task_id=task_id,
                                 status="processing",
                                 progress=mapped_pct,
-                                message=f"正在分析镜头: {pct:.1f}%",
+                                message=f"正在拆分镜头: {pct:.2f}%",
                             )
                             if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                 raise asyncio.CancelledError("任务已取消")
@@ -397,7 +637,7 @@ class ExtractSceneService:
                                 task_id,
                                 "processing",
                                 mapped_pct,
-                                f"正在分析镜头: {overall * 100.0:.1f}%",
+                                f"正在拆分镜头: {overall * 100.0:.2f}%",
                             )
 
                         def _on_chunk_progress(idx: int, pct: float):
@@ -440,7 +680,7 @@ class ExtractSceneService:
                         pending = set()
                         next_i = 0
                         total_chunks = len(starts)
-                        effective_concurrency = total_chunks if max_chunk_concurrency <= 0 else max_chunk_concurrency
+                        effective_concurrency = max_chunk_concurrency if max_chunk_concurrency > 0 else 1
 
                         def _enqueue_more():
                             nonlocal next_i
@@ -469,7 +709,7 @@ class ExtractSceneService:
                                         task_id=task_id,
                                         status="processing",
                                         progress=mapped_pct,
-                                        message=f"正在分析镜头: {pct:.1f}%",
+                                        message=f"正在拆分镜头: {pct:.2f}%",
                                     )
                                     if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                         for pt in pending:
@@ -602,6 +842,55 @@ class ExtractSceneService:
                 analysis_dir = _uploads_dir() / "analyses"
                 analysis_dir.mkdir(parents=True, exist_ok=True)
 
+                existing_analysis = self._load_existing_scene_analysis(project_id)
+                if analyze_vision and existing_analysis:
+                    existing_scenes, existing_fps, existing_total_frames, existing_path = existing_analysis
+                    if vision_action == "continue":
+                        optimized_scenes = self._merge_existing_vision_results(optimized_scenes, existing_scenes)
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=88,
+                            message="检测到历史视觉分析结果，继续补全未分析镜头...",
+                        )
+                    elif vision_action == "restart":
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=88,
+                            message="检测到历史视觉分析结果，准备重新进行视觉分析...",
+                        )
+                    else:
+                        optimized_scenes = self._merge_existing_vision_results(optimized_scenes, existing_scenes)
+                        if not self._has_pending_vision_scenes(optimized_scenes, vision_mode):
+                            if existing_fps > 0:
+                                fps = existing_fps
+                            if existing_total_frames > 0:
+                                total_frames = existing_total_frames
+                            self._save_scenes_result(project_id, optimized_scenes, fps, total_frames)
+                            task_progress_store.set_state(
+                                scope=self.SCOPE,
+                                project_id=project_id,
+                                task_id=task_id,
+                                status="completed",
+                                progress=100,
+                                message="检测到已有视觉分析结果，已直接复用",
+                            )
+                            return
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=88,
+                            message="检测到历史视觉分析结果，自动继续补全未分析镜头...",
+                        )
+                        logger.info("复用历史视觉分析文件继续执行: project_id=%s path=%s", project_id, existing_path)
+
                 # 4.5 视觉分析 (Moondream or Online Vision)
                 # 要求：视觉分析前必须已经拿到整体字幕数据（有字幕文件且已落盘，部分字幕也算有）
                 has_subtitles_for_vision = False
@@ -685,28 +974,7 @@ class ExtractSceneService:
                         )
 
                 # 5. 保存结果
-                # 保存为 json
-                result_data = {
-                    "scenes": optimized_scenes,
-                    "fps": fps,
-                    "total_frames": total_frames,
-                    "created_at": datetime.now().isoformat()
-                }
-                
-                # 路径: uploads/analyses/{project_id}_scenes.json
-                out_name = f"{project_id}_scenes.json"
-                out_path = analysis_dir / out_name
-                
-                with open(out_path, "w", encoding="utf-8") as f:
-                    json.dump(result_data, f, ensure_ascii=False, indent=2)
-                    
-                web_path = _to_web_path(out_path)
-                
-                # 更新项目
-                projects_store.update_project(project_id, {
-                    "scenes_path": web_path,
-                    "scenes_updated_at": datetime.now().isoformat()
-                })
+                out_path = self._save_scenes_result(project_id, optimized_scenes, fps, total_frames)
                 
                 task_progress_store.set_state(
                     scope=self.SCOPE,

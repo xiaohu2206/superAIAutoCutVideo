@@ -373,9 +373,6 @@ class ScriptGenerationService:
                 "text": text,
                 "OST": it.get("OST", 0),
             }
-            pic = it.get("picture")
-            if pic:
-                seg["subtitle"] = str(pic)
             segments.append(seg)
 
         now = datetime.now()

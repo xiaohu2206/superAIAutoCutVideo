@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { X, Folder } from "lucide-react";
 import { NarrationType } from "../../types/project";
+import AppSelect from "../ui/AppSelect";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -225,18 +226,17 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               >
                 解说类型
               </label>
-              <select
+              <AppSelect
                 id="narration-type"
                 value={narrationType}
                 onChange={(e) =>
                   setNarrationType(e.target.value as NarrationType)
                 }
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                 disabled={loading}
               >
                 <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
                 <option value={NarrationType.MOVIE}>电影解说</option>
-              </select>
+              </AppSelect>
             </div>
 
             {/* 按钮组 */}

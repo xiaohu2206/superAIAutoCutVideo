@@ -34,8 +34,9 @@ import platform
 from threading import RLock
 import subprocess
 
+from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_path, resolve_uploads_path
 from modules.projects_store import projects_store
-from modules.video_processor import video_processor
+from modules.video_processor import video_processor, _trim_log_tag, _trim_timeout_label
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
 from services.generate_copywriting_service import generate_copywriting_service
@@ -68,13 +69,7 @@ def project_root_dir() -> Path:
 
 
 def uploads_dir() -> Path:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (project_root_dir() / "uploads")
-    (up / "videos").mkdir(parents=True, exist_ok=True)
-    (up / "subtitles").mkdir(parents=True, exist_ok=True)
-    (up / "audios").mkdir(parents=True, exist_ok=True)
-    (up / "analyses").mkdir(parents=True, exist_ok=True)
-    return up
+    return app_uploads_dir()
 
 
 def safe_dir_name(name: str, fallback: str) -> str:
@@ -88,40 +83,11 @@ def safe_dir_name(name: str, fallback: str) -> str:
 
 
 def to_web_path(p: Path) -> str:
-    env = os.environ.get("SACV_UPLOADS_DIR")
-    up = Path(env) if env else (project_root_dir() / "uploads")
-    rel = p.relative_to(up)
-    return "/uploads/" + str(rel).replace("\\", "/")
+    return to_uploads_web_path(p)
 
 
 def resolve_abs_path(path_str: str) -> Path:
-    s = (path_str or "").strip()
-    if not s:
-        return Path("")
-    s_norm = s.replace("\\", "/")
-    if s_norm.startswith("/uploads/") or s_norm == "/uploads":
-        rel = s_norm[len("/uploads/"):] if s_norm.startswith("/uploads/") else ""
-        env = os.environ.get("SACV_UPLOADS_DIR")
-        candidates = []
-        if env:
-            try:
-                candidates.append(Path(env) / rel)
-            except Exception:
-                pass
-        try:
-            candidates.append((project_root_dir() / "uploads") / rel)
-        except Exception:
-            pass
-        for c in candidates:
-            try:
-                if c.exists():
-                    return c
-            except Exception:
-                pass
-        return candidates[0] if candidates else Path(rel)
-    if s_norm.startswith("/"):
-        return project_root_dir() / s_norm[1:]
-    return Path(s)
+    return resolve_uploads_path(path_str)
 
 
 def resolve_any_path(path_str: str) -> Path:
@@ -427,6 +393,7 @@ class ExtractSubtitleRequest(BaseModel):
     analyzeVision: bool = False
     visionMode: str = "all"
     visionKeyFrames: int = 1
+    visionAction: str = "auto"
 
 
 class SubtitleSegmentInput(BaseModel):
@@ -753,6 +720,9 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
         vk = int(getattr(req, "visionKeyFrames", 1) or 1)
         if vk not in (1, 3):
             vk = 1
+        va = str(getattr(req, "visionAction", "auto") or "auto").strip().lower()
+        if va not in ("auto", "continue", "restart"):
+            va = "auto"
         data = await extract_scene_service.extract_scenes(
             project_id=project_id,
             force=bool(req.force),
@@ -765,6 +735,7 @@ async def extract_scene(project_id: str, req: ExtractSubtitleRequest = Body(defa
             analyze_vision=bool(req.analyzeVision),
             vision_mode=req.visionMode,
             vision_key_frames=vk,
+            vision_action=va,
         )
         return {
             "message": "镜头提取任务已提交",
@@ -1092,6 +1063,32 @@ async def stream_project_merged_video(project_id: str, request: Request):
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"}
 FASTSTART_EXTS = {".mp4", ".mov"}
+VIDEO_UPLOAD_SESSIONS: Dict[str, Dict[str, Any]] = {}
+VIDEO_UPLOAD_SESSIONS_LOCK = RLock()
+
+
+def _register_uploaded_video(project_id: str, out_path: Path, file_name: str, size: int) -> Dict[str, Any]:
+    web_path = to_web_path(out_path)
+    projects_store.append_video_path(project_id, web_path, file_name)
+    upload_time = now_ts()
+    return {
+        "message": "视频上传成功",
+        "data": {
+            "file_path": web_path,
+            "file_name": file_name,
+            "file_size": size,
+            "upload_time": upload_time,
+        },
+        "timestamp": upload_time,
+    }
+
+
+def _build_video_upload_path(project_id: str, suffix: str) -> Path:
+    up_dir = uploads_dir() / "videos"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    unique = uuid.uuid4().hex[:8]
+    out_name = f"{project_id}_video_{ts}_{unique}{suffix}"
+    return up_dir / out_name
 
 
 async def remux_faststart(path: Path) -> bool:
@@ -1137,7 +1134,7 @@ async def remux_faststart(path: Path) -> bool:
 
 
 @router.post("/{project_id}/upload/video")
-async def upload_video(project_id: str, file: UploadFile = File(...), project_id_form: str = Form(None)):
+async def upload_video(project_id: str, file: UploadFile = File(...)):
     # 校验项目存在
     p = projects_store.get_project(project_id)
     if not p:
@@ -1148,12 +1145,7 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     if suffix not in VIDEO_EXTS:
         raise HTTPException(status_code=400, detail="文件格式不支持")
 
-    # 保存文件
-    up_dir = uploads_dir() / "videos"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    unique = uuid.uuid4().hex[:8]
-    out_name = f"{project_id}_video_{ts}_{unique}{suffix}"
-    out_path = up_dir / out_name
+    out_path = _build_video_upload_path(project_id, suffix)
 
     size = 0
     try:
@@ -1168,31 +1160,135 @@ async def upload_video(project_id: str, file: UploadFile = File(...), project_id
     finally:
         await file.close()
 
-    # 上传后转码 / faststart 已关闭（按需取消下行注释以恢复）
-    # orig_path = out_path
-    # out_path = await video_processor.normalize_upload_for_web_preview(out_path)
-    # if out_path == orig_path:
-    #     await remux_faststart(out_path)
-    # try:
-    #     size = out_path.stat().st_size
-    # except Exception:
-    #     pass
+    return _register_uploaded_video(project_id, out_path, file.filename, size)
 
-    # 记录到项目的视频列表，并按规则更新生效路径
-    web_path = to_web_path(out_path)
-    # 记录路径与原始文件名
-    projects_store.append_video_path(project_id, web_path, file.filename)
+
+@router.post("/{project_id}/upload/video/chunk")
+async def upload_video_chunk(
+    project_id: str,
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    file_name: str = Form(...),
+    file_size: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    if total_chunks <= 0:
+        raise HTTPException(status_code=400, detail="total_chunks 无效")
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=400, detail="chunk_index 无效")
+
+    suffix = Path(file_name or chunk.filename or "").suffix.lower()
+    if suffix not in VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail="文件格式不支持")
+
+    tmp_dir = uploads_dir() / "videos" / "chunks" / project_id / upload_id
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    chunk_path = tmp_dir / f"{chunk_index:06d}.part"
+
+    chunk_size = 0
+    try:
+        with open(chunk_path, "wb") as buffer:
+            while True:
+                piece = await chunk.read(1024 * 1024)
+                if not piece:
+                    break
+                chunk_size += len(piece)
+                buffer.write(piece)
+    finally:
+        await chunk.close()
+
+    with VIDEO_UPLOAD_SESSIONS_LOCK:
+        session = VIDEO_UPLOAD_SESSIONS.get(upload_id)
+        if not session:
+            session = {
+                "project_id": project_id,
+                "upload_id": upload_id,
+                "file_name": file_name,
+                "file_size": file_size,
+                "total_chunks": total_chunks,
+                "suffix": suffix,
+            }
+            VIDEO_UPLOAD_SESSIONS[upload_id] = session
+        elif session.get("project_id") != project_id:
+            raise HTTPException(status_code=400, detail="upload_id 与项目不匹配")
 
     return {
-        "message": "视频上传成功",
+        "message": "分片上传成功",
         "data": {
-            "file_path": web_path,
-            "file_name": file.filename,
-            "file_size": size,
-            "upload_time": now_ts(),
+            "upload_id": upload_id,
+            "chunk_index": chunk_index,
+            "chunk_size": chunk_size,
+            "uploaded_chunks": len(list(tmp_dir.glob("*.part"))),
+            "total_chunks": total_chunks,
         },
         "timestamp": now_ts(),
     }
+
+
+class FinalizeVideoUploadRequest(BaseModel):
+    upload_id: str
+    file_name: str
+    file_size: int
+    total_chunks: int
+
+
+@router.post("/{project_id}/upload/video/complete")
+async def complete_video_upload(project_id: str, req: FinalizeVideoUploadRequest):
+    p = projects_store.get_project(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    with VIDEO_UPLOAD_SESSIONS_LOCK:
+        session = VIDEO_UPLOAD_SESSIONS.get(req.upload_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="上传会话不存在")
+    if session.get("project_id") != project_id:
+        raise HTTPException(status_code=400, detail="upload_id 与项目不匹配")
+
+    total_chunks = int(session.get("total_chunks") or req.total_chunks)
+    file_name = str(session.get("file_name") or req.file_name)
+    file_size = int(session.get("file_size") or req.file_size or 0)
+    suffix = str(session.get("suffix") or Path(file_name).suffix.lower())
+    if suffix not in VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail="文件格式不支持")
+
+    tmp_dir = uploads_dir() / "videos" / "chunks" / project_id / req.upload_id
+    if not tmp_dir.exists():
+        raise HTTPException(status_code=404, detail="上传分片不存在")
+
+    missing_chunks = [index for index in range(total_chunks) if not (tmp_dir / f"{index:06d}.part").exists()]
+    if missing_chunks:
+        raise HTTPException(status_code=400, detail=f"缺少分片: {missing_chunks[0]}")
+
+    out_path = _build_video_upload_path(project_id, suffix)
+    merged_size = 0
+    try:
+        with open(out_path, "wb") as output:
+            for index in range(total_chunks):
+                chunk_path = tmp_dir / f"{index:06d}.part"
+                with open(chunk_path, "rb") as chunk_file:
+                    shutil.copyfileobj(chunk_file, output)
+                merged_size += chunk_path.stat().st_size
+    except Exception as e:
+        try:
+            if out_path.exists():
+                out_path.unlink()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"合并上传分片失败: {str(e)}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        with VIDEO_UPLOAD_SESSIONS_LOCK:
+            VIDEO_UPLOAD_SESSIONS.pop(req.upload_id, None)
+
+    actual_size = merged_size or file_size
+    return _register_uploaded_video(project_id, out_path, file_name, actual_size)
 
 
 @router.post("/{project_id}/video/prepare")
@@ -1427,7 +1523,11 @@ async def merge_videos(project_id: str):
                 except Exception:
                     pass
 
-            ok = await video_processor.concat_videos([str(x) for x in inputs], str(out_path), on_progress)
+            ok = await video_processor.concat_videos(
+                [str(x) for x in inputs],
+                str(out_path),
+                on_progress,
+            )
             if not ok:
                 MERGE_TASKS[task_id].status = "failed"
                 err = getattr(video_processor, "last_concat_error", None) or ""
@@ -1572,6 +1672,7 @@ def _invert_ranges_ms(ranges: List[List[int]], duration_ms: int) -> List[List[in
 
 @router.post("/{project_id}/trim/video")
 async def trim_video(project_id: str, req: TrimVideoRequest):
+    trim_tag = _trim_log_tag(project_id, None)
     p = projects_store.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -1625,6 +1726,17 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
         _active_trim_keys[trim_key] = task_id
         TRIM_TASKS[task_id] = TrimTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备裁剪")
 
+    trim_tag = _trim_log_tag(project_id, task_id)
+    logger.info(
+        "%s request file=%s mode=%s ranges=%d keep_ranges=%d duration=%.3fs",
+        trim_tag,
+        Path(file_path).name,
+        mode,
+        len(req.ranges or []),
+        len(keep_ranges),
+        float(duration_ms) / 1000.0,
+    )
+
     async def _broadcast(payload: Dict[str, Any]):
         try:
             await manager.broadcast(json.dumps(payload, ensure_ascii=False))
@@ -1634,7 +1746,9 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
     async def _run():
         seg_paths: List[Path] = []
         out_tmp: Optional[Path] = None
+        trim_cancel_event = asyncio.Event()
         try:
+            logger.info("%s task start", trim_tag)
             TRIM_TASKS[task_id].status = "processing"
             TRIM_TASKS[task_id].message = "正在裁剪"
             await _broadcast(
@@ -1649,6 +1763,11 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 }
             )
 
+            logger.info(
+                "%s keep ranges sample=%s",
+                trim_tag,
+                ", ".join([f"{float(s)/1000.0:.3f}-{float(e)/1000.0:.3f}s" for s, e in keep_ranges[:8]]) + (" ..." if len(keep_ranges) > 8 else ""),
+            )
             tmp_dir = uploads_dir() / "videos" / "tmp"
             tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1658,8 +1777,27 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 seg_paths.append(seg_out)
                 start_sec = float(s_ms) / 1000.0
                 dur_sec = float(e_ms - s_ms) / 1000.0
-                ok = await video_processor.cut_video_segment(str(abs_in), str(seg_out), start_sec, dur_sec)
+                logger.info(
+                    "%s clip %d/%d start range=%.3fs-%.3fs dur=%.3fs",
+                    trim_tag,
+                    idx + 1,
+                    total_segments,
+                    start_sec,
+                    start_sec + dur_sec,
+                    dur_sec,
+                )
+                ok = await video_processor.cut_video_segment(
+                    str(abs_in),
+                    str(seg_out),
+                    start_sec,
+                    dur_sec,
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=trim_cancel_event,
+                )
                 if not ok:
+                    logger.error("%s clip %d/%d failed output_exists=%s output=%s", trim_tag, idx + 1, total_segments, seg_out.exists(), seg_out)
                     raise RuntimeError(f"剪切第 {idx + 1} 段失败")
                 pct = 10.0 + (40.0 * float(idx + 1) / float(max(total_segments, 1)))
                 TRIM_TASKS[task_id].progress = float(f"{pct:.2f}")
@@ -1703,9 +1841,42 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     }
                 )
 
-            ok = await video_processor.concat_videos([str(x) for x in seg_paths], str(out_tmp), _on_concat_progress)
+            concat_timeout = max(90.0, min(30 * 60.0, (float(duration_ms) / 1000.0) * 4.0 + 60.0))
+            logger.info(
+                "%s concat input sample=%s output_tmp=%s",
+                trim_tag,
+                ", ".join([Path(x).name for x in seg_paths[:8]]) + (" ..." if len(seg_paths) > 8 else ""),
+                out_tmp,
+            )
+            logger.info(
+                "%s concat start segments=%d timeout=%s",
+                trim_tag,
+                len(seg_paths),
+                _trim_timeout_label(concat_timeout),
+            )
+            ok = await asyncio.wait_for(
+                video_processor.concat_videos(
+                    [str(x) for x in seg_paths],
+                    str(out_tmp),
+                    _on_concat_progress,
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=trim_cancel_event,
+                ),
+                timeout=concat_timeout,
+            )
             if not ok or not out_tmp.exists():
                 err = getattr(video_processor, "last_concat_error", None) or ""
+                last_cmd = getattr(video_processor, "last_concat_cmd", None) or []
+                logger.error(
+                    "%s concat failed ok=%s out_exists=%s err=%s cmd=%s",
+                    trim_tag,
+                    ok,
+                    bool(out_tmp and out_tmp.exists()),
+                    str(err).strip()[:500],
+                    " ".join(str(x) for x in last_cmd)[:1000],
+                )
                 if err:
                     raise RuntimeError(f"拼接失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接失败")
@@ -1790,6 +1961,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 except Exception:
                     pass
 
+            logger.info("%s concat done replace=%s output=%s", trim_tag, "inplace" if out_web_path == file_path else "fallback", Path(out_web_path).name)
             out_ver = datetime.now().strftime("%Y%m%d%H%M%S%f")
             TRIM_TASKS[task_id].status = "completed"
             TRIM_TASKS[task_id].progress = 100.0
@@ -1809,9 +1981,45 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     "timestamp": now_ts(),
                 }
             )
+            logger.info("%s task completed", trim_tag)
+        except asyncio.TimeoutError:
+            TRIM_TASKS[task_id].status = "failed"
+            TRIM_TASKS[task_id].message = f"拼接超时（{_trim_timeout_label(concat_timeout)}）"
+            try:
+                trim_cancel_event.set()
+            except Exception:
+                pass
+            logger.error("%s concat timeout timeout=%s", trim_tag, _trim_timeout_label(concat_timeout))
+            if out_tmp:
+                try:
+                    if out_tmp.exists():
+                        out_tmp.unlink()
+                except Exception:
+                    pass
+            for sp in seg_paths:
+                try:
+                    if sp.exists():
+                        sp.unlink()
+                except Exception:
+                    pass
+            await _broadcast(
+                {
+                    "type": "error",
+                    "scope": "trim_video",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": TRIM_TASKS[task_id].message,
+                    "progress": float(TRIM_TASKS[task_id].progress or 0.0),
+                    "timestamp": now_ts(),
+                }
+            )
         except Exception as e:
             TRIM_TASKS[task_id].status = "failed"
             TRIM_TASKS[task_id].message = str(e) or "裁剪失败"
+            try:
+                trim_cancel_event.set()
+            except Exception:
+                pass
             if out_tmp:
                 try:
                     if out_tmp.exists():
@@ -1836,6 +2044,7 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 }
             )
         finally:
+            logger.info("%s task end status=%s progress=%.1f", trim_tag, TRIM_TASKS[task_id].status, float(TRIM_TASKS[task_id].progress or 0.0))
             with _trim_lock:
                 cur = _active_trim_keys.get(trim_key)
                 if cur == task_id:
@@ -2144,6 +2353,7 @@ async def get_project_running_tasks(project_id: str):
         "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
+        "extract_scene": task_progress_store.get_latest_running(extract_scene_service.SCOPE, project_id),
     }
     return {
         "message": "获取任务进度",
@@ -2163,6 +2373,7 @@ async def get_project_latest_tasks(project_id: str):
                 "generate_script": None,
                 "generate_video": None,
                 "generate_jianying_draft": None,
+                "extract_scene": None,
             },
             "timestamp": now_ts(),
         }
@@ -2173,6 +2384,7 @@ async def get_project_latest_tasks(project_id: str):
             "generate_script": task_progress_store.get_state("generate_script", project_id),
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
+            "extract_scene": task_progress_store.get_state(extract_scene_service.SCOPE, project_id),
         },
         "timestamp": now_ts(),
     }

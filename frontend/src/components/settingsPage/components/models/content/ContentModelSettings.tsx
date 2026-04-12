@@ -2,6 +2,7 @@ import { TauriCommands } from "@/services/clients";
 import { message } from "@/services/message";
 import { AlertCircle, CheckCircle, ExternalLink, Eye, EyeOff } from "lucide-react";
 import React from "react";
+import AppSelect from "@/components/ui/AppSelect";
 import type { ContentModelConfig, TestResult } from "../../../types";
 
 interface ContentModelSettingsProps {
@@ -55,10 +56,9 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         <label className="block text-sm font-medium text-gray-700 mb-2">
           选择模型提供商
         </label>
-        <select
+        <AppSelect
           value={contentSelectedProvider}
           onChange={(e) => handleContentProviderChange(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="302ai">302平台 (302.AI)</option>
           <option value="yunwu">云雾API平台 (Yunwu.AI)</option>
@@ -67,7 +67,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           <option value="deepseek">DeepSeek</option>
           <option value="openrouter">OpenRouter</option>
           <option value="custom_openai">自定义模型（OpenAI 兼容接口）</option>
-        </select>
+        </AppSelect>
         <p className="text-xs text-gray-500 mt-1">
           选择用于文案生成的AI模型提供商；自定义项需填写下方接口地址、密钥与模型名
         </p>
@@ -156,6 +156,22 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           <p className="text-xs text-gray-500 mt-1">
             OpenAI 兼容 Chat Completions 地址；若未以 /chat/completions 结尾会自动补全（与通义、云雾等用法一致）
           </p>
+        </div>
+      )}
+
+      {contentSelectedProvider === "custom_openai" && (
+        <div>
+          <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={Boolean(currentContentConfig.stream_output)}
+              onChange={(e) =>
+                void updateCurrentContentConfig("stream_output", e.target.checked)
+              }
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>开启流式输出（失败尝试勾选）</span>
+          </label>
         </div>
       )}
 

@@ -24,8 +24,21 @@ WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def _concat_list_file_encoding() -> str:
-    """Windows 上部分 ffmpeg 构建依赖带 BOM 的 UTF-8 才能正确解析 concat 列表中的非 ASCII 路径。"""
-    return "utf-8-sig" if os.name == "nt" else "utf-8"
+    """concat 列表必须用无 BOM 的 UTF-8：带 BOM 时首行会变成「\ufefffile ...」，ffmpeg 报 unknown keyword file。"""
+    return "utf-8"
+
+
+def _trim_log_tag(project_id: Optional[str], task_id: Optional[str]) -> str:
+    pid = (project_id or "-")[:8]
+    tid = (task_id or "-").split("_")[-1][:6]
+    return f"[trim][p={pid}][t={tid}]"
+
+
+def _trim_timeout_label(seconds: float) -> str:
+    if seconds >= 60:
+        return f"{seconds / 60.0:.1f}min"
+    return f"{seconds:.0f}s"
+
 
 class VideoProcessor:
     """视频处理器类"""
@@ -56,34 +69,116 @@ class VideoProcessor:
         self,
         proc: asyncio.subprocess.Process,
         cancel_event: Optional[asyncio.Event],
+        *,
+        timeout: Optional[float] = None,
+        timeout_message: Optional[str] = None,
+        timeout_log: Optional[str] = None,
     ) -> Tuple[bytes, bytes]:
-        if not cancel_event:
-            return await proc.communicate()
+        return await self._wait_process_with_cancel(
+            proc,
+            cancel_event,
+            timeout=timeout,
+            timeout_message=timeout_message,
+            timeout_log=timeout_log,
+            capture_output=True,
+        )
 
-        comm_task = asyncio.create_task(proc.communicate())
-        cancel_task = asyncio.create_task(cancel_event.wait())
-        done, pending = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
-        if cancel_task in done:
-            try:
-                if proc.returncode is None:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-            finally:
-                try:
-                    await asyncio.wait_for(comm_task, timeout=1.5)
-                except Exception:
-                    try:
-                        comm_task.cancel()
-                    except Exception:
-                        pass
-            raise asyncio.CancelledError()
+    async def _wait_process_with_cancel(
+        self,
+        proc: asyncio.subprocess.Process,
+        cancel_event: Optional[asyncio.Event],
+        *,
+        timeout: Optional[float] = None,
+        timeout_message: Optional[str] = None,
+        timeout_log: Optional[str] = None,
+        capture_output: bool = True,
+    ) -> Tuple[bytes, bytes]:
+        wait_task = asyncio.create_task(proc.wait())
+        cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+        timeout_task = asyncio.create_task(asyncio.sleep(float(timeout))) if timeout and timeout > 0 else None
+
+        wait_set = {wait_task}
+        if cancel_task:
+            wait_set.add(cancel_task)
+        if timeout_task:
+            wait_set.add(timeout_task)
+
+        stdout = b""
+        stderr = b""
+
         try:
-            cancel_task.cancel()
-        except Exception:
-            pass
-        return await comm_task
+            done, _ = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
+
+            if cancel_task and cancel_task in done:
+                try:
+                    if proc.returncode is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        await asyncio.wait_for(wait_task, timeout=1.5)
+                    except Exception:
+                        try:
+                            if proc.returncode is None:
+                                proc.kill()
+                        except Exception:
+                            pass
+                        try:
+                            await asyncio.wait_for(wait_task, timeout=1.0)
+                        except Exception:
+                            pass
+                raise asyncio.CancelledError()
+
+            if timeout_task and timeout_task in done:
+                log_text = (timeout_log or timeout_message or "ffmpeg timeout").strip()
+                logger.error(log_text)
+                try:
+                    if proc.returncode is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                finally:
+                    try:
+                        await asyncio.wait_for(wait_task, timeout=1.5)
+                    except Exception:
+                        try:
+                            if proc.returncode is None:
+                                proc.kill()
+                        except Exception:
+                            pass
+                        try:
+                            await asyncio.wait_for(wait_task, timeout=1.0)
+                        except Exception:
+                            pass
+                raise asyncio.TimeoutError(timeout_message or "子进程执行超时")
+
+            await wait_task
+            if capture_output:
+                try:
+                    if proc.stdout:
+                        stdout = await proc.stdout.read()
+                except Exception:
+                    pass
+                try:
+                    if proc.stderr:
+                        stderr = await proc.stderr.read()
+                except Exception:
+                    pass
+            return stdout, stderr
+        finally:
+            if cancel_task:
+                try:
+                    cancel_task.cancel()
+                except Exception:
+                    pass
+            if timeout_task:
+                try:
+                    timeout_task.cancel()
+                except Exception:
+                    pass
     
     async def cut_video_segment(
         self,
@@ -102,6 +197,8 @@ class VideoProcessor:
         以便按关键帧就近截取（仍使用 `-c copy` 保持高效）。
         """
         try:
+            trim_tag = _trim_log_tag(project_id, task_id) if scope == "trim_video" else ""
+            clip_timeout = max(45.0, min(12 * 60.0, float(duration or 0.0) * 3.0 + 30.0))
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -114,7 +211,14 @@ class VideoProcessor:
                 output_path
             ]
 
-            logger.info(f"剪切视频片段(关键帧对齐): {start_time}s-{start_time+duration}s -> {output_path}")
+            logger.info(
+                "%s cut start mode=copy range=%.3fs-%.3fs dur=%.3fs timeout=%s",
+                trim_tag,
+                float(start_time),
+                float(start_time + duration),
+                float(duration),
+                _trim_timeout_label(clip_timeout),
+            )
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -127,7 +231,17 @@ class VideoProcessor:
             if tracking:
                 self._register_proc(str(scope), str(project_id), str(task_id), process)
             try:
-                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                stdout, stderr = await self._communicate_with_cancel(
+                    process,
+                    cancel_event,
+                    timeout=clip_timeout,
+                    timeout_message=f"裁剪超时（copy，{_trim_timeout_label(clip_timeout)}）",
+                    timeout_log=(
+                        f"{trim_tag} cut timeout mode=copy "
+                        f"range={float(start_time):.3f}s-{float(start_time + duration):.3f}s "
+                        f"dur={float(duration):.3f}s timeout={_trim_timeout_label(clip_timeout)}"
+                    ).strip(),
+                )
             finally:
                 if tracking:
                     self._unregister_proc(str(scope), str(project_id), str(task_id), process)
@@ -146,24 +260,25 @@ class VideoProcessor:
                     tol = 0.20
                     if a_dur_val > 0.0 and (a_dur_val + tol) < float(dur):
                         logger.warning(
-                            "剪切结果音画时长不一致，进入重编码回退: audio=%.3fs video=%.3fs target=%.3fs path=%s",
+                            "%s cut fallback reason=av_duration_mismatch audio=%.3fs video=%.3fs target=%.3fs",
+                            trim_tag,
                             a_dur_val,
                             float(dur),
                             float(duration),
-                            output_path,
                         )
                     else:
-                        logger.info(f"视频剪切成功: {output_path}")
+                        logger.info("%s cut done mode=copy out=%s", trim_tag, output_path)
                         return True
-                logger.warning("剪切结果时长异常，进入重编码回退")
+                logger.warning("%s cut fallback reason=output_duration_invalid", trim_tag)
             else:
-                err = stderr.decode(errors="ignore")
-                logger.error(f"视频剪切失败，进入重编码回退: {err}")
+                err = stderr.decode(errors="ignore").strip()
+                logger.error("%s cut fallback reason=copy_failed err=%s", trim_tag, err[:300])
 
             try:
                 enc_name, vcodec_args = await self._pick_fast_encoder()
             except Exception:
                 enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+            reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
             reencode_cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -178,6 +293,12 @@ class VideoProcessor:
                 "-y",
                 output_path
             ]
+            logger.info(
+                "%s cut start mode=reencode encoder=%s timeout=%s",
+                trim_tag,
+                enc_name,
+                _trim_timeout_label(reencode_timeout),
+            )
             p2 = await asyncio.create_subprocess_exec(
                 *reencode_cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -188,7 +309,17 @@ class VideoProcessor:
             if tracking2:
                 self._register_proc(str(scope), str(project_id), str(task_id), p2)
             try:
-                _, e2 = await self._communicate_with_cancel(p2, cancel_event)
+                _, e2 = await self._communicate_with_cancel(
+                    p2,
+                    cancel_event,
+                    timeout=reencode_timeout,
+                    timeout_message=f"裁剪超时（重编码，{_trim_timeout_label(reencode_timeout)}）",
+                    timeout_log=(
+                        f"{trim_tag} cut timeout mode=reencode encoder={enc_name} "
+                        f"range={float(start_time):.3f}s-{float(start_time + duration):.3f}s "
+                        f"dur={float(duration):.3f}s timeout={_trim_timeout_label(reencode_timeout)}"
+                    ).strip(),
+                )
             finally:
                 if tracking2:
                     self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
@@ -198,14 +329,17 @@ class VideoProcessor:
                 except Exception:
                     dur2 = None
                 if dur2 is not None and dur2 > 0.01:
-                    logger.info(f"视频剪切成功(重编码): {output_path}")
+                    logger.info("%s cut done mode=reencode out=%s", trim_tag, output_path)
                     return True
-                logger.error("重编码剪切后时长仍为0")
+                logger.error("%s cut failed reason=reencode_output_duration_zero", trim_tag)
                 return False
             else:
-                logger.error(f"视频剪切失败(重编码): {e2.decode(errors='ignore')}")
+                logger.error("%s cut failed mode=reencode err=%s", trim_tag, e2.decode(errors='ignore').strip()[:300])
                 return False
 
+        except asyncio.TimeoutError as e:
+            logger.error("%s cut aborted reason=timeout detail=%s", trim_tag if 'trim_tag' in locals() else "", str(e))
+            return False
         except Exception as e:
             logger.error(f"剪切视频时出错: {e}")
             return False
@@ -399,6 +533,60 @@ class VideoProcessor:
             if force_reencode:
                 copy_possible = False
             token = uuid.uuid4().hex[:10]
+            total_duration = sum(durations)
+            async def _consume_progress_stream(process: asyncio.subprocess.Process) -> None:
+                if not on_progress:
+                    return
+                try:
+                    last_bucket = -1
+                    seen_end = False
+                    while True:
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError()
+                        rl = asyncio.create_task(process.stdout.readline())
+                        wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                        if wt:
+                            done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
+                            if wt in done:
+                                try:
+                                    rl.cancel()
+                                except Exception:
+                                    pass
+                                raise asyncio.CancelledError()
+                            line = await rl
+                            try:
+                                wt.cancel()
+                            except Exception:
+                                pass
+                        else:
+                            line = await rl
+                        if not line:
+                            break
+                        s = line.decode(errors="ignore").strip()
+                        if s.startswith("out_time_ms="):
+                            try:
+                                ms = float(s.split("=", 1)[1])
+                                if total_duration > 0:
+                                    pct = (ms / (total_duration * 1000.0)) * 100.0
+                                    if pct < 0:
+                                        pct = 0.0
+                                    if pct > 100:
+                                        pct = 100.0
+                                    if not seen_end and pct >= 100.0:
+                                        pct = 99.0
+                                    await on_progress(pct)
+                                    bucket = int(pct // 5)
+                                    if bucket > last_bucket:
+                                        logger.info(f"拼接进度: {pct:.1f}%")
+                                        last_bucket = bucket
+                            except Exception:
+                                pass
+                        elif s.startswith("progress=") and s.endswith("end"):
+                            seen_end = True
+                            logger.info("拼接进度: 99.0% (等待完成)")
+                except Exception as e:
+                    logger.warning("拼接进度读取异常: %s", e)
+
             can_concat_demuxer = False
             list_path = Path(output_path).with_suffix(f".{token}.concat.txt")
             if copy_possible:
@@ -496,7 +684,7 @@ class VideoProcessor:
                         ]
                         if acodec0 == "aac":
                             cmd.extend(["-bsf:a", "aac_adtstoasc"])
-                        cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        cmd.extend(["-progress", "pipe:1", "-y", output_path])
                         self.last_concat_cmd = cmd
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
@@ -508,59 +696,19 @@ class VideoProcessor:
                         if tracking:
                             self._register_proc(str(scope), str(project_id), str(task_id), process)
                         total_duration = sum(durations)
-                        if on_progress:
-                            try:
-                                last_bucket = -1
-                                seen_end = False
-                                while True:
-                                    if cancel_event and cancel_event.is_set():
-                                        raise asyncio.CancelledError()
-                                    rl = asyncio.create_task(process.stdout.readline())
-                                    wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                                    if wt:
-                                        done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                        if wt in done:
-                                            try:
-                                                rl.cancel()
-                                            except Exception:
-                                                pass
-                                            raise asyncio.CancelledError()
-                                        line = await rl
-                                        try:
-                                            wt.cancel()
-                                        except Exception:
-                                            pass
-                                    else:
-                                        line = await rl
-                                    if not line:
-                                        break
-                                    s = line.decode(errors="ignore").strip()
-                                    if s.startswith("out_time_ms="):
-                                        try:
-                                            ms = float(s.split("=", 1)[1])
-                                            if total_duration > 0:
-                                                pct = (ms / (total_duration * 1000.0)) * 100.0
-                                                if pct < 0:
-                                                    pct = 0.0
-                                                if pct > 100:
-                                                    pct = 100.0
-                                                if not seen_end and pct >= 100.0:
-                                                    pct = 99.0
-                                                await on_progress(pct)
-                                                bucket = int(pct // 5)
-                                                if bucket > last_bucket:
-                                                    logger.info(f"拼接进度: {pct:.1f}%")
-                                                    last_bucket = bucket
-                                        except Exception:
-                                            pass
-                                    elif s.startswith("progress=") and s.endswith("end"):
-                                        seen_end = True
-                                        logger.info("拼接进度: 99.0% (等待完成)")
-                            except Exception:
-                                pass
+                        progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
                         try:
-                            stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                            stdout, stderr = await self._wait_process_with_cancel(
+                                process,
+                                cancel_event,
+                                capture_output=not bool(on_progress),
+                            )
                         finally:
+                            if progress_task:
+                                try:
+                                    await progress_task
+                                except Exception:
+                                    pass
                             if tracking:
                                 self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                         for f in ts_files:
@@ -596,7 +744,6 @@ class VideoProcessor:
                     "-f", "concat", "-safe", "0",
                     "-i", str(list_path),
                     "-c", "copy",
-                    "-movflags", "+faststart",
                     "-progress", "pipe:1",
                     "-y", output_path,
                 ]
@@ -611,59 +758,19 @@ class VideoProcessor:
                 if tracking:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
                 total_duration = sum(durations)
-                if on_progress:
-                    try:
-                        last_bucket = -1
-                        seen_end = False
-                        while True:
-                            if cancel_event and cancel_event.is_set():
-                                raise asyncio.CancelledError()
-                            rl = asyncio.create_task(process.stdout.readline())
-                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                            if wt:
-                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                if wt in done:
-                                    try:
-                                        rl.cancel()
-                                    except Exception:
-                                        pass
-                                    raise asyncio.CancelledError()
-                                line = await rl
-                                try:
-                                    wt.cancel()
-                                except Exception:
-                                    pass
-                            else:
-                                line = await rl
-                            if not line:
-                                break
-                            s = line.decode(errors="ignore").strip()
-                            if s.startswith("out_time_ms="):
-                                try:
-                                    ms = float(s.split("=", 1)[1])
-                                    if total_duration > 0:
-                                        pct = (ms / (total_duration * 1000.0)) * 100.0
-                                        if pct < 0:
-                                            pct = 0.0
-                                        if pct > 100:
-                                            pct = 100.0
-                                        if not seen_end and pct >= 100.0:
-                                            pct = 99.0
-                                        await on_progress(pct)
-                                        bucket = int(pct // 5)
-                                        if bucket > last_bucket:
-                                            logger.info(f"拼接进度: {pct:.1f}%")
-                                            last_bucket = bucket
-                                except Exception:
-                                    pass
-                            elif s.startswith("progress=") and s.endswith("end"):
-                                seen_end = True
-                                logger.info("拼接进度: 99.0% (等待完成)")
-                    except Exception:
-                        pass
+                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
                 try:
-                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                    stdout, stderr = await self._wait_process_with_cancel(
+                        process,
+                        cancel_event,
+                        capture_output=not bool(on_progress),
+                    )
                 finally:
+                    if progress_task:
+                        try:
+                            await progress_task
+                        except Exception:
+                            pass
                     if tracking:
                         self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 try:
@@ -691,16 +798,39 @@ class VideoProcessor:
             for p in inputs:
                 cmd.extend(["-i", str(p)])
 
+            # concat 要求各段视频分辨率、SAR、帧率等一致；仅做偶数对齐不足以统一不同尺寸的素材
+            tw, th = 0, 0
+            for vi in vinfo_list:
+                if not vi:
+                    continue
+                try:
+                    w = int(vi.get("width") or 0)
+                    h = int(vi.get("height") or 0)
+                except Exception:
+                    w, h = 0, 0
+                tw = max(tw, w)
+                th = max(th, h)
+            if tw < 2:
+                tw = 1280
+            if th < 2:
+                th = 720
+            tw = tw - (tw % 2)
+            th = th - (th % 2)
+
             vf_parts = []
             for i in range(n):
                 base_fr_val = _fr_to_float(vinfo_list[0].get("r_frame_rate")) if vinfo_list and vinfo_list[0] else None
+                v_norm = (
+                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p"
+                )
                 if base_fr_val is not None:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]{v_norm},fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
                     )
                 else:
                     vf_parts.append(
-                        f"[{i}:v:0]scale=trunc(iw/2)*2:trunc(ih/2)*2,setpts=PTS-STARTPTS[v{i}]"
+                        f"[{i}:v:0]{v_norm},setpts=PTS-STARTPTS[v{i}]"
                     )
                 if has_audio[i]:
                     vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
@@ -756,60 +886,20 @@ class VideoProcessor:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
 
                 total_duration = sum(durations)
-                if on_progress:
-                    try:
-                        last_bucket = -1
-                        seen_end = False
-                        while True:
-                            if cancel_event and cancel_event.is_set():
-                                raise asyncio.CancelledError()
-                            rl = asyncio.create_task(process.stdout.readline())
-                            wt = asyncio.create_task(cancel_event.wait()) if cancel_event else None
-                            if wt:
-                                done, _ = await asyncio.wait({rl, wt}, return_when=asyncio.FIRST_COMPLETED)
-                                if wt in done:
-                                    try:
-                                        rl.cancel()
-                                    except Exception:
-                                        pass
-                                    raise asyncio.CancelledError()
-                                line = await rl
-                                try:
-                                    wt.cancel()
-                                except Exception:
-                                    pass
-                            else:
-                                line = await rl
-                            if not line:
-                                break
-                            s = line.decode(errors="ignore").strip()
-                            if s.startswith("out_time_ms="):
-                                try:
-                                    ms = float(s.split("=", 1)[1])
-                                    if total_duration > 0:
-                                        pct = (ms / (total_duration * 1000.0)) * 100.0
-                                        if pct < 0:
-                                            pct = 0.0
-                                        if pct > 100:
-                                            pct = 100.0
-                                        if not seen_end and pct >= 100.0:
-                                            pct = 99.0
-                                        await on_progress(pct)
-                                        bucket = int(pct // 5)
-                                        if bucket > last_bucket:
-                                            logger.info(f"拼接进度: {pct:.1f}%")
-                                            last_bucket = bucket
-                                except Exception:
-                                    pass
-                            elif s.startswith("progress=") and s.endswith("end"):
-                                seen_end = True
-                                logger.info("拼接进度: 99.0% (等待完成)")
-                    except Exception:
-                        pass
+                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
 
                 try:
-                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+                    stdout, stderr = await self._wait_process_with_cancel(
+                        process,
+                        cancel_event,
+                        capture_output=not bool(on_progress),
+                    )
                 finally:
+                    if progress_task:
+                        try:
+                            await progress_task
+                        except Exception:
+                            pass
                     if tracking:
                         self._unregister_proc(str(scope), str(project_id), str(task_id), process)
                 try:
@@ -1107,6 +1197,14 @@ class VideoProcessor:
         names = await self._detect_encoders()
         seq: List[List[str]] = []
         cpu_seq: List[List[str]] = []
+
+        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names) and await self._is_encoder_usable("h264_nvenc"):
+            seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
+        if "h264_qsv" in names and await self._is_encoder_usable("h264_qsv"):
+            seq.append(["-c:v", "h264_qsv"])
+        if "h264_amf" in names and await self._is_encoder_usable("h264_amf"):
+            seq.append(["-c:v", "h264_amf"])
+
         if "libx264" in names:
             cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
         if "libopenh264" in names:
@@ -1119,13 +1217,6 @@ class VideoProcessor:
             cpu_seq.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"])
 
         seq.extend(cpu_seq)
-
-        if getattr(self, "_cuda_available", False) and ("h264_nvenc" in names) and await self._is_encoder_usable("h264_nvenc"):
-            seq.append(["-c:v", "h264_nvenc", "-preset", "p3", "-rc:v", "vbr_hq", "-cq:v", "19"])
-        if "h264_qsv" in names and await self._is_encoder_usable("h264_qsv"):
-            seq.append(["-c:v", "h264_qsv"])
-        if "h264_amf" in names and await self._is_encoder_usable("h264_amf"):
-            seq.append(["-c:v", "h264_amf"])
         return seq
 
     async def _detect_encoders(self) -> List[str]:
@@ -1628,6 +1719,7 @@ class VideoProcessor:
 
     async def extract_audio_mp3(self, input_video: str, output_mp3: str) -> bool:
         try:
+            Path(output_mp3).parent.mkdir(parents=True, exist_ok=True)
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
