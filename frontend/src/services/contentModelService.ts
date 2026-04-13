@@ -4,6 +4,7 @@ export const contentModelService = {
   getConfigs: () => apiClient.getContentGenerationConfigs(),
   updateConfig: (configId: string, data: any) => apiClient.updateContentGenerationConfig(configId, data),
   testConnection: (configId: string) => apiClient.testContentGenerationConfig(configId),
+  testActiveConnection: () => apiClient.testActiveContentGenerationConfig(),
 };
 
 export default contentModelService;

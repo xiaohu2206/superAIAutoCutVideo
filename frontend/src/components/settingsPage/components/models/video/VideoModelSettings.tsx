@@ -47,8 +47,8 @@ type ModelType = "online" | "local";
 const MODEL_PROVIDERS = [
   { id: "yunwu", label: "云雾API平台 (Yunwu.AI)", type: "online" as ModelType },
   { id: "302ai", label: "302平台 (302.AI)", type: "online" as ModelType },
-  { id: "qwen", label: "通义千问 (Qwen)", type: "online" as ModelType },
-  { id: "doubao", label: "豆包 (Doubao)", type: "online" as ModelType },
+  { id: "qwen", label: "阿里百炼", type: "online" as ModelType },
+  { id: "doubao", label: "火山引擎（不建议用）", type: "online" as ModelType },
   {
     id: "custom_openai_vision",
     label: "自定义模型（OpenAI 兼容）",
@@ -212,6 +212,9 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
             : selectedProvider === "custom_openai_vision"
               ? "自定义端点需支持 OpenAI 格式图文消息（image_url + text），用于抽帧后的画面描述"
               : "选择用于视频生成的AI模型提供商"}
+        </p>
+        <p className="text-xs text-red-600 mt-1">
+          视频模型可能消耗巨大，请谨慎使用
         </p>
       </div>
 

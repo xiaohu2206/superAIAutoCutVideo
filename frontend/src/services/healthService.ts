@@ -24,6 +24,8 @@ export const healthService = {
    * 一键测试所有集成组件
    */
   testIntegrations: () => apiClient.testIntegrations(),
+
+  testBcutAsrConnection: () => apiClient.testBcutAsrConnection(),
 };
 
 export default healthService;

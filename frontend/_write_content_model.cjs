@@ -112,8 +112,8 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="302ai">302平台 (302.AI)</option>
-          <option value="qwen">通义千问 (Qwen)</option>
-          <option value="doubao">豆包 (Doubao)</option>
+          <option value="qwen">阿里百炼</option>
+          <option value="doubao">火山引擎</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openrouter">OpenRouter</option>
         </select>

@@ -346,6 +346,11 @@ export class ApiClient {
     return this.post(`/api/models/video-analysis/test/${configId}`);
   }
 
+  // 测试当前激活的视频分析模型配置
+  async testActiveVideoAnalysisConfig(): Promise<any> {
+    return this.post(`/api/models/video-analysis/test`);
+  }
+
   // 获取文案生成模型配置
   async getContentGenerationConfigs(): Promise<any> {
     return this.get("/api/models/content-generation/configs");
@@ -365,6 +370,11 @@ export class ApiClient {
   // 测试文案生成模型配置
   async testContentGenerationConfig(configId: string): Promise<any> {
     return this.post(`/api/models/content-generation/test/${configId}`);
+  }
+
+  // 测试当前激活的文案生成模型配置
+  async testActiveContentGenerationConfig(): Promise<any> {
+    return this.post(`/api/models/content-generation/test`);
   }
 
   // ===== TTS（音色设置）相关 API =====
@@ -403,9 +413,20 @@ export class ApiClient {
     return this.post(`/api/tts/configs/${encodeURIComponent(configId)}/test${q}`);
   }
 
+  // 测试当前激活的 TTS 配置连通性
+  async testActiveTtsConnection(proxyUrl?: string): Promise<any> {
+    const q = proxyUrl ? `?proxy_url=${encodeURIComponent(proxyUrl)}` : "";
+    return this.post(`/api/tts/configs/test${q}`);
+  }
+
   // 测试所有集成组件（一键自检）
   async testIntegrations(): Promise<any> {
     return this.post("/api/health/test-integrations");
+  }
+
+  /** 测试（Bcut）字幕识别服务连通性（与提取字幕 bcut 提供方一致） */
+  async testBcutAsrConnection(): Promise<any> {
+    return this.post("/api/health/test-bcut-asr");
   }
 
   // 音色试听（优先使用凭据生成，其次回退 sample_wav_url）

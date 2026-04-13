@@ -424,6 +424,22 @@ class TtsTestRequest(BaseModel):
     config_id: str = Field(..., description="配置ID")
 
 
+@router.post("/configs/test", summary="测试当前激活的TTS配置连通性")
+async def test_active_tts_connection(
+    proxy_url: Optional[str] = Query(None, description="可选代理URL，覆盖EDGE_TTS_PROXY"),
+):
+    try:
+        result = await tts_engine_config_manager.test_active_connection(proxy_url)
+        return {
+            "success": result.get("success", False),
+            "data": result,
+            "message": result.get("message", "测试完成"),
+        }
+    except Exception as e:
+        logger.error(f"测试激活TTS连接失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/configs/{config_id}/test", summary="测试TTS引擎连通性")
 async def test_tts_connection(config_id: str, proxy_url: Optional[str] = Query(None, description="可选代理URL，覆盖EDGE_TTS_PROXY")):
     try:

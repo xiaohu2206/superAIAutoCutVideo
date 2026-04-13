@@ -338,7 +338,7 @@ class TtsEngineConfigManager:
             {
                 'provider': 'qwen_online_tts',
                 'display_name': 'Qwen3-TTS(在线)',
-                'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key）',
+                'description': 'DashScope 千问在线语音合成，支持系统音色与声音复刻（需配置 API Key）[贵死了]',
                 'required_fields': ['secret_key'],
                 'optional_fields': ['region']
             },
@@ -349,13 +349,13 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
-            {
-                'provider': 'voxcpm_tts',
-                'display_name': 'VoxCPM(本地)',
-                'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
-                'required_fields': [],
-                'optional_fields': []
-            },
+            # {
+            #     'provider': 'voxcpm_tts',
+            #     'display_name': 'VoxCPM(本地)',
+            #     'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
+            #     'required_fields': [],
+            #     'optional_fields': []
+            # },
             {
                 'provider': 'tencent_tts',
                 'display_name': '腾讯云 TTS',
@@ -798,6 +798,20 @@ class TtsEngineConfigManager:
                 "message": "测试请求失败",
                 "error": str(e)
             }
+
+    async def test_active_connection(self, proxy_url: Optional[str] = None) -> Dict[str, Any]:
+        """测试当前已启用（激活）的 TTS 配置连通性。"""
+        active_id = self.get_active_config_id()
+        if not active_id:
+            return {
+                "success": False,
+                "message": "没有找到激活的 TTS 配置",
+                "error": "当前没有启用的配音引擎配置",
+            }
+        active_cfg = self.get_active_config()
+        if active_cfg:
+            logger.info(f"正在测试激活 TTS 配置: {active_id} ({active_cfg.provider})")
+        return await self.test_connection(active_id, proxy_url)
 
 
 # 全局TTS引擎配置管理器实例

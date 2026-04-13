@@ -9,6 +9,8 @@ import {
   getDefaultModelName,
 } from "../utils";
 
+const MODEL_CONFIG_SYNC_EVENT = "models:config-sync";
+
 /**
  * 视频生成模型配置管理 Hook
  */
@@ -32,6 +34,19 @@ export const useVideoModelConfig = () => {
 
   useEffect(() => {
     loadVideoAnalysisConfigs();
+  }, []);
+
+  useEffect(() => {
+    const onSync = (e: Event) => {
+      const ce = e as CustomEvent<{ target?: "video" | "content"; provider?: string }>;
+      if (ce?.detail?.target === "video") {
+        void loadVideoAnalysisConfigs();
+      }
+    };
+    window.addEventListener(MODEL_CONFIG_SYNC_EVENT, onSync as EventListener);
+    return () => {
+      window.removeEventListener(MODEL_CONFIG_SYNC_EVENT, onSync as EventListener);
+    };
   }, []);
 
   const loadVideoAnalysisConfigs = async () => {
@@ -127,6 +142,27 @@ export const useVideoModelConfig = () => {
       const response = await videoModelService.updateConfig(configId, config);
 
       if (response.success) {
+        const syncedIds: string[] =
+          response.data?.synced_content_config_ids ??
+          response.data?.data?.synced_content_config_ids ??
+          [];
+        if (Array.isArray(syncedIds) && syncedIds.length > 0) {
+          const p = String(config.provider || "").toLowerCase();
+          const customExtra =
+            p === "custom_openai_vision" || p === "custom_openai"
+              ? "（含接口地址、流式输出、模型名称与 API Key）"
+              : "";
+          message.info(
+            `已自动同步为文案模型（${config.provider}）补齐配置${customExtra}：${syncedIds.join(
+              ", ",
+            )}`,
+          );
+          window.dispatchEvent(
+            new CustomEvent(MODEL_CONFIG_SYNC_EVENT, {
+              detail: { target: "content" as const, provider: config.provider },
+            }),
+          );
+        }
         await loadVideoAnalysisConfigs();
       }
     } catch (error) {

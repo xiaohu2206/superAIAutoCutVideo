@@ -23,8 +23,8 @@ interface UnifiedModelSettingsProps {
 type ModelType = "online" | "local";
 
 const MODEL_PROVIDERS = [
-  { id: "qwen", label: "通义千问 (Qwen)", type: "online" as ModelType },
-  { id: "doubao", label: "豆包 (Doubao)", type: "online" as ModelType },
+  { id: "qwen", label: "阿里百炼", type: "online" as ModelType },
+  { id: "doubao", label: "火山引擎", type: "online" as ModelType },
   { id: "deepseek", label: "DeepSeek", type: "online" as ModelType },
   { id: "moondream", label: "Moondream2 (本地)", type: "local" as ModelType },
 ];

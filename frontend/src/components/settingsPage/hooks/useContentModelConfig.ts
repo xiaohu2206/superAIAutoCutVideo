@@ -9,6 +9,8 @@ import {
   getContentDefaultModelName,
 } from "../utils";
 
+const MODEL_CONFIG_SYNC_EVENT = "models:config-sync";
+
 /**
  * 文案生成模型配置管理 Hook
  */
@@ -35,6 +37,19 @@ export const useContentModelConfig = () => {
 
   useEffect(() => {
     loadContentGenerationConfigs();
+  }, []);
+
+  useEffect(() => {
+    const onSync = (e: Event) => {
+      const ce = e as CustomEvent<{ target?: "video" | "content"; provider?: string }>;
+      if (ce?.detail?.target === "content") {
+        void loadContentGenerationConfigs();
+      }
+    };
+    window.addEventListener(MODEL_CONFIG_SYNC_EVENT, onSync as EventListener);
+    return () => {
+      window.removeEventListener(MODEL_CONFIG_SYNC_EVENT, onSync as EventListener);
+    };
   }, []);
 
   const loadContentGenerationConfigs = async () => {
@@ -121,6 +136,27 @@ export const useContentModelConfig = () => {
       );
 
       if (response.success) {
+        const syncedIds: string[] =
+          response.data?.synced_video_config_ids ??
+          response.data?.data?.synced_video_config_ids ??
+          [];
+        if (Array.isArray(syncedIds) && syncedIds.length > 0) {
+          const p = String(config.provider || "").toLowerCase();
+          const customExtra =
+            p === "custom_openai_vision" || p === "custom_openai"
+              ? "（含接口地址、流式输出、模型名称与 API Key）"
+              : "";
+          message.info(
+            `已自动同步为视频模型（${config.provider}）补齐配置${customExtra}：${syncedIds.join(
+              ", ",
+            )}`,
+          );
+          window.dispatchEvent(
+            new CustomEvent(MODEL_CONFIG_SYNC_EVENT, {
+              detail: { target: "video" as const, provider: config.provider },
+            }),
+          );
+        }
         await loadContentGenerationConfigs();
       }
     } catch (error) {

@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
 import ProjectList from "../components/projectManagement/ProjectList";
+import BasicConfigCheckModal from "../components/projectManagement/BasicConfigCheckModal";
 import { useProjects } from "../hooks/useProjects";
 import type { CreateProjectRequest, Project } from "../types/project";
 import { message } from "../services/message";
@@ -31,6 +32,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isBasicConfigCheckOpen, setIsBasicConfigCheckOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -155,9 +157,29 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       <div className="flex items-center justify-between px-1 shrink-0">
         <div className="flex items-baseline space-x-2">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900">项目</h2>
-          <span className="text-sm text-gray-500 font-normal">（新版本不对旧数据做兼容）</span>
         </div>
         <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-0.5">
+            
+            <div className="group relative inline-flex shrink-0 items-center">
+            <button
+              type="button"
+              onClick={() => setIsBasicConfigCheckOpen(true)}
+              className="px-2 py-2 text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              基础连通检测
+            </button>
+              <div
+                id="basic-config-check-hint"
+                role="tooltip"
+                className="pointer-events-none absolute right-0 top-full z-20 pt-1 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+              >
+                <div className="w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-left text-xs leading-relaxed text-gray-600 shadow-md">
+                  一键检查当前配置（文案模型、视频模型、已启用的配音 TTS、内置字幕识别、剪映草稿路径等）是否能走通基础流程，便于在创建或编辑项目前发现问题。
+                </div>
+              </div>
+            </div>
+          </div>
           <input
             type="text"
             placeholder="搜索项目..."
@@ -167,17 +189,17 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
             }}
             className="w-44 sm:w-64 px-3 py-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
           />
-           {/* 刷新按钮 */}
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing || loading}
-              className="flex items-center px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
-              />
-              刷新
-            </button>
+          {/* 刷新按钮 */}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="flex items-center px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
+            />
+            刷新
+          </button>
           <button
             onClick={() => {
               setIsCreateModalOpen(true);
@@ -225,6 +247,11 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
           setSelectedProject(null);
         }}
         onConfirm={handleConfirmDelete}
+      />
+
+      <BasicConfigCheckModal
+        isOpen={isBasicConfigCheckOpen}
+        onClose={() => setIsBasicConfigCheckOpen(false)}
       />
     </div>
   );

@@ -5,8 +5,8 @@
 提供视频分析模型和文案生成模型的配置管理接口
 """
 
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import logging
 
@@ -33,6 +33,91 @@ class ContentModelConfigRequest(BaseModel):
 class ModelTestRequest(BaseModel):
     """模型测试请求"""
     config_id: str = Field(..., description="配置ID")
+
+def _is_unset_api_key(v: Optional[str]) -> bool:
+    s = (v or "").strip()
+    return (not s) or s.lower() == "xxx"
+
+def _equivalent_providers_for_sync(provider: Optional[str]) -> List[str]:
+    """
+    不同模块对同一平台的 provider 命名可能不同，这里做等价映射。
+    - 视频: custom_openai_vision
+    - 文案: custom_openai
+    """
+    p = (provider or "").strip().lower()
+    if not p:
+        return []
+    mapping = {
+        "custom_openai_vision": ["custom_openai"],
+        "custom_openai": ["custom_openai_vision"],
+    }
+    return [p, *mapping.get(p, [])]
+
+
+def _is_custom_openai_cross_sync_provider(provider: Optional[str]) -> bool:
+    p = (provider or "").strip().lower()
+    return p in ("custom_openai_vision", "custom_openai")
+
+
+def _read_stream_output_flag(model: Any) -> bool:
+    """与 AIModelConfig 一致：优先读顶层 stream_output，否则读 extra_params。"""
+    if model is None:
+        return False
+    v = getattr(model, "stream_output", None)
+    if v is not None:
+        return bool(v)
+    ep = getattr(model, "extra_params", None) or {}
+    if isinstance(ep, dict):
+        return bool(ep.get("stream_output", False))
+    return False
+
+
+def _sync_pydantic_copy(model: Any, updates: Dict[str, Any]) -> Any:
+    """Pydantic v2 用 model_copy；否则退回 v1 的 copy(update=...)。"""
+    mc = getattr(model, "model_copy", None)
+    if callable(mc):
+        return mc(update=updates)
+    copy_fn = getattr(model, "copy", None)
+    if callable(copy_fn):
+        return copy_fn(update=updates)
+    raise TypeError("配置模型不支持 model_copy/copy")
+
+
+def _video_custom_fields_changed(
+    old: Optional[VideoModelConfig], new_cfg: VideoModelConfig
+) -> bool:
+    if old is None:
+        return True
+    return (
+        str(getattr(old, "api_key", "") or "").strip()
+        != str(new_cfg.api_key or "").strip()
+        or str(getattr(old, "base_url", "") or "").strip()
+        != str(new_cfg.base_url or "").strip()
+        or _read_stream_output_flag(old) != _read_stream_output_flag(new_cfg)
+        or str(getattr(old, "model_name", "") or "").strip()
+        != str(new_cfg.model_name or "").strip()
+    )
+
+
+def _merge_video_into_content_custom(
+    src: VideoModelConfig, dst: ContentModelConfig
+) -> ContentModelConfig:
+    """自定义 OpenAI 兼容：视频侧字段合并到文案侧（api_key / base_url / stream / model_name）。"""
+    cleaned_base = (src.base_url or "").strip().strip("`")
+    cleaned_model = (src.model_name or "").strip().strip("`")
+    stream_on = _read_stream_output_flag(src)
+    ep = dict(dst.extra_params or {})
+    ep["stream_output"] = stream_on
+    return _sync_pydantic_copy(
+        dst,
+        {
+            "api_key": str(src.api_key or "").strip(),
+            "base_url": cleaned_base,
+            "model_name": cleaned_model,
+            "stream_output": stream_on,
+            "extra_params": ep,
+        },
+    )
 
 
 # ==================== 视频分析模型配置接口 ====================
@@ -84,8 +169,54 @@ async def update_video_analysis_config(config_id: str, request: VideoModelConfig
 
         success = video_model_config_manager.update_config(config_id, new_config)
         if success:
+            synced_content_config_ids: List[str] = []
+            try:
+                old_api_key = (old_config.api_key if old_config else None)
+                api_key_changed = (old_api_key is None) or (
+                    str(old_api_key).strip() != str(new_config.api_key).strip()
+                )
+                providers = set(_equivalent_providers_for_sync(new_config.provider))
+                is_custom = _is_custom_openai_cross_sync_provider(new_config.provider)
+                custom_changed = is_custom and _video_custom_fields_changed(
+                    old_config, new_config
+                )
+
+                for cid, cfg in content_model_config_manager.get_all_configs().items():
+                    try:
+                        if (cfg.provider or "").lower() not in providers:
+                            continue
+                        if not _is_unset_api_key(cfg.api_key):
+                            continue
+                        if is_custom and custom_changed:
+                            updated_cfg = _merge_video_into_content_custom(
+                                new_config, cfg
+                            )
+                        elif (
+                            api_key_changed
+                            and (not _is_unset_api_key(new_config.api_key))
+                        ):
+                            updated_cfg = cfg.copy(
+                                update={
+                                    "api_key": str(new_config.api_key).strip(),
+                                }
+                            )
+                        else:
+                            continue
+                        if content_model_config_manager.update_config(
+                            cid, updated_cfg
+                        ):
+                            synced_content_config_ids.append(cid)
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.warning(f"同步文案模型 API Key 失败（忽略，不影响保存）: {e}")
+
             return {
                 "success": True,
+                "data": {
+                    "synced_content_config_ids": synced_content_config_ids,
+                    "provider": new_config.provider,
+                },
                 "message": f"视频分析模型配置 '{config_id}' 更新成功"
             }
         else:

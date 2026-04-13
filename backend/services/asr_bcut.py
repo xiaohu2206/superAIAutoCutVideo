@@ -27,7 +27,7 @@ API_QUERY_RESULT = API_BASE_URL + "/task/result"
 
 
 class BcutASR(BaseASR):
-    """必剪 语音识别接口"""
+    """ 语音识别接口"""
     headers = {
         'User-Agent': 'Bilibili/1.0.0 (https://www.bilibili.com)',
         'Content-Type': 'application/json'

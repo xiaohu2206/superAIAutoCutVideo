@@ -8,6 +8,7 @@ export const ttsService = {
   getVoices: (provider: string) => apiClient.getTtsVoices(provider),
   previewVoice: (voiceId: string, data: any) => apiClient.previewTtsVoice(voiceId, data),
   testConnection: (configId: string, proxyUrl?: string) => apiClient.testTtsConnection(configId, proxyUrl),
+  testActiveConnection: (proxyUrl?: string) => apiClient.testActiveTtsConnection(proxyUrl),
 };
 
 export default ttsService;

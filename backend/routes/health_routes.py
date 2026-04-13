@@ -411,6 +411,36 @@ async def test_all_ai_connections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/test-bcut-asr", summary="测试（Bcut）字幕识别连通性")
+async def test_bcut_asr():
+    """探测 Bcut ASR 接口可达性（与字幕提取 provider=bcut 前置校验一致）。"""
+    try:
+        asr_result = await _run_in_thread(BcutASR.test_connection)
+        ok = bool(asr_result.get("success"))
+        if ok:
+            code = asr_result.get("status_code")
+            msg = f"ASR 可达（HTTP {code}）" if code is not None else " ASR 可达"
+        else:
+            msg = (
+                asr_result.get("error")
+                or asr_result.get("message")
+                or (
+                    f"HTTP {asr_result.get('status_code')}"
+                    if asr_result.get("status_code") is not None
+                    else "连接失败"
+                )
+            )
+        return {
+            "success": ok,
+            "data": asr_result,
+            "message": msg,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"测试 Bcut ASR 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/test-integrations", summary="测试关键集成组件")
 async def test_integrations():
     """
