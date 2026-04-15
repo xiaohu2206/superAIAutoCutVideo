@@ -774,6 +774,15 @@ export class TauriCommands {
     }
   }
 
+  /** 主窗口尺寸（逻辑像素），用于初始化完成后展开主界面 */
+  static async setMainWindowSize(width: number, height: number, center: boolean): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("set_main_window_size", { width, height, center });
+    } catch (error) {
+      console.error("调整窗口大小失败:", error);
+    }
+  }
+
   static async closeWindow(): Promise<void> {
     try {
       await TauriCommands.coreInvoke("close_main_window");

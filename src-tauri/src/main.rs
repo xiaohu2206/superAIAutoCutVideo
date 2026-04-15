@@ -1327,6 +1327,36 @@ async fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
         .map_err(|e| format!("读取窗口最大化状态失败: {}", e))
 }
 
+/// 设置主窗口内边尺寸（逻辑像素），可选居中。用于启动页小窗与主界面大窗切换。
+#[tauri::command]
+async fn set_main_window_size(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    center: bool,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    if window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))?
+    {
+        window
+            .unmaximize()
+            .map_err(|e| format!("还原窗口失败: {}", e))?;
+    }
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| format!("调整窗口大小失败: {}", e))?;
+    if center {
+        window
+            .center()
+            .map_err(|e| format!("居中窗口失败: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn close_main_window(app: AppHandle) -> Result<(), String> {
     let window = app
@@ -1387,7 +1417,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .decorations(false)
                 .shadow(false)
                 .transparent(true)
-                .inner_size(1200.0, 800.0)
+                .inner_size(800.0, 350.0)
                 .center();
 
         #[cfg(not(target_os = "windows"))]
@@ -1397,7 +1427,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .resizable(true)
                 .decorations(false)
                 .shadow(false)
-                .inner_size(1200.0, 800.0)
+                .inner_size(800.0, 350.0)
                 .center();
 
         window_builder.build()?;
@@ -1486,6 +1516,7 @@ fn main() {
             start_dragging_main_window,
             toggle_maximize_main_window,
             is_main_window_maximized,
+            set_main_window_size,
             close_main_window
         ])
         .run(tauri::generate_context!())

@@ -1,5 +1,6 @@
-import { Copy, Minus, RefreshCw, Square, X } from "lucide-react";
+import { Copy, Minus, Square, X } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import AppLoadingScreen from "./components/AppLoadingScreen";
 import Navigation from "./components/Navigation";
 import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
@@ -24,6 +25,9 @@ interface BackendStatus {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 与 tauri.conf 中启动完成后主界面一致（逻辑像素） */
+const TAURI_MAIN_WINDOW_INNER = { width: 1280, height: 800 } as const;
 
 const detectTauriEnvironment = (): boolean => {
   const w: any = typeof window !== "undefined" ? window : undefined;
@@ -138,6 +142,15 @@ const App: React.FC = () => {
   const initializeApp = async () => {
     setIsLoading(true);
 
+    const expandMainWindowBeforeMainUi = async () => {
+      if (!detectTauriEnvironment()) return;
+      await TauriCommands.setMainWindowSize(
+        TAURI_MAIN_WINDOW_INNER.width,
+        TAURI_MAIN_WINDOW_INNER.height,
+        true
+      );
+    };
+
     let attempts = 0;
     let ready = false;
     const maxAttempts = 30;
@@ -154,6 +167,7 @@ const App: React.FC = () => {
           } catch (e) {
             console.debug("WebSocket连接失败");
           }
+          await expandMainWindowBeforeMainUi();
           setIsLoading(false);
           ready = true;
           continue;
@@ -165,6 +179,7 @@ const App: React.FC = () => {
       await sleep(Math.min(800 + attempts * 200, 3000));
     } while (!ready && attempts < maxAttempts);
     if (!ready) {
+      await expandMainWindowBeforeMainUi();
       setIsLoading(false);
     }
   };
@@ -274,16 +289,7 @@ const App: React.FC = () => {
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">SuperAI</p>
-          {!!appVersion && <p className="text-xs text-gray-400 mt-1">v{appVersion}</p>}
-          <p className="text-sm text-gray-500">第一次打开比较慢，预计需要5分钟，请稍等...</p>
-        </div>
-      </div>
-    );
+    return <AppLoadingScreen appVersion={appVersion} />;
   }
 
   const handleHomeClick = () => {
