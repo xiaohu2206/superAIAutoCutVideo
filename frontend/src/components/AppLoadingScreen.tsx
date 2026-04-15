@@ -43,7 +43,6 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion, updateV
             </div>
           </div>
         </div>
-{/* 
         {!!appVersion && (
           <div className="mx-auto w-full max-w-md pb-8">
             <p
@@ -53,7 +52,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion, updateV
               v{appVersion}
             </p>
           </div>
-        )} */}
+        )}
       </div>
 
       <style>{`

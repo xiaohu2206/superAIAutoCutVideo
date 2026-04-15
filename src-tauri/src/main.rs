@@ -27,6 +27,8 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State};
+
+mod runtime_updater;
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
 
@@ -1374,6 +1376,29 @@ async fn close_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ── 运行时分块更新 Tauri 命令 ──────────────────────────────────────
+
+#[tauri::command]
+async fn check_runtime_update(
+    app_handle: AppHandle,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    runtime_updater::check_update(&app_handle).await
+}
+
+#[tauri::command]
+async fn download_runtime_update(
+    app_handle: AppHandle,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    runtime_updater::download_and_apply(&app_handle).await
+}
+
+#[tauri::command]
+async fn get_runtime_installed_state(
+    app_handle: AppHandle,
+) -> Result<runtime_updater::InstalledState, String> {
+    runtime_updater::get_installed_info(&app_handle).await
+}
+
 // 应用启动时的初始化
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItem::with_id(app, "tray_show", "显示主窗口", true, None::<&str>)?;
@@ -1518,7 +1543,10 @@ fn main() {
             toggle_maximize_main_window,
             is_main_window_maximized,
             set_main_window_size,
-            close_main_window
+            close_main_window,
+            check_runtime_update,
+            download_runtime_update,
+            get_runtime_installed_state
         ])
         .run(tauri::generate_context!())
         .expect("启动Tauri应用失败");
