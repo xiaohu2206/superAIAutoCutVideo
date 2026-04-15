@@ -3,9 +3,10 @@ import logoSrc from "../assets/logo.png";
 
 interface AppLoadingScreenProps {
   appVersion?: string;
+  updateVersion?: string;
 }
 
-const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion }) => {
+const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion, updateVersion }) => {
   return (
     <div className="relative flex min-h-screen select-none overflow-hidden rounded-[18px] bg-white">
       {/* 右侧淡色装饰光斑 */}
@@ -34,10 +35,15 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion }) => {
                 <div className="h-full w-1/2 animate-[loading_1.4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-[#00ecf3] to-[#00c4d6]" />
               </div>
               <p className="mt-3 text-center text-xs text-slate-400">即将就绪，预计 5 分钟</p>
+              {!!updateVersion && (
+                <p className="mt-2 text-center text-[11px] text-emerald-500">
+                  检测到可更新版本 v{updateVersion}
+                </p>
+              )}
             </div>
           </div>
         </div>
-
+{/* 
         {!!appVersion && (
           <div className="mx-auto w-full max-w-md pb-8">
             <p
@@ -47,7 +53,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion }) => {
               v{appVersion}
             </p>
           </div>
-        )}
+        )} */}
       </div>
 
       <style>{`

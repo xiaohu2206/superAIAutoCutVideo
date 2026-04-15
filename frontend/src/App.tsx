@@ -6,6 +6,7 @@ import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
 import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
+import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useAppVersion } from "./hooks/useAppVersion";
 import {
   TauriCommands,
@@ -53,6 +54,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const { appVersion } = useAppVersion();
+  const { updateInfo, checkNow: checkAppUpdate } = useAppUpdater();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -86,6 +88,7 @@ const App: React.FC = () => {
     wsClient.on("error", handleWsError);
 
     initializeApp();
+    void checkAppUpdate();
 
     return () => {
       window.clearInterval(timer);
@@ -289,7 +292,12 @@ const App: React.FC = () => {
   };
 
   if (isLoading) {
-    return <AppLoadingScreen appVersion={appVersion} />;
+    return (
+      <AppLoadingScreen
+        appVersion={appVersion}
+        updateVersion={updateInfo?.available ? updateInfo.version : ""}
+      />
+    );
   }
 
   const handleHomeClick = () => {
