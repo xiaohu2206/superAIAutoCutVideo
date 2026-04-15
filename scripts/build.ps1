@@ -207,6 +207,19 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     )
   }
 
+  if ($content -notmatch '(?m)^InstallDir\s+"\$PROGRAMFILES64\\SuperAutoCutVideo"\s*$') {
+    $content = [regex]::Replace(
+      $content,
+      '(?m)^InstallDir\s+"[^"]+"\s*$',
+      'InstallDir "$PROGRAMFILES64\SuperAutoCutVideo"',
+      1
+    )
+  }
+
+  if ($content -notmatch '(?m)^!define\s+APPNAME_DIR\s+"SuperAutoCutVideo"\s*$') {
+    $content = "!define APPNAME_DIR `"SuperAutoCutVideo`"`r`n" + $content
+  }
+
   if (-not $alreadyHasBackendCopy) {
     $insertPattern = 'File /a "/oname=resources\\ffmpeg\.exe" "[^"]+ffmpeg\.exe"'
     if ($content -notmatch $insertPattern) {
