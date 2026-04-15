@@ -901,6 +901,60 @@ async def preview_voice(voice_id: str, req: VoicePreviewRequest):
                     raise HTTPException(status_code=503, detail=msg)
                 raise HTTPException(status_code=500, detail=msg)
 
+        if provider == "indextts":
+            try:
+                from modules.indextts.connection_store import indextts_connection_store
+                from modules.indextts.service import indextts_service
+
+                if not indextts_connection_store.is_connected():
+                    raise HTTPException(status_code=400, detail="indextts_not_connected")
+
+                vid = str(voice_id).strip()
+                voices = await tts_engine_config_manager.get_voices_async("indextts")
+                match_ix = next((v for v in voices if v.id == vid), None)
+                if not match_ix:
+                    raise HTTPException(status_code=404, detail="voice_not_found")
+
+                ts = int(time.time() * 1000)
+                safe_vid = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in vid)[:64]
+                filename = f"indextts_{safe_vid}_preview_{ts}.mp3"
+                out_path = _get_preview_tmp_dir() / filename
+                text = req.text or "您好，欢迎使用智能配音。"
+                try:
+                    res = await indextts_service.synthesize(text, str(out_path), vid, cfg)
+                    if not res.get("success"):
+                        raise HTTPException(status_code=500, detail=res.get("error") or "合成失败")
+                    audio_bytes = out_path.read_bytes()
+                finally:
+                    try:
+                        if out_path.exists():
+                            out_path.unlink()
+                    except Exception:
+                        pass
+
+                preview_id = await _preview_cache_put(
+                    content=audio_bytes,
+                    filename=filename,
+                    meta={"provider": "indextts", "voice_id": vid},
+                )
+                audio_url = f"/api/tts/voices/preview/{preview_id}"
+                return {
+                    "success": True,
+                    "data": {
+                        "voice_id": vid,
+                        "name": match_ix.name,
+                        "audio_url": audio_url,
+                        "description": match_ix.description,
+                        "duration": res.get("duration"),
+                    },
+                    "message": "已生成 IndexTTS 试听音频",
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"IndexTTS 试听失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
         # 非 Edge：严格校验音色存在
         if not match:
             raise HTTPException(status_code=404, detail=f"音色 '{voice_id}' 不存在")

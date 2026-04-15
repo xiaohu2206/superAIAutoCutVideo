@@ -20,6 +20,7 @@ import { getGenderLabel } from "./utils";
 import Qwen3VoiceSection from "@/features/qwen3Tts/components/Qwen3VoiceSection";
 import QwenOnlineVoiceSection from "@/features/qwenOnlineTts/components/QwenOnlineVoiceSection";
 import VoxcpmVoiceSection from "@/features/voxcpmTts/components/VoxcpmVoiceSection";
+import { IndexTtsSection } from "@/features/indextts";
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
 
@@ -49,10 +50,13 @@ export const TtsSettings: React.FC = () => {
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
   const [testDurationMs, setTestDurationMs] = useState<number | null>(null);
 
+  const [indexttsConnected, setIndexttsConnected] = useState(false);
+
   const hasCredentials = useMemo(() => {
     // Edge TTS 免凭据：只要当前提供商为 edge_tts，则视为具备"连通性测试许可"
     if (provider === "edge_tts") return true;
     if (provider === "qwen3_tts") return true;
+    if (provider === "indextts") return indexttsConnected;
     // 千问在线 TTS：仅需要 secret_key
     if (provider === "qwen_online_tts")
       return Boolean(currentConfig?.secret_key === "***");
@@ -60,7 +64,7 @@ export const TtsSettings: React.FC = () => {
     return Boolean(
       currentConfig?.secret_id === "***" && currentConfig?.secret_key === "***"
     );
-  }, [provider, currentConfig]);
+  }, [provider, currentConfig, indexttsConnected]);
 
   // 初始化：并发加载引擎与配置
   useEffect(() => {
@@ -290,7 +294,20 @@ export const TtsSettings: React.FC = () => {
           });
           return;
         }
-      } else if (provider !== "edge_tts" && provider !== "qwen3_tts") {
+      } else if (provider === "indextts") {
+        if (!indexttsConnected || !currentConfigId) {
+          setTestResult({
+            success: false,
+            config_id: currentConfigId || "",
+            provider,
+            message: "请先连接 IndexTTS 局域网服务",
+          });
+          return;
+        }
+      } else if (
+        provider !== "edge_tts" &&
+        provider !== "qwen3_tts"
+      ) {
         if (!hasCredentials || !currentConfigId) {
           setTestResult({
             success: false,
@@ -354,7 +371,20 @@ export const TtsSettings: React.FC = () => {
 
         {/* 凭据设置 */}
         <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
-          {provider === "voxcpm_tts" ? (
+          {provider === "indextts" ? (
+            <IndexTtsSection
+              configId={currentConfigId}
+              activeVoiceId={currentConfig?.active_voice_id || ""}
+              onSetActive={handleSetActiveVoice}
+              onConnectionChange={setIndexttsConnected}
+              onVoicesRefresh={() => loadVoices("indextts")}
+              onConfigRefresh={refreshConfigs}
+              onTestConnection={handleTestConnection}
+              testing={testing}
+              testResult={testResult}
+              testDurationMs={testDurationMs}
+            />
+          ) : provider === "voxcpm_tts" ? (
             <VoxcpmVoiceSection
               configId={currentConfigId}
               activeVoiceId={currentConfig?.active_voice_id || ""}
@@ -402,7 +432,10 @@ export const TtsSettings: React.FC = () => {
         </section>
 
         {/* 音色库 */}
-        {provider === "qwen3_tts" || provider === "qwen_online_tts" || provider === "voxcpm_tts" ? null : (
+        {provider === "qwen3_tts" ||
+        provider === "qwen_online_tts" ||
+        provider === "voxcpm_tts" ||
+        provider === "indextts" ? null : (
           <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-md font-semibold text-gray-900">音色库</h4>

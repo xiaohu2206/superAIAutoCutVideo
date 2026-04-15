@@ -57,12 +57,14 @@ from routes.tts_routes import router as tts_router
 from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.qwen_online_tts_routes import router as qwen_online_tts_router
 from routes.voxcpm_tts_routes import router as voxcpm_tts_router
+from routes.indextts_routes import router as indextts_router
 from routes.fun_asr_routes import router as fun_asr_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
 from routes.generate_routes import router as generate_router
 from routes.storage_routes import router as settings_router
 from routes.moondream_routes import router as moondream_router
+from routes.log_routes import router as log_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import (
@@ -239,7 +241,7 @@ def release_single_instance_lock() -> None:
 class RuntimeLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            msg = record.getMessage()
+            msg = self.format(record)
             runtime_log_store.append(
                 {
                     "type": "log",
@@ -259,7 +261,9 @@ try:
     root_logger = logging.getLogger()
     has_handler = any(isinstance(h, RuntimeLogHandler) for h in root_logger.handlers)
     if not has_handler:
-        root_logger.addHandler(RuntimeLogHandler(level=logging.INFO))
+        runtime_handler = RuntimeLogHandler(level=logging.INFO)
+        runtime_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        root_logger.addHandler(runtime_handler)
 except Exception:
     pass
 
@@ -381,12 +385,14 @@ app.include_router(tts_router)
 app.include_router(qwen3_tts_router)
 app.include_router(qwen_online_tts_router)
 app.include_router(voxcpm_tts_router)
+app.include_router(indextts_router)
 app.include_router(fun_asr_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)
 app.include_router(generate_router)
 app.include_router(settings_router)
 app.include_router(moondream_router)
+app.include_router(log_router)
 
 
 @app.exception_handler(HTTPException)
@@ -727,57 +733,6 @@ async def get_status():
         "tasks_count": len(tasks_status),
         "timestamp": datetime.now().isoformat()
     }
-
-
-@app.get("/api/logs")
-async def list_global_logs(
-    after_id: Optional[int] = Query(default=None),
-    limit: int = Query(default=200, ge=1, le=2000),
-):
-    items = runtime_log_store.list(project_id=None, after_id=after_id, limit=limit)
-    next_after_id = None
-    try:
-        next_after_id = int(items[-1]["id"]) if items else after_id
-    except Exception:
-        next_after_id = after_id
-    return {
-        "message": "获取日志成功",
-        "data": {
-            "items": items,
-            "next_after_id": next_after_id,
-        },
-        "timestamp": datetime.now().isoformat(),
-    }
-
-
-@app.post("/api/logs/clear")
-async def clear_global_logs():
-    runtime_log_store.clear(project_id=None)
-    return {"message": "清空日志成功", "success": True, "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/api/logs/stream")
-async def stream_global_logs(after_id: Optional[int] = Query(default=None)):
-    async def _gen():
-        items = runtime_log_store.list(project_id=None, after_id=after_id, limit=2000)
-        for it in items:
-            yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
-        handle = runtime_log_store.subscribe(project_id=None)
-        try:
-            while True:
-                try:
-                    it = await asyncio.wait_for(handle.queue.get(), timeout=15)
-                    yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
-                    yield ":keep-alive\n\n"
-        finally:
-            runtime_log_store.unsubscribe(handle)
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-    }
-    return StreamingResponse(_gen(), media_type="text/event-stream", headers=headers)
 
 
 @app.get("/api/server/info")

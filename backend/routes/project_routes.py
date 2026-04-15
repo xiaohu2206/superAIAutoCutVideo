@@ -847,6 +847,7 @@ async def save_subtitle(project_id: str, req: SaveSubtitleRequest):
             target_abs = cand
     if not target_abs:
         up_dir = uploads_dir() / "subtitles"
+        up_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         out_name = f"{project_id}_subtitle_edit_{ts}.srt"
         target_abs = up_dir / out_name
@@ -1331,6 +1332,7 @@ async def upload_subtitle(project_id: str, file: UploadFile = File(...)):
     unique = uuid.uuid4().hex[:8]
     out_name = f"{project_id}_subtitle_{ts}_{unique}{suffix}"
     out_path = up_dir / out_name
+    up_dir.mkdir(parents=True, exist_ok=True)
 
     size = 0
     try:

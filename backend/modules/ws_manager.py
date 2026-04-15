@@ -46,8 +46,11 @@ class ConnectionManager:
                         task_progress_store.update_from_payload(obj)
                     except Exception:
                         pass
-                    stored = runtime_log_store.append({**obj, "_stored": True}, project_id=obj.get("project_id"))
-                    message = json.dumps(stored, ensure_ascii=False)
+                    if obj.get("type") == "heartbeat":
+                        message = json.dumps(obj, ensure_ascii=False)
+                    else:
+                        stored = runtime_log_store.append({**obj, "_stored": True}, project_id=obj.get("project_id"))
+                        message = json.dumps(stored, ensure_ascii=False)
                 elif isinstance(obj, dict):
                     try:
                         task_progress_store.update_from_payload(obj)

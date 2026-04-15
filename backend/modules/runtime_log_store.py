@@ -37,6 +37,29 @@ def _sanitize_text(text: str) -> str:
     return out
 
 
+def _format_terminal_like_text(data: Dict[str, Any]) -> str:
+    message = _sanitize_text(str(data.get("message") or "")).strip()
+    if message:
+        return message
+
+    detail = _sanitize_text(str(data.get("detail") or "")).strip()
+    if detail:
+        return detail
+
+    error = _sanitize_text(str(data.get("error") or "")).strip()
+    if error:
+        return error
+
+    payload: Dict[str, Any] = {}
+    for key, value in data.items():
+        if key in {"id", "timestamp", "channel", "_stored", "project_id"}:
+            continue
+        payload[key] = value
+    if not payload:
+        return ""
+    return _sanitize_text(json.dumps(payload, ensure_ascii=False))
+
+
 def _channel_key(project_id: Optional[str]) -> str:
     if project_id:
         return f"project:{project_id}"
@@ -111,6 +134,9 @@ class RuntimeLogStore:
             data["detail"] = _sanitize_text(str(data.get("detail") or ""))
         if "error" in data:
             data["error"] = _sanitize_text(str(data.get("error") or ""))
+        terminal_text = _format_terminal_like_text(data)
+        if terminal_text:
+            data["terminal_text"] = terminal_text
         data["channel"] = channel
 
         line = json.dumps(data, ensure_ascii=False)

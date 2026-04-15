@@ -423,7 +423,7 @@ class VideoGenerationService:
                 try:
                     cfg = tts_engine_config_manager.get_active_config()
                     provider = (getattr(cfg, "provider", None) or "").lower()
-                    if provider == "qwen3_tts":
+                    if provider in ("qwen3_tts", "indextts"):
                         total_tts_dur = 0.0
                         missing = 0
                         for it in need_tts:

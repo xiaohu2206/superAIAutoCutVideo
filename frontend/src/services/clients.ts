@@ -434,6 +434,49 @@ export class ApiClient {
     return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {}, 1000 * 300);
   }
 
+  // ===== IndexTTS（局域网，经后端转发）=====
+  async getIndexTtsStatus(): Promise<any> {
+    return this.get(`/api/indextts/status`);
+  }
+
+  async connectIndexTts(data: {
+    host: string;
+    port?: number;
+    api_prefix?: string;
+    scan_back?: number;
+  }): Promise<any> {
+    return this.post(`/api/indextts/connect`, data);
+  }
+
+  async disconnectIndexTts(): Promise<any> {
+    return this.post(`/api/indextts/disconnect`);
+  }
+
+  async uploadIndexTtsCloneVoice(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("name", file.name || "audio.wav");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      return await this.request(`/api/indextts/clone-voices/upload`, {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async selectIndexTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/indextts/clone-voices/select`, { voice_id: voiceId });
+  }
+
+  async deleteIndexTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/indextts/clone-voices/delete`, { voice_id: voiceId });
+  }
+
   // ===== 存储设置相关 API =====
   async getStorageSettings(): Promise<any> {
     return this.get("/api/settings/storage");

@@ -252,6 +252,15 @@ class TencentTtsService:
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
+        if provider == "indextts":
+            try:
+                from modules.indextts.service import indextts_service
+            except Exception as e:
+                return {"success": False, "error": f"indextts_import_failed:{e}"}
+
+            out = Path(out_path)
+            return await indextts_service.synthesize(text, str(out), voice_id, cfg)
+
         if provider == "qwen3_tts":
             try:
                 from modules.qwen3_tts_service import qwen3_tts_service

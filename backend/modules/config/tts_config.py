@@ -45,7 +45,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts', 'indextts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -169,6 +169,20 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('voxcpm_tts_default')
 
+                if 'indextts_default' not in self.configs:
+                    self.configs['indextts_default'] = TtsEngineConfig(
+                        provider='indextts',
+                        secret_id=None,
+                        secret_key=None,
+                        region=None,
+                        description='IndexTTS 局域网服务（需先在 IndexTTS 连接页连接成功）',
+                        enabled=False,
+                        active_voice_id=None,
+                        speed_ratio=1.0,
+                        extra_params={},
+                    )
+                    missing_defaults.append('indextts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -282,6 +296,20 @@ class TtsEngineConfigManager:
                     }
                 )
             ),
+            (
+                'indextts_default',
+                TtsEngineConfig(
+                    provider='indextts',
+                    secret_id=None,
+                    secret_key=None,
+                    region=None,
+                    description='IndexTTS 局域网服务（需先连接成功）',
+                    enabled=False,
+                    active_voice_id=None,
+                    speed_ratio=1.0,
+                    extra_params={},
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -335,6 +363,13 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
+             {
+                'provider': 'indextts',
+                'display_name': 'IndexTTS(本地)',
+                'description': '本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
+                'required_fields': [],
+                'optional_fields': []
+            },
             {
                 'provider': 'qwen_online_tts',
                 'display_name': 'Qwen3-TTS(在线)',
@@ -362,7 +397,8 @@ class TtsEngineConfigManager:
                 'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',
                 'required_fields': ['secret_id', 'secret_key'],
                 'optional_fields': ['region']
-            }
+            },
+           
         ]
 
     def get_voices(self, provider: str) -> List[TtsVoice]:
@@ -498,6 +534,8 @@ class TtsEngineConfigManager:
                         voice_type_tag=item.get('voice_type_tag') or None,
                         voice_human_style=item.get('voice_human_style') or None,
                     ))
+            elif provider == 'indextts':
+                voices = []
             elif provider == 'qwen_online_tts':
                 raw_list = [
                     {"id": "Cherry", "name": "Cherry", "language": "zh-CN", "gender": None, "tags": ["system"]},
@@ -535,6 +573,52 @@ class TtsEngineConfigManager:
     async def get_voices_async(self, provider: str) -> List[TtsVoice]:
         """异步获取音色列表；Edge TTS 直接拉取最新官方列表，不使用本地缓存文件。"""
         provider = provider.lower()
+        if provider == 'indextts':
+            try:
+                from modules.indextts.connection_store import indextts_connection_store
+                from modules.indextts.client import fetch_clone_voices_json
+
+                if not indextts_connection_store.is_connected():
+                    self._voices_cache[provider] = []
+                    return []
+                base = indextts_connection_store.base_url()
+                prefix = indextts_connection_store.api_prefix()
+                payload = await fetch_clone_voices_json(base, prefix)
+                data = payload.get("data") if isinstance(payload, dict) else None
+                items = []
+                if isinstance(data, dict):
+                    items = list(data.get("items") or [])
+                if not items and isinstance(payload, dict):
+                    items = list(payload.get("items") or [])
+                voices: List[TtsVoice] = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    vid = str(it.get("id") or "").strip()
+                    if not vid:
+                        continue
+                    nm = str(it.get("name") or vid).strip()
+                    voices.append(
+                        TtsVoice(
+                            id=vid,
+                            name=nm,
+                            description=None,
+                            sample_wav_url=None,
+                            language=None,
+                            gender=None,
+                            tags=["indextts", "clone"] if it.get("is_active") else ["indextts"],
+                            voice_type=None,
+                            category="clone",
+                            voice_quality=None,
+                            voice_type_tag="indextts",
+                            voice_human_style=None,
+                        )
+                    )
+                self._voices_cache[provider] = voices
+                return voices
+            except Exception as e:
+                logger.error(f"获取 IndexTTS 音色列表失败: {e}")
+                return self.get_voices(provider)
         if provider == 'edge_tts':
             try:
                 from modules.edge_tts_service import edge_tts_service
@@ -568,6 +652,46 @@ class TtsEngineConfigManager:
         config = self.get_config(config_id)
         if not config:
             return {"success": False, "config_id": config_id, "error": f"配置 '{config_id}' 不存在"}
+
+        if config.provider == 'indextts':
+            try:
+                from modules.indextts.connection_store import indextts_connection_store
+                from modules.indextts.client import probe_indextts
+            except Exception as e:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": f"IndexTTS 模块加载失败: {e}",
+                    "error": str(e),
+                }
+            if not indextts_connection_store.is_connected():
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": "请先调用 /api/indextts/connect 连接局域网 IndexTTS 服务",
+                    "error": "indextts_not_connected",
+                }
+            ok, err = await probe_indextts(
+                indextts_connection_store.base_url(),
+                indextts_connection_store.api_prefix(),
+            )
+            if not ok:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": err or "IndexTTS 探测失败",
+                    "error": err or "indextts_probe_failed",
+                }
+            return {
+                "success": True,
+                "config_id": config_id,
+                "provider": config.provider,
+                "message": "IndexTTS 服务可用",
+                "base_url": indextts_connection_store.base_url(),
+            }
 
         if config.provider == 'qwen_online_tts':
             api_key = (config.secret_key or "").strip()
