@@ -24,6 +24,12 @@ SINGLE_CALL_MAX_CHARS = 3000
 CHARS_PER_ITEM_ZH = 80
 CHARS_PER_ITEM_EN = 200
 
+# LLM 调用：失败后重试次数（共 max_retries + 1 次请求）
+LLM_CALL_MAX_RETRIES = 3
+# 第 1 次重试前等待 1s，之后指数退避，单次上限 30s
+LLM_RETRY_BACKOFF_BASE_SEC = 1.0
+LLM_RETRY_BACKOFF_MAX_SEC = 30.0
+
 
 def _is_english(language: Optional[str]) -> bool:
     if not language:
@@ -52,6 +58,46 @@ def _estimate_target_word_count(
     if copywriting_word_count is not None and int(copywriting_word_count) > 0:
         return int(copywriting_word_count)
     return None
+
+
+def _estimate_total_duration_seconds_from_timeline_text(timeline_text: str) -> Optional[float]:
+    """从带时间轴的上下文文本中估算总时长（秒）。"""
+    if not timeline_text:
+        return None
+
+    matches = re.findall(r"\[(\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2})\]", timeline_text)
+    if not matches:
+        return None
+
+    def _to_seconds(ts: str) -> int:
+        hh, mm, ss = ts.split(":")
+        return int(hh) * 3600 + int(mm) * 60 + int(ss)
+
+    try:
+        return float(max(_to_seconds(end) for _, end in matches))
+    except Exception:
+        return None
+
+
+def _estimate_target_word_count_by_video_duration(total_duration_seconds: Optional[float]) -> Optional[int]:
+    """不分段时，根据总视频时长估算文案字数上限。"""
+    if total_duration_seconds is None or total_duration_seconds <= 0:
+        return None
+
+    total_minutes = total_duration_seconds / 60.0
+    if total_minutes > 30:
+        return None
+    if total_minutes >= 20:
+        return 3000
+    if total_minutes >= 15:
+        return 2000
+    if total_minutes >= 10:
+        return 1000
+    if total_minutes >= 5:
+        return 500
+    if total_minutes >= 3:
+        return 300
+    return 300
 
 
 def _resolve_template_key(
@@ -262,14 +308,24 @@ def _remove_leading_quoted_subtitle_lines(text: str) -> str:
     return merged
 
 
+def _is_non_retryable_llm_error(exc: BaseException) -> bool:
+    """配置/参数类错误重试无效，直接抛出。"""
+    if isinstance(exc, RuntimeError):
+        msg = str(exc)
+        if "没有激活" in msg or "不支持的AI提供商" in msg:
+            return True
+    return False
+
+
 async def _call_llm_text(
     messages: List[ChatMessage],
     *,
     cancel_event: Optional[asyncio.Event] = None,
-    max_retries: int = 3,
+    max_retries: int = LLM_CALL_MAX_RETRIES,
 ) -> str:
     merged = _merge_system_messages(messages)
-    for attempt in range(max_retries + 1):
+    total_attempts = max_retries + 1
+    for attempt in range(total_attempts):
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
         try:
@@ -294,9 +350,27 @@ async def _call_llm_text(
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            if _is_non_retryable_llm_error(e):
+                raise
             if attempt < max_retries:
-                logger.warning(f"LLM call failed (attempt {attempt + 1}): {e}. Retrying...")
+                delay = min(
+                    LLM_RETRY_BACKOFF_MAX_SEC,
+                    LLM_RETRY_BACKOFF_BASE_SEC * (2**attempt),
+                )
+                logger.warning(
+                    f"LLM call failed (attempt {attempt + 1}/{total_attempts}): {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                if cancel_event:
+                    try:
+                        await asyncio.wait_for(cancel_event.wait(), timeout=delay)
+                        raise asyncio.CancelledError()
+                    except asyncio.TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(delay)
                 continue
+            logger.error(f"LLM call failed after {max_retries} retries: {e}")
             raise
     return ""
 
@@ -422,7 +496,9 @@ async def generate_copywriting_from_subtitles(
         subs_text_lines.append(f"[{ts}] {s['text']}")
     subs_text = "\n".join(subs_text_lines)
 
-    target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
+    explicit_target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
+    auto_target_chars = _estimate_target_word_count_by_video_duration(float(subtitles[-1]["end"]))
+    target_chars = explicit_target_chars if explicit_target_chars is not None else auto_target_chars
 
     template_key = _resolve_template_key(project_id, script_language)
     default_key = _default_prompt_key_for_project(project_id)
@@ -475,6 +551,7 @@ async def generate_copywriting_from_scenes(
         return ""
 
     subs_text_lines = []
+    max_end_seconds = 0.0
     for item in scene_items:
         try:
             start_s = float(item.get("start") or 0.0)
@@ -485,10 +562,13 @@ async def generate_copywriting_from_scenes(
         text = str(item.get("text") or "").strip()
         if not text:
             continue
+        max_end_seconds = max(max_end_seconds, end_s)
         subs_text_lines.append(f"[{ts}] {text}")
     subs_text = "\n".join(subs_text_lines)
 
-    target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
+    explicit_target_chars = _estimate_target_word_count(script_length, script_language, copywriting_word_count)
+    auto_target_chars = _estimate_target_word_count_by_video_duration(max_end_seconds)
+    target_chars = explicit_target_chars if explicit_target_chars is not None else auto_target_chars
 
     template_key = _resolve_template_key(project_id, script_language)
     default_key = _default_prompt_key_for_project(project_id)

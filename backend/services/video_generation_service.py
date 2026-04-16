@@ -13,11 +13,13 @@ import shutil
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import subprocess
 
 from modules.projects_store import Project, projects_store
 from modules.video_processor import WIN_NO_WINDOW, video_processor
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
+from modules.audio_normalizer import AudioNormalizer
 from modules.ws_manager import manager
 from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
@@ -31,6 +33,65 @@ def _uploads_dir() -> Path:
 
 def _to_web_path(p: Path) -> str:
     return to_uploads_web_path(p)
+
+
+async def _trim_audio_silence(
+    input_path: Path,
+    output_path: Path,
+    *,
+    start_threshold_db: float = -55.0,
+    start_duration_s: float = 0.05,
+    start_keep_silence_s: float = 0.12,
+    stop_threshold_db: float = -55.0,
+    stop_duration_s: float = 0.12,
+    end_keep_silence_s: float = 0.10,
+) -> bool:
+    try:
+        if not input_path.exists():
+            return False
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        th_start = f"{float(start_threshold_db)}dB"
+        th_stop = f"{float(stop_threshold_db)}dB"
+        start_dur = max(0.0, float(start_duration_s))
+        keep_lead = max(0.0, float(start_keep_silence_s))
+        stop_dur = max(0.0, float(stop_duration_s))
+        keep_tail = max(0.0, float(end_keep_silence_s))
+        af = (
+            "silenceremove="
+            f"detection=rms:start_periods=1:start_duration={start_dur}:start_threshold={th_start}:"
+            f"start_silence={keep_lead}:"
+            f"stop_periods=-1:stop_duration={stop_dur}:stop_threshold={th_stop}:"
+            f"stop_silence={keep_tail}"
+        )
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(input_path),
+            "-af",
+            af,
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            str(output_path),
+        ]
+        kwargs: Dict[str, Any] = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs,
+        )
+        await proc.communicate()
+        return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+    except Exception:
+        return False
 
 
 class VideoGenerationService:
@@ -369,6 +430,7 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                     return idx, (res if isinstance(res, dict) else {})
 
+                audio_norm = AudioNormalizer()
                 tasks: List[asyncio.Task] = []
                 for it in need_tts:
                     idx = int(it["idx"])
@@ -478,14 +540,29 @@ class VideoGenerationService:
                     sy = tts_results.get(idx)
                     if not sy:
                         raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
+                    narr_used = seg_audio
+                    provider = (getattr(tts_engine_config_manager.get_active_config(), "provider", None) or "").lower()
+                    if provider == "qwen3_tts":
+                        norm_audio = aud_tmp_dir / f"seg_{idx:04d}_norm.mp3"
+                        ok_norm = await audio_norm.normalize_audio_loudness(str(seg_audio), str(norm_audio))
+                        if ok_norm:
+                            narr_used = norm_audio
+                    trim_audio = aud_tmp_dir / f"seg_{idx:04d}_trim.mp3"
+                    ok_trim = await _trim_audio_silence(narr_used, trim_audio)
+                    if ok_trim:
+                        narr_used = trim_audio
                     adur = float(sy.get("duration") or 0.0) if isinstance(sy.get("duration"), (int, float)) else 0.0
                     if adur <= 0.0:
-                        adur = await video_processor._ffprobe_duration(str(seg_audio), "audio") or 0.0
+                        adur = await video_processor._ffprobe_duration(str(narr_used), "audio") or 0.0
+                    else:
+                        trimmed_dur = await video_processor._ffprobe_duration(str(narr_used), "audio") or 0.0
+                        if trimmed_dur > 0.0:
+                            adur = trimmed_dur
                     try:
-                        seg_audio_size = seg_audio.stat().st_size
+                        seg_audio_size = narr_used.stat().st_size
                     except Exception:
                         seg_audio_size = None
-                    logger.info(f"DEBUG tts_audio idx={idx} path={seg_audio} size={seg_audio_size} duration={adur}")
+                    logger.info(f"DEBUG tts_audio idx={idx} path={narr_used} size={seg_audio_size} duration={adur}")
                     if adur > 0.0 and input_dur > 0.0 and adur > duration:
                         ext = adur - duration
                         fwd = max(0.0, input_dur - end)
@@ -528,7 +605,7 @@ class VideoGenerationService:
                     clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
                     rep_ok = await video_processor.replace_audio_with_narration(
                         str(clip_abs),
-                        str(seg_audio),
+                        str(narr_used),
                         str(clip_nar_abs),
                         scope="generate_video",
                         project_id=project_id,
