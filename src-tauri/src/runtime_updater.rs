@@ -90,7 +90,8 @@ pub fn read_installed_state(app_handle: &AppHandle) -> Result<InstalledState, St
     }
     let data = std::fs::read_to_string(&path)
         .map_err(|e| format!("读取 runtime_state.json 失败: {}", e))?;
-    serde_json::from_str(&data)
+    let data = crate::json_util::trim_utf8_bom(&data);
+    serde_json::from_str(data)
         .map_err(|e| format!("解析 runtime_state.json 失败: {}", e))
 }
 
@@ -110,7 +111,8 @@ pub fn write_installed_state(app_handle: &AppHandle, state: &InstalledState) -> 
 pub fn read_manifest_from_path(path: &Path) -> Result<RuntimeManifest, String> {
     let data = std::fs::read_to_string(path)
         .map_err(|e| format!("读取清单文件失败: {}", e))?;
-    serde_json::from_str(&data).map_err(|e| format!("解析清单 JSON 失败: {}", e))
+    let data = crate::json_util::trim_utf8_bom(&data);
+    serde_json::from_str(data).map_err(|e| format!("解析清单 JSON 失败: {}", e))
 }
 
 /// 根据清单中的 `url` 字段解析本地 zip 文件名（与清单同目录）。
@@ -180,7 +182,8 @@ pub fn apply_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result
         let zip_path = local_zip_path_for_chunk(manifest_dir, chunk);
         if !zip_path.is_file() {
             return Err(format!(
-                "缺少分块文件「{}」，请与 runtime-manifest.json 放在同一文件夹。\n期望路径：{}",
+                "缺少分块文件「{}」，请与 runtime-manifest.json 放在同一文件夹。\n期望路径：{}\n\
+                 若本机已安装该分块且本次不想更新它，请从 runtime-manifest.json 的 chunks 中删除对应条目（仅发布需更新的分块 zip）。",
                 local_zip_filename(chunk),
                 zip_path.display()
             ));

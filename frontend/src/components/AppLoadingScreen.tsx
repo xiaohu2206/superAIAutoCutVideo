@@ -32,7 +32,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion, updateV
             {/* 加载指示 + 文案 */}
             <div className="mt-10 flex w-full max-w-xs flex-col items-center">
               <div className="h-[3px] w-full overflow-hidden rounded-full bg-[#00ecf3]/15">
-                <div className="h-full w-1/2 animate-[loading_1.4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-[#00ecf3] to-[#00c4d6]" />
+                <div className="h-full w-1/2 animate-loading-bar rounded-full bg-gradient-to-r from-[#00ecf3] to-[#00c4d6]" />
               </div>
               <p className="mt-3 text-center text-xs text-slate-400">即将就绪，预计 5 分钟</p>
               {!!updateVersion && (
@@ -55,13 +55,6 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ appVersion, updateV
         )}
       </div>
 
-      <style>{`
-        @keyframes loading {
-          0% { transform: translateX(-100%); }
-          50% { transform: translateX(150%); }
-          100% { transform: translateX(-100%); }
-        }
-      `}</style>
     </div>
   );
 };

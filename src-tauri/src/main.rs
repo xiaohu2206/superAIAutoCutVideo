@@ -28,6 +28,8 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State};
 
+mod json_util;
+mod offline_bundle;
 mod runtime_updater;
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
@@ -1200,9 +1202,8 @@ async fn start_backend(
     }
 }
 
-// Tauri命令：停止Python后端
-#[tauri::command]
-async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
+/// 停止后端并释放 AppData 下 DLL 文件锁（覆盖后端目录前必须调用，否则 Windows 报 os error 32）。
+fn stop_backend_sync(state: &AppState) -> Result<bool, String> {
     let mut process_guard = state.backend_process.lock().unwrap();
 
     if let Some(mut child) = process_guard.take() {
@@ -1215,7 +1216,6 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
                 println!("[backend] 已停止 (pid={})", pid);
                 #[cfg(target_os = "windows")]
                 {
-                    // 额外兜底：强制结束所有同名后端进程，避免残留
                     kill_all_backend_processes();
                 }
                 Ok(true)
@@ -1225,11 +1225,16 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
     } else {
         #[cfg(target_os = "windows")]
         {
-            // 无记录的子进程，但可能仍有残留后端，兜底清理
             kill_all_backend_processes();
         }
-        Ok(false) // 没有运行的进程
+        Ok(false)
     }
+}
+
+// Tauri命令：停止Python后端
+#[tauri::command]
+async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
+    stop_backend_sync(&state)
 }
 
 // Tauri命令：获取后端状态
@@ -1301,6 +1306,27 @@ async fn select_output_directory(app: AppHandle) -> Result<FileSelection, String
         .blocking_pick_folder();
 
     match dir_path {
+        Some(path) => Ok(FileSelection {
+            path: Some(path.to_string()),
+            cancelled: false,
+        }),
+        None => Ok(FileSelection {
+            path: None,
+            cancelled: true,
+        }),
+    }
+}
+
+// Tauri命令：选择离线更新总清单 offline-bundle-manifest.json
+#[tauri::command]
+async fn select_offline_bundle_manifest(app: AppHandle) -> Result<FileSelection, String> {
+    let file_path = tauri_plugin_dialog::DialogExt::dialog(&app)
+        .file()
+        .add_filter("offline-bundle-manifest", &["json"])
+        .set_title("选择 offline-bundle-manifest.json")
+        .blocking_pick_file();
+
+    match file_path {
         Some(path) => Ok(FileSelection {
             path: Some(path.to_string()),
             cancelled: false,
@@ -1459,7 +1485,11 @@ async fn check_runtime_update(
 #[tauri::command]
 async fn download_runtime_update(
     app_handle: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    let _ = stop_backend_sync(&state)?;
+    #[cfg(target_os = "windows")]
+    std::thread::sleep(std::time::Duration::from_millis(400));
     runtime_updater::download_and_apply(&app_handle).await
 }
 
@@ -1481,12 +1511,28 @@ fn check_local_runtime_update(
 #[tauri::command]
 async fn apply_local_runtime_update(
     app_handle: AppHandle,
+    state: State<'_, AppState>,
     manifest_path: String,
 ) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    let _ = stop_backend_sync(&state)?;
+    #[cfg(target_os = "windows")]
+    std::thread::sleep(std::time::Duration::from_millis(400));
     let app_handle = app_handle.clone();
     tokio::task::spawn_blocking(move || runtime_updater::apply_local_update(&app_handle, &manifest_path))
         .await
         .map_err(|e| format!("本地运行时更新任务异常: {}", e))?
+}
+
+#[tauri::command]
+fn resolve_offline_update_bundle(
+    selected_path: String,
+) -> Result<offline_bundle::OfflineBundleResolved, String> {
+    offline_bundle::resolve_offline_update_bundle(selected_path)
+}
+
+#[tauri::command]
+fn launch_local_shell_installer(installer_path: String) -> Result<(), String> {
+    offline_bundle::launch_local_shell_installer(installer_path)
 }
 
 // 应用启动时的初始化
@@ -1625,6 +1671,7 @@ fn main() {
             get_backend_status,
             select_video_file,
             select_output_directory,
+            select_offline_bundle_manifest,
             get_app_info,
             show_notification,
             open_external_link,
@@ -1638,7 +1685,9 @@ fn main() {
             download_runtime_update,
             get_runtime_installed_state,
             check_local_runtime_update,
-            apply_local_runtime_update
+            apply_local_runtime_update,
+            resolve_offline_update_bundle,
+            launch_local_shell_installer
         ])
         .run(tauri::generate_context!())
         .expect("启动Tauri应用失败");

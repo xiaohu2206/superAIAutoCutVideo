@@ -10,7 +10,13 @@ export interface UpdateSummary {
 
 const isTauriRuntime = (): boolean => {
   const w = typeof window !== "undefined" ? (window as any) : undefined;
-  return !!w?.__TAURI__ || typeof w?.__TAURI_IPC__ === "function";
+  if (!w) return false;
+  return (
+    !!w.__TAURI__ ||
+    typeof w.__TAURI_IPC__ === "function" ||
+    !!w.__TAURI_METADATA__ ||
+    !!w.__TAURI_INTERNALS__
+  );
 };
 
 export async function checkForAppUpdate(): Promise<UpdateSummary | null> {

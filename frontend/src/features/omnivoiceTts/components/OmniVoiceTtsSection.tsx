@@ -1,4 +1,4 @@
-import { apiClient } from "@/services/clients";
+import { apiClient, TauriCommands } from "@/services/clients";
 import { message } from "@/services/message";
 import { ttsService } from "@/services/ttsService";
 import type { TtsTestResult, TtsVoice } from "@/components/settingsPage/types";
@@ -316,8 +316,18 @@ export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
           OmniVoice（局域网）
         </h4>
         <p className="text-sm text-gray-600 mb-4">
-          在局域网机器上启动 OmniVoice API（默认端口 8970，路径前缀 /api），在此填写 IP
-          并连接后即可管理克隆音色与试听。
+          在局域网机器上启动 OmniVoice API（默认端口 8970，路径前缀 /api）。{" "}
+          <button
+            type="button"
+            onClick={() =>
+              void TauriCommands.openExternalLink(
+                "https://my.feishu.cn/wiki/T0tWw8hICicNwoktStQcaOeinPg?from=from_copylink"
+              )
+            }
+            className="inline p-0 m-0 border-0 bg-transparent font-inherit text-blue-600 hover:text-blue-800 hover:underline cursor-pointer align-baseline"
+          >
+            查看教程
+          </button>
         </p>
 
         <div className="flex flex-wrap items-end gap-3 mb-3">

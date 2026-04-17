@@ -753,6 +753,21 @@ export class TauriCommands {
     }
   }
 
+  // 选择离线更新总清单 offline-bundle-manifest.json
+  static async selectOfflineBundleManifest(): Promise<{
+    path?: string;
+    cancelled: boolean;
+  }> {
+    try {
+      return await TauriCommands.coreInvoke("select_offline_bundle_manifest");
+    } catch {
+      const p =
+        typeof window !== "undefined" ? window.prompt("请输入 offline-bundle-manifest.json 路径") : null;
+      if (p && p.trim()) return { path: p.trim(), cancelled: false };
+      return { cancelled: true };
+    }
+  }
+
   // 获取应用信息
   static async getAppInfo(): Promise<Record<string, string>> {
     try {

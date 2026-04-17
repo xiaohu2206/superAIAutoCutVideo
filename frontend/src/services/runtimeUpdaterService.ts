@@ -39,9 +39,16 @@ export interface DownloadProgress {
   phase: "downloading" | "extracting" | "verifying" | "done";
 }
 
+/** Tauri 2 默认不挂 window.__TAURI__，IPC 走 __TAURI_INTERNALS__（与 App.tsx detectTauriEnvironment 一致） */
 export const isTauriRuntime = (): boolean => {
   const w = typeof window !== "undefined" ? (window as any) : undefined;
-  return !!w?.__TAURI__ || typeof w?.__TAURI_IPC__ === "function";
+  if (!w) return false;
+  return (
+    !!w.__TAURI__ ||
+    typeof w.__TAURI_IPC__ === "function" ||
+    !!w.__TAURI_METADATA__ ||
+    !!w.__TAURI_INTERNALS__
+  );
 };
 
 export async function checkRuntimeUpdate(): Promise<RuntimeUpdateInfo | null> {
@@ -64,7 +71,7 @@ export async function checkLocalRuntimeUpdate(
 ): Promise<RuntimeUpdateInfo | null> {
   if (!isTauriRuntime()) return null;
   return await invoke<RuntimeUpdateInfo>("check_local_runtime_update", {
-    manifest_path: manifestPath,
+    manifestPath,
   });
 }
 
@@ -73,8 +80,34 @@ export async function applyLocalRuntimeUpdate(
 ): Promise<RuntimeUpdateInfo | null> {
   if (!isTauriRuntime()) return null;
   return await invoke<RuntimeUpdateInfo>("apply_local_runtime_update", {
-    manifest_path: manifestPath,
+    manifestPath,
   });
+}
+
+/** 网盘「总清单」解析结果：后端 runtime-manifest 路径 + 可选 NSIS 安装包 */
+export interface OfflineBundleResolved {
+  backendManifestPath: string;
+  shellInstallerPath: string | null;
+}
+
+export async function resolveOfflineUpdateBundle(
+  selectedPath: string
+): Promise<OfflineBundleResolved | null> {
+  if (!isTauriRuntime()) return null;
+  // Rust `OfflineBundleResolved` 使用 serde(rename_all = "camelCase")，IPC 返回 camelCase 字段
+  const raw = await invoke<{
+    backendManifestPath: string;
+    shellInstallerPath: string | null;
+  }>("resolve_offline_update_bundle", { selectedPath });
+  return {
+    backendManifestPath: raw.backendManifestPath,
+    shellInstallerPath: raw.shellInstallerPath ?? null,
+  };
+}
+
+export async function launchLocalShellInstaller(installerPath: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("launch_local_shell_installer", { installerPath });
 }
 
 export async function getRuntimeInstalledState(): Promise<InstalledState | null> {

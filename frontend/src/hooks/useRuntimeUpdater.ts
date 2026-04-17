@@ -83,7 +83,19 @@ export function useRuntimeUpdater() {
       }));
       return info;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "读取本地清单失败";
+      const msg = (() => {
+        if (typeof error === "string") return error;
+        if (error instanceof Error) return error.message;
+        if (
+          error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof (error as { message: unknown }).message === "string"
+        ) {
+          return (error as { message: string }).message;
+        }
+        return "读取本地清单失败";
+      })();
       setState((prev) => ({
         ...prev,
         checking: false,
@@ -107,7 +119,19 @@ export function useRuntimeUpdater() {
       await loadInstalledState();
       return info;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "安装本地运行时失败";
+      const msg = (() => {
+        if (typeof error === "string") return error;
+        if (error instanceof Error) return error.message;
+        if (
+          error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof (error as { message: unknown }).message === "string"
+        ) {
+          return (error as { message: string }).message;
+        }
+        return "安装本地运行时失败";
+      })();
       setState((prev) => ({ ...prev, installing: false, error: msg }));
       return null;
     }
