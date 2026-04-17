@@ -203,15 +203,15 @@ if errorlevel 1 (
     exit /b 1
 )
 rem 复制 FFmpeg 到资源目录（优先 Chocolatey，其次 PATH）
-for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFMPEG_EXE=%%I"
-for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFPROBE_EXE=%%I"
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }"') do set "FFMPEG_EXE=%%I"
+for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }"') do set "FFPROBE_EXE=%%I"
 if not defined FFMPEG_EXE for /f "delims=" %%I in ('where ffmpeg 2^>nul') do set "FFMPEG_EXE=%%I"
 if not defined FFPROBE_EXE for /f "delims=" %%I in ('where ffprobe 2^>nul') do set "FFPROBE_EXE=%%I"
 if not defined FFMPEG_EXE if exist "%ProgramData%\chocolatey\bin\choco.exe" (
     echo 尝试通过 Chocolatey 安装 FFmpeg...
     choco install ffmpeg -y --no-progress
-    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFMPEG_EXE=%%I"
-    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | %{$_.FullName}"') do set "FFPROBE_EXE=%%I"
+    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }"') do set "FFMPEG_EXE=%%I"
+    for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-ChildItem \"C:\ProgramData\chocolatey\lib\ffmpeg*\" -Recurse -Include ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }"') do set "FFPROBE_EXE=%%I"
 )
 if defined FFMPEG_EXE copy /y "%FFMPEG_EXE%" "..\src-tauri\resources\ffmpeg.exe"
 if defined FFPROBE_EXE copy /y "%FFPROBE_EXE%" "..\src-tauri\resources\ffprobe.exe"

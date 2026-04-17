@@ -261,6 +261,15 @@ class TencentTtsService:
             out = Path(out_path)
             return await indextts_service.synthesize(text, str(out), voice_id, cfg)
 
+        if provider == "omnivoice_tts":
+            try:
+                from modules.omnivoice_tts.service import omnivoice_tts_service
+            except Exception as e:
+                return {"success": False, "error": f"omnivoice_tts_import_failed:{e}"}
+
+            out = Path(out_path)
+            return await omnivoice_tts_service.synthesize(text, str(out), voice_id, cfg)
+
         if provider == "qwen3_tts":
             try:
                 from modules.qwen3_tts_service import qwen3_tts_service

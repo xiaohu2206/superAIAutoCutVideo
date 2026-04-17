@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""IndexTTS HTTP API 客户端（与业务配置解耦，仅负责请求与轮询）"""
+"""OmniVoice HTTP API 客户端（与业务配置解耦，仅负责请求与轮询）"""
 
 from __future__ import annotations
 
@@ -17,13 +17,9 @@ logger = logging.getLogger(__name__)
 
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
-# IndexTTS/Gradio 在 GPU 推理时会短暂无法 accept 新连接；connect/pool 过短会导致轮询偶发 ConnectTimeout。
-# 轮询阶段复用同一 AsyncClient，避免每秒新建 TCP 连接。
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=60.0, read=600.0, write=120.0, pool=60.0)
-
 _DEFAULT_LIMITS = httpx.Limits(max_keepalive_connections=10, max_connections=20)
 
-# 轮询时瞬时连不上服务：重试几次（任务仍在服务端执行）
 _POLL_STATUS_RETRIES = 8
 _POLL_STATUS_RETRY_BASE_SEC = 0.5
 
@@ -44,7 +40,7 @@ def _join(base: str, prefix: str, path: str) -> str:
     return urljoin(base, rel.lstrip("/"))
 
 
-def _is_transient_indextts_http_err(exc: BaseException) -> bool:
+def _is_transient_omnivoice_http_err(exc: BaseException) -> bool:
     if isinstance(exc, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout)):
         return True
     if isinstance(exc, httpx.ConnectError):
@@ -67,8 +63,8 @@ async def _get_task_status_with_client(
     return data if isinstance(data, dict) else {}
 
 
-async def probe_indextts(base_url: str, api_prefix: str = "/api") -> Tuple[bool, Optional[str]]:
-    """检测 IndexTTS 是否可用：请求 clone-voices。"""
+async def probe_omnivoice(base_url: str, api_prefix: str = "/api") -> Tuple[bool, Optional[str]]:
+    """检测 OmniVoice 是否可用：请求 clone-voices。"""
     url = _join(base_url, api_prefix, "/clone-voices")
     try:
         async with httpx.AsyncClient(
@@ -89,24 +85,18 @@ async def probe_indextts(base_url: str, api_prefix: str = "/api") -> Tuple[bool,
 
 
 def build_port_candidates(start_port: int, scan_back: int) -> List[int]:
-    """
-    先尝试 start_port；若不可用则「往前」扫描 scan_back 个端口（端口号递减）。
-    例如 start_port=7860、scan_back=10 → 7860,7859,...,7851。
-    """
     start = int(start_port)
     n = max(0, int(scan_back))
     return [start - i for i in range(n + 1)]
 
 
-async def discover_indextts(
+async def discover_omnivoice(
     host: str,
-    start_port: int = 7860,
+    start_port: int = 8970,
     scan_back: int = 10,
     api_prefix: str = "/api",
 ) -> Optional[Tuple[str, int]]:
-    """
-    在 host 上探测 IndexTTS，返回 (base_url, port)。
-    """
+    """在 host 上探测 OmniVoice API，返回 (base_url, port)。"""
     h = (host or "").strip()
     if not h:
         return None
@@ -114,7 +104,7 @@ async def discover_indextts(
         if port <= 0 or port > 65535:
             continue
         base = f"http://{h}:{port}"
-        ok, _err = await probe_indextts(base, api_prefix)
+        ok, _err = await probe_omnivoice(base, api_prefix)
         if ok:
             return base, port
     return None
@@ -144,12 +134,18 @@ async def post_tts_generate(
     api_prefix: str,
     text: str,
     voice_id: Optional[str] = None,
+    language: Optional[str] = None,
+    ref_text: Optional[str] = None,
     params: Optional[Dict[str, Any]] = None,
 ) -> str:
     url = _join(base_url, api_prefix, "/tts/generate")
     body: Dict[str, Any] = {"text": text}
     if voice_id:
         body["voice_id"] = voice_id
+    if language:
+        body["language"] = language
+    if ref_text is not None:
+        body["ref_text"] = ref_text
     if params:
         body["params"] = params
     async with httpx.AsyncClient(
@@ -170,7 +166,7 @@ async def post_tts_generate(
     if not tid and isinstance(wrapped, dict):
         tid = wrapped.get("task_id") or wrapped.get("taskId")
     if not tid:
-        raise RuntimeError("indextts_missing_task_id")
+        raise RuntimeError("omnivoice_missing_task_id")
     return str(tid)
 
 
@@ -197,6 +193,9 @@ def _task_status_str(payload: Dict[str, Any]) -> str:
         t = d.get("task")
         if isinstance(t, dict) and t.get("status"):
             return str(t.get("status")).lower()
+    t2 = payload.get("task")
+    if isinstance(t2, dict) and t2.get("status"):
+        return str(t2.get("status")).lower()
     return ""
 
 
@@ -222,11 +221,11 @@ async def poll_task_until_done(
                     last = await _get_task_status_with_client(client, base_url, api_prefix, task_id)
                     break
                 except Exception as e:
-                    if not _is_transient_indextts_http_err(e) or attempt >= _POLL_STATUS_RETRIES - 1:
+                    if not _is_transient_omnivoice_http_err(e) or attempt >= _POLL_STATUS_RETRIES - 1:
                         raise
                     wait = _POLL_STATUS_RETRY_BASE_SEC * (2**attempt)
                     logger.warning(
-                        "IndexTTS 轮询状态暂时失败（将重试）: %s (attempt %s/%s)",
+                        "OmniVoice 轮询状态暂时失败（将重试）: %s (attempt %s/%s)",
                         e,
                         attempt + 1,
                         _POLL_STATUS_RETRIES,
@@ -235,14 +234,20 @@ async def poll_task_until_done(
             st = _task_status_str(last)
             if st in {"succeeded", "success", "completed", "done"}:
                 return last
-            if st == "failed" or st == "error":
+            if st in {"failed", "error"}:
                 err = ""
                 d = _unwrap_data(last)
                 if isinstance(d, dict):
-                    err = str(d.get("error") or "")
-                raise RuntimeError(err or "indextts_task_failed")
+                    t = d.get("task")
+                    if isinstance(t, dict) and t.get("error"):
+                        err = str(t.get("error") or "")
+                    if not err:
+                        err = str(d.get("error") or "")
+                if not err and isinstance(last.get("task"), dict):
+                    err = str(last["task"].get("error") or "")
+                raise RuntimeError(err or "omnivoice_task_failed")
             await asyncio.sleep(interval_sec)
-    raise TimeoutError("indextts_task_timeout")
+    raise TimeoutError("omnivoice_task_timeout")
 
 
 async def download_task_audio(
@@ -265,11 +270,11 @@ async def download_task_audio(
                 dest_path.write_bytes(r.content)
                 return
             except Exception as e:
-                if not _is_transient_indextts_http_err(e) or attempt >= _DOWNLOAD_RETRIES - 1:
+                if not _is_transient_omnivoice_http_err(e) or attempt >= _DOWNLOAD_RETRIES - 1:
                     raise
                 wait = _DOWNLOAD_RETRY_BASE_SEC * (2**attempt)
                 logger.warning(
-                    "IndexTTS 下载音频暂时失败（将重试）: %s (attempt %s/%s)",
+                    "OmniVoice 下载音频暂时失败（将重试）: %s (attempt %s/%s)",
                     e,
                     attempt + 1,
                     _DOWNLOAD_RETRIES,
@@ -319,7 +324,6 @@ async def upload_clone_voice(
     filename: str,
     display_name: str,
 ) -> Dict[str, Any]:
-    """POST /clone-voices/upload（multipart）"""
     url = _join(base_url, api_prefix, "/clone-voices/upload")
     async with httpx.AsyncClient(
         timeout=_DEFAULT_TIMEOUT,
@@ -337,7 +341,6 @@ async def upload_clone_voice(
 
 
 async def post_clone_voice_select(base_url: str, api_prefix: str, voice_id: str) -> Dict[str, Any]:
-    """POST /clone-voices/select"""
     url = _join(base_url, api_prefix, "/clone-voices/select")
     async with httpx.AsyncClient(
         timeout=_DEFAULT_TIMEOUT,
@@ -352,8 +355,27 @@ async def post_clone_voice_select(base_url: str, api_prefix: str, voice_id: str)
             return {}
 
 
+async def post_clone_voice_rename(
+    base_url: str,
+    api_prefix: str,
+    voice_id: str,
+    new_name: str,
+) -> Dict[str, Any]:
+    url = _join(base_url, api_prefix, "/clone-voices/rename")
+    async with httpx.AsyncClient(
+        timeout=_DEFAULT_TIMEOUT,
+        limits=_DEFAULT_LIMITS,
+        follow_redirects=True,
+    ) as client:
+        r = await client.post(url, json={"voice_id": voice_id, "new_name": new_name})
+        r.raise_for_status()
+        try:
+            return r.json() if r.content else {}
+        except Exception:
+            return {}
+
+
 async def post_clone_voice_delete(base_url: str, api_prefix: str, voice_id: str) -> Dict[str, Any]:
-    """POST /clone-voices/delete"""
     url = _join(base_url, api_prefix, "/clone-voices/delete")
     async with httpx.AsyncClient(
         timeout=_DEFAULT_TIMEOUT,

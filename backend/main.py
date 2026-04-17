@@ -58,6 +58,7 @@ from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.qwen_online_tts_routes import router as qwen_online_tts_router
 from routes.voxcpm_tts_routes import router as voxcpm_tts_router
 from routes.indextts_routes import router as indextts_router
+from routes.omnivoice_tts_routes import router as omnivoice_tts_router
 from routes.fun_asr_routes import router as fun_asr_router
 from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
@@ -386,6 +387,7 @@ app.include_router(qwen3_tts_router)
 app.include_router(qwen_online_tts_router)
 app.include_router(voxcpm_tts_router)
 app.include_router(indextts_router)
+app.include_router(omnivoice_tts_router)
 app.include_router(fun_asr_router)
 app.include_router(prompts_router)
 app.include_router(jianying_router)

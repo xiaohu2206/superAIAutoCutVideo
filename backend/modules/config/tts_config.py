@@ -45,7 +45,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts', 'indextts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts', 'indextts', 'omnivoice_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -183,6 +183,20 @@ class TtsEngineConfigManager:
                     )
                     missing_defaults.append('indextts_default')
 
+                if 'omnivoice_tts_default' not in self.configs:
+                    self.configs['omnivoice_tts_default'] = TtsEngineConfig(
+                        provider='omnivoice_tts',
+                        secret_id=None,
+                        secret_key=None,
+                        region=None,
+                        description='OmniVoice 局域网服务（需先在 OmniVoice 连接页连接成功）',
+                        enabled=False,
+                        active_voice_id=None,
+                        speed_ratio=1.0,
+                        extra_params={},
+                    )
+                    missing_defaults.append('omnivoice_tts_default')
+
                 if missing_defaults:
                     self.save_configs()
                     logger.info(f"已补充默认TTS配置: {', '.join(missing_defaults)}")
@@ -310,6 +324,20 @@ class TtsEngineConfigManager:
                     extra_params={},
                 )
             ),
+            (
+                'omnivoice_tts_default',
+                TtsEngineConfig(
+                    provider='omnivoice_tts',
+                    secret_id=None,
+                    secret_key=None,
+                    region=None,
+                    description='OmniVoice 局域网服务（需先连接成功）',
+                    enabled=False,
+                    active_voice_id=None,
+                    speed_ratio=1.0,
+                    extra_params={},
+                )
+            ),
         ]
         for cid, cfg in defaults:
             self.configs[cid] = cfg
@@ -367,6 +395,13 @@ class TtsEngineConfigManager:
                 'provider': 'indextts',
                 'display_name': 'IndexTTS(本地)',
                 'description': '本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'omnivoice_tts',
+                'display_name': 'OmniVoice(本地)',
+                'description': '局域网 OmniVoice HTTP 服务，需先在「连接 OmniVoice」中连接成功',
                 'required_fields': [],
                 'optional_fields': []
             },
@@ -536,6 +571,8 @@ class TtsEngineConfigManager:
                     ))
             elif provider == 'indextts':
                 voices = []
+            elif provider == 'omnivoice_tts':
+                voices = []
             elif provider == 'qwen_online_tts':
                 raw_list = [
                     {"id": "Cherry", "name": "Cherry", "language": "zh-CN", "gender": None, "tags": ["system"]},
@@ -619,6 +656,52 @@ class TtsEngineConfigManager:
             except Exception as e:
                 logger.error(f"获取 IndexTTS 音色列表失败: {e}")
                 return self.get_voices(provider)
+        if provider == 'omnivoice_tts':
+            try:
+                from modules.omnivoice_tts.connection_store import omnivoice_tts_connection_store
+                from modules.omnivoice_tts.client import fetch_clone_voices_json
+
+                if not omnivoice_tts_connection_store.is_connected():
+                    self._voices_cache[provider] = []
+                    return []
+                base = omnivoice_tts_connection_store.base_url()
+                prefix = omnivoice_tts_connection_store.api_prefix()
+                payload = await fetch_clone_voices_json(base, prefix)
+                data = payload.get("data") if isinstance(payload, dict) else None
+                items = []
+                if isinstance(data, dict):
+                    items = list(data.get("items") or [])
+                if not items and isinstance(payload, dict):
+                    items = list(payload.get("items") or [])
+                voices_ov: List[TtsVoice] = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    vid = str(it.get("id") or "").strip()
+                    if not vid:
+                        continue
+                    nm = str(it.get("name") or vid).strip()
+                    voices_ov.append(
+                        TtsVoice(
+                            id=vid,
+                            name=nm,
+                            description=None,
+                            sample_wav_url=None,
+                            language=None,
+                            gender=None,
+                            tags=["omnivoice_tts", "clone"] if it.get("is_active") else ["omnivoice_tts"],
+                            voice_type=None,
+                            category="clone",
+                            voice_quality=None,
+                            voice_type_tag="omnivoice_tts",
+                            voice_human_style=None,
+                        )
+                    )
+                self._voices_cache[provider] = voices_ov
+                return voices_ov
+            except Exception as e:
+                logger.error(f"获取 OmniVoice 音色列表失败: {e}")
+                return self.get_voices(provider)
         if provider == 'edge_tts':
             try:
                 from modules.edge_tts_service import edge_tts_service
@@ -691,6 +774,46 @@ class TtsEngineConfigManager:
                 "provider": config.provider,
                 "message": "IndexTTS 服务可用",
                 "base_url": indextts_connection_store.base_url(),
+            }
+
+        if config.provider == 'omnivoice_tts':
+            try:
+                from modules.omnivoice_tts.connection_store import omnivoice_tts_connection_store
+                from modules.omnivoice_tts.client import probe_omnivoice
+            except Exception as e:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": f"OmniVoice 模块加载失败: {e}",
+                    "error": str(e),
+                }
+            if not omnivoice_tts_connection_store.is_connected():
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": "请先调用 /api/omnivoice-tts/connect 连接局域网 OmniVoice 服务",
+                    "error": "omnivoice_tts_not_connected",
+                }
+            ok, err = await probe_omnivoice(
+                omnivoice_tts_connection_store.base_url(),
+                omnivoice_tts_connection_store.api_prefix(),
+            )
+            if not ok:
+                return {
+                    "success": False,
+                    "config_id": config_id,
+                    "provider": config.provider,
+                    "message": err or "OmniVoice 探测失败",
+                    "error": err or "omnivoice_probe_failed",
+                }
+            return {
+                "success": True,
+                "config_id": config_id,
+                "provider": config.provider,
+                "message": "OmniVoice 服务可用",
+                "base_url": omnivoice_tts_connection_store.base_url(),
             }
 
         if config.provider == 'qwen_online_tts':

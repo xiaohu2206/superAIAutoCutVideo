@@ -1,4 +1,4 @@
-import { apiClient, TauriCommands } from "@/services/clients";
+import { apiClient } from "@/services/clients";
 import { message } from "@/services/message";
 import { ttsService } from "@/services/ttsService";
 import type { TtsTestResult, TtsVoice } from "@/components/settingsPage/types";
@@ -16,13 +16,12 @@ import {
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-export type IndexTtsSectionProps = {
+export type OmniVoiceTtsSectionProps = {
   configId: string | null;
   activeVoiceId: string;
   onSetActive: (voiceId: string) => Promise<void>;
   onConnectionChange?: (connected: boolean) => void;
   onVoicesRefresh?: () => Promise<void>;
-  /** 删除音色并清空当前音色后，用于同步父级配置（如 refreshConfigs） */
   onConfigRefresh?: () => Promise<void>;
   onTestConnection: () => void | Promise<void>;
   testing: boolean;
@@ -37,7 +36,7 @@ const resolveUrl = (url: string): string => {
   return url;
 };
 
-export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
+export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
   configId,
   activeVoiceId,
   onSetActive,
@@ -50,7 +49,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
   testDurationMs,
 }) => {
   const [host, setHost] = useState("127.0.0.1");
-  const [port, setPort] = useState(7860);
+  const [port, setPort] = useState(8970);
   const [scanBack, setScanBack] = useState(10);
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -66,14 +65,14 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
   }>({ open: false, voice: null });
 
   const [previewText, setPreviewText] = useState(
-    "您好，这是一段 IndexTTS 测试配音。"
+    "您好，这是一段 OmniVoice 测试配音。"
   );
   const [previewLoading, setPreviewLoading] = useState(false);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const syncStatus = useCallback(async () => {
     try {
-      const res = await ttsService.getIndexTtsStatus();
+      const res = await ttsService.getOmniVoiceTtsStatus();
       const ok = Boolean(res?.data?.connected);
       setConnected(ok);
       setBaseUrl(res?.data?.base_url || null);
@@ -89,7 +88,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
   const loadVoicesLocal = useCallback(async () => {
     setLoadingVoices(true);
     try {
-      const res = await ttsService.getVoices("indextts");
+      const res = await ttsService.getVoices("omnivoice_tts");
       if (res?.success) {
         setVoices(res.data || []);
       } else {
@@ -135,14 +134,14 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     }
     setConnecting(true);
     try {
-      const res = await ttsService.connectIndexTts({
+      const res = await ttsService.connectOmniVoiceTts({
         host: h,
         port,
         api_prefix: "/api",
         scan_back: scanBack,
       });
       if (res?.success) {
-        message.success(res.message || "已连接 IndexTTS");
+        message.success(res.message || "已连接 OmniVoice");
         await syncStatus();
         await loadVoicesLocal();
         await onVoicesRefresh?.();
@@ -160,7 +159,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
 
   const handleDisconnect = async () => {
     try {
-      await ttsService.disconnectIndexTts();
+      await ttsService.disconnectOmniVoiceTts();
       message.success("已断开");
       stopAudio();
       await syncStatus();
@@ -175,12 +174,12 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     e.target.value = "";
     if (!file) return;
     if (!connected) {
-      message.warning("请先连接 IndexTTS 服务");
+      message.warning("请先连接 OmniVoice 服务");
       return;
     }
     setUploading(true);
     try {
-      const res = await ttsService.uploadIndexTtsCloneVoice(file);
+      const res = await ttsService.uploadOmniVoiceTtsCloneVoice(file);
       if (res?.success) {
         message.success("上传成功");
         await loadVoicesLocal();
@@ -197,7 +196,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
 
   const openDeleteDialog = (v: TtsVoice) => {
     if (!connected) {
-      message.warning("请先连接 IndexTTS");
+      message.warning("请先连接 OmniVoice");
       return;
     }
     setDeleteDialog({ open: true, voice: v });
@@ -208,7 +207,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     if (!v || !connected) return;
     setDeletingId(v.id);
     try {
-      const res = await ttsService.deleteIndexTtsCloneVoice(v.id);
+      const res = await ttsService.deleteOmniVoiceTtsCloneVoice(v.id);
       if (!res?.success) {
         message.error("删除失败");
         return;
@@ -235,11 +234,11 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
 
   const handleSelectAndActivate = async (voiceId: string) => {
     if (!connected) {
-      message.warning("请先连接 IndexTTS");
+      message.warning("请先连接 OmniVoice");
       return;
     }
     try {
-      await ttsService.selectIndexTtsCloneVoice(voiceId);
+      await ttsService.selectOmniVoiceTtsCloneVoice(voiceId);
       await onSetActive(voiceId);
       message.success("已设为当前音色");
     } catch (err: any) {
@@ -257,7 +256,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     try {
       const res = await ttsService.previewVoice(voice.id, {
         config_id: configId,
-        provider: "indextts",
+        provider: "omnivoice_tts",
         text: previewText.trim() || "您好，欢迎使用智能配音。",
       });
       const url =
@@ -284,7 +283,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
       return;
     }
     if (!configId || !connected) {
-      message.warning("请先连接 IndexTTS");
+      message.warning("请先连接 OmniVoice");
       return;
     }
     setPreviewLoading(true);
@@ -292,7 +291,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     try {
       const res = await ttsService.previewVoice(activeVoiceId, {
         config_id: configId,
-        provider: "indextts",
+        provider: "omnivoice_tts",
         text: previewText.trim() || "您好，欢迎使用智能配音。",
       });
       const url = res?.data?.audio_url || res?.data?.sample_wav_url;
@@ -314,21 +313,11 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
     <div className="space-y-6">
       <div>
         <h4 className="text-md font-semibold text-gray-900 mb-2">
-          IndexTTS（本地）
+          OmniVoice（局域网）
         </h4>
         <p className="text-sm text-gray-600 mb-4">
-          先连接本机的 IndexTTS HTTP 服务，再管理克隆音色与试听。{" "}
-          <button
-            type="button"
-            onClick={() =>
-              void TauriCommands.openExternalLink(
-                "https://my.feishu.cn/wiki/I0gVwZZDBiSqIDkQQElc40KCnmh?from=from_copylink"
-              )
-            }
-            className="inline p-0 m-0 border-0 bg-transparent font-inherit text-blue-600 hover:text-blue-800 hover:underline cursor-pointer align-baseline"
-          >
-            查看教程
-          </button>
+          在局域网机器上启动 OmniVoice API（默认端口 8970，路径前缀 /api），在此填写 IP
+          并连接后即可管理克隆音色与试听。
         </p>
 
         <div className="flex flex-wrap items-end gap-3 mb-3">
@@ -350,7 +339,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
               value={port}
               min={1}
               max={65535}
-              onChange={(e) => setPort(Number(e.target.value) || 7860)}
+              onChange={(e) => setPort(Number(e.target.value) || 8970)}
               disabled={connecting}
             />
           </div>
@@ -415,7 +404,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
               <input
                 type="file"
                 className="hidden"
-                accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp3,.wav,.mp3"
+                accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp3,audio/flac,audio/mp4,audio/aac,.wav,.mp3,.flac,.m4a,.ogg,.aac,.opus"
                 disabled={!connected || uploading}
                 onChange={handleUpload}
               />
@@ -434,7 +423,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
           </div>
         </div>
         <p className="text-xs text-gray-500">
-          上传时显示名称使用上传文件名（与后端转发一致）。
+          支持 wav / mp3 / flac / m4a / ogg / aac / opus；显示名称默认使用上传文件名。
         </p>
 
         <div className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
@@ -492,7 +481,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
                   type="button"
                   className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
                   disabled={!connected || deletingId === v.id}
-                  title="从 IndexTTS 删除此克隆音色"
+                  title="从 OmniVoice 删除此克隆音色"
                   onClick={() => openDeleteDialog(v)}
                 >
                   {deletingId === v.id ? (
@@ -533,7 +522,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
       <div className="border-t border-gray-100 pt-4">
         <h5 className="text-sm font-semibold text-gray-900 mb-2">连通性测试</h5>
         <p className="text-xs text-gray-500 mb-2">
-          验证当前 TTS 配置与 IndexTTS 后端是否可用（与引擎测试一致）。
+          验证当前 TTS 配置与 OmniVoice 后端是否可用（与引擎测试一致）。
         </p>
         <button
           type="button"
@@ -590,7 +579,7 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
                   </div>
                   <div className="p-5 space-y-3">
                     <p className="text-sm text-gray-700">
-                      确定从 IndexTTS 删除音色{" "}
+                      确定从 OmniVoice 删除音色{" "}
                       <span className="font-semibold">
                         「{deleteDialog.voice.name}」
                       </span>
@@ -635,4 +624,4 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
   );
 };
 
-export default IndexTtsSection;
+export default OmniVoiceTtsSection;

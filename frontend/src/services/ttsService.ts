@@ -21,6 +21,18 @@ export const ttsService = {
   uploadIndexTtsCloneVoice: (file: File) => apiClient.uploadIndexTtsCloneVoice(file),
   selectIndexTtsCloneVoice: (voiceId: string) => apiClient.selectIndexTtsCloneVoice(voiceId),
   deleteIndexTtsCloneVoice: (voiceId: string) => apiClient.deleteIndexTtsCloneVoice(voiceId),
+
+  getOmniVoiceTtsStatus: () => apiClient.getOmniVoiceTtsStatus(),
+  connectOmniVoiceTts: (data: {
+    host: string;
+    port?: number;
+    api_prefix?: string;
+    scan_back?: number;
+  }) => apiClient.connectOmniVoiceTts(data),
+  disconnectOmniVoiceTts: () => apiClient.disconnectOmniVoiceTts(),
+  uploadOmniVoiceTtsCloneVoice: (file: File) => apiClient.uploadOmniVoiceTtsCloneVoice(file),
+  selectOmniVoiceTtsCloneVoice: (voiceId: string) => apiClient.selectOmniVoiceTtsCloneVoice(voiceId),
+  deleteOmniVoiceTtsCloneVoice: (voiceId: string) => apiClient.deleteOmniVoiceTtsCloneVoice(voiceId),
 };
 
 export default ttsService;

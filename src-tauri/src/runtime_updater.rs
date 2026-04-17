@@ -107,6 +107,166 @@ pub fn write_installed_state(app_handle: &AppHandle, state: &InstalledState) -> 
 
 // ── 拉取远端清单 ──────────────────────────────────────────────────
 
+pub fn read_manifest_from_path(path: &Path) -> Result<RuntimeManifest, String> {
+    let data = std::fs::read_to_string(path)
+        .map_err(|e| format!("读取清单文件失败: {}", e))?;
+    serde_json::from_str(&data).map_err(|e| format!("解析清单 JSON 失败: {}", e))
+}
+
+/// 根据清单中的 `url` 字段解析本地 zip 文件名（与清单同目录）。
+/// 支持 `https://.../runtime-base-1.2.6.zip`、`runtime-base-1.2.6.zip` 等形式。
+pub fn local_zip_filename(chunk: &RuntimeChunk) -> String {
+    let url = chunk.url.trim();
+    if url.starts_with("http://") || url.starts_with("https://") {
+        if let Some(seg) = url.rsplit('/').next() {
+            if !seg.is_empty() && seg.contains('.') {
+                return seg.to_string();
+            }
+        }
+    } else if !url.is_empty() {
+        let p = Path::new(url);
+        if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+            return name.to_string();
+        }
+        return url.to_string();
+    }
+    format!("{}-{}.zip", chunk.name, chunk.version)
+}
+
+pub fn local_zip_path_for_chunk(manifest_dir: &Path, chunk: &RuntimeChunk) -> PathBuf {
+    manifest_dir.join(local_zip_filename(chunk))
+}
+
+pub fn check_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result<RuntimeUpdateInfo, String> {
+    let path = PathBuf::from(manifest_path);
+    if !path.is_file() {
+        return Err(format!("清单文件不存在: {}", path.display()));
+    }
+    let local = read_installed_state(app_handle)?;
+    let remote = read_manifest_from_path(&path)?;
+    Ok(compute_update_plan(&local, &remote))
+}
+
+pub fn apply_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result<RuntimeUpdateInfo, String> {
+    let path = PathBuf::from(manifest_path);
+    if !path.is_file() {
+        return Err(format!("清单文件不存在: {}", path.display()));
+    }
+    let manifest_dir = path
+        .parent()
+        .ok_or_else(|| "无法解析清单所在目录".to_string())?;
+
+    let local = read_installed_state(app_handle)?;
+    let remote = read_manifest_from_path(&path)?;
+    let plan = compute_update_plan(&local, &remote);
+
+    if !plan.available {
+        return Ok(plan);
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    let backend_dir = app_data_dir.join("superAutoCutVideoBackend");
+    let _ = std::fs::create_dir_all(&backend_dir);
+
+    let mut new_state = local.clone();
+    new_state.schema_version = 1;
+    new_state.runtime_version = remote.runtime_version.clone();
+    new_state.variant = remote.variant.clone();
+
+    for chunk in &plan.chunks_to_update {
+        let zip_path = local_zip_path_for_chunk(manifest_dir, chunk);
+        if !zip_path.is_file() {
+            return Err(format!(
+                "缺少分块文件「{}」，请与 runtime-manifest.json 放在同一文件夹。\n期望路径：{}",
+                local_zip_filename(chunk),
+                zip_path.display()
+            ));
+        }
+
+        let _ = app_handle.emit(
+            "runtime-update-progress",
+            DownloadProgress {
+                chunk_name: chunk.name.clone(),
+                downloaded: 0,
+                total: chunk.size,
+                phase: "verifying".into(),
+            },
+        );
+
+        let actual_hash = sha256_of_file(&zip_path)?;
+        if actual_hash != chunk.sha256 {
+            return Err(format!(
+                "分块 {} 校验失败：清单要求 sha256={}，实际为 {}",
+                chunk.name, chunk.sha256, actual_hash
+            ));
+        }
+
+        let _ = app_handle.emit(
+            "runtime-update-progress",
+            DownloadProgress {
+                chunk_name: chunk.name.clone(),
+                downloaded: chunk.size,
+                total: chunk.size,
+                phase: "verifying".into(),
+            },
+        );
+
+        let _ = app_handle.emit(
+            "runtime-update-progress",
+            DownloadProgress {
+                chunk_name: chunk.name.clone(),
+                downloaded: 0,
+                total: chunk.size,
+                phase: "extracting".into(),
+            },
+        );
+
+        extract_chunk_zip(&zip_path, &backend_dir)?;
+
+        new_state.chunks.insert(
+            chunk.name.clone(),
+            InstalledChunkInfo {
+                version: chunk.version.clone(),
+                sha256: chunk.sha256.clone(),
+            },
+        );
+
+        let _ = app_handle.emit(
+            "runtime-update-progress",
+            DownloadProgress {
+                chunk_name: chunk.name.clone(),
+                downloaded: chunk.size,
+                total: chunk.size,
+                phase: "extracting".into(),
+            },
+        );
+    }
+
+    for chunk in &plan.skip_chunks {
+        if let Some(existing) = local.chunks.get(chunk) {
+            new_state.chunks.insert(chunk.clone(), existing.clone());
+        }
+    }
+
+    new_state.installed_at = chrono_now_iso();
+    write_installed_state(app_handle, &new_state)?;
+
+    let _ = app_handle.emit(
+        "runtime-update-progress",
+        DownloadProgress {
+            chunk_name: "all".into(),
+            downloaded: plan.total_download_size,
+            total: plan.total_download_size,
+            phase: "done".into(),
+        },
+    );
+
+    Ok(plan)
+}
+
 pub async fn fetch_remote_manifest(url: &str) -> Result<RuntimeManifest, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

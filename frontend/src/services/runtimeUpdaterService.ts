@@ -36,10 +36,10 @@ export interface DownloadProgress {
   chunk_name: string;
   downloaded: number;
   total: number;
-  phase: "downloading" | "extracting" | "done";
+  phase: "downloading" | "extracting" | "verifying" | "done";
 }
 
-const isTauriRuntime = (): boolean => {
+export const isTauriRuntime = (): boolean => {
   const w = typeof window !== "undefined" ? (window as any) : undefined;
   return !!w?.__TAURI__ || typeof w?.__TAURI_IPC__ === "function";
 };
@@ -57,6 +57,24 @@ export async function checkRuntimeUpdate(): Promise<RuntimeUpdateInfo | null> {
 export async function downloadRuntimeUpdate(): Promise<RuntimeUpdateInfo | null> {
   if (!isTauriRuntime()) return null;
   return await invoke<RuntimeUpdateInfo>("download_runtime_update");
+}
+
+export async function checkLocalRuntimeUpdate(
+  manifestPath: string
+): Promise<RuntimeUpdateInfo | null> {
+  if (!isTauriRuntime()) return null;
+  return await invoke<RuntimeUpdateInfo>("check_local_runtime_update", {
+    manifest_path: manifestPath,
+  });
+}
+
+export async function applyLocalRuntimeUpdate(
+  manifestPath: string
+): Promise<RuntimeUpdateInfo | null> {
+  if (!isTauriRuntime()) return null;
+  return await invoke<RuntimeUpdateInfo>("apply_local_runtime_update", {
+    manifest_path: manifestPath,
+  });
 }
 
 export async function getRuntimeInstalledState(): Promise<InstalledState | null> {

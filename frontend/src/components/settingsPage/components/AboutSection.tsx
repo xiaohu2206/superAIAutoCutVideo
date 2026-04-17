@@ -1,9 +1,11 @@
-import { Download, Info, Layers, Loader2, Package, RefreshCw } from "lucide-react";
+import { Download, FolderOpen, Info, Layers, Loader2, Package, RefreshCw } from "lucide-react";
 import React from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useAppUpdater } from "../../../hooks/useAppUpdater";
 import { useAppVersion } from "../../../hooks/useAppVersion";
 import { useRuntimeUpdater } from "../../../hooks/useRuntimeUpdater";
-import { formatBytes } from "../../../services/runtimeUpdaterService";
+import { formatBytes, isTauriRuntime } from "../../../services/runtimeUpdaterService";
 
 const AboutSection: React.FC = () => {
   const { appVersion } = useAppVersion();
@@ -22,11 +24,30 @@ const AboutSection: React.FC = () => {
     installing: rtInstalling,
     updateInfo: rtUpdate,
     installedState: rtInstalled,
+    localManifestPath: rtManifestPath,
     progress: rtProgress,
     error: rtError,
-    checkNow: rtCheckNow,
-    installNow: rtInstallNow,
+    checkLocal: rtCheckLocal,
+    applyLocal: rtApplyLocal,
   } = useRuntimeUpdater();
+
+  const pickLocalRuntimePackage = async () => {
+    if (!isTauriRuntime()) return;
+    const selected = await open({
+      title: "选择 runtime-manifest.json",
+      filters: [{ name: "运行时清单", extensions: ["json"] }],
+      multiple: false,
+    });
+    if (selected === null || Array.isArray(selected)) return;
+    await rtCheckLocal(selected);
+  };
+
+  const installLocalAndRelaunch = async () => {
+    if (!isTauriRuntime() || !rtManifestPath) return;
+    const result = await rtApplyLocal(rtManifestPath);
+    if (result == null || !result.available) return;
+    await relaunch();
+  };
 
   const rtProgressPct =
     rtProgress && rtProgress.total > 0
@@ -106,7 +127,7 @@ const AboutSection: React.FC = () => {
                 <h3 className="text-sm font-semibold text-slate-900">后端运行时更新</h3>
               </div>
               <p className="text-xs text-slate-500">
-                分块更新 GPU/CPU 后端依赖，仅下载变化部分，无需每次重下整包。
+                从网盘下载「runtime-manifest.json」与对应 zip，放在同一文件夹后，在此选择清单文件即可校验并安装；完成后将自动重启应用。
               </p>
 
               {rtInstalled && rtInstalled.runtime_version ? (
@@ -131,7 +152,7 @@ const AboutSection: React.FC = () => {
                       : ""}
                   </p>
                   <p className="text-xs text-slate-500">
-                    本次下载量：{formatBytes(rtUpdate.total_download_size)}
+                    本次需处理：{formatBytes(rtUpdate.total_download_size)}
                   </p>
                 </>
               ) : rtUpdate?.available === false ? (
@@ -141,11 +162,15 @@ const AboutSection: React.FC = () => {
               {rtInstalling && rtProgress && (
                 <div className="mt-1 space-y-1">
                   <p className="text-xs text-slate-500">
-                    {rtProgress.phase === "downloading"
-                      ? `下载中：${rtProgress.chunk_name} — ${formatBytes(rtProgress.downloaded)} / ${formatBytes(rtProgress.total)}`
-                      : rtProgress.phase === "extracting"
-                        ? `解压中：${rtProgress.chunk_name}`
-                        : "完成"}
+                    {rtProgress.phase === "verifying"
+                      ? `校验 SHA256：${rtProgress.chunk_name} — ${formatBytes(rtProgress.downloaded)} / ${formatBytes(rtProgress.total)}`
+                      : rtProgress.phase === "downloading"
+                        ? `下载中：${rtProgress.chunk_name} — ${formatBytes(rtProgress.downloaded)} / ${formatBytes(rtProgress.total)}`
+                        : rtProgress.phase === "extracting"
+                          ? `解压中：${rtProgress.chunk_name}`
+                          : rtProgress.phase === "done"
+                            ? "完成"
+                            : "处理中"}
                   </p>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-indigo-100">
                     <div
@@ -162,21 +187,21 @@ const AboutSection: React.FC = () => {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void rtCheckNow()}
+                onClick={() => void pickLocalRuntimePackage()}
                 disabled={rtChecking || rtInstalling}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {rtChecking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                检查
+                {rtChecking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                选择本地更新包
               </button>
               <button
                 type="button"
-                onClick={() => void rtInstallNow()}
-                disabled={!rtUpdate?.available || rtChecking || rtInstalling}
+                onClick={() => void installLocalAndRelaunch()}
+                disabled={!rtUpdate?.available || !rtManifestPath || rtChecking || rtInstalling}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
               >
-                {rtInstalling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                下载并安装
+                {rtInstalling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                安装并重启
               </button>
             </div>
           </div>

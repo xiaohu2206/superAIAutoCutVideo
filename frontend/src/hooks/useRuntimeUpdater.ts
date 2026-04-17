@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  checkRuntimeUpdate,
-  downloadRuntimeUpdate,
+  applyLocalRuntimeUpdate,
+  checkLocalRuntimeUpdate,
   getRuntimeInstalledState,
   onRuntimeUpdateProgress,
   type DownloadProgress,
@@ -14,6 +14,7 @@ interface RuntimeUpdateState {
   installing: boolean;
   updateInfo: RuntimeUpdateInfo | null;
   installedState: InstalledState | null;
+  localManifestPath: string | null;
   progress: DownloadProgress | null;
   error: string;
 }
@@ -23,6 +24,7 @@ const initial: RuntimeUpdateState = {
   installing: false,
   updateInfo: null,
   installedState: null,
+  localManifestPath: null,
   progress: null,
   error: "",
 };
@@ -64,20 +66,35 @@ export function useRuntimeUpdater() {
     setState((prev) => ({ ...prev, installedState: installed }));
   }, []);
 
-  const checkNow = useCallback(async () => {
-    setState((prev) => ({ ...prev, checking: true, error: "" }));
+  /** 选择清单后预览：需传入 runtime-manifest.json 的绝对路径 */
+  const checkLocal = useCallback(async (manifestPath: string) => {
+    setState((prev) => ({
+      ...prev,
+      checking: true,
+      error: "",
+      localManifestPath: manifestPath,
+    }));
     try {
-      const info = await checkRuntimeUpdate();
-      setState((prev) => ({ ...prev, checking: false, updateInfo: info }));
+      const info = await checkLocalRuntimeUpdate(manifestPath);
+      setState((prev) => ({
+        ...prev,
+        checking: false,
+        updateInfo: info,
+      }));
       return info;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "检查运行时更新失败";
-      setState((prev) => ({ ...prev, checking: false, error: msg }));
+      const msg = error instanceof Error ? error.message : "读取本地清单失败";
+      setState((prev) => ({
+        ...prev,
+        checking: false,
+        error: msg,
+        updateInfo: null,
+      }));
       return null;
     }
   }, []);
 
-  const installNow = useCallback(async () => {
+  const applyLocal = useCallback(async (manifestPath: string) => {
     setState((prev) => ({
       ...prev,
       installing: true,
@@ -85,24 +102,34 @@ export function useRuntimeUpdater() {
       progress: null,
     }));
     try {
-      const info = await downloadRuntimeUpdate();
+      const info = await applyLocalRuntimeUpdate(manifestPath);
       setState((prev) => ({ ...prev, installing: false, updateInfo: info }));
       await loadInstalledState();
       return info;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "安装运行时更新失败";
+      const msg = error instanceof Error ? error.message : "安装本地运行时失败";
       setState((prev) => ({ ...prev, installing: false, error: msg }));
       return null;
     }
   }, [loadInstalledState]);
 
+  const clearLocalSelection = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      localManifestPath: null,
+      updateInfo: null,
+      error: "",
+    }));
+  }, []);
+
   return useMemo(
     () => ({
       ...state,
-      checkNow,
-      installNow,
+      checkLocal,
+      applyLocal,
       loadInstalledState,
+      clearLocalSelection,
     }),
-    [state, checkNow, installNow, loadInstalledState]
+    [state, checkLocal, applyLocal, loadInstalledState, clearLocalSelection]
   );
 }

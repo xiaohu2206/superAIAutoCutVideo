@@ -477,6 +477,49 @@ export class ApiClient {
     return this.post(`/api/indextts/clone-voices/delete`, { voice_id: voiceId });
   }
 
+  // ===== OmniVoice TTS（局域网，经后端转发）=====
+  async getOmniVoiceTtsStatus(): Promise<any> {
+    return this.get(`/api/omnivoice-tts/status`);
+  }
+
+  async connectOmniVoiceTts(data: {
+    host: string;
+    port?: number;
+    api_prefix?: string;
+    scan_back?: number;
+  }): Promise<any> {
+    return this.post(`/api/omnivoice-tts/connect`, data);
+  }
+
+  async disconnectOmniVoiceTts(): Promise<any> {
+    return this.post(`/api/omnivoice-tts/disconnect`);
+  }
+
+  async uploadOmniVoiceTtsCloneVoice(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("name", file.name || "audio.wav");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      return await this.request(`/api/omnivoice-tts/clone-voices/upload`, {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async selectOmniVoiceTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/omnivoice-tts/clone-voices/select`, { voice_id: voiceId });
+  }
+
+  async deleteOmniVoiceTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/omnivoice-tts/clone-voices/delete`, { voice_id: voiceId });
+  }
+
   // ===== 存储设置相关 API =====
   async getStorageSettings(): Promise<any> {
     return this.get("/api/settings/storage");

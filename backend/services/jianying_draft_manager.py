@@ -1020,13 +1020,18 @@ class JianyingDraftManager:
 
                 tts_results: Dict[int, Dict[str, Any]] = {}
                 if need_tts:
+                    _jianying_tts_msg = (
+                        f"串行生成配音（{len(need_tts)} 段）"
+                        if provider == "omnivoice_tts"
+                        else f"并发生成配音（{len(need_tts)} 段）"
+                    )
                     await JianyingDraftManager._broadcast({
                         "type": "progress",
                         "scope": JianyingDraftManager.SCOPE,
                         "project_id": project_id,
                         "task_id": task_id,
                         "phase": "tts_generate",
-                        "message": f"并发生成配音（{len(need_tts)} 段）",
+                        "message": _jianying_tts_msg,
                         "progress": 41,
                         "timestamp": _now_ts(),
                     })
@@ -1039,27 +1044,13 @@ class JianyingDraftManager:
                             raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                         return idx, (res if isinstance(res, dict) else {})
 
-                    tasks: List[asyncio.Task] = []
-                    for it in need_tts:
-                        tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
-
-                    completed = 0
-                    try:
-                        for fut in asyncio.as_completed(tasks):
+                    if provider == "omnivoice_tts":
+                        completed = 0
+                        for it in need_tts:
                             if cancel_event and cancel_event.is_set():
                                 raise asyncio.CancelledError()
-                            try:
-                                idx, r = await fut
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception:
-                                for ot in tasks:
-                                    if ot is not fut and not ot.done():
-                                        try:
-                                            ot.cancel()
-                                        except Exception:
-                                            pass
-                                raise
+                            idx_i = int(it["idx"])
+                            idx, r = await _tts_job(idx_i, str(it["text"]), Path(it["out"]))
                             tts_results[idx] = r
                             completed += 1
                             try:
@@ -1078,13 +1069,53 @@ class JianyingDraftManager:
                                 })
                             except Exception:
                                 pass
-                    finally:
-                        for ot in tasks:
-                            if not ot.done():
+                    else:
+                        tasks: List[asyncio.Task] = []
+                        for it in need_tts:
+                            tasks.append(asyncio.create_task(_tts_job(int(it["idx"]), str(it["text"]), Path(it["out"]))))
+
+                        completed = 0
+                        try:
+                            for fut in asyncio.as_completed(tasks):
+                                if cancel_event and cancel_event.is_set():
+                                    raise asyncio.CancelledError()
                                 try:
-                                    ot.cancel()
+                                    idx, r = await fut
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception:
+                                    for ot in tasks:
+                                        if ot is not fut and not ot.done():
+                                            try:
+                                                ot.cancel()
+                                            except Exception:
+                                                pass
+                                    raise
+                                tts_results[idx] = r
+                                completed += 1
+                                try:
+                                    base = 41
+                                    span = 9
+                                    prog = base + int((completed / max(1, len(need_tts))) * span)
+                                    await JianyingDraftManager._broadcast({
+                                        "type": "progress",
+                                        "scope": JianyingDraftManager.SCOPE,
+                                        "project_id": project_id,
+                                        "task_id": task_id,
+                                        "phase": "tts_generate_progress",
+                                        "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                        "progress": min(50, prog),
+                                        "timestamp": _now_ts(),
+                                    })
                                 except Exception:
                                     pass
+                        finally:
+                            for ot in tasks:
+                                if not ot.done():
+                                    try:
+                                        ot.cancel()
+                                    except Exception:
+                                        pass
 
                 for idx, seg in enumerate(segments, start=1):
                     if cancel_event and cancel_event.is_set():

@@ -1,0 +1,10 @@
+---
+description: Windows 下启动 ffmpeg/ffprobe 等子进程不弹 CMD 黑框
+globs: backend/**/*.py
+---
+
+在 Windows 上，使用 `asyncio.create_subprocess_exec`、`subprocess.run`、`subprocess.Popen`、`subprocess.check_output` 等启动控制台程序（ffmpeg、ffprobe、python -c 等）时，**必须**隐藏控制台窗口，否则在 Tauri 等场景会反复闪现黑框。
+
+**优先**使用 `modules.subprocess_no_console`：`acreate_subprocess_exec`、`check_output_no_console`、`run_no_console`、`popen_no_console`。
+
+仅在确有需要显示控制台时，对异步封装传入 `visible_console=True`，或自行传入合适的 `creationflags` 并注明原因。

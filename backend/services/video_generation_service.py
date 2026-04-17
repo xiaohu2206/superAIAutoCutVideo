@@ -344,8 +344,15 @@ class VideoGenerationService:
 
             need_tts = [it for it in segment_items if not bool(it.get("is_original"))]
             tts_results: Dict[int, Dict[str, Any]] = {}
+            _cfg_tts = tts_engine_config_manager.get_active_config()
+            _tts_provider = (getattr(_cfg_tts, "provider", None) or "").lower()
             if need_tts:
                 try:
+                    _tts_msg = (
+                        f"串行生成配音（{len(need_tts)} 段）"
+                        if _tts_provider == "omnivoice_tts"
+                        else f"并发生成配音（{len(need_tts)} 段）"
+                    )
                     await manager.broadcast(
                         __import__("json").dumps({
                             "type": "progress",
@@ -353,7 +360,7 @@ class VideoGenerationService:
                             "project_id": project_id,
                             "task_id": task_id,
                             "phase": "tts_generate",
-                            "message": f"并发生成配音（{len(need_tts)} 段）",
+                            "message": _tts_msg,
                             "progress": 31,
                             "timestamp": datetime.now().isoformat(),
                         })
@@ -369,29 +376,14 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                     return idx, (res if isinstance(res, dict) else {})
 
-                tasks: List[asyncio.Task] = []
-                for it in need_tts:
-                    idx = int(it["idx"])
-                    seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
-                    tasks.append(asyncio.create_task(_tts_job(idx, str(it.get("text") or ""), seg_audio)))
-
-                completed = 0
-                try:
-                    for fut in asyncio.as_completed(tasks):
+                if _tts_provider == "omnivoice_tts":
+                    completed = 0
+                    for it in need_tts:
                         if cancel_event.is_set():
                             raise asyncio.CancelledError()
-                        try:
-                            idx, r = await fut
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:
-                            for ot in tasks:
-                                if ot is not fut and not ot.done():
-                                    try:
-                                        ot.cancel()
-                                    except Exception:
-                                        pass
-                            raise
+                        idx = int(it["idx"])
+                        seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                        idx, r = await _tts_job(idx, str(it.get("text") or ""), seg_audio)
                         tts_results[idx] = r
                         completed += 1
                         try:
@@ -412,18 +404,62 @@ class VideoGenerationService:
                             )
                         except Exception:
                             pass
-                finally:
-                    for ot in tasks:
-                        if not ot.done():
+                else:
+                    tasks: List[asyncio.Task] = []
+                    for it in need_tts:
+                        idx = int(it["idx"])
+                        seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
+                        tasks.append(asyncio.create_task(_tts_job(idx, str(it.get("text") or ""), seg_audio)))
+
+                    completed = 0
+                    try:
+                        for fut in asyncio.as_completed(tasks):
+                            if cancel_event.is_set():
+                                raise asyncio.CancelledError()
                             try:
-                                ot.cancel()
+                                idx, r = await fut
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                for ot in tasks:
+                                    if ot is not fut and not ot.done():
+                                        try:
+                                            ot.cancel()
+                                        except Exception:
+                                            pass
+                                raise
+                            tts_results[idx] = r
+                            completed += 1
+                            try:
+                                base = 31
+                                span = 19
+                                prog = base + int((completed / max(1, len(need_tts))) * span)
+                                await manager.broadcast(
+                                    __import__("json").dumps({
+                                        "type": "progress",
+                                        "scope": "generate_video",
+                                        "project_id": project_id,
+                                        "task_id": task_id,
+                                        "phase": "tts_generate_progress",
+                                        "message": f"配音生成中 {completed}/{len(need_tts)}",
+                                        "progress": min(50, prog),
+                                        "timestamp": datetime.now().isoformat(),
+                                    })
+                                )
                             except Exception:
                                 pass
+                    finally:
+                        for ot in tasks:
+                            if not ot.done():
+                                try:
+                                    ot.cancel()
+                                except Exception:
+                                    pass
 
                 try:
                     cfg = tts_engine_config_manager.get_active_config()
                     provider = (getattr(cfg, "provider", None) or "").lower()
-                    if provider in ("qwen3_tts", "indextts"):
+                    if provider in ("qwen3_tts", "indextts", "omnivoice_tts"):
                         total_tts_dur = 0.0
                         missing = 0
                         for it in need_tts:

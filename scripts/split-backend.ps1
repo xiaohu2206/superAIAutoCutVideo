@@ -26,6 +26,9 @@
   例如 https://github.com/user/repo/releases/download/v1.2.6/
   默认为空字符串（需发布前手动替换）
 
+.PARAMETER ProjectRoot
+  仓库根目录。若为空则从脚本路径推导；由 build.ps1 调用时建议显式传入，避免在 StrictMode 下 $PSScriptRoot 为空时 Split-Path 失败。
+
 .EXAMPLE
   .\scripts\split-backend.ps1 -Variant gpu -Version 1.2.6 -BaseUrl "https://example.com/releases/v1.2.6/"
 #>
@@ -34,12 +37,27 @@ param(
     [string]$OutputDir  = "",
     [string]$Version    = "",
     [string]$Variant    = "cpu",
-    [string]$BaseUrl    = ""
+    [string]$BaseUrl    = "",
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
+
+if (-not $ProjectRoot) {
+    $scriptRootDir = $null
+    if (Test-Path variable:PSScriptRoot) {
+        $scriptRootDir = (Get-Variable PSScriptRoot -ValueOnly)
+    }
+    if ($scriptRootDir) {
+        $ProjectRoot = Split-Path -Parent $scriptRootDir
+    }
+    if (-not $ProjectRoot -and $MyInvocation.MyCommand.Path) {
+        $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+    }
+    if (-not $ProjectRoot) {
+        $ProjectRoot = (Get-Location).Path
+    }
+}
 
 # ── 默认值 ────────────────────────────────────────────────────────
 

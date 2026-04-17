@@ -1,8 +1,12 @@
+[CmdletBinding()]
 param(
   [switch]$FullBackend,
   [ValidateSet('cpu','gpu','all')]
   [string]$Variant = 'all',
   [switch]$GpuEmbedBackendZip,
+  # 在 GPU 后端 PyInstaller 产出就绪后，生成 runtime-base / app-backend zip 与 runtime-manifest.json（供 SACV_RUNTIME_MANIFEST_URL 分块更新）
+  [Alias('Chunks')]
+  [switch]$RuntimeChunks,
   [switch]$RecreateBackendVenv,
   [switch]$TauriDebug,
   [switch]$SkipClean,
@@ -194,6 +198,55 @@ function Ensure-FFmpegInTauriResources([string]$venvPy) {
   } catch { }
 }
 
+function Add-NsisClearAppDataBackendHook([string]$installerNsiPath) {
+  if (-not (Test-Path $installerNsiPath)) { return $false }
+  $marker = 'SACV_CLEAR_APPDATA_BACKEND'
+  $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
+  if ($content -match [regex]::Escape($marker)) { return $false }
+  $inject = "`r`n    ; $marker`r`n    DetailPrint `"Clear cached backend extract (AppData)`"`r`n    RMDir /r `"`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend`"`r`n"
+  $patched = $false
+  if ($content -match '(?m)^(Section\s+"Install"\s*)$') {
+    $content = $content -replace '(?m)^(Section\s+"Install"\s*)$', ('$1' + $inject)
+    $patched = $true
+  }
+  elseif ($content -match '(?m)^(Section\s+"main"\s*)$') {
+    $content = $content -replace '(?m)^(Section\s+"main"\s*)$', ('$1' + $inject)
+    $patched = $true
+  }
+  if (-not $patched) { return $false }
+  Microsoft.PowerShell.Management\Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
+  return $true
+}
+
+function Invoke-NsisRebuildBundleExe([string]$variantTargetDir, [string]$variant) {
+  $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
+  if (-not (Test-Path $installerNsi)) { return }
+  $makensis = Get-TauriMakensisPath
+  $bundleNsisDir = Join-Path $variantTargetDir "release\\bundle\\nsis"
+  $bundleExe = $null
+  if (Test-Path $bundleNsisDir) {
+    try { $bundleExe = Get-ChildItem -Path $bundleNsisDir -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
+  }
+  if ($bundleExe -and (Test-Path $bundleExe.FullName)) {
+    $outArg = "/DOUTFILE=$($bundleExe.FullName)"
+    & $makensis $outArg $installerNsi | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      $tmpOut = Join-Path $env:TEMP ("nsis_{0}_{1}.exe" -f $variant, ([guid]::NewGuid().ToString("N")))
+      $tmpArg = "/DOUTFILE=$tmpOut"
+      & $makensis $tmpArg $installerNsi | Out-Null
+      if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
+      try {
+        Microsoft.PowerShell.Management\Copy-Item -Force $tmpOut $bundleExe.FullName
+      } finally {
+        Microsoft.PowerShell.Management\Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+      }
+    }
+  } else {
+    & $makensis $installerNsi | Out-Null
+  }
+  if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
+}
+
 function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
@@ -216,6 +269,9 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     $snippet = @"
 
     SetOverwrite on
+    DetailPrint "Clear cached backend extract (AppData)"
+    RMDir /r "`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend"
+
     StrCpy `$R0 "`$EXEDIR\superAutoCutVideoBackend_gpu.zip"
     StrCpy `$R1 "superAutoCutVideoBackend_gpu.zip"
     `${IfNot} `${FileExists} "`$R0"
@@ -230,14 +286,17 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
         Delete "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
         Rename "`$INSTDIR\resources\`$R1" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
       `${EndIf}
-    `${Else}
-      `${If} `${Silent}
-        Abort
-      `${Else}
-        MessageBox MB_ICONSTOP|MB_OK "GPU backend zip not found. Place superAutoCutVideoBackend_gpu.zip next to the installer and retry."
-        Abort
-      `${EndIf}
+      Goto gpu_backend_zip_ready
     `${EndIf}
+
+    `${If} `${Silent}
+      Abort
+    `${Else}
+      MessageBox MB_ICONSTOP|MB_OK "GPU backend zip not found. For first install, place superAutoCutVideoBackend_gpu.zip next to the installer. For upgrade, ensure the existing install still contains resources\\superAutoCutVideoBackend.zip."
+      Abort
+    `${EndIf}
+
+    gpu_backend_zip_ready:
 "@
 
     $content = $content -replace $insertPattern, ('$&' + $snippet)
@@ -551,6 +610,10 @@ foreach ($variant in $variants) {
     if (-not $torchAlreadyOk -and -not $usedLocal) {
       if ($variant -eq "cpu") {
         & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
+        if ($LASTEXITCODE -ne 0) {
+          Info "Official PyTorch CPU index failed; fallback to Aliyun wheels (-f)"
+          & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cpu/" "--extra-index-url" "$env:PIP_INDEX_URL"
+        }
       } else {
         & $venvPy "-m" "pip" "install" "torch==2.7.1+cu128" "torchvision==0.22.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
         if ($LASTEXITCODE -ne 0) {
@@ -563,6 +626,10 @@ foreach ($variant in $variants) {
     if (-not $torchAlreadyOk) {
       if ($variant -eq "cpu") {
         & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
+        if ($LASTEXITCODE -ne 0) {
+          Info "Official torchaudio CPU index failed; fallback to Aliyun wheels (-f)"
+          & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cpu/" "--extra-index-url" "$env:PIP_INDEX_URL"
+        }
       } else {
         & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
         if ($LASTEXITCODE -ne 0) {
@@ -662,7 +729,13 @@ foreach ($variant in $variants) {
   Microsoft.PowerShell.Management\Copy-Item -Recurse -Force $backendDistDir $backendResDir
   Invoke-CompressArchiveWithRetry $backendDistDir $backendResZip
   try { Ensure-FFmpegInTauriResources $venvPy } catch { Info "Skip FFmpeg prepare: $($_.Exception.Message)" }
- 
+
+  # 勿直接读 $RuntimeChunks：StrictMode 下未传参时可能未绑定。用 PSBoundParameters 需脚本带 [CmdletBinding()]
+  if ($variant -eq 'gpu' -and $PSBoundParameters.ContainsKey('RuntimeChunks') -and $PSBoundParameters['RuntimeChunks']) {
+    Step "Split backend into runtime chunks (GPU, manifest for SACV_RUNTIME_MANIFEST_URL)"
+    $splitScript = Join-Path $repoRoot 'scripts\split-backend.ps1'
+    & $splitScript -Variant gpu -Version $version -BaseUrl "" -ProjectRoot $repoRoot
+  }
 
   Step "Ensure no running instances before Tauri build ($variant)"
   try {
@@ -713,34 +786,22 @@ foreach ($variant in $variants) {
   }
   finally { $env:CARGO_TARGET_DIR = $oldCargoTargetDir ; Pop-Location }
 
-  if (-not $TauriDebug -and $variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
-    Step "Patch NSIS installer (GPU offline zip copy)"
+  if (-not $TauriDebug) {
     $installerNsi = Join-Path $variantTargetDir "release\\nsis\\x64\\installer.nsi"
-    Patch-GpuNsisInstaller $installerNsi
-    $makensis = Get-TauriMakensisPath
-    $bundleNsisDir = Join-Path $variantTargetDir "release\\bundle\\nsis"
-    $bundleExe = $null
-    if (Test-Path $bundleNsisDir) {
-      try { $bundleExe = Get-ChildItem -Path $bundleNsisDir -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
-    }
-    if ($bundleExe -and (Test-Path $bundleExe.FullName)) {
-      $outArg = "/DOUTFILE=$($bundleExe.FullName)"
-      & $makensis $outArg $installerNsi | Out-Null
-      if ($LASTEXITCODE -ne 0) {
-        $tmpOut = Join-Path $env:TEMP ("nsis_{0}_{1}.exe" -f $variant, ([guid]::NewGuid().ToString("N")))
-        $tmpArg = "/DOUTFILE=$tmpOut"
-        & $makensis $tmpArg $installerNsi | Out-Null
-        if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
-        try {
-          Microsoft.PowerShell.Management\Copy-Item -Force $tmpOut $bundleExe.FullName
-        } finally {
-          Microsoft.PowerShell.Management\Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
-        }
+    if ($variant -eq 'gpu' -and -not $GpuEmbedBackendZip) {
+      if (Test-Path $installerNsi) {
+        Step "Patch NSIS installer (GPU offline zip copy)"
+        Patch-GpuNsisInstaller $installerNsi
+        Step "Rebuild NSIS bundle (GPU)"
+        Invoke-NsisRebuildBundleExe $variantTargetDir $variant
       }
-    } else {
-      & $makensis $installerNsi | Out-Null
     }
-    if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
+    elseif (Test-Path $installerNsi) {
+      if (Add-NsisClearAppDataBackendHook $installerNsi) {
+        Step "Rebuild NSIS bundle (clear AppData backend on install)"
+        Invoke-NsisRebuildBundleExe $variantTargetDir $variant
+      }
+    }
   }
 
   Step "Create portable ZIP and installers ($variant)"
