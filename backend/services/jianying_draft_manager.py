@@ -164,20 +164,27 @@ async def _trim_audio_silence(
     *,
     start_threshold_db: float = -55.0,
     start_duration_s: float = 0.05,
-    start_keep_silence_s: float = 0.02,
+    start_keep_silence_s: float = 0.12,
+    stop_threshold_db: float = -55.0,
+    stop_duration_s: float = 0.12,
+    end_keep_silence_s: float = 0.10,
 ) -> bool:
     try:
         if not input_path.exists():
             return False
         output_path.parent.mkdir(parents=True, exist_ok=True)
         th_start = f"{float(start_threshold_db)}dB"
-        # 只裁开头留白：末尾用 stop_periods 会把尾音、弱读当作静音切掉，故禁用末尾裁剪
+        th_stop = f"{float(stop_threshold_db)}dB"
         start_dur = max(0.0, float(start_duration_s))
         keep_lead = max(0.0, float(start_keep_silence_s))
+        stop_dur = max(0.0, float(stop_duration_s))
+        keep_tail = max(0.0, float(end_keep_silence_s))
         af = (
             "silenceremove="
             f"detection=rms:start_periods=1:start_duration={start_dur}:start_threshold={th_start}:"
-            f"start_silence={keep_lead}"
+            f"start_silence={keep_lead}:"
+            f"stop_periods=-1:stop_duration={stop_dur}:stop_threshold={th_stop}:"
+            f"stop_silence={keep_tail}"
         )
         cmd = [
             "ffmpeg",
