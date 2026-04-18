@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, Eye, EyeOff, ShieldCheck, Play, Loader, FolderOpen, Download, XCircle, RefreshCw, Info } from "lucide-react";
+import { AlertCircle, CheckCircle, Eye, ShieldCheck, Play, Loader, FolderOpen, Download, XCircle, RefreshCw, Info } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import AppSelect from "@/components/ui/AppSelect";
 import type { TestResult, VideoModelConfig } from "../../../types";
@@ -13,8 +13,6 @@ interface UnifiedModelSettingsProps {
   setCurrentConfig: React.Dispatch<React.SetStateAction<VideoModelConfig>>;
   testingConnection: boolean;
   testResult: TestResult | null;
-  showPassword: boolean;
-  setShowPassword: React.Dispatch<React.SetStateAction<boolean>>;
   handleProviderChange: (provider: string) => void;
   updateCurrentConfig: (field: string, value: any) => void;
   testModelConnection: () => void;
@@ -35,8 +33,6 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
   setCurrentConfig,
   testingConnection,
   testResult,
-  showPassword,
-  setShowPassword,
   handleProviderChange,
   updateCurrentConfig,
   testModelConnection,
@@ -332,29 +328,16 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
             <label className="block text-sm font-medium text-gray-700 mb-2">
               API密钥
             </label>
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                value={currentConfig.api_key}
-                onChange={(e) =>
-                  setCurrentConfig((prev) => ({ ...prev, api_key: e.target.value }))
-                }
-                onBlur={(e) => updateCurrentConfig("api_key", e.target.value)}
-                placeholder="请输入API密钥"
-                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
-              >
-                {showPassword ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
+            <input
+              type="text"
+              value={currentConfig.api_key}
+              onChange={(e) =>
+                setCurrentConfig((prev) => ({ ...prev, api_key: e.target.value }))
+              }
+              onBlur={(e) => updateCurrentConfig("api_key", e.target.value)}
+              placeholder="请输入API密钥"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <p className="text-xs text-gray-500 mt-1">从模型提供商获取的API密钥</p>
           </div>
 

@@ -33,7 +33,6 @@ export const useContentModelConfig = () => {
   const [testingContentConnection, setTestingContentConnection] = useState(false);
   const [contentTestResult, setContentTestResult] = useState<TestResult | null>(null);
   const [contentTestStructured, setContentTestStructured] = useState<string | null>(null);
-  const [showContentPassword, setShowContentPassword] = useState(false);
 
   useEffect(() => {
     loadContentGenerationConfigs();
@@ -224,8 +223,6 @@ export const useContentModelConfig = () => {
     testingContentConnection,
     contentTestResult,
     contentTestStructured,
-    showContentPassword,
-    setShowContentPassword,
     handleContentProviderChange,
     updateCurrentContentConfig,
     testContentModelConnection,

@@ -14,6 +14,11 @@ from modules.projects_store import projects_store, Project
 from modules.ws_manager import manager
 from modules.task_progress_store import task_progress_store
 from services.script_generation_service import ScriptGenerationService
+from services.reference_copywriting_wash import (
+    build_subs_text_from_scenes_data,
+    build_subs_text_from_subtitle_file_content,
+    wash_reference_copywriting_pipeline,
+)
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 
@@ -215,30 +220,48 @@ class GenerateCopywritingService:
         film_ctx = _movie_narration_film_context(p, narration_type)
         reference_cw = _movie_narration_reference_copywriting(p, narration_type)
 
-        if use_visual and scenes_data is not None:
-            copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
-                scenes_data=scenes_data,
+        wash_applied = False
+        copywriting_text = ""
+        if reference_cw:
+            if use_visual and scenes_data is not None:
+                subs_for_wash = build_subs_text_from_scenes_data(scenes_data)
+            else:
+                subs_for_wash = build_subs_text_from_subtitle_file_content(subtitle_text)
+            copywriting_text = await wash_reference_copywriting_pipeline(
+                reference_cw,
+                subs_for_wash,
                 drama_name=drama_name,
-                project_id=project_id,
                 script_language=str(script_language) if script_language else None,
-                script_length=str(script_length) if script_length else None,
-                copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
-                film_context=film_ctx,
-                reference_copywriting=reference_cw,
                 cancel_event=cancel_event,
             )
-        else:
-            copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline(
-                subtitle_content=subtitle_text,
-                drama_name=drama_name,
-                project_id=project_id,
-                script_language=str(script_language) if script_language else None,
-                script_length=str(script_length) if script_length else None,
-                copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
-                film_context=film_ctx,
-                reference_copywriting=reference_cw,
-                cancel_event=cancel_event,
-            )
+            if (copywriting_text or "").strip():
+                wash_applied = True
+
+        if not wash_applied:
+            if use_visual and scenes_data is not None:
+                copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
+                    scenes_data=scenes_data,
+                    drama_name=drama_name,
+                    project_id=project_id,
+                    script_language=str(script_language) if script_language else None,
+                    script_length=str(script_length) if script_length else None,
+                    copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                    film_context=film_ctx,
+                    reference_copywriting=None,
+                    cancel_event=cancel_event,
+                )
+            else:
+                copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline(
+                    subtitle_content=subtitle_text,
+                    drama_name=drama_name,
+                    project_id=project_id,
+                    script_language=str(script_language) if script_language else None,
+                    script_length=str(script_length) if script_length else None,
+                    copywriting_word_count=int(copywriting_word_count) if copywriting_word_count else None,
+                    film_context=film_ctx,
+                    reference_copywriting=None,
+                    cancel_event=cancel_event,
+                )
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
         copywriting = {
@@ -254,6 +277,7 @@ class GenerateCopywritingService:
                 "copywriting_word_count": int(copywriting_word_count) if copywriting_word_count else None,
                 "film_context_included": bool(film_ctx),
                 "reference_copywriting_included": bool(reference_cw),
+                "reference_copywriting_wash": wash_applied,
             },
         }
 

@@ -200,7 +200,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         narration_reference_copywriting: referenceDraft.trim() ? referenceDraft.trim() : "",
       });
       await refreshProject();
-      message.success("参考解说文案已保存");
+      message.success("洗稿文案已保存");
       setReferenceModalOpen(false);
     } catch (e: any) {
       message.error(e?.message || "保存失败");
@@ -245,18 +245,20 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         
         {isMovieNarration && (
           <div className="flex items-center gap-2 pl-1">
-            <button
-              onClick={handleOpenFilmContextModal}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
-                hasFilmContextSaved 
-                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
-                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-              }`}
-              title="设置影片脉络与人物简介"
-            >
-              {hasFilmContextSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-              <span>附加影片信息</span>
-            </button>
+            {!hasReferenceCopywritingSaved && (
+              <button
+                onClick={handleOpenFilmContextModal}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                  hasFilmContextSaved 
+                    ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
+                    : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+                title="设置影片脉络与人物简介"
+              >
+                {hasFilmContextSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                <span>附加影片信息</span>
+              </button>
+            )}
             <button
               onClick={handleOpenReferenceModal}
               className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
@@ -264,10 +266,10 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
                   ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
                   : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
               }`}
-              title="设置参考解说文案"
+              title="设置洗稿文案"
             >
               {hasReferenceCopywritingSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-              <span>参考解说文案</span>
+              <span>洗稿（推荐）</span>
             </button>
           </div>
         )}
@@ -561,7 +563,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
-                <h3 className="text-lg font-semibold text-gray-900">参考解说文案</h3>
+                <h3 className="text-lg font-semibold text-gray-900">洗稿</h3>
                 <button
                   type="button"
                   onClick={() => setReferenceModalOpen(false)}
@@ -574,16 +576,16 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
               <div className="p-6 space-y-4 text-sm text-gray-700 overflow-y-auto">
                 <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
                   <p className="leading-relaxed text-blue-800 text-sm">
-                    粘贴你喜欢的解说成稿作为风格与结构参考。生成新文案时会附在对话最后；请仍严格按当前项目字幕事实撰写，避免照搬。
+                    在抖音提取这个解说影片的文案，直接复制进来，会帮你把字幕部分去掉，简单润色，效果比直接生成好。
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">参考解说全文</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">参考文案全文</label>
                   <textarea
                     value={referenceDraft}
                     onChange={(e) => setReferenceDraft(e.target.value)}
                     rows={16}
-                    placeholder="粘贴参考解说文案…"
+                    placeholder="粘贴参考文案…"
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y"
                   />
                 </div>

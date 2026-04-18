@@ -30,7 +30,6 @@ export const useVideoModelConfig = () => {
   });
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     loadVideoAnalysisConfigs();
@@ -213,8 +212,6 @@ export const useVideoModelConfig = () => {
     setCurrentConfig,
     testingConnection,
     testResult,
-    showPassword,
-    setShowPassword,
     handleProviderChange,
     updateCurrentConfig,
     testModelConnection,

@@ -17,11 +17,13 @@ import ScriptLanguageSelector from "./advancedConfig/ScriptLanguageSelector";
 interface GenerateAdvancedConfigSectionProps {
   projectId: string;
   narrationType?: NarrationType;
+  hasReferenceCopywriting?: boolean;
 }
 
 const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps> = ({
   projectId,
   narrationType,
+  hasReferenceCopywriting = false,
 }) => {
   const {
     items,
@@ -212,12 +214,14 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
 
   return (
     <div className="border-gray-200 pt-4 space-y-3">
-      <CopywritingWordCountSelector
-        copywritingWordCount={copywritingWordCount}
-        loading={copywritingWordCountLoading}
-        saving={copywritingWordCountSaving}
-        setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
-      />
+      {!hasReferenceCopywriting && (
+        <CopywritingWordCountSelector
+          copywritingWordCount={copywritingWordCount}
+          loading={copywritingWordCountLoading}
+          saving={copywritingWordCountSaving}
+          setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
+        />
+      )}
       <ScriptLengthSelector
         scriptLength={scriptLength}
         loading={scriptLengthLoading}
@@ -238,19 +242,21 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
         setScriptLanguageAndPersist={setScriptLanguageAndPersist}
       />
       {error ? <div className="text-xs text-red-600 mb-2">{error}</div> : null}
-      <PromptTemplateList
-        narrationType={narrationType}
-        featureKey={featureKey}
-        defaultOfficialDescription={defaultOfficialDescription}
-        selectedIdOrKey={selectedIdOrKey}
-        items={(items || []) as any}
-        otherOfficialItems={otherOfficialItems as any}
-        onSelect={(origin, id_or_key) => void handleSelect(origin, id_or_key)}
-        onPreview={(id_or_key) => void handleRowPreview(id_or_key)}
-        onEditUserTemplate={(id_or_key) => void handleEditUserTemplate(id_or_key)}
-        onDeleteUserTemplate={(id, name) => void openDeleteModal(id, name)}
-        onCreateTemplate={openCreateTemplateModal}
-      />
+      {!hasReferenceCopywriting && (
+        <PromptTemplateList
+          narrationType={narrationType}
+          featureKey={featureKey}
+          defaultOfficialDescription={defaultOfficialDescription}
+          selectedIdOrKey={selectedIdOrKey}
+          items={(items || []) as any}
+          otherOfficialItems={otherOfficialItems as any}
+          onSelect={(origin, id_or_key) => void handleSelect(origin, id_or_key)}
+          onPreview={(id_or_key) => void handleRowPreview(id_or_key)}
+          onEditUserTemplate={(id_or_key) => void handleEditUserTemplate(id_or_key)}
+          onDeleteUserTemplate={(id, name) => void openDeleteModal(id, name)}
+          onCreateTemplate={openCreateTemplateModal}
+        />
+      )}
       <PreviewModal
         isOpen={isPreviewOpen}
         text={previewText}

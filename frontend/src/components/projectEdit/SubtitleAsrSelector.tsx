@@ -141,7 +141,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
               onChange: (e) => setProvider(e.target.value as SubtitleAsrProvider),
             },
             <>
-              <option value="bcut">内置 API（仅中文）</option>
+              <option value="bcut">内置（仅中英文）</option>
               <option value="fun_asr" disabled={!funAsrSelectable}>
                 FunASR（本地模型）
               </option>
@@ -203,7 +203,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
 
       <div className="mt-2 text-[11px] text-gray-600">
         {provider === "bcut"
-          ? "内置 API 识别字幕只支持中文。"
+          ? "内置 API 识别字幕只支持中英文"
           : loading
             ? "正在加载本地模型状态…"
             : funModels.length === 0

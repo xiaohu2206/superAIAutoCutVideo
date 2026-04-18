@@ -39,8 +39,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     setCurrentConfig,
     testingConnection,
     testResult,
-    showPassword,
-    setShowPassword,
     handleProviderChange,
     updateCurrentConfig,
     testModelConnection,
@@ -53,8 +51,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     testingContentConnection,
     contentTestResult,
     contentTestStructured,
-    showContentPassword,
-    setShowContentPassword,
     handleContentProviderChange,
     updateCurrentContentConfig,
     testContentModelConnection,
@@ -80,8 +76,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             setCurrentConfig={setCurrentConfig}
             testingConnection={testingConnection}
             testResult={testResult}
-            showPassword={showPassword}
-            setShowPassword={setShowPassword}
             handleProviderChange={handleProviderChange}
             updateCurrentConfig={updateCurrentConfig}
             testModelConnection={testModelConnection}
@@ -96,8 +90,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             testingContentConnection={testingContentConnection}
             contentTestResult={contentTestResult}
             contentTestStructured={contentTestStructured}
-            showContentPassword={showContentPassword}
-            setShowContentPassword={setShowContentPassword}
             handleContentProviderChange={handleContentProviderChange}
             updateCurrentContentConfig={updateCurrentContentConfig}
             testContentModelConnection={testContentModelConnection}

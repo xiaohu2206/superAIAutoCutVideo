@@ -108,6 +108,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           <GenerateAdvancedConfigSection
             projectId={project.id}
             narrationType={project.narration_type}
+            hasReferenceCopywriting={Boolean((project.narration_reference_copywriting || "").trim())}
           />
         )}
 

@@ -1,6 +1,6 @@
 import { TauriCommands } from "@/services/clients";
 import { message } from "@/services/message";
-import { AlertCircle, CheckCircle, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, CheckCircle, ExternalLink } from "lucide-react";
 import React from "react";
 import AppSelect from "@/components/ui/AppSelect";
 import type { ContentModelConfig, TestResult } from "../../../types";
@@ -14,8 +14,6 @@ interface ContentModelSettingsProps {
   testingContentConnection: boolean;
   contentTestResult: TestResult | null;
   contentTestStructured: string | null;
-  showContentPassword: boolean;
-  setShowContentPassword: React.Dispatch<React.SetStateAction<boolean>>;
   handleContentProviderChange: (provider: string) => void;
   updateCurrentContentConfig: (field: string, value: any) => void;
   testContentModelConnection: () => void;
@@ -31,8 +29,6 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
   testingContentConnection,
   contentTestResult,
   contentTestStructured,
-  showContentPassword,
-  setShowContentPassword,
   handleContentProviderChange,
   updateCurrentContentConfig,
   testContentModelConnection,
@@ -88,47 +84,34 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
         <label className="block text-sm font-medium text-gray-700 mb-2">
           API密钥
         </label>
-        <div className="relative">
-          <input
-            type={showContentPassword ? "text" : "password"}
-            value={currentContentConfig.api_key}
-            onChange={(e) =>
+        <input
+          type="text"
+          value={currentContentConfig.api_key}
+          onChange={(e) =>
+            setCurrentContentConfig((prev) => ({
+              ...prev,
+              api_key: e.target.value,
+            }))
+          }
+          onFocus={(e) => {
+            apiKeyBeforeEditRef.current = e.target.value;
+          }}
+          onBlur={(e) => {
+            const trimmed = e.target.value.trim();
+            if (!trimmed) {
               setCurrentContentConfig((prev) => ({
                 ...prev,
-                api_key: e.target.value,
-              }))
+                api_key: apiKeyBeforeEditRef.current,
+              }));
+              message.warning("API密钥不能为空");
+              return;
             }
-            onFocus={(e) => {
-              apiKeyBeforeEditRef.current = e.target.value;
-            }}
-            onBlur={(e) => {
-              const trimmed = e.target.value.trim();
-              if (!trimmed) {
-                setCurrentContentConfig((prev) => ({
-                  ...prev,
-                  api_key: apiKeyBeforeEditRef.current,
-                }));
-                message.warning("API密钥不能为空");
-                return;
-              }
-              if (trimmed === apiKeyBeforeEditRef.current) return;
-              updateCurrentContentConfig("api_key", trimmed);
-            }}
-            placeholder="请输入API密钥"
-            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <button
-            type="button"
-            onClick={() => setShowContentPassword(!showContentPassword)}
-            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
-          >
-            {showContentPassword ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </button>
-        </div>
+            if (trimmed === apiKeyBeforeEditRef.current) return;
+            updateCurrentContentConfig("api_key", trimmed);
+          }}
+          placeholder="请输入API密钥"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
         <p className="text-xs text-gray-500 mt-1">从模型提供商获取的API密钥（需自己获取）</p>
       </div>
 
