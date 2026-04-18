@@ -32,7 +32,7 @@ export const VIDEO_VISION_MODEL_OPTIONS: Record<
   { value: string; label: string }[]
 > = {
   yunwu: [
-    { value: "qwen3-vl-flash", label: "qwen3-vl-flash" },
+    { value: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite" },
     {
       value: "gemini-3.1-flash-lite-preview",
       label: "gemini-3.1-flash-lite-preview",

@@ -5,5 +5,6 @@
 """
 
 from .health_routes import router as health_router
+from .log_routes import router as log_router
 
-__all__ = ["ai_router", "health_router"]
+__all__ = ["health_router", "log_router"]

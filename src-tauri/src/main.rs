@@ -27,6 +27,10 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State};
+
+mod json_util;
+mod offline_bundle;
+mod runtime_updater;
 #[cfg(target_os = "windows")]
 use zip::ZipArchive;
 
@@ -383,6 +387,64 @@ async fn ensure_ffmpeg_binaries(resource_dir: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+fn zip_mtime_and_size(zip_path: &std::path::Path) -> Option<(String, u64)> {
+    let meta = std::fs::metadata(zip_path).ok()?;
+    let mt = meta.modified().ok()?;
+    let d = mt.duration_since(std::time::UNIX_EPOCH).ok()?;
+    let mtime = format!("{}.{}", d.as_secs(), d.subsec_nanos());
+    Some((mtime, meta.len()))
+}
+
+#[cfg(target_os = "windows")]
+enum BackendZipStamp {
+    None,
+    /// 旧版仅记录 zip 修改时间（单行）
+    LegacyMtime(String),
+    Full {
+        version: String,
+        mtime: String,
+        size: u64,
+    },
+}
+
+#[cfg(target_os = "windows")]
+fn parse_backend_zip_stamp(content: &str) -> BackendZipStamp {
+    let lines: Vec<&str> = content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    match lines.len() {
+        0 => BackendZipStamp::None,
+        1 => BackendZipStamp::LegacyMtime(lines[0].to_string()),
+        _ => {
+            let size = lines
+                .get(2)
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            BackendZipStamp::Full {
+                version: lines[0].to_string(),
+                mtime: lines[1].to_string(),
+                size,
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_backend_zip_stamp(
+    stamp_path: &std::path::Path,
+    app_version: &str,
+    mtime: &str,
+    size: u64,
+) {
+    let _ = std::fs::write(
+        stamp_path,
+        format!("{}\n{}\n{}", app_version, mtime, size),
+    );
+}
+
+#[cfg(target_os = "windows")]
 fn ensure_backend_executable_available(
     _app_handle: &AppHandle,
     resource_dir: &PathBuf,
@@ -395,6 +457,8 @@ fn ensure_backend_executable_available(
     let nested_backend_dir = extracted_backend_dir.join("superAutoCutVideoBackend");
     let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
     let stamp_path = extracted_backend_dir.join(".backend_zip_stamp");
+    let app_version = _app_handle.package_info().version.to_string();
+
     let is_valid_backend_root = |root: &std::path::Path| -> Option<PathBuf> {
         let exe = root.join("superAutoCutVideoBackend.exe");
         if !exe.exists() {
@@ -408,43 +472,55 @@ fn ensure_backend_executable_available(
         }
     };
 
-    let zip_stamp = || -> Option<String> {
-        let mt = std::fs::metadata(&zip_path).ok()?.modified().ok()?;
-        let d = mt.duration_since(std::time::UNIX_EPOCH).ok()?;
-        Some(format!("{}.{}", d.as_secs(), d.subsec_nanos()))
-    };
-    let read_stamp = || -> Option<String> {
-        std::fs::read_to_string(&stamp_path).ok().map(|s| s.trim().to_string())
-    };
-    let should_refresh = || -> bool {
-        if !zip_path.exists() {
-            return false;
-        }
-        let want = match zip_stamp() {
-            Some(v) => v,
-            None => return false,
-        };
-        match read_stamp() {
-            Some(got) if got == want => false,
-            _ => true,
+    if !zip_path.exists() {
+        return Ok(extracted_backend_dir.join("superAutoCutVideoBackend.exe"));
+    }
+
+    let (want_mtime, want_size) = match zip_mtime_and_size(&zip_path) {
+        Some(v) => v,
+        None => {
+            return Ok(extracted_backend_dir.join("superAutoCutVideoBackend.exe"));
         }
     };
 
-    if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
-        if !should_refresh() {
+    let stamp_raw = std::fs::read_to_string(&stamp_path).unwrap_or_default();
+    let stamp = parse_backend_zip_stamp(&stamp_raw);
+
+    let zip_fingerprint_matches = match &stamp {
+        BackendZipStamp::Full { mtime, size, .. } => *mtime == want_mtime && *size == want_size,
+        BackendZipStamp::LegacyMtime(m) => *m == want_mtime,
+        BackendZipStamp::None => false,
+    };
+
+    if zip_fingerprint_matches {
+        if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
+            let need_stamp_update = match &stamp {
+                BackendZipStamp::Full { version, .. } => version != &app_version,
+                BackendZipStamp::LegacyMtime(_) => true,
+                BackendZipStamp::None => true,
+            };
+            if need_stamp_update {
+                let _ = std::fs::create_dir_all(&extracted_backend_dir);
+                write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
+            }
+            return Ok(exe);
+        }
+        if let Some(exe) = is_valid_backend_root(&nested_backend_dir) {
+            let need_stamp_update = match &stamp {
+                BackendZipStamp::Full { version, .. } => version != &app_version,
+                BackendZipStamp::LegacyMtime(_) => true,
+                BackendZipStamp::None => true,
+            };
+            if need_stamp_update {
+                let _ = std::fs::create_dir_all(&extracted_backend_dir);
+                write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
+            }
             return Ok(exe);
         }
     }
-    if let Some(exe) = is_valid_backend_root(&nested_backend_dir) {
-        if !should_refresh() {
-            return Ok(exe);
-        }
-    }
+
     if extracted_backend_dir.exists() {
         let _ = std::fs::remove_dir_all(&extracted_backend_dir);
-    }
-    if !zip_path.exists() {
-        return Ok(extracted_backend_dir.join("superAutoCutVideoBackend.exe"));
     }
 
     let _ = std::fs::create_dir_all(&app_data_dir);
@@ -490,9 +566,8 @@ fn ensure_backend_executable_available(
             ));
         }
     }
-    if let Some(stamp) = zip_stamp() {
-        let _ = std::fs::write(&stamp_path, stamp);
-    }
+
+    write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
 
     if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
         return Ok(exe);
@@ -1127,9 +1202,8 @@ async fn start_backend(
     }
 }
 
-// Tauri命令：停止Python后端
-#[tauri::command]
-async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
+/// 停止后端并释放 AppData 下 DLL 文件锁（覆盖后端目录前必须调用，否则 Windows 报 os error 32）。
+fn stop_backend_sync(state: &AppState) -> Result<bool, String> {
     let mut process_guard = state.backend_process.lock().unwrap();
 
     if let Some(mut child) = process_guard.take() {
@@ -1142,7 +1216,6 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
                 println!("[backend] 已停止 (pid={})", pid);
                 #[cfg(target_os = "windows")]
                 {
-                    // 额外兜底：强制结束所有同名后端进程，避免残留
                     kill_all_backend_processes();
                 }
                 Ok(true)
@@ -1152,11 +1225,16 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
     } else {
         #[cfg(target_os = "windows")]
         {
-            // 无记录的子进程，但可能仍有残留后端，兜底清理
             kill_all_backend_processes();
         }
-        Ok(false) // 没有运行的进程
+        Ok(false)
     }
+}
+
+// Tauri命令：停止Python后端
+#[tauri::command]
+async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
+    stop_backend_sync(&state)
 }
 
 // Tauri命令：获取后端状态
@@ -1228,6 +1306,27 @@ async fn select_output_directory(app: AppHandle) -> Result<FileSelection, String
         .blocking_pick_folder();
 
     match dir_path {
+        Some(path) => Ok(FileSelection {
+            path: Some(path.to_string()),
+            cancelled: false,
+        }),
+        None => Ok(FileSelection {
+            path: None,
+            cancelled: true,
+        }),
+    }
+}
+
+// Tauri命令：选择离线更新总清单 offline-bundle-manifest.json
+#[tauri::command]
+async fn select_offline_bundle_manifest(app: AppHandle) -> Result<FileSelection, String> {
+    let file_path = tauri_plugin_dialog::DialogExt::dialog(&app)
+        .file()
+        .add_filter("offline-bundle-manifest", &["json"])
+        .set_title("选择 offline-bundle-manifest.json")
+        .blocking_pick_file();
+
+    match file_path {
         Some(path) => Ok(FileSelection {
             path: Some(path.to_string()),
             cancelled: false,
@@ -1327,6 +1426,36 @@ async fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
         .map_err(|e| format!("读取窗口最大化状态失败: {}", e))
 }
 
+/// 设置主窗口内边尺寸（逻辑像素），可选居中。用于启动页小窗与主界面大窗切换。
+#[tauri::command]
+async fn set_main_window_size(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    center: bool,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    if window
+        .is_maximized()
+        .map_err(|e| format!("读取窗口最大化状态失败: {}", e))?
+    {
+        window
+            .unmaximize()
+            .map_err(|e| format!("还原窗口失败: {}", e))?;
+    }
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| format!("调整窗口大小失败: {}", e))?;
+    if center {
+        window
+            .center()
+            .map_err(|e| format!("居中窗口失败: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn close_main_window(app: AppHandle) -> Result<(), String> {
     let window = app
@@ -1342,6 +1471,68 @@ async fn close_main_window(app: AppHandle) -> Result<(), String> {
         .show();
 
     Ok(())
+}
+
+// ── 运行时分块更新 Tauri 命令 ──────────────────────────────────────
+
+#[tauri::command]
+async fn check_runtime_update(
+    app_handle: AppHandle,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    runtime_updater::check_update(&app_handle).await
+}
+
+#[tauri::command]
+async fn download_runtime_update(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    let _ = stop_backend_sync(&state)?;
+    #[cfg(target_os = "windows")]
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    runtime_updater::download_and_apply(&app_handle).await
+}
+
+#[tauri::command]
+async fn get_runtime_installed_state(
+    app_handle: AppHandle,
+) -> Result<runtime_updater::InstalledState, String> {
+    runtime_updater::get_installed_info(&app_handle).await
+}
+
+#[tauri::command]
+fn check_local_runtime_update(
+    app_handle: AppHandle,
+    manifest_path: String,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    runtime_updater::check_local_update(&app_handle, &manifest_path)
+}
+
+#[tauri::command]
+async fn apply_local_runtime_update(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    manifest_path: String,
+) -> Result<runtime_updater::RuntimeUpdateInfo, String> {
+    let _ = stop_backend_sync(&state)?;
+    #[cfg(target_os = "windows")]
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let app_handle = app_handle.clone();
+    tokio::task::spawn_blocking(move || runtime_updater::apply_local_update(&app_handle, &manifest_path))
+        .await
+        .map_err(|e| format!("本地运行时更新任务异常: {}", e))?
+}
+
+#[tauri::command]
+fn resolve_offline_update_bundle(
+    selected_path: String,
+) -> Result<offline_bundle::OfflineBundleResolved, String> {
+    offline_bundle::resolve_offline_update_bundle(selected_path)
+}
+
+#[tauri::command]
+fn launch_local_shell_installer(installer_path: String) -> Result<(), String> {
+    offline_bundle::launch_local_shell_installer(installer_path)
 }
 
 // 应用启动时的初始化
@@ -1387,7 +1578,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .decorations(false)
                 .shadow(false)
                 .transparent(true)
-                .inner_size(1200.0, 800.0)
+                .inner_size(800.0, 350.0)
                 .center();
 
         #[cfg(not(target_os = "windows"))]
@@ -1397,7 +1588,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .resizable(true)
                 .decorations(false)
                 .shadow(false)
-                .inner_size(1200.0, 800.0)
+                .inner_size(800.0, 350.0)
                 .center();
 
         window_builder.build()?;
@@ -1434,6 +1625,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -1479,6 +1671,7 @@ fn main() {
             get_backend_status,
             select_video_file,
             select_output_directory,
+            select_offline_bundle_manifest,
             get_app_info,
             show_notification,
             open_external_link,
@@ -1486,7 +1679,15 @@ fn main() {
             start_dragging_main_window,
             toggle_maximize_main_window,
             is_main_window_maximized,
-            close_main_window
+            set_main_window_size,
+            close_main_window,
+            check_runtime_update,
+            download_runtime_update,
+            get_runtime_installed_state,
+            check_local_runtime_update,
+            apply_local_runtime_update,
+            resolve_offline_update_bundle,
+            launch_local_shell_installer
         ])
         .run(tauri::generate_context!())
         .expect("启动Tauri应用失败");

@@ -123,7 +123,7 @@ class VideoModelConfigManager:
                     provider='yunwu',
                     api_key='xxx',
                     base_url='https://yunwu.ai/v1/chat/completions',
-                    model_name='qwen3-vl-flash',
+                    model_name='gemini-2.5-flash-lite',
                     description='云雾API平台视频分析模型（支持视觉）',
                     enabled=True
                 )
@@ -134,7 +134,7 @@ class VideoModelConfigManager:
                     provider='302ai',
                     api_key='xxx',
                     base_url='https://api.302ai.cn/v1/chat/completions',
-                    model_name='qwen3-vl-flash',
+                    model_name='gemini-2.0-flash-lite',
                     description='302AI平台视频分析模型（支持视觉）',
                     enabled=False
                 )
@@ -239,7 +239,7 @@ class VideoModelConfigManager:
                     provider='yunwu',
                     api_key='xxx',
                     base_url='https://yunwu.ai/v1/chat/completions',
-                    model_name='qwen3-vl-flash',
+                    model_name='gemini-2.5-flash-lite',
                     description='云雾API平台视频分析模型（支持视觉）',
                     enabled=True
                 )
@@ -250,7 +250,7 @@ class VideoModelConfigManager:
                     provider='302ai',
                     api_key='xxx',
                     base_url='https://api.302ai.cn/v1/chat/completions',
-                    model_name='qwen3-vl-flash',
+                    model_name='gemini-2.0-flash-lite',
                     description='302AI平台视频分析模型（支持视觉）',
                     enabled=False
                 )

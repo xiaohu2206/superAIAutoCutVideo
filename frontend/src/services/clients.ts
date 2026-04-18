@@ -434,6 +434,92 @@ export class ApiClient {
     return this.post(`/api/tts/voices/${encodeURIComponent(voiceId)}/preview`, req || {}, 1000 * 300);
   }
 
+  // ===== IndexTTS（局域网，经后端转发）=====
+  async getIndexTtsStatus(): Promise<any> {
+    return this.get(`/api/indextts/status`);
+  }
+
+  async connectIndexTts(data: {
+    host: string;
+    port?: number;
+    api_prefix?: string;
+    scan_back?: number;
+  }): Promise<any> {
+    return this.post(`/api/indextts/connect`, data);
+  }
+
+  async disconnectIndexTts(): Promise<any> {
+    return this.post(`/api/indextts/disconnect`);
+  }
+
+  async uploadIndexTtsCloneVoice(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("name", file.name || "audio.wav");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      return await this.request(`/api/indextts/clone-voices/upload`, {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async selectIndexTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/indextts/clone-voices/select`, { voice_id: voiceId });
+  }
+
+  async deleteIndexTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/indextts/clone-voices/delete`, { voice_id: voiceId });
+  }
+
+  // ===== OmniVoice TTS（局域网，经后端转发）=====
+  async getOmniVoiceTtsStatus(): Promise<any> {
+    return this.get(`/api/omnivoice-tts/status`);
+  }
+
+  async connectOmniVoiceTts(data: {
+    host: string;
+    port?: number;
+    api_prefix?: string;
+    scan_back?: number;
+  }): Promise<any> {
+    return this.post(`/api/omnivoice-tts/connect`, data);
+  }
+
+  async disconnectOmniVoiceTts(): Promise<any> {
+    return this.post(`/api/omnivoice-tts/disconnect`);
+  }
+
+  async uploadOmniVoiceTtsCloneVoice(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("name", file.name || "audio.wav");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      return await this.request(`/api/omnivoice-tts/clone-voices/upload`, {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async selectOmniVoiceTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/omnivoice-tts/clone-voices/select`, { voice_id: voiceId });
+  }
+
+  async deleteOmniVoiceTtsCloneVoice(voiceId: string): Promise<any> {
+    return this.post(`/api/omnivoice-tts/clone-voices/delete`, { voice_id: voiceId });
+  }
+
   // ===== 存储设置相关 API =====
   async getStorageSettings(): Promise<any> {
     return this.get("/api/settings/storage");
@@ -667,6 +753,21 @@ export class TauriCommands {
     }
   }
 
+  // 选择离线更新总清单 offline-bundle-manifest.json
+  static async selectOfflineBundleManifest(): Promise<{
+    path?: string;
+    cancelled: boolean;
+  }> {
+    try {
+      return await TauriCommands.coreInvoke("select_offline_bundle_manifest");
+    } catch {
+      const p =
+        typeof window !== "undefined" ? window.prompt("请输入 offline-bundle-manifest.json 路径") : null;
+      if (p && p.trim()) return { path: p.trim(), cancelled: false };
+      return { cancelled: true };
+    }
+  }
+
   // 获取应用信息
   static async getAppInfo(): Promise<Record<string, string>> {
     try {
@@ -728,6 +829,15 @@ export class TauriCommands {
     } catch (error) {
       console.error("读取窗口最大化状态失败:", error);
       return false;
+    }
+  }
+
+  /** 主窗口尺寸（逻辑像素），用于初始化完成后展开主界面 */
+  static async setMainWindowSize(width: number, height: number, center: boolean): Promise<void> {
+    try {
+      await TauriCommands.coreInvoke("set_main_window_size", { width, height, center });
+    } catch (error) {
+      console.error("调整窗口大小失败:", error);
     }
   }
 
