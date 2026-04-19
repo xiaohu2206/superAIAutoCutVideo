@@ -98,7 +98,7 @@ export interface Project {
   id: string; // 项目ID
   name: string; // 项目名称
   description?: string; // 项目描述
-  project_type?: "subtitle" | "visual";
+  project_type?: "subtitle" | "visual" | "omni";
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number | null;
@@ -172,7 +172,7 @@ export interface ProjectLatestTasks {
 export interface CreateProjectRequest {
   name: string;
   description?: string;
-  project_type?: "subtitle" | "visual";
+  project_type?: "subtitle" | "visual" | "omni";
   narration_type?: NarrationType;
 }
 
@@ -182,7 +182,7 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
-  project_type?: "subtitle" | "visual";
+  project_type?: "subtitle" | "visual" | "omni";
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number | null;

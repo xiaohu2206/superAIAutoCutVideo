@@ -24,7 +24,7 @@ class Project(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    project_type: str = Field(default="subtitle") # subtitle | visual
+    project_type: str = Field(default="subtitle") # subtitle | visual | omni
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None

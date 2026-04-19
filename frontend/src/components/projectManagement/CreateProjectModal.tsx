@@ -12,7 +12,7 @@ interface CreateProjectModalProps {
     name: string;
     description?: string;
     narration_type: NarrationType;
-    project_type: "subtitle" | "visual";
+    project_type: "subtitle" | "visual" | "omni";
   }) => Promise<void>;
 }
 
@@ -29,7 +29,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [narrationType, setNarrationType] = useState<NarrationType>(
     NarrationType.SHORT_DRAMA
   );
-  const [projectType, setProjectType] = useState<"subtitle" | "visual">("subtitle");
+  const [projectType, setProjectType] = useState<"subtitle" | "visual" | "omni">("subtitle");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -194,6 +194,32 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-gray-500">适用：适用所有类型的视频</p>
+                  </div>
+                </div>
+
+                {/* 全感知推理 */}
+                <div
+                  onClick={() => !loading && setProjectType("omni")}
+                  className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    projectType === "omni"
+                      ? "border-purple-500 bg-purple-50"
+                      : "border-gray-200 bg-white hover:border-purple-300"
+                  }`}
+                >
+                  {projectType === "omni" && (
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-purple-500 rounded-full border-2 border-white shadow-sm"></div>
+                  )}
+                  <div className="flex items-center justify-between mb-2">
+                    <h4
+                      className={`text-lg font-bold ${
+                        projectType === "omni" ? "text-purple-700" : "text-gray-700"
+                      }`}
+                    >
+                      全感知推理
+                    </h4>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-500">适用：字幕与视觉信息联合分析的视频</p>
                   </div>
                 </div>
               </div>

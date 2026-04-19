@@ -1,0 +1,178 @@
+{
+  "step": "step2_multimodal_features",
+  "step1_shot_split": {
+    "merge_shots": true,
+    "model_path": "models/transnetv2-weights",
+    "output_shots_json": "output/video_1_shots.json",
+    "export_clips_to_output_video_1_shots": false,
+    "export_raw_clips_to_output_video_1_shots_raw": false
+  },
+  "srt": {
+    "path": "inputFile/videos/video_6.srt"
+  },
+  "input": {
+    "shots_json": "output/video_1_shots.json"
+  },
+  "video": {
+    "path": "inputFile/videos/video_6.mp4"
+  },
+  "output": {
+    "dir": "output",
+    "frames_dir": "output/frames",
+    "result_json": "output/video_1_shots_multimodal.json"
+  },
+  "step2_multimodal_features": {
+    "concurrency": 20,
+    "frame_concurrency": 20,
+    "model_concurrency": 20,
+    "dispatch_sleep_seconds": 0.05,
+    "continue_on_error": true,
+    "save_every_n": 200,
+    "max_retries": 5,
+    "retry_sleep_seconds": 2
+  },
+  "model_provider": "custom_openai",
+  "yunwu": {
+    "api_key": "sk-UCMn5CgmAmZsPkG01nsTdTo2aZuCiCVYbj4d87idI9dQYcJA",
+    "chat_completions_url": "https://yunwu.ai/v1/chat/completions",
+    "embeddings_url": "https://yunwu.ai/v1/embeddings",
+    "rerank_url": "https://yunwu.ai/v1/rerank",
+    "vl_model": "qwen3-vl-flash",
+    "embedding_model": "gemini-embedding-2-preview",
+    "timeout_seconds": 300
+  },
+  "custom_openai": {
+    "api_key": "sk-2221cc921446301bc5688f6067509f579bcb5d00bf0afd9d8046fe7f93c7f762",
+    "base_url": "https://crs.ruinique.com/v1",
+    "chat_completions_url": "",
+    "embeddings_url": "",
+    "rerank_url": "",
+    "vl_model": "sonnet-4-6",
+    "embedding_model": "gemini-embedding-2-preview",
+    "llm_model": "sonnet-4-6",
+    "timeout_seconds": 300,
+    "embedding_provider": "yunwu",
+    "rerank_provider": "yunwu"
+  },
+  "copywriting_structuring": {
+    "input_text": "inputFile/copywriting.txt",
+    "output_json": "output/copywriting_format.json",
+    "prompt_language": "zh",
+    "prompt_path": "",
+    "model": "",
+    "chunk_target_chars": 500,
+    "chunk_lookback_chars": 100,
+    "temperature": 0.2,
+    "max_retries": 2,
+    "retry_sleep_seconds": 2
+  },
+  "copywriting_embeddings": {
+    "input_json": "output/copywriting_format.json",
+    "output_json": "output/copywriting_format_embeddings.json",
+    "concurrency": 100000,
+    "continue_on_error": true,
+    "save_every_n": 10,
+    "max_retries": 2,
+    "retry_sleep_seconds": 2
+  },
+  "search_shots": {
+    "copywriting_embeddings_json": "output/copywriting_format_embeddings.json",
+    "shots_multimodal_json": "output/video_1_shots_multimodal.json",
+    "top_k": 30
+  },
+  "step4_5_rerank": {
+    "copywriting_embeddings_json": "output/copywriting_format_embeddings.json",
+    "copywriting_format_json": "inputFile/copywriting_format.json",
+    "output_json": "output/copywriting_to_shots_rerank.json",
+    "reuse_existing_output": true,
+    "skip_stage1_rerank": false,
+    "concurrency": 20,
+    "output_top_k": 0,
+    "stage1_top_n": 15,
+    "stage2_top_n": 15,
+    "stage2_return_n": 5,
+    "models": {
+      "rerank_model": "qwen3-rerank",
+      "llm_model": "sonnet-4-6"
+    },
+    "stage1_instruct": "Given a web search query, retrieve relevant passages that answer the query.",
+    "weights": {
+      "rerank_score": 0.55,
+      "embedding_score": 0.3,
+      "continuity_score": 0.15
+    },
+    "temperature": 0.2,
+    "max_retries": 2,
+    "retry_sleep_seconds": 2
+  },
+  "step4_8_global_path_search": {
+    "input_rerank_json": "output/copywriting_to_shots_rerank.json",
+    "output_json": "output/copywriting_to_shots_global_path.json",
+    "enable_candidate_truncation": true,
+    "candidate_top_k": 30,
+    "enable_dynamic_beam_width": true,
+    "beam_width_early": 16,
+    "beam_width_mid": 10,
+    "beam_width_late": 6,
+    "enable_path_expansion": true,
+    "keep_top_paths": 8,
+    "disallow_repeat_shot": true,
+    "enable_repeat_shot_fallback": true,
+    "enable_backward_jump_penalty": true,
+    "enable_refine": true,
+    "refine_candidate_top_k": 20,
+    "enable_polyline_smoothing": false,
+    "enable_polyline_outlier_detection": false,
+    "enable_short_outlier_run_repair": true,
+    "short_outlier_run_max_length": 3,
+    "short_outlier_run_candidate_top_k": 10,
+    "short_outlier_run_residual_threshold": 80,
+    "short_outlier_run_time_padding": 45,
+    "smooth_candidate_top_k": 10,
+    "smooth_skip_head_ratio": 0.05,
+    "smooth_skip_tail_ratio": 0.1,
+    "smooth_outlier_residual_threshold": 80,
+    "smooth_outlier_neighbor_gap_threshold": 60,
+    "smooth_residual_penalty_weight": 0.12,
+    "smooth_residual_improve_ratio": 0.25,
+    "smooth_residual_hard_cap": 120,
+    "smooth_min_score_improve": 0.000001,
+    "enable_timeline_zigzag_penalty": true,
+    "keep_all_matches": true,
+    "output_matches_limit": 30
+  },
+  "step4_9_highlight_narration_script": {
+    "input_match_json": "output/copywriting_to_shots_global_path.json",
+    "shots_multimodal_json": "output/video_1_shots_multimodal.json",
+    "output_json": "output/highlight_narration_script.json",
+    "model": "gtp-5.4",
+    "chunk_llm_concurrency": 32,
+    "max_items_for_retrieval": 999999,
+    "temperature": 0.2,
+    "max_retries": 2,
+    "retry_sleep_seconds": 2,
+    "chunk_target_size": 16,
+    "chunk_balance_mode": "balanced_shots",
+    "chunk_min_lines": 1,
+    "timeline_window_mode": "proportional",
+    "timeline_gap_median_multiplier": 4.0,
+    "timeline_gap_min_seconds": 30.0,
+    "preextract_viral_shots": true,
+    "viral_shot_max_items": 15
+  },
+  "generate_video": {
+    "input_match_json": "output/copywriting_to_shots_rerank.json",
+    "output_dir": "output/generated",
+    "output_video": "output/generated/final.mp4",
+    "top_match_index": 0,
+    "max_items": 0,
+    "segment_concurrency": 2,
+    "reuse_existing": true,
+    "tts": {
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "volume": "+0%",
+      "concurrency": 8
+    }
+  }
+}

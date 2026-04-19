@@ -98,6 +98,14 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
    * 项目类型标签
    */
   const getTypeConfig = (type?: string) => {
+    if (type === "omni") {
+      return {
+        icon: Eye,
+        label: "全感知推理",
+        color: "text-fuchsia-700",
+        bg: "bg-fuchsia-100",
+      };
+    }
     if (type === "visual") {
       return {
         icon: Eye,

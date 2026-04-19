@@ -163,7 +163,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
 
   React.useEffect(() => {
-    if (project.project_type !== "visual") return;
+    if (project.project_type === "subtitle") return;
     let cancelled = false;
     (async () => {
       try {
@@ -243,7 +243,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-semibold text-gray-900">
-                {project.project_type === "visual" ? "镜头与字幕提取" : "字幕提取"}
+                {project.project_type === "subtitle" ? "字幕提取" : "镜头与字幕提取"}
             </h2>
             {project.subtitle_source === "user" && project.subtitle_path ? (
               <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100">
@@ -262,7 +262,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             ) : null}
           </div>
           
-          {project.project_type === "visual" ? (
+          {project.project_type !== "subtitle" ? (
              <div className="flex flex-col gap-2 items-end">
                <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
                   <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -436,14 +436,14 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           <button
             onClick={onNextStep}
             disabled={
-              project.project_type === "visual"
+              project.project_type !== "subtitle"
                 ? !project.scenes_path
                 : !project.subtitle_path
             }
             className={`
               group flex items-center px-4 py-2 mr-6 rounded-lg text-white font-medium shadow-md transition-all duration-300
               ${
-                (project.project_type === "visual"
+                (project.project_type !== "subtitle"
                   ? project.scenes_path
                   : project.subtitle_path)
                   ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5"
@@ -455,7 +455,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             <ArrowRight
               className={`ml-2 h-5 w-5 transition-transform duration-300 ${
                 (
-                  project.project_type === "visual"
+                  project.project_type !== "subtitle"
                     ? project.scenes_path
                     : project.subtitle_path
                 )

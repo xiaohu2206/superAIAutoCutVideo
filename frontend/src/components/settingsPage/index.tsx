@@ -3,6 +3,7 @@ import { WebSocketMessage } from "../../services/clients";
 import AboutSection from "./components/AboutSection";
 import { JianyingDraftPathSection } from "./components/JianyingDraftPathSection";
 import { ContentModelSettings } from "./components/models/content/ContentModelSettings";
+import AiSearchShotModelSettings from "./components/models/aiSearchShot/AiSearchShotModelSettings";
 import { VideoModelSettings } from "./components/models/video/VideoModelSettings";
 import MonitorSection from "./components/MonitorSection";
 import StorageSettingsSection from "./components/StorageSettingsSection";
@@ -12,6 +13,7 @@ import { GlobalParamsSettings } from "./components/GlobalParamsSettings";
 import { sections } from "./constants";
 import { useContentModelConfig } from "./hooks/useContentModelConfig";
 import { useVideoModelConfig } from "./hooks/useVideoModelConfig";
+import { useAiSearchShotModelConfig } from "./hooks/useAiSearchShotModelConfig";
 
 /**
  * 设置页面主组件
@@ -56,6 +58,21 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     testContentModelConnection,
   } = useContentModelConfig();
 
+  const {
+    config: aiSearchShotConfig,
+    setConfig: setAiSearchShotConfig,
+    loading: aiSearchShotLoading,
+    saveConfig: saveAiSearchShotConfig,
+    testingEmbedding,
+    testingRerank,
+    embeddingTestResult,
+    rerankTestResult,
+    embeddingTestDetail,
+    rerankTestDetail,
+    testEmbedding,
+    testRerank,
+  } = useAiSearchShotModelConfig();
+
   useEffect(() => {
     if (activeSection === "monitor") {
       onMonitorEnter?.();
@@ -93,6 +110,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             handleContentProviderChange={handleContentProviderChange}
             updateCurrentContentConfig={updateCurrentContentConfig}
             testContentModelConnection={testContentModelConnection}
+          />
+        );
+      case "aiSearchShotModel":
+        return (
+          <AiSearchShotModelSettings
+            config={aiSearchShotConfig}
+            setConfig={setAiSearchShotConfig}
+            loading={aiSearchShotLoading}
+            saveConfig={saveAiSearchShotConfig}
+            testingEmbedding={testingEmbedding}
+            testingRerank={testingRerank}
+            embeddingTestResult={embeddingTestResult}
+            rerankTestResult={rerankTestResult}
+            embeddingTestDetail={embeddingTestDetail}
+            rerankTestDetail={rerankTestDetail}
+            testEmbedding={testEmbedding}
+            testRerank={testRerank}
           />
         );
       case "jianyingDraftPath":

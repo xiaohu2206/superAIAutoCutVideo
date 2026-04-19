@@ -53,10 +53,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
 
   useEffect(() => {
     if (!loading && project && !hasInitializedStep) {
-      const isReady =
-        project.project_type === "visual"
-          ? !!project.scenes_path
-          : project.subtitle_status === "ready";
+        const isReady =
+          project.project_type === "subtitle"
+            ? project.subtitle_status === "ready"
+            : !!project.scenes_path;
 
       if (isReady) {
         setCurrentStep("generate");
@@ -187,27 +187,27 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
             <button
               onClick={() => {
                 const isReady =
-                  project?.project_type === "visual"
-                    ? !!project?.scenes_path
-                    : project?.subtitle_status === "ready";
+                  project?.project_type === "subtitle"
+                    ? project?.subtitle_status === "ready"
+                    : !!project?.scenes_path;
 
                 if (isReady) {
                   setCurrentStep("generate");
                 } else {
                   message.warning(
-                    project?.project_type === "visual"
-                      ? "请先提取镜头"
-                      : "请先提取或上传字幕"
+                    project?.project_type === "subtitle"
+                      ? "请先提取或上传字幕"
+                      : "请先提取镜头"
                   );
                 }
               }}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
                 currentStep === "generate"
                   ? "bg-white text-gray-900 shadow-sm"
-                  : !(
-                      project?.project_type === "visual"
-                        ? !!project?.scenes_path
-                        : project?.subtitle_status === "ready"
+                  :                     !(
+                      project?.project_type === "subtitle"
+                        ? project?.subtitle_status === "ready"
+                        : !!project?.scenes_path
                     )
                   ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-500 hover:text-gray-700"

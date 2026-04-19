@@ -523,7 +523,7 @@ export function useProjectEditUploadStep(
       visionAction: "auto" | "continue" | "restart"
     ) => {
       // visual 项目：先同步完成字幕提取（HTTP 阻塞至结束），再提交镜头提取任务；进度仍由 WS 驱动。
-      if (options.project?.project_type === "visual") {
+      if (options.project?.project_type !== "subtitle") {
         const p = options.project;
         const canStartSubtitle =
           !(p.subtitle_source === "user" && Boolean(p.subtitle_path)) &&

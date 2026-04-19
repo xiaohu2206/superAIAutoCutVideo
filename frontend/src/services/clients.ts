@@ -377,6 +377,23 @@ export class ApiClient {
     return this.post(`/api/models/content-generation/test`);
   }
 
+  // ===== 向量模型 设置相关 API =====
+  async getAiSearchShotModelConfig(): Promise<any> {
+    return this.get("/api/settings/ai-search-shot");
+  }
+
+  async updateAiSearchShotModelConfig(config: any): Promise<any> {
+    return this.post("/api/settings/ai-search-shot", { config });
+  }
+
+  async testAiSearchShotEmbedding(config: any): Promise<any> {
+    return this.post("/api/settings/ai-search-shot/test/embedding", { config });
+  }
+
+  async testAiSearchShotRerank(config: any): Promise<any> {
+    return this.post("/api/settings/ai-search-shot/test/rerank", { config });
+  }
+
   // ===== TTS（音色设置）相关 API =====
   // 获取TTS引擎列表
   async getTtsEngines(): Promise<any> {

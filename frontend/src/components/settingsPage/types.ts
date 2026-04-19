@@ -26,6 +26,20 @@ export interface ContentModelConfig {
   enabled?: boolean;
 }
 
+export interface AiSearchShotModelConfig {
+  provider: string;
+  api_key: string;
+  embedding_base_url: string;
+  embedding_model: string;
+  rerank_base_url: string;
+  rerank_model: string;
+  timeout_seconds?: number;
+  max_retries?: number;
+  retry_sleep_seconds?: number;
+  enabled?: boolean;
+  description?: string;
+}
+
 /**
  * 应用设置接口
  */

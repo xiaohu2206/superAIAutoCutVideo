@@ -1,0 +1,16 @@
+output/frames/*
+inputFile/videos/*
+output/generated/*
+.venv/*
+
+# Large generated JSON (regenerate via pipeline; keeps clone/push small)
+output/video_1_shots_multimodal.json
+output/copywriting_format_embeddings.json
+output/copywriting_to_shots_rerank.json
+output/copywriting_to_shots_global_path.json
+output/copywriting_to_shots_top30.json
+output/video_1_shots.json
+
+# Python cache
+**/__pycache__/
+*.py[cod]

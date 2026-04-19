@@ -64,6 +64,7 @@ from routes.prompts_routes import router as prompts_router
 from routes.jianying_config_routes import router as jianying_router
 from routes.generate_routes import router as generate_router
 from routes.storage_routes import router as settings_router
+from routes.ai_search_shot_settings_routes import router as ai_search_shot_settings_router
 from routes.moondream_routes import router as moondream_router
 from routes.log_routes import router as log_router
 from modules.ws_manager import manager
@@ -393,6 +394,7 @@ app.include_router(prompts_router)
 app.include_router(jianying_router)
 app.include_router(generate_router)
 app.include_router(settings_router)
+app.include_router(ai_search_shot_settings_router)
 app.include_router(moondream_router)
 app.include_router(log_router)
 
