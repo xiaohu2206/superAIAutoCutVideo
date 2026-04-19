@@ -1,6 +1,11 @@
 import React from "react";
+import { useOmniFullNarrationPipeline } from "../../hooks/omni/useOmniFullNarrationPipeline";
 import type { Project } from "../../types/project";
 import GenerateAdvancedConfigSection from "./GenerateAdvancedConfigSection";
+import CopywritingSection from "./CopywritingSection";
+import OmniFullNarrationPipelineControls from "./omni/OmniFullNarrationPipelineControls";
+import OmniFullNarrationPipelineProgress from "./omni/OmniFullNarrationPipelineProgress";
+import OmniFullNarrationScriptWorkspace from "./omni/OmniFullNarrationScriptWorkspace";
 import ProjectOperations from "./ProjectOperations";
 import ScriptEditor from "./ScriptEditor";
 
@@ -90,6 +95,11 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 }) => {
   const [showAdvancedConfig, setShowAdvancedConfig] = React.useState(false);
 
+  const omniNarration = useOmniFullNarrationPipeline({
+    project,
+    refreshProject,
+  });
+
   return (
     <>
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
@@ -141,19 +151,58 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           draftGenLogs={draftGenLogs}
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
+          hideVisualGenerateScriptButton={project.project_type === "omni"}
+          isOmniFullPipelineRunning={omniNarration.omniPipelineBusy}
+          omniScriptGenerateSlot={
+            project.project_type === "omni" ? (
+              <OmniFullNarrationPipelineControls
+                busy={omniNarration.omniPipelineBusy}
+                disabled={omniNarration.omniPipelineDisabled}
+                disabledReason={omniNarration.omniPipelineDisabledReason}
+                onRun={omniNarration.handleRunOmniFullNarrationPipeline}
+              />
+            ) : undefined
+          }
+          omniScriptProgressSlot={
+            project.project_type === "omni" ? (
+              <OmniFullNarrationPipelineProgress
+                busy={omniNarration.omniPipelineBusy}
+                progress={omniNarration.omniPipelineProgress}
+                logs={omniNarration.omniPipelineLogs}
+              />
+            ) : undefined
+          }
         />
       </div>
 
-      <ScriptEditor
-        editedCopywriting={editedCopywriting}
-        setEditedCopywriting={setEditedCopywriting}
-        isSavingCopywriting={isSavingCopywriting}
-        handleSaveCopywriting={handleSaveCopywriting}
-        editedScript={editedScript}
-        setEditedScript={setEditedScript}
-        isSaving={isSaving}
-        handleSaveScript={handleSaveScript}
-      />
+      {project.project_type === "omni" ? (
+        <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
+          <CopywritingSection
+            editedCopywriting={editedCopywriting}
+            setEditedCopywriting={setEditedCopywriting}
+            isSavingCopywriting={isSavingCopywriting}
+            handleSaveCopywriting={handleSaveCopywriting}
+          />
+          <hr className="border-gray-200" />
+          <OmniFullNarrationScriptWorkspace
+            editedScript={omniNarration.omniEditedScript}
+            setEditedScript={omniNarration.setOmniEditedScript}
+            isSaving={omniNarration.omniScriptSaving}
+            onSave={omniNarration.handleSaveOmniScript}
+          />
+        </div>
+      ) : (
+        <ScriptEditor
+          editedCopywriting={editedCopywriting}
+          setEditedCopywriting={setEditedCopywriting}
+          isSavingCopywriting={isSavingCopywriting}
+          handleSaveCopywriting={handleSaveCopywriting}
+          editedScript={editedScript}
+          setEditedScript={setEditedScript}
+          isSaving={isSaving}
+          handleSaveScript={handleSaveScript}
+        />
+      )}
     </>
   );
 };

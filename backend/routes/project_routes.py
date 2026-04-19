@@ -47,6 +47,7 @@ from services.omni_copywriting_struct_embed_service import omni_copywriting_stru
 from services.omni_shot_match_service import omni_shot_match_service
 from services.omni_global_path_search_service import omni_global_path_search_service
 from services.omni_generate_script_service import omni_generate_script_service
+from omni_full_narration_pipeline import omni_full_narration_pipeline_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
@@ -2372,6 +2373,9 @@ async def get_project_running_tasks(project_id: str):
         "omni_generate_script": task_progress_store.get_latest_running(
             omni_generate_script_service.SCOPE, project_id
         ),
+        "omni_full_narration_pipeline": task_progress_store.get_latest_running(
+            omni_full_narration_pipeline_service.SCOPE, project_id
+        ),
     }
     return {
         "message": "获取任务进度",
@@ -2397,6 +2401,7 @@ async def get_project_latest_tasks(project_id: str):
                 "omni_shot_match": None,
                 "omni_global_path_search": None,
                 "omni_generate_script": None,
+                "omni_full_narration_pipeline": None,
             },
             "timestamp": now_ts(),
         }
@@ -2418,6 +2423,9 @@ async def get_project_latest_tasks(project_id: str):
             ),
             "omni_generate_script": task_progress_store.get_state(
                 omni_generate_script_service.SCOPE, project_id
+            ),
+            "omni_full_narration_pipeline": task_progress_store.get_state(
+                omni_full_narration_pipeline_service.SCOPE, project_id
             ),
         },
         "timestamp": now_ts(),

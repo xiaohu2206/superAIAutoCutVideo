@@ -58,6 +58,7 @@ from routes.omni_copywriting_embed_routes import router as omni_copywriting_embe
 from routes.omni_shot_match_routes import router as omni_shot_match_router
 from routes.omni_global_path_search_routes import router as omni_global_path_search_router
 from routes.omni_generate_script_routes import router as omni_generate_script_router
+from routes.omni_full_narration_pipeline_routes import router as omni_full_narration_pipeline_router
 from routes.tts_routes import router as tts_router
 from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.qwen_online_tts_routes import router as qwen_online_tts_router
@@ -393,6 +394,7 @@ app.include_router(omni_copywriting_embed_router)
 app.include_router(omni_shot_match_router)
 app.include_router(omni_global_path_search_router)
 app.include_router(omni_generate_script_router)
+app.include_router(omni_full_narration_pipeline_router)
 app.include_router(tts_router)
 app.include_router(qwen3_tts_router)
 app.include_router(qwen_online_tts_router)

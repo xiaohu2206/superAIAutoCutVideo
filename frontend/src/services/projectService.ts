@@ -481,6 +481,21 @@ export class ProjectService {
   }
 
   /**
+   * Omni：顺序执行 文案结构化+向量 → 镜头匹配 → 全局路径 → 解说脚本生成
+   */
+  async runOmniFullNarrationPipeline(
+    projectId: string,
+    body?: Record<string, unknown>
+  ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
+      `/api/projects/${projectId}/omni/full-narration-pipeline/run`,
+      body ?? {},
+      120000
+    );
+    return response.data ?? {};
+  }
+
+  /**
    * 根据脚本生成输出视频（后台任务 + WebSocket 进度）
    */
   async startGenerateVideo(projectId: string): Promise<{ task_id: string; scope?: string } | null> {

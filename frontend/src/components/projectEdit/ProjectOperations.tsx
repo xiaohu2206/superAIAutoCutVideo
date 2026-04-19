@@ -1,6 +1,5 @@
 import { AlertCircle, Check, ChevronDown, Clipboard, FileVideo, FolderOpen, Loader, Play, Scissors, Square, X, FileText } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
-import { apiClient, type ApiResponse } from "../../services/clients";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
 import { NarrationType, Project } from "../../types/project";
@@ -35,6 +34,14 @@ interface ProjectOperationsProps {
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
   refreshProject: () => Promise<void>;
+  /** Omni：隐藏 visual 的「生成解说脚本」，由独立组件提供全链路入口 */
+  hideVisualGenerateScriptButton?: boolean;
+  /** Omni：替代原「生成解说脚本」按钮区域的 React 节点 */
+  omniScriptGenerateSlot?: React.ReactNode;
+  /** Omni：全链路进度（全宽块，布局对齐 visual「脚本生成进度」） */
+  omniScriptProgressSlot?: React.ReactNode;
+  /** Omni：全链路运行中，用于与文案/视频等任务互斥 */
+  isOmniFullPipelineRunning?: boolean;
 }
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
@@ -66,6 +73,10 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   showMergedPreview,
   setShowMergedPreview,
   refreshProject,
+  hideVisualGenerateScriptButton = false,
+  omniScriptGenerateSlot,
+  omniScriptProgressSlot,
+  isOmniFullPipelineRunning = false,
 }) => {
   const [outputVideoCacheBust, setOutputVideoCacheBust] = useState<number>(0);
   const [copying, setCopying] = useState(false);
@@ -77,15 +88,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   const [referenceModalOpen, setReferenceModalOpen] = useState(false);
   const [referenceDraft, setReferenceDraft] = useState("");
   const [savingReference, setSavingReference] = useState(false);
-  /** TODO: 删除 — Omni 文案结构化+向量 临时测试 */
-  const [omniCweTestBusy, setOmniCweTestBusy] = useState(false);
-  /** TODO: 删除 — Omni 镜头粗筛/重排 临时测试 */
-  const [omniShotMatchTestBusy, setOmniShotMatchTestBusy] = useState(false);
-  /** TODO: 删除 — Omni 全局路径搜索 临时测试 */
-  const [omniGlobalPathTestBusy, setOmniGlobalPathTestBusy] = useState(false);
-  /** TODO: 删除 — Omni 解说脚本生成 临时测试 */
-  const [omniGenerateScriptTestBusy, setOmniGenerateScriptTestBusy] = useState(false);
-
   const isMovieNarration = project.narration_type === NarrationType.MOVIE;
   const hasFilmContextSaved = Boolean((project.narration_film_context || "").trim());
   const hasReferenceCopywritingSaved = Boolean((project.narration_reference_copywriting || "").trim());
@@ -107,7 +109,12 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   }, [referenceModalOpen, project.id, project.narration_reference_copywriting]);
 
   const draftPath = project?.jianying_draft_last_dir || project?.jianying_draft_last_dir_web || "";
-  const isGeneratingAny = isGeneratingCopywriting || isGeneratingScript || isGeneratingVideo || isGeneratingDraft;
+  const isGeneratingAny =
+    isGeneratingCopywriting ||
+    isGeneratingScript ||
+    isGeneratingVideo ||
+    isGeneratingDraft ||
+    Boolean(isOmniFullPipelineRunning);
   const copywritingButtonDisabled =
     !project?.video_path ||
     !project?.subtitle_path ||
@@ -218,70 +225,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     }
   };
 
-  /** TODO: 删除 — 调用后端 omni copywriting struct+embed run */
-  const handleTestOmniCopywritingStructEmbed = async () => {
-    try {
-      setOmniCweTestBusy(true);
-      const res = await apiClient.post<
-        ApiResponse<{ task_id?: string; status?: string; message?: string }>
-      >(`/api/projects/${project.id}/omni/copywriting-struct-embed/run`, {});
-      const tid = res.data?.task_id;
-      message.success(tid ? `已提交 task_id=${tid}` : res.message || "已提交");
-    } catch (e: any) {
-      message.error(e?.message || "请求失败");
-    } finally {
-      setOmniCweTestBusy(false);
-    }
-  };
-
-  /** TODO: 删除 — 调用后端 omni shot-match run */
-  const handleTestOmniShotMatch = async () => {
-    try {
-      setOmniShotMatchTestBusy(true);
-      const res = await apiClient.post<
-        ApiResponse<{ task_id?: string; status?: string; message?: string }>
-      >(`/api/projects/${project.id}/omni/shot-match/run`, {});
-      const tid = res.data?.task_id;
-      message.success(tid ? `已提交 task_id=${tid}` : res.message || "已提交");
-    } catch (e: any) {
-      message.error(e?.message || "请求失败");
-    } finally {
-      setOmniShotMatchTestBusy(false);
-    }
-  };
-
-  /** TODO: 删除 — 调用后端 omni global-path-search run */
-  const handleTestOmniGlobalPathSearch = async () => {
-    try {
-      setOmniGlobalPathTestBusy(true);
-      const res = await apiClient.post<
-        ApiResponse<{ task_id?: string; status?: string; message?: string }>
-      >(`/api/projects/${project.id}/omni/global-path-search/run`, {});
-      const tid = res.data?.task_id;
-      message.success(tid ? `已提交 task_id=${tid}` : res.message || "已提交");
-    } catch (e: any) {
-      message.error(e?.message || "请求失败");
-    } finally {
-      setOmniGlobalPathTestBusy(false);
-    }
-  };
-
-  /** TODO: 删除 — 调用后端 omni generate-script run */
-  const handleTestOmniGenerateScript = async () => {
-    try {
-      setOmniGenerateScriptTestBusy(true);
-      const res = await apiClient.post<
-        ApiResponse<{ task_id?: string; status?: string; message?: string }>
-      >(`/api/projects/${project.id}/omni/generate-script/run`, {});
-      const tid = res.data?.task_id;
-      message.success(tid ? `已提交 task_id=${tid}` : res.message || "已提交");
-    } catch (e: any) {
-      message.error(e?.message || "请求失败");
-    } finally {
-      setOmniGenerateScriptTestBusy(false);
-    }
-  };
-
   const handleOpenOutputVideoInExplorer = async () => {
     if (!project.output_video_path) {
       message.error("尚未生成输出视频");
@@ -315,70 +258,6 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             <>生成解说文案</>
           )}
         </button>
-        {project.project_type === "omni" && (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleTestOmniCopywritingStructEmbed}
-              disabled={
-                omniCweTestBusy ||
-                omniShotMatchTestBusy ||
-                omniGlobalPathTestBusy ||
-                omniGenerateScriptTestBusy ||
-                isGeneratingAny
-              }
-              className="px-3 py-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-              title="临时测试：文案结构化+向量化（可删）"
-            >
-              {omniCweTestBusy ? "提交中…" : "[测] 文案结构化+向量"}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestOmniShotMatch}
-              disabled={
-                omniShotMatchTestBusy ||
-                omniCweTestBusy ||
-                omniGlobalPathTestBusy ||
-                omniGenerateScriptTestBusy ||
-                isGeneratingAny
-              }
-              className="px-3 py-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-              title="临时测试：镜头粗筛+重排（可删）"
-            >
-              {omniShotMatchTestBusy ? "提交中…" : "[测] 镜头匹配"}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestOmniGlobalPathSearch}
-              disabled={
-                omniGlobalPathTestBusy ||
-                omniCweTestBusy ||
-                omniShotMatchTestBusy ||
-                omniGenerateScriptTestBusy ||
-                isGeneratingAny
-              }
-              className="px-3 py-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-              title="临时测试：全局路径搜索（可删）"
-            >
-              {omniGlobalPathTestBusy ? "提交中…" : "[测] 全局路径"}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestOmniGenerateScript}
-              disabled={
-                omniGenerateScriptTestBusy ||
-                omniCweTestBusy ||
-                omniShotMatchTestBusy ||
-                omniGlobalPathTestBusy ||
-                isGeneratingAny
-              }
-              className="px-3 py-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-              title="临时测试：Omni 解说脚本生成（可删）"
-            >
-              {omniGenerateScriptTestBusy ? "提交中…" : "[测] 解说脚本"}
-            </button>
-          </div>
-        )}
         {isMovieNarration && (
           <div className="flex items-center gap-2 pl-1">
             {!hasReferenceCopywritingSaved && (
@@ -411,23 +290,25 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         )}
       </div>
 
-      <button
-        onClick={handleGenerateScript}
-        disabled={scriptButtonDisabled}
-        title={scriptButtonTitle}
-        className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isGeneratingScript ? (
-          <>
-            <Loader className="h-5 w-5 mr-2 animate-spin" />
-            生成中...
-          </>
-        ) : (
-          <>
-            生成解说脚本
-          </>
-        )}
-      </button>
+      {hideVisualGenerateScriptButton ? (
+        omniScriptGenerateSlot ?? null
+      ) : (
+        <button
+          onClick={handleGenerateScript}
+          disabled={scriptButtonDisabled}
+          title={scriptButtonTitle}
+          className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isGeneratingScript ? (
+            <>
+              <Loader className="h-5 w-5 mr-2 animate-spin" />
+              生成中...
+            </>
+          ) : (
+            <>生成解说脚本</>
+          )}
+        </button>
+      )}
 
        {project.script && project.video_path && 
        <Dropdown
@@ -776,8 +657,11 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           </div>
         </div>
       )}
-      {/* 生成脚本实时进度显示 */}
-      {(isGeneratingScript || (scriptGenProgress > 0 && scriptGenProgress < 100)) && (
+      {/* Omni 全链路进度：与 visual「脚本生成进度」同一位置、全宽 */}
+      {hideVisualGenerateScriptButton && omniScriptProgressSlot}
+      {/* 生成脚本实时进度显示（visual / subtitle） */}
+      {!hideVisualGenerateScriptButton &&
+        (isGeneratingScript || (scriptGenProgress > 0 && scriptGenProgress < 100)) && (
         <div className="w-full ml-0 mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>脚本生成进度(预计3～5分钟)</span>
@@ -806,7 +690,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
           )}
         </div>
       )}
-     
+
       {(draftPath || project.output_video_path) && (
         <div className="w-full mt-4 bg-gray-50 rounded-lg border border-gray-200 divide-y divide-gray-200 overflow-hidden">
           {/* 草稿目录 */}

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>视频 + 时间轴跳转演示（对齐 TrimTimeline / TrimPlayerPanel 思路）</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #1a1d24;
+      --track: #2a2f3a;
+      --playhead: #a78bfa;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin: 0 0 8px;
+    }
+    .note {
+      font-size: 0.8125rem;
+      color: var(--muted);
+      margin-bottom: 20px;
+      max-width: 52rem;
+    }
+    .layout {
+      max-width: 960px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .video-wrap {
+      background: #000;
+      border-radius: 10px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      position: relative;
+    }
+    video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #111827;
+      color: #fff;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #1f2937; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .time {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    label.chk {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.875rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .timeline-panel {
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 12px 14px 14px;
+    }
+    .timeline-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    /* 轨道：对应 TrimTimelineTrack —— 用 rect 算点击比例 */
+    .track {
+      position: relative;
+      height: 44px;
+      background: var(--track);
+      border-radius: 6px;
+      cursor: pointer;
+      touch-action: none;
+    }
+    .track-inner {
+      position: absolute;
+      inset: 0;
+      border-radius: 6px;
+    }
+    .progress-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: rgba(167, 139, 250, 0.18);
+      border-radius: 6px 0 0 6px;
+      pointer-events: none;
+    }
+    .playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--playhead);
+      box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
+      pointer-events: none;
+      left: 0%;
+    }
+    .playhead::after {
+      content: "";
+      position: absolute;
+      top: -4px;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: var(--playhead);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <h1>视频播放器 + 可点击时间轴</h1>
+    <p class="note">
+      逻辑对齐 <code>TrimPlayerPanel</code> 中的 <code>&lt;video&gt;</code>（无原生 controls）与
+      <code>TrimTimeline</code> 里轨道 <code>pointerdown</code> / 拖拽 scrub：用
+      <code>getBoundingClientRect()</code> 将指针 <code>x</code> 转为时间比例，再写入
+      <code>video.currentTime</code>。勾选「点击/拖完后自动播放」后，_seek 结束即从该时刻开始播。
+    </p>
+
+    <div class="video-wrap">
+      <!-- 可换成本地文件：src="file:///..." 在某些浏览器受限，建议用本地静态服或下面示例地址 -->
+      <video
+        id="v"
+        playsinline
+        preload="auto"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+      ></video>
+    </div>
+
+    <div class="toolbar">
+      <button type="button" id="btnPlay" disabled>播放</button>
+      <label class="chk">
+        <input type="checkbox" id="chkAutoPlay" checked />
+        点击/拖完后自动播放
+      </label>
+      <span class="time" id="timeLabel">00:00.000 / --:--</span>
+    </div>
+
+    <div class="timeline-panel">
+      <div class="timeline-label">时间轴（点击或按住拖拽跳转；松手后若勾选自动播放则从此刻播放）</div>
+      <div class="track" id="track" role="slider" aria-valuemin="0" aria-valuemax="100" aria-label="播放进度">
+        <div class="track-inner">
+          <div class="progress-fill" id="progressFill"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const video = document.getElementById("v");
+      const track = document.getElementById("track");
+      const playhead = document.getElementById("playhead");
+      const progressFill = document.getElementById("progressFill");
+      const btnPlay = document.getElementById("btnPlay");
+      const timeLabel = document.getElementById("timeLabel");
+      const chkAutoPlay = document.getElementById("chkAutoPlay");
+
+      function clamp(n, a, b) {
+        return Math.max(a, Math.min(b, n));
+      }
+      function clamp01(x) {
+        return clamp(x, 0, 1);
+      }
+      function fmt(t) {
+        if (!isFinite(t)) return "--:--";
+        const m = Math.floor(t / 60);
+        const s = t - m * 60;
+        const pad = (n) => String(n).padStart(2, "0");
+        return pad(m) + ":" + pad(Math.floor(s)) + "." + String(Math.floor((s % 1) * 1000)).padStart(3, "0");
+      }
+
+      /** 与 TrimTimeline 一致：用轨道 rect 把 clientX 映射为 0..1 比例（此处视口=全长） */
+      function ratioFromClientX(clientX) {
+        const rect = track.getBoundingClientRect();
+        const x = clamp(clientX - rect.left, 0, rect.width);
+        return rect.width > 0 ? x / rect.width : 0;
+      }
+
+      function seekToRatio(ratio) {
+        const d = video.duration;
+        if (!isFinite(d) || d <= 0) return;
+        video.currentTime = clamp01(ratio) * d;
+      }
+
+      function updateUiFromVideo() {
+        const d = video.duration;
+        const t = video.currentTime;
+        const ratio = isFinite(d) && d > 0 ? clamp01(t / d) : 0;
+        playhead.style.left = ratio * 100 + "%";
+        progressFill.style.width = ratio * 100 + "%";
+        timeLabel.textContent = fmt(t) + " / " + (isFinite(d) ? fmt(d) : "--:--");
+      }
+
+      let dragging = false;
+      let seekDonePromise = Promise.resolve();
+
+      function pointerSeek(clientX) {
+        seekToRatio(ratioFromClientX(clientX));
+      }
+
+      track.addEventListener("pointerdown", function (e) {
+        if (!isFinite(video.duration) || video.duration <= 0) return;
+        dragging = true;
+        track.setPointerCapture(e.pointerId);
+        pointerSeek(e.clientX);
+        seekDonePromise = Promise.resolve().then(function () {
+          return new Promise(function (resolve) {
+            function onSeeked() {
+              video.removeEventListener("seeked", onSeeked);
+              resolve();
+            }
+            video.addEventListener("seeked", onSeeked);
+            requestAnimationFrame(function () {
+              if (video.seeking) return;
+              video.removeEventListener("seeked", onSeeked);
+              resolve();
+            });
+          });
+        });
+        e.preventDefault();
+      });
+
+      track.addEventListener("pointermove", function (e) {
+        if (!dragging) return;
+        pointerSeek(e.clientX);
+      });
+
+      function endDrag(e) {
+        if (!dragging) return;
+        dragging = false;
+        try {
+          track.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+
+        var doPlay = chkAutoPlay.checked;
+        if (doPlay) {
+          seekDonePromise.then(function () {
+            return video.play();
+          }).catch(function () {});
+        }
+      }
+
+      track.addEventListener("pointerup", endDrag);
+      track.addEventListener("pointercancel", endDrag);
+
+      video.addEventListener("loadedmetadata", function () {
+        btnPlay.disabled = false;
+        updateUiFromVideo();
+      });
+
+      video.addEventListener("timeupdate", updateUiFromVideo);
+      video.addEventListener("seeked", updateUiFromVideo);
+
+      btnPlay.addEventListener("click", function () {
+        if (video.paused) {
+          video.play().catch(function () {});
+        } else {
+          video.pause();
+        }
+      });
+
+      video.addEventListener("play", function () {
+        btnPlay.textContent = "暂停";
+      });
+      video.addEventListener("pause", function () {
+        btnPlay.textContent = "播放";
+      });
+
+      updateUiFromVideo();
+    })();
+  </script>
+</body>
+</html>
