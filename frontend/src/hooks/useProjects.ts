@@ -1,8 +1,9 @@
 // 项目管理自定义Hook
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { projectService } from "../services/projectService";
 import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
+import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type {
   CreateProjectRequest,
   GenerateCopywritingRequest,
@@ -188,6 +189,17 @@ export interface UseProjectDetailReturn {
   sceneExtractProgress: number;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
+  runOmniPipeline: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  cancelOmniPipeline: () => Promise<void>;
+  extractingOmniPipeline: boolean;
+  omniPipelineProgress: number;
+  omniPipelineMessage: string;
+  omniPipelinePhase: string | null;
+  /** 与字幕条类似：运行中或刷新后仍有未完成任务时显示 */
+  omniPipelineShowProgressBar: boolean;
+  /** Step1（TransNet 同步段）无法中断，不显示停止按钮 */
+  omniPipelineCanStop: boolean;
+  omniMultimodalResult: OmniMultimodalResult | null;
 }
 
 /**
@@ -213,6 +225,16 @@ export const useProjectDetail = (
   const [sceneTaskId, setSceneTaskId] = useState<string | null>(null);
   const scenePollingTimeoutRef = useRef<number | null>(null);
 
+  const [extractingOmniPipeline, setExtractingOmniPipeline] = useState(false);
+  const [omniPipelineProgress, setOmniPipelineProgress] = useState(0);
+  const [omniPipelineMessage, setOmniPipelineMessage] = useState<string>("");
+  const [omniPipelinePhase, setOmniPipelinePhase] = useState<string | null>(null);
+  const [omniTaskId, setOmniTaskId] = useState<string | null>(null);
+  const omniPollingTimeoutRef = useRef<number | null>(null);
+  /** 递增以作废上一轮 Omni 轮询（避免 await 返回后再次 setTimeout） */
+  const omniPollSessionRef = useRef(0);
+  const [omniMultimodalResult, setOmniMultimodalResult] = useState<OmniMultimodalResult | null>(null);
+
   const syncSceneTaskState = useCallback((task: { task_id?: string | null; status?: string; progress?: number; message?: string; phase?: string } | null | undefined) => {
     if (!task?.task_id) {
       setExtractingScene(false);
@@ -236,6 +258,97 @@ export const useProjectDetail = (
       scenePollingTimeoutRef.current = null;
     }
   }, []);
+
+  const syncOmniTaskState = useCallback((task: { task_id?: string | null; status?: string; progress?: number; message?: string; phase?: string } | null | undefined) => {
+    if (!task?.task_id) {
+      setExtractingOmniPipeline(false);
+      setOmniTaskId(null);
+      setOmniPipelineProgress(0);
+      setOmniPipelineMessage("");
+      setOmniPipelinePhase(null);
+      return;
+    }
+    setOmniTaskId(task.task_id || null);
+    setExtractingOmniPipeline(task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled");
+    setOmniPipelineProgress(typeof task.progress === "number" ? task.progress : 0);
+    setOmniPipelineMessage(task.message || "");
+    setOmniPipelinePhase(task.phase || null);
+  }, []);
+
+  const stopOmniPolling = useCallback(() => {
+    if (omniPollingTimeoutRef.current !== null) {
+      window.clearTimeout(omniPollingTimeoutRef.current);
+      omniPollingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startOmniPolling = useCallback((projectId: string, taskId: string, reloadProject?: (id: string) => Promise<void>) => {
+    stopOmniPolling();
+    omniPollSessionRef.current += 1;
+    const sessionId = omniPollSessionRef.current;
+    const poll = async () => {
+      try {
+        const status = await projectService.getOmniPipelineStatus(projectId, taskId);
+        if (sessionId !== omniPollSessionRef.current) return;
+        if (status.status === "completed") {
+          setExtractingOmniPipeline(false);
+          setOmniPipelineProgress(100);
+          setOmniPipelineMessage(status.message || "Omni 管线完成");
+          setOmniPipelinePhase(status.phase || null);
+          setOmniTaskId(null);
+          omniPollingTimeoutRef.current = null;
+          try {
+            const multimodal = await projectService.getOmniMultimodalResult(projectId);
+            setOmniMultimodalResult(multimodal);
+          } catch (e) {
+            console.error("加载 Omni 多模态结果失败:", e);
+          }
+          if (reloadProject) {
+            void reloadProject(projectId);
+          }
+        } else if (status.status === "failed" || status.status === "cancelled") {
+          setExtractingOmniPipeline(false);
+          setOmniTaskId(null);
+          if (status.status === "failed") {
+            setError(status.message || "Omni 管线失败");
+          }
+          setOmniPipelineMessage(
+            status.message || (status.status === "cancelled" ? "Omni 管线已停止" : "Omni 管线失败")
+          );
+          setOmniPipelinePhase(status.phase || null);
+          setOmniPipelineProgress(typeof status.progress === "number" ? status.progress : 0);
+          omniPollingTimeoutRef.current = null;
+        } else {
+          setExtractingOmniPipeline(true);
+          setOmniPipelineProgress(typeof status.progress === "number" ? status.progress : 0);
+          setOmniPipelineMessage(status.message || "");
+          setOmniPipelinePhase(status.phase || null);
+          omniPollingTimeoutRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1000);
+        }
+      } catch (e: any) {
+        console.error(e);
+        if (sessionId !== omniPollSessionRef.current) return;
+        omniPollingTimeoutRef.current = null;
+        const detail = typeof e?.detail === "string" ? e.detail : "";
+        const message = typeof e?.message === "string" ? e.message : "";
+        const notFound = detail.includes("任务不存在") || message.includes("任务不存在");
+        if (notFound) {
+          setExtractingOmniPipeline(false);
+          setOmniTaskId(null);
+          setOmniPipelineProgress(0);
+          setOmniPipelinePhase(null);
+          setOmniPipelineMessage("");
+          return;
+        }
+        omniPollingTimeoutRef.current = window.setTimeout(() => {
+          void poll();
+        }, 1500);
+      }
+    };
+    void poll();
+  }, [stopOmniPolling]);
 
   const startScenePolling = useCallback((projectId: string, taskId: string, reloadProject?: (id: string) => Promise<void>) => {
     stopScenePolling();
@@ -829,6 +942,49 @@ export const useProjectDetail = (
     }
   }, [project, startScenePolling, stopScenePolling]);
 
+  const runOmniPipeline = useCallback(
+    async (options?: { force?: boolean; task_id?: string | null }) => {
+      if (!project) return;
+      setError(null);
+      setOmniMultimodalResult(null);
+      setExtractingOmniPipeline(true);
+      setOmniPipelineProgress(0);
+      setOmniPipelineMessage("");
+      setOmniPipelinePhase(null);
+      stopOmniPolling();
+      try {
+        const res = await projectService.runOmniPipeline(project.id, options);
+        const taskId = res.task_id;
+        setOmniTaskId(taskId || null);
+        if (taskId) {
+          startOmniPolling(project.id, taskId, fetchProject);
+        }
+      } catch (err) {
+        setError(getErrorMessage(err, "Omni 管线失败"));
+        setExtractingOmniPipeline(false);
+        setOmniTaskId(null);
+        setOmniPipelineMessage(getErrorMessage(err, "Omni 管线失败"));
+        setOmniPipelinePhase(null);
+        throw err;
+      }
+    },
+    [project, startOmniPolling, stopOmniPolling, fetchProject]
+  );
+
+  const cancelOmniPipeline = useCallback(async () => {
+    if (!project) return;
+    // 先作废当前轮询会话并清定时器，否则 await 返回后仍可能继续请求 pipeline-status
+    omniPollSessionRef.current += 1;
+    stopOmniPolling();
+    setExtractingOmniPipeline(false);
+    const taskId = omniTaskId || undefined;
+    try {
+      await projectService.cancelTask(project.id, { scope: "omni_multimodal", task_id: taskId });
+    } finally {
+      setOmniTaskId(null);
+    }
+  }, [project, omniTaskId, stopOmniPolling]);
+
   const cancelSceneExtraction = useCallback(async () => {
     if (!project) return;
     const taskId = sceneTaskId || undefined;
@@ -841,6 +997,22 @@ export const useProjectDetail = (
         projectService.getScenes(project.id).then(setSceneResult).catch(console.error);
     }
   }, [project?.scenes_path]);
+
+  useEffect(() => {
+    setOmniMultimodalResult(null);
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (
+      project &&
+      project.project_type === "omni" &&
+      project.omni_multimodal_json_path &&
+      !omniMultimodalResult &&
+      !extractingOmniPipeline
+    ) {
+      projectService.getOmniMultimodalResult(project.id).then(setOmniMultimodalResult).catch(console.error);
+    }
+  }, [project?.id, project?.project_type, project?.omni_multimodal_json_path, omniMultimodalResult, extractingOmniPipeline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -876,10 +1048,68 @@ export const useProjectDetail = (
   }, [project?.id, startScenePolling, stopScenePolling, syncSceneTaskState]);
 
   useEffect(() => {
+    let cancelled = false;
+    const syncOmniTask = async () => {
+      if (!project?.id) {
+        if (!cancelled) {
+          stopOmniPolling();
+          syncOmniTaskState(null);
+        }
+        return;
+      }
+      try {
+        const running = await projectService.getProjectRunningTasks(project.id);
+        if (cancelled || !running) return;
+        const task = running.omni_multimodal;
+        syncOmniTaskState(task);
+        if (task?.task_id) {
+          setOmniMultimodalResult(null);
+          startOmniPolling(project.id, String(task.task_id), fetchProject);
+        } else {
+          stopOmniPolling();
+        }
+      } catch (err) {
+        console.error("同步 Omni 任务状态失败:", err);
+      }
+    };
+    void syncOmniTask();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id, startOmniPolling, stopOmniPolling, syncOmniTaskState, fetchProject]);
+
+  useEffect(() => {
     return () => {
       stopScenePolling();
     };
   }, [stopScenePolling]);
+
+  useEffect(() => {
+    return () => {
+      omniPollSessionRef.current += 1;
+      stopOmniPolling();
+    };
+  }, [stopOmniPolling]);
+
+  const omniPipelineShowProgressBar = useMemo(() => {
+    return (
+      extractingOmniPipeline ||
+      (omniTaskId !== null && omniPipelineProgress > 0 && omniPipelineProgress < 100)
+    );
+  }, [extractingOmniPipeline, omniTaskId, omniPipelineProgress]);
+
+  const omniPipelineCanStop = useMemo(() => {
+    if (!extractingOmniPipeline) return false;
+    const ph = (omniPipelinePhase || "").trim().toLowerCase();
+    if (ph === "step1") return false;
+    if (ph === "preparing" || ph === "step2") return true;
+    const msg = omniPipelineMessage || "";
+    const p = omniPipelineProgress;
+    if (p >= 35 || msg.includes("Step2") || msg.includes("Step1 完成")) return true;
+    if (p < 5) return true;
+    if (p >= 5 && p < 35) return false;
+    return true;
+  }, [extractingOmniPipeline, omniPipelinePhase, omniPipelineProgress, omniPipelineMessage]);
 
   return {
     project,
@@ -917,5 +1147,14 @@ export const useProjectDetail = (
     sceneExtractProgress,
     sceneExtractMessage,
     sceneExtractPhase,
+    runOmniPipeline,
+    cancelOmniPipeline,
+    extractingOmniPipeline,
+    omniPipelineProgress,
+    omniPipelineMessage,
+    omniPipelinePhase,
+    omniPipelineShowProgressBar,
+    omniPipelineCanStop,
+    omniMultimodalResult,
   };
 };

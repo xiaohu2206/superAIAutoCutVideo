@@ -129,6 +129,11 @@ export interface Project {
   output_video_path?: string; // 输出视频文件路径
   scenes_path?: string; // 镜头分割结果路径
   scenes_updated_at?: string; // 镜头更新时间
+  /** Omni：Step1 镜头+字幕对齐 JSON（uploads/omni_multimodal/...） */
+  omni_step1_json_path?: string | null;
+  /** Omni：Step2 多模态+向量结果 JSON */
+  omni_multimodal_json_path?: string | null;
+  omni_pipeline_updated_at?: string | null;
   // 剪映草稿相关
   jianying_draft_last_dir?: string; // 最新草稿目录绝对路径或Web路径
   jianying_draft_last_dir_web?: string; // 最新草稿目录Web路径
@@ -156,6 +161,7 @@ export interface ProjectRunningTasks {
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
   extract_scene?: TaskProgressState | null;
+  omni_multimodal?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
@@ -164,6 +170,7 @@ export interface ProjectLatestTasks {
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
   extract_scene?: TaskProgressState | null;
+  omni_multimodal?: TaskProgressState | null;
 }
 
 /**

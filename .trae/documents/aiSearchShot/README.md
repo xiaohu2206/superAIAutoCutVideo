@@ -165,11 +165,11 @@
 | `beam_width_late` | 进度 70% 以后使用的 Beam 保留条数。（默认 `3`） |
 | `keep_top_paths` | 搜索结束后，在输出 `global_paths` 里写入前几条完整备选路径（含 `rank`、`global_score`、`shot_ids`），便于对比或调试。（默认 `5`） |
 | `refine_candidate_top_k` | 开启 `enable_refine` 时，每一段只从前 K 个候选里尝试替换当前选中镜，控制 refine 开销。（默认 `3`） |
-| `smooth_candidate_top_k` | 开启 `enable_polyline_smoothing` 时，用于尝试替换 outlier 的前 K 个候选数；未配置时退化到 `refine_candidate_top_k`。（默认 `12`） |
-| `smooth_skip_head_ratio` | smoothing 检测 outlier 时，头部跳过的比例；越大越不容易改动开头段落。（默认 `0.05`） |
-| `smooth_skip_tail_ratio` | smoothing 检测 outlier 时，尾部跳过的比例；越大越不容易改动结尾段落。（默认 `0.10`） |
-| `smooth_outlier_residual_threshold` | smoothing 的异常点判定阈值之一：当前镜头时间中点相对邻居基线的残差达到该值才可能判为 outlier。（默认 `120.0`） |
-| `smooth_outlier_neighbor_gap_threshold` | smoothing 的异常点判定阈值之一：与相邻镜头的时间 gap 失衡程度达到该值才可能判为 outlier。（默认 `90.0`） |
+| `smooth_candidate_top_k` | 与 `enable_polyline_smoothing` 等字段一并保留在配置中；当前版本已移除折线离群检测，基于离群的平滑替换不再生效。（默认 `12`） |
+| `smooth_skip_head_ratio` | 同上，历史参数，当前不参与计算。（默认 `0.05`） |
+| `smooth_skip_tail_ratio` | 同上，历史参数，当前不参与计算。（默认 `0.10`） |
+| `smooth_outlier_residual_threshold` | 同上，历史参数，当前不参与计算。（默认 `120.0`） |
+| `smooth_outlier_neighbor_gap_threshold` | 同上，历史参数，当前不参与计算。（默认 `90.0`） |
 | `smooth_residual_penalty_weight` | smoothing 选择替换镜头时，对残差引入的附加惩罚权重；越大越偏向时间折线更平滑的候选。（默认 `0.05`） |
 | `smooth_min_score_improve` | smoothing 接受替换所需的最小改进量，避免因为极小浮动频繁替换。（默认 `1e-6`） |
 
@@ -185,8 +185,7 @@
 | `enable_backward_jump_penalty` | `true`：时间线回退（当前镜起点早于上一镜终点）时在转场分项扣分；`false`：关闭该项惩罚。（默认 `true`） |
 | `enable_timeline_zigzag_penalty` | `true`：对连续三段的「前跳→回跳 / 回跳→前跳」时间摆动做全局惩罚；`false`：关闭 zigzag 全局项。（默认 `true`） |
 | `enable_refine` | `true`：在 Beam 最优路径上再做逐段替换，用全局 `_path_score` 择优；`false`：跳过 refine。（默认 `true`） |
-| `enable_polyline_smoothing` | `true`：执行时间折线平滑（在 refine 流程中参与）；`false`：跳过整段 smoothing。（默认 `true`） |
-| `enable_polyline_outlier_detection` | `true`：smoothing 时先检测时间折线 outlier 再尝试替换；`false`：不检测异常点，不发生平滑替换。（默认 `true`） |
+| `enable_polyline_smoothing` | 配置项保留；当前版本已移除折线离群检测，该开关不再改变 Step4.8 结果。（默认 `true`） |
 | `keep_all_matches` | `true`：每段 `matches` = 全局选中顶到 `[0]` + 其余原候选（去重同 `shot_id`）；`false`：每段只输出一条选中镜。（默认 `true`） |
 
 2) 推荐调参（减少“中间 item 突然跳到很远时间点”）：
@@ -202,7 +201,7 @@
 |------|--------------------|------|
 | 轻量 / 冒烟 | `enable_candidate_truncation=true`，`candidate_top_k=3`，`enable_dynamic_beam_width=true`，`beam_width_early/mid/late=5/3/2`，`enable_refine=false`，`keep_all_matches=true` | 最快；池子小、不 refine，适合先跑通流程或文案段很多时试参数 |
 | 平衡（常用） | `enable_candidate_truncation=true`，`candidate_top_k=6~8`，`enable_dynamic_beam_width=true`，`beam_width_early/mid/late=10/6/4`，`enable_refine=true`，`refine_candidate_top_k=6~8`，`enable_backward_jump_penalty=true`，`enable_timeline_zigzag_penalty=true` | 质量与速度较均衡，适合作为默认组合 |
-| 质量 / 难剪素材 | `enable_candidate_truncation=true`，`candidate_top_k=8~12`，`beam_width_early/mid/late=12/8/5` 或更宽，`enable_refine=true`，`refine_candidate_top_k` 与 `candidate_top_k` 接近，`enable_polyline_smoothing=true`，`enable_polyline_outlier_detection=true` | 扩大每段候选与 Beam，并保留平滑修正，时间线更稳但更慢；段数极多时慎用 |
+| 质量 / 难剪素材 | `enable_candidate_truncation=true`，`candidate_top_k=8~12`，`beam_width_early/mid/late=12/8/5` 或更宽，`enable_refine=true`，`refine_candidate_top_k` 与 `candidate_top_k` 接近 | 扩大每段候选与 Beam，时间线更稳但更慢；段数极多时慎用 |
 | 只看原始搜索、不做后处理 | `enable_refine=false`，`enable_polyline_smoothing=false` | 便于观察 Beam 搜索本身效果，不受 refine / smoothing 干预 |
 | 仅对比路径、减小 JSON | `keep_all_matches=false` | 每段只保留全局选中的一条 `matches[0]`，文件更小 |
 
@@ -253,6 +252,7 @@
 说明：
 - 这一步会把全部解说文案一次性提交给模型，不再按 chunk 分段生成。
 - 为减少上下文长度，不会直接把整份 `video_1_shots_multimodal.json` 原样塞给模型，而是提供每条文案的 Top1 检索候选摘要，再补充按时间线压缩后的全片镜头摘要。
+- Step4.8 结果中已不再包含折线离群字段（如历史版本中的 `is_polyline_outlier`）；本步仅依赖检索候选与全片镜头时间轴。
 - 模型必须输出严格 JSON，并在代码里做了时间戳格式、片段时长（不少于 1 秒）、`OST` 值等校验。
 
 ### Step 5 生成成片（Edge 配音 + 镜头合成 + 拼接）

@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import random
-import re
 import time
 import urllib.error
 import urllib.request
@@ -32,43 +31,6 @@ def _load_frame_analysis_prompt(prompt_language: str, subtitle_text: str) -> str
     with open(prompt_path, "r", encoding="utf-8") as f:
         template = f.read()
     return template.replace("{subtitle_text}", subtitle_text or "")
-
-
-_FRAME_MARK_DESC = "<<<DESC>>>"
-_FRAME_MARK_BRIEF = "<<<BRIEF>>>"
-
-
-def _strip_outer_code_fence(text: str) -> str:
-    s = (text or "").strip()
-    if not s.startswith("```"):
-        return s
-    lines = s.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
-def parse_desc_brief_from_frame_response(raw: str) -> Dict[str, str]:
-    """
-    解析视觉模型纯文本输出：要求使用 <<<DESC>>> 与 <<<BRIEF>>> 分段（见 prompts）。
-    """
-    text = _strip_outer_code_fence(raw)
-    m = re.search(
-        rf"(?is){re.escape(_FRAME_MARK_DESC)}\s*(.*?)\s*{re.escape(_FRAME_MARK_BRIEF)}\s*(.*)",
-        text,
-    )
-    if m:
-        return {"desc": (m.group(1) or "").strip(), "brief": (m.group(2) or "").strip()}
-    # 仅有第一段标记或顺序错乱时的弱兜底
-    if _FRAME_MARK_DESC in text and _FRAME_MARK_BRIEF not in text:
-        rest = text.split(_FRAME_MARK_DESC, 1)[1]
-        return {"desc": rest.strip(), "brief": ""}
-    if _FRAME_MARK_BRIEF in text and _FRAME_MARK_DESC not in text:
-        rest = text.split(_FRAME_MARK_BRIEF, 1)[1]
-        return {"desc": "", "brief": rest.strip()}
-    return {"desc": text.strip(), "brief": ""}
 
 
 class OpenAICompatibleClientBase:
@@ -214,6 +176,52 @@ class OpenAICompatibleClientBase:
             b64 = base64.b64encode(f.read()).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
+    @classmethod
+    def _image_path_to_vl_data_url(
+        cls,
+        image_path: str,
+        *,
+        max_long_edge: int,
+        jpeg_quality: int,
+    ) -> str:
+        """
+        将帧图转为 data URL；当 max_long_edge > 0 时按比例缩小长边并统一为 JPEG，减少视觉 token。
+        降采样失败时回退为原图直读（与 _image_to_data_url 行为一致）。
+        """
+        if max_long_edge <= 0:
+            return cls._image_to_data_url(image_path)
+        q = int(jpeg_quality)
+        q = max(1, min(100, q))
+        try:
+            import cv2
+
+            img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                raise RuntimeError("cv2.imread 返回 None")
+            if img.ndim == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            elif img.shape[2] == 4:
+                img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            h, w = img.shape[:2]
+            me = max(h, w)
+            if me > max_long_edge:
+                scale = max_long_edge / float(me)
+                nw = max(1, int(round(w * scale)))
+                nh = max(1, int(round(h * scale)))
+                img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+            ok, buf = cv2.imencode(
+                ".jpg",
+                img,
+                [int(cv2.IMWRITE_JPEG_QUALITY), q],
+            )
+            if not ok or buf is None:
+                raise RuntimeError("cv2.imencode 失败")
+            b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+            return f"data:image/jpeg;base64,{b64}"
+        except Exception as e:
+            logger.warning("VL 图片降采样失败，使用原图: path=%s err=%s", image_path, e)
+            return cls._image_to_data_url(image_path)
+
     def analyze_shot_frame(
         self,
         *,
@@ -224,6 +232,8 @@ class OpenAICompatibleClientBase:
         temperature: float = 0.2,
         max_retries: int = 0,
         retry_sleep_seconds: float = 1.0,
+        max_image_long_edge: int = 0,
+        vl_jpeg_quality: int = 85,
         log_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not self.chat_completions_url:
@@ -234,7 +244,7 @@ class OpenAICompatibleClientBase:
         item_prefix = f"[shot_analysis] shot_id={shot_id} shot_index={shot_index}"
         subtitle_preview = (subtitle_text or "").replace("\n", " ").strip()[:120]
         logger.info(
-            f"{item_prefix} 开始调用视觉模型 provider={self.provider_name} model={model} image_count={len(image_paths)} subtitle_len={len(subtitle_text or '')} subtitle_preview={subtitle_preview!r} prompt_language={prompt_language}"
+            f"{item_prefix} 开始调用视觉模型 provider={self.provider_name} model={model} image_count={len(image_paths)} subtitle_len={len(subtitle_text or '')} subtitle_preview={subtitle_preview!r} prompt_language={prompt_language} max_image_long_edge={max_image_long_edge} vl_jpeg_quality={vl_jpeg_quality}"
         )
         prompt = _load_frame_analysis_prompt(prompt_language, subtitle_text)
 
@@ -243,21 +253,46 @@ class OpenAICompatibleClientBase:
             content.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": self._image_to_data_url(p)},
+                    "image_url": {
+                        "url": self._image_path_to_vl_data_url(
+                            p,
+                            max_long_edge=max_image_long_edge,
+                            jpeg_quality=vl_jpeg_quality,
+                        )
+                    },
                 }
             )
+
+        schema = {
+            "name": "shot_visual_analysis",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "desc": {"type": "string"},
+                    "brief": {"type": "string"},
+                    "objects": {"type": "array", "items": {"type": "string"}},
+                    "action": {"type": "string"},
+                    "scene": {"type": "string"},
+                    "emotion": {"type": "string"},
+                },
+                "required": ["desc", "brief", "objects", "action", "scene", "emotion"],
+                "additionalProperties": False,
+            },
+        }
 
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "temperature": temperature,
+            "response_format": {"type": "json_schema", "json_schema": schema},
         }
 
         attempts = max(1, int(max_retries or 0) + 1)
         last_exc: Optional[Exception] = None
         for i in range(attempts):
             try:
-                # 注意：这里做“整段流程级重试”，任何异常都会触发重试（包括分段解析失败等）。
+                # 注意：这里做“整段流程级重试”，任何异常都会触发重试（包括 JSON 解析失败/结构异常）。
                 resp = self._post_json_with_retry(
                     self.chat_completions_url,
                     payload,
@@ -271,20 +306,21 @@ class OpenAICompatibleClientBase:
                     content_str = resp["choices"][0]["message"]["content"]
                 except Exception:
                     raise RuntimeError(f"{self.provider_name} chat 返回结构异常: {resp}")
-                if isinstance(content_str, list):
-                    # 少数兼容接口将 content 拆成片段
-                    parts: List[str] = []
-                    for block in content_str:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(str(block.get("text") or ""))
-                        elif isinstance(block, str):
-                            parts.append(block)
-                    content_str = "\n".join(parts)
-                else:
-                    content_str = str(content_str or "")
-                parsed = parse_desc_brief_from_frame_response(content_str)
+                try:
+                    parsed = json.loads(content_str)
+                except Exception:
+                    content_str = (content_str or "").strip()
+                    if content_str.startswith("```"):
+                        # 兼容模型偶发 ```json ... ``` 包裹
+                        lines = content_str.splitlines()
+                        if lines and lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].startswith("```"):
+                            lines = lines[:-1]
+                        content_str = "\n".join(lines).strip()
+                    parsed = json.loads(content_str)
                 logger.info(
-                    f"{item_prefix} 视觉模型解析完成 desc_len={len(parsed.get('desc', '') or '')} brief_len={len(parsed.get('brief', '') or '')}"
+                    f"{item_prefix} 视觉模型解析完成 action={parsed.get('action', '')!r} scene={parsed.get('scene', '')!r} emotion={parsed.get('emotion', '')!r} objects_count={len(parsed.get('objects', []) or [])}"
                 )
                 return parsed
             except Exception as e:

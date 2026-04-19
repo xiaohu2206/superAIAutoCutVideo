@@ -1,11 +1,13 @@
 import { ArrowRight, Loader, Square } from "lucide-react";
 import React from "react";
+import type { OmniMultimodalResult } from "../../types/omniMultimodal";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../../types/project";
 import AdvancedConfigSection from "./AdvancedConfigSection";
 import SubtitleEditor from "./SubtitleEditor";
 import VideoSourcesManager from "./VideoSourcesManager";
 import SubtitleAsrSelector from "./SubtitleAsrSelector";
 import SceneListTable from "./SceneListTable";
+import OmniMultimodalShotsTable from "./OmniMultimodalShotsTable";
 import ScenePlayModal from "./ScenePlayModal";
 import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
 import OverwriteConfirmModal from "./OverwriteConfirmModal";
@@ -78,6 +80,15 @@ interface ProjectEditUploadStepProps {
   subtitleOverwriteModalOpen: boolean;
   onSubtitleOverwriteConfirm: () => void;
   onSubtitleOverwriteCancel: () => void;
+  onRunOmniPipeline: () => void;
+  onStopOmniPipeline: () => void;
+  isStoppingOmniPipeline: boolean;
+  extractingOmniPipeline: boolean;
+  omniPipelineProgress: number;
+  omniPipelineMessage: string;
+  omniPipelineShowProgressBar: boolean;
+  omniPipelineCanStop: boolean;
+  omniMultimodalResult: OmniMultimodalResult | null;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -138,6 +149,15 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   subtitleOverwriteModalOpen,
   onSubtitleOverwriteConfirm,
   onSubtitleOverwriteCancel,
+  onRunOmniPipeline,
+  onStopOmniPipeline,
+  isStoppingOmniPipeline,
+  extractingOmniPipeline,
+  omniPipelineProgress,
+  omniPipelineMessage,
+  omniPipelineShowProgressBar,
+  omniPipelineCanStop,
+  omniMultimodalResult,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
@@ -145,6 +165,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
     project.subtitle_status === "ready";
 
   const canReExtractScenes = Boolean(project.scenes_path);
+  const canReRunOmniPipeline = Boolean(project.omni_multimodal_json_path);
 
   const [scenePlayState, setScenePlayState] = React.useState<{
     isOpen: boolean;
@@ -163,7 +184,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
 
   React.useEffect(() => {
-    if (project.project_type === "subtitle") return;
+    if (project.project_type !== "visual") return;
     let cancelled = false;
     (async () => {
       try {
@@ -243,7 +264,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-semibold text-gray-900">
-                {project.project_type === "subtitle" ? "字幕提取" : "镜头与字幕提取"}
+              {project.project_type === "subtitle"
+                ? "字幕提取"
+                : project.project_type === "omni"
+                  ? "字幕与 Omni 多模态"
+                  : "镜头与字幕提取"}
             </h2>
             {project.subtitle_source === "user" && project.subtitle_path ? (
               <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100">
@@ -262,64 +287,39 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             ) : null}
           </div>
           
-          {project.project_type !== "subtitle" ? (
-             <div className="flex flex-col gap-2 items-end">
-               <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <span className="text-gray-600 select-none">{visionScopeLabel}</span>
-                    <span className="text-gray-300 hidden sm:inline">|</span>
-                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                      <input
-                        type="radio"
-                        name="visionMode"
-                        value="no_subtitles"
-                        checked={visionMode === "no_subtitles"}
-                        onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
-                        disabled={extractingScene}
-                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      仅无字幕镜头
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                      <input
-                        type="radio"
-                        name="visionMode"
-                        value="all"
-                        checked={visionMode === "all"}
-                        onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
-                        disabled={extractingScene}
-                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      所有镜头
-                    </label>
-                  </div>
-                  {/* <div className="flex items-center gap-2 flex-wrap justify-end border-t border-gray-200/80 pt-1.5 w-full">
-                    <span className="text-gray-500 select-none shrink-0">每镜头抽帧</span>
-                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                      <input
-                        type="radio"
-                        name="visionKeyFrames"
-                        checked={visionKeyFrames === 1}
-                        onChange={() => setVisionKeyFrames(1)}
-                        disabled={extractingScene}
-                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      1 帧
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
-                      <input
-                        type="radio"
-                        name="visionKeyFrames"
-                        checked={visionKeyFrames === 3}
-                        onChange={() => setVisionKeyFrames(3)}
-                        disabled={extractingScene}
-                        className="border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      3 帧
-                    </label>
-                  </div> */}
-               </div>
-               <button
+          {project.project_type === "visual" ? (
+            <div className="flex flex-col gap-2 items-end">
+              <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <span className="text-gray-600 select-none">{visionScopeLabel}</span>
+                  <span className="text-gray-300 hidden sm:inline">|</span>
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                    <input
+                      type="radio"
+                      name="visionMode"
+                      value="no_subtitles"
+                      checked={visionMode === "no_subtitles"}
+                      onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
+                      disabled={extractingScene}
+                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    仅无字幕镜头
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                    <input
+                      type="radio"
+                      name="visionMode"
+                      value="all"
+                      checked={visionMode === "all"}
+                      onChange={(e) => setVisionMode(e.target.value as "no_subtitles" | "all")}
+                      disabled={extractingScene}
+                      className="border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    所有镜头
+                  </label>
+                </div>
+              </div>
+              <button
                 onClick={() => onExtractScenes({ analyzeVision, visionMode, visionKeyFrames })}
                 disabled={
                   subtitleLoading ||
@@ -338,19 +338,19 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   <>{canReExtractScenes ? "重新分析镜头" : "分析镜头"}</>
                 )}
               </button>
-             </div>
-          ) : (
+            </div>
+          ) : project.project_type === "omni" ? (
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
               <button
                 onClick={onExtractSubtitle}
                 disabled={
                   subtitleLoading ||
                   extractingSubtitle ||
-                  (!project.video_path &&
-                  !project.merged_video_path) ||
-                  (project.subtitle_source === "user" && (Boolean(project.subtitle_path))) 
-                  // project.subtitle_status === "extracting"
+                  extractingOmniPipeline ||
+                  (!project.video_path && !project.merged_video_path) ||
+                  (project.subtitle_source === "user" && Boolean(project.subtitle_path))
                 }
-                className="flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {extractingSubtitle ? (
                   <>
@@ -361,12 +361,54 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   <>{canReExtractSubtitle ? "重新提取字幕" : "提取字幕"}</>
                 )}
               </button>
+              <button
+                onClick={onRunOmniPipeline}
+                disabled={
+                  Boolean(subtitleLoading) ||
+                  extractingSubtitle ||
+                  extractingOmniPipeline ||
+                  (!project.video_path && !project.merged_video_path) ||
+                  !project.subtitle_path ||
+                  Boolean(project.subtitle_status && project.subtitle_status !== "ready")
+                }
+                className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {extractingOmniPipeline ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    Omni 管线运行中...
+                  </>
+                ) : (
+                  <>{canReRunOmniPipeline ? "重新运行 Omni 管线" : "运行 Omni 管线（镜头+多模态）"}</>
+                )}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onExtractSubtitle}
+              disabled={
+                subtitleLoading ||
+                extractingSubtitle ||
+                (!project.video_path && !project.merged_video_path) ||
+                (project.subtitle_source === "user" && Boolean(project.subtitle_path))
+              }
+              className="flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {extractingSubtitle ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  提取中...
+                </>
+              ) : (
+                <>{canReExtractSubtitle ? "重新提取字幕" : "提取字幕"}</>
+              )}
+            </button>
           )}
         </div>
 
         <SubtitleAsrSelector
           value={subtitleAsr}
-          disabled={subtitleLoading || extractingSubtitle}
+          disabled={subtitleLoading || extractingSubtitle || extractingOmniPipeline}
           onChange={onSubtitleAsrChange}
         />
 
@@ -391,7 +433,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
         )}
 
-        {extractingScene && (
+        {project.project_type === "visual" && extractingScene && (
           <div className="w-full mt-4">
              <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1">
               <span>镜头提取进度 </span>
@@ -426,9 +468,51 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           </div>
         )}
 
-        {!extractingScene && sceneExtractMessage ? (
+        {project.project_type === "omni" && omniPipelineShowProgressBar && (
+            <div className="w-full mt-4">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>Omni 管线进度</span>
+                <div className="flex items-center gap-2">
+                  <span>{Math.round(omniPipelineProgress)}%</span>
+                  {omniPipelineCanStop ? (
+                    <button
+                      type="button"
+                      onClick={onStopOmniPipeline}
+                      disabled={isStoppingOmniPipeline}
+                      title="停止 Omni 管线"
+                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isStoppingOmniPipeline ? (
+                        <Loader className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Square className="h-3 w-3 fill-current" />
+                      )}
+                      <span className="text-xs font-medium">停止</span>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div
+                  className="h-2 bg-fuchsia-600 rounded transition-all"
+                  style={{ width: `${Math.round(omniPipelineProgress)}%` }}
+                />
+              </div>
+              {omniPipelineMessage ? (
+                <div className="mt-2 text-xs text-gray-700 break-all">{omniPipelineMessage}</div>
+              ) : null}
+            </div>
+          )}
+
+        {project.project_type === "visual" && !extractingScene && sceneExtractMessage ? (
           <div className="w-full mt-4">
             <div className="text-xs text-gray-700 break-all">{sceneExtractMessage}</div>
+          </div>
+        ) : null}
+
+        {project.project_type === "omni" && !omniPipelineShowProgressBar && omniPipelineMessage ? (
+          <div className="w-full mt-4">
+            <div className="text-xs text-gray-700 break-all">{omniPipelineMessage}</div>
           </div>
         ) : null}
       </div>
@@ -436,16 +520,20 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           <button
             onClick={onNextStep}
             disabled={
-              project.project_type !== "subtitle"
-                ? !project.scenes_path
-                : !project.subtitle_path
+              project.project_type === "subtitle"
+                ? !project.subtitle_path
+                : project.project_type === "omni"
+                  ? !project.omni_multimodal_json_path
+                  : !project.scenes_path
             }
             className={`
               group flex items-center px-4 py-2 mr-6 rounded-lg text-white font-medium shadow-md transition-all duration-300
               ${
-                (project.project_type !== "subtitle"
-                  ? project.scenes_path
-                  : project.subtitle_path)
+                (project.project_type === "subtitle"
+                  ? project.subtitle_path
+                  : project.project_type === "omni"
+                    ? project.omni_multimodal_json_path
+                    : project.scenes_path)
                   ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5"
                   : "bg-gray-300 cursor-not-allowed opacity-60"
               }
@@ -454,11 +542,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
             <span>生成脚本</span>
             <ArrowRight
               className={`ml-2 h-5 w-5 transition-transform duration-300 ${
-                (
-                  project.project_type !== "subtitle"
-                    ? project.scenes_path
-                    : project.subtitle_path
-                )
+                (project.project_type === "subtitle"
+                  ? project.subtitle_path
+                  : project.project_type === "omni"
+                    ? project.omni_multimodal_json_path
+                    : project.scenes_path)
                   ? "group-hover:translate-x-1"
                   : ""
               }`}
@@ -473,6 +561,15 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                  }}
               />
          )}
+        {project.project_type === "omni" && omniMultimodalResult && (
+          <OmniMultimodalShotsTable
+            key={project.id}
+            result={omniMultimodalResult}
+            onPlayShot={(start, end) => {
+              setScenePlayState({ isOpen: true, startTime: start, endTime: end });
+            }}
+          />
+        )}
         {project.subtitle_source === "extracted" && (
           <SubtitleEditor
             segments={subtitleDraft}

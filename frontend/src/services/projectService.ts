@@ -12,6 +12,7 @@ import type {
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
+import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type { SceneResult } from "../types/scene";
 import { apiClient, type ApiResponse } from "./clients";
 
@@ -678,6 +679,41 @@ export class ProjectService {
     const response = await apiClient.get<ApiResponse<any>>(
       `/api/projects/${projectId}/scene-status/${taskId}`
     );
+    return response.data;
+  }
+
+  async runOmniPipeline(
+    projectId: string,
+    options?: { force?: boolean; task_id?: string | null }
+  ): Promise<{ task_id: string; status: string; message: string }> {
+    const payload = {
+      force: Boolean(options?.force),
+      task_id: options?.task_id ?? undefined,
+    };
+    const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
+      `/api/projects/${projectId}/omni/run-pipeline`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error("Omni 管线提交失败：响应为空");
+    }
+    return response.data;
+  }
+
+  async getOmniPipelineStatus(projectId: string, taskId: string): Promise<any> {
+    const response = await apiClient.get<ApiResponse<any>>(
+      `/api/projects/${projectId}/omni/pipeline-status/${taskId}`
+    );
+    return response.data;
+  }
+
+  async getOmniMultimodalResult(projectId: string): Promise<OmniMultimodalResult> {
+    const response = await apiClient.get<ApiResponse<OmniMultimodalResult>>(
+      `/api/projects/${projectId}/omni/multimodal-result`
+    );
+    if (!response.data) {
+      throw new Error("Omni 多模态结果为空");
+    }
     return response.data;
   }
 }

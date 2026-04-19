@@ -329,13 +329,6 @@ class ExtractSubtitleService:
 
         audio_abs: Optional[Path] = None
         audio_web: Optional[str] = None
-
-        if not force and getattr(p, "audio_path", None):
-            a_cand = _resolve_path(p.audio_path)
-            if a_cand.exists():
-                audio_abs = a_cand
-                await _ws(project_id, "progress", "audio_exists", "复用已提取音频", 20)
-
         if not audio_abs:
             # 清理旧音频
             old_audio_path = getattr(p, "audio_path", None)

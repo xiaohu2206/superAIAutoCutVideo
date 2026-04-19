@@ -214,16 +214,10 @@ def _pick_scene_text(shot: Dict[str, Any]) -> str:
     summary = _normalize_spaces(shot.get("summary", ""))
     if summary:
         return summary
-    brief_v = _normalize_spaces(visual.get("brief") or "")
-    desc_v = _normalize_spaces(visual.get("desc") or "")
-    if brief_v and desc_v:
-        visual_scene = f"画面：{brief_v} | {desc_v}"
-    elif brief_v or desc_v:
-        visual_scene = f"画面：{brief_v or desc_v}"
-    else:
-        visual_scene = ""
     parts = [
-        visual_scene,
+        f"画面：{_normalize_spaces(visual.get('brief') or visual.get('desc') or '')}"
+        if (visual.get("brief") or visual.get("desc"))
+        else "",
         f"动作：{_normalize_spaces(visual.get('action', ''))}" if visual.get("action") else "",
         f"情绪：{_normalize_spaces(visual.get('emotion', ''))}" if visual.get("emotion") else "",
         f"字幕：{_normalize_spaces(shot.get('subtitle_full_text', ''))}" if shot.get("subtitle_full_text") else "",
@@ -237,90 +231,6 @@ def _build_copywriting_outline(results: List[Dict[str, Any]]) -> str:
         text = _truncate_text(item.get("text", ""), 80)
         lines.append(f"{idx}. {text}")
     return "\n".join(lines)
-
-
-POLYLINE_OUTLIER_DETAIL_RATIO_THRESHOLD = 0.4
-POLYLINE_OUTLIER_TOP_K_FOR_HIGH_RATIO_BLOCK = 10
-
-
-def _copywriting_line_1based(item: Dict[str, Any], chunk_start_0: int, local_index: int) -> int:
-    """全剧文案序号（1-based），与分批说明中的「第 line_start～line_end 条」一致。"""
-    ix = item.get("item_index")
-    if isinstance(ix, int):
-        return ix + 1
-    return chunk_start_0 + local_index + 1
-
-
-def _format_ranked_match_line(match: Dict[str, Any], rank: int, *, truncate_scene_len: Optional[int]) -> str:
-    start = _format_ts(_safe_float(match.get("start")))
-    end = _format_ts(_safe_float(match.get("end")))
-    score = _safe_float(match.get("final_score", match.get("score", 0.0)))
-    scene = _pick_scene_text(match)
-    scene = _normalize_spaces(scene)
-    if truncate_scene_len is not None and len(scene) > truncate_scene_len:
-        scene = _truncate_text(scene, truncate_scene_len)
-    return (
-        f"  候选{rank} | shot_id={match.get('shot_id')} | {start}-{end} | "
-        f"score={score:.3f} | {scene}"
-        f"\n"
-    )
-
-
-def _build_polyline_outlier_prompt_sections(
-    chunk_results: List[Dict[str, Any]],
-    *,
-    chunk_start_0: int,
-) -> Tuple[str, str]:
-    """
-    返回 (离群说明模块, 高比例离群时 Top1～Top5 明细模块)。
-    - 任一条 is_polyline_outlier 为真时，第一段非空，提示模型 Top1 检索不稳定。
-    - 当本批离群占比 > POLYLINE_OUTLIER_DETAIL_RATIO_THRESHOLD 时，第二段非空，逐条列出离群文案的候选 1～5（scene 不截断）。
-    """
-    n = len(chunk_results)
-    if n == 0:
-        return "", ""
-
-    outliers: List[Tuple[int, Dict[str, Any]]] = []
-    for local_i, item in enumerate(chunk_results):
-        if bool(item.get("is_polyline_outlier")):
-            line_no = _copywriting_line_1based(item, chunk_start_0, local_i)
-            outliers.append((line_no, item))
-
-    if not outliers:
-        return "", ""
-
-    ratio = len(outliers) / float(n)
-    nums_str = "、".join(str(x[0]) for x in outliers)
-    block_a = f"""
-
-## 时间折线离群标注（检索稳定性）
-以下文案序号在全片时间轴折线意义上被标记为 **is_polyline_outlier=true**（向量检索得到的 Top1 镜头在时间走向上与邻接文案不一致）：
-**第 {nums_str} 条**（共 {len(outliers)} 条，占本批 {len(outliers)}/{n}≈{ratio:.0%}）。
-对这些条目，「检索候选摘要」中的 Top1 **仅作弱参考**；请结合「全片镜头列表」独立判断画面与叙事，必要时在合理范围内改用时间更连贯、内容更贴切的镜头；不要盲信该 Top1。
-
-"""
-    block_b = ""
-    if ratio > POLYLINE_OUTLIER_DETAIL_RATIO_THRESHOLD:
-        lines_body: List[str] = [
-            f"\n本批文案 {n} 条中离群 {len(outliers)} 条（>{POLYLINE_OUTLIER_DETAIL_RATIO_THRESHOLD:.0%}），"
-            f"下列逐条列出每条离群文案的检索候选第 1～{POLYLINE_OUTLIER_TOP_K_FOR_HIGH_RATIO_BLOCK} 名（完整镜头描述 scene，请逐条比对，勿仅依赖 Top1）：\n"
-        ]
-        for line_no, item in outliers:
-            text_preview = _truncate_text(item.get("text", ""), 200)
-            lines_body.append(f"\n### 文案第 {line_no} 条（离群）\n文案：{text_preview}\n")
-            matches = item.get("matches") or []
-            top = matches[:POLYLINE_OUTLIER_TOP_K_FOR_HIGH_RATIO_BLOCK]
-            if not top:
-                lines_body.append("  （无 matches 候选）\n")
-                continue
-            for ri, m in enumerate(top, start=1):
-                lines_body.append(_format_ranked_match_line(m, ri, truncate_scene_len=None) + "\n")
-        block_b = (
-            "\n## 高比例离群：候选 Top1～Top5 镜头全量明细（重点核对）\n"
-            + "".join(lines_body)
-        )
-
-    return block_a, block_b
 
 
 def _build_retrieval_candidates(results: List[Dict[str, Any]], item_limit: int) -> str:
@@ -1162,10 +1072,6 @@ def run_highlight_narration_script(config_path: str = None) -> str:
                 max_items=viral_shot_max_items,
             )
 
-        po_a, po_b = _build_polyline_outlier_prompt_sections(
-            chunk_results,
-            chunk_start_0=a,
-        )
         chunk_suffix_c = CHUNK_TASK_SUFFIX.format(
             batch_cur=meta["chunk_index"] + 1,
             batch_total=total_chunks,
@@ -1177,7 +1083,7 @@ def run_highlight_narration_script(config_path: str = None) -> str:
             win_start_sec=w_start,
             win_end_sec=w_end,
         )
-        # 段落顺序：检索候选摘要 → 时间折线离群 → 高比例离群 → 分批任务说明 → 全片镜头列表
+        # 段落顺序：检索候选摘要 → 分批任务说明 → 全片镜头列表
         viral_block_c = ""
         if viral_section_body:
             viral_block_c = (
@@ -1203,8 +1109,6 @@ def run_highlight_narration_script(config_path: str = None) -> str:
             "\n"
             + viral_block_c
             + retrieval_block_c
-            # + po_a
-            # + po_b
             + chunk_suffix_c
             + timeline_block_c
         )
@@ -1217,7 +1121,7 @@ def run_highlight_narration_script(config_path: str = None) -> str:
         )
         user_prompt_c = user_prompt_template.format(**fmt_kw)
         if "{dynamic_sections}" not in user_prompt_template:
-            user_prompt_c += po_a + po_b + chunk_suffix_c
+            user_prompt_c += chunk_suffix_c
 
         _write_prompt_cache_md(
             project_root,

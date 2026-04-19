@@ -42,6 +42,11 @@ from services.generate_script_service import generate_script_service
 from services.generate_copywriting_service import generate_copywriting_service
 from services.extract_subtitle_service import extract_subtitle_service
 from services.extract_scene_service import extract_scene_service
+from services.omni_multimodal_pipeline_service import omni_multimodal_pipeline_service
+from services.omni_copywriting_struct_embed_service import omni_copywriting_struct_embed_service
+from services.omni_shot_match_service import omni_shot_match_service
+from services.omni_global_path_search_service import omni_global_path_search_service
+from services.omni_generate_script_service import omni_generate_script_service
 from services.jianying_draft_manager import jianying_draft_manager, JianyingDraftManager
 from services.script_generation_service import normalize_script_length_selection
 from modules.config.jianying_config import jianying_config_manager
@@ -2356,6 +2361,17 @@ async def get_project_running_tasks(project_id: str):
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
         "extract_scene": task_progress_store.get_latest_running(extract_scene_service.SCOPE, project_id),
+        "omni_multimodal": task_progress_store.get_latest_running(omni_multimodal_pipeline_service.SCOPE, project_id),
+        "omni_copywriting_embed": task_progress_store.get_latest_running(
+            omni_copywriting_struct_embed_service.SCOPE, project_id
+        ),
+        "omni_shot_match": task_progress_store.get_latest_running(omni_shot_match_service.SCOPE, project_id),
+        "omni_global_path_search": task_progress_store.get_latest_running(
+            omni_global_path_search_service.SCOPE, project_id
+        ),
+        "omni_generate_script": task_progress_store.get_latest_running(
+            omni_generate_script_service.SCOPE, project_id
+        ),
     }
     return {
         "message": "获取任务进度",
@@ -2376,6 +2392,11 @@ async def get_project_latest_tasks(project_id: str):
                 "generate_video": None,
                 "generate_jianying_draft": None,
                 "extract_scene": None,
+                "omni_multimodal": None,
+                "omni_copywriting_embed": None,
+                "omni_shot_match": None,
+                "omni_global_path_search": None,
+                "omni_generate_script": None,
             },
             "timestamp": now_ts(),
         }
@@ -2387,6 +2408,17 @@ async def get_project_latest_tasks(project_id: str):
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
             "extract_scene": task_progress_store.get_state(extract_scene_service.SCOPE, project_id),
+            "omni_multimodal": task_progress_store.get_state(omni_multimodal_pipeline_service.SCOPE, project_id),
+            "omni_copywriting_embed": task_progress_store.get_state(
+                omni_copywriting_struct_embed_service.SCOPE, project_id
+            ),
+            "omni_shot_match": task_progress_store.get_state(omni_shot_match_service.SCOPE, project_id),
+            "omni_global_path_search": task_progress_store.get_state(
+                omni_global_path_search_service.SCOPE, project_id
+            ),
+            "omni_generate_script": task_progress_store.get_state(
+                omni_generate_script_service.SCOPE, project_id
+            ),
         },
         "timestamp": now_ts(),
     }

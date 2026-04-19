@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("AIShotSearch.globalPathSearch")
 
@@ -192,77 +192,6 @@ def _beam_width(i: int, total: int, cfg: Dict[str, Any]) -> int:
     return max(1, late)
 
 
-def _collect_polyline_outlier_candidates(
-    shots: List[Dict[str, Any]],
-    matrix: List[List[Dict[str, Any]]],
-    cfg: Dict[str, Any],
-) -> Tuple[List[int], Dict[int, Dict[str, Any]]]:
-    total = len(shots)
-    if total < 3 or not _strategy_enabled(cfg, "enable_polyline_outlier_detection", True):
-        return [], {}
-
-    edge_skip_head_ratio = min(0.49, max(0.0, _to_float(cfg.get("smooth_skip_head_ratio", 0.05), 0.05)))
-    edge_skip_tail_ratio = min(0.49, max(0.0, _to_float(cfg.get("smooth_skip_tail_ratio", 0.10), 0.10)))
-    outlier_residual_threshold = max(0.0, _to_float(cfg.get("smooth_outlier_residual_threshold", 120.0), 120.0))
-    outlier_neighbor_gap_threshold = max(0.0, _to_float(cfg.get("smooth_outlier_neighbor_gap_threshold", 90.0), 90.0))
-
-    outlier_indices: List[int] = []
-    details: Dict[int, Dict[str, Any]] = {}
-    for i in range(1, total - 1):
-        point_ratio = _copy_point_ratio(i, total)
-        if point_ratio <= edge_skip_head_ratio or point_ratio >= 1.0 - edge_skip_tail_ratio:
-            continue
-
-        prev_mid = _shot_midpoint(shots[i - 1])
-        cur_mid = _shot_midpoint(shots[i])
-        next_mid = _shot_midpoint(shots[i + 1])
-        baseline_mid = (prev_mid + next_mid) / 2.0
-        residual = cur_mid - baseline_mid
-        gap_from_prev = cur_mid - prev_mid
-        gap_to_next = next_mid - cur_mid
-        neighbor_gap_mismatch = min(abs(gap_from_prev), abs(gap_to_next))
-
-        is_outlier = abs(residual) >= outlier_residual_threshold and neighbor_gap_mismatch >= outlier_neighbor_gap_threshold
-        if not is_outlier:
-            continue
-
-        outlier_indices.append(i)
-        details[i] = {
-            "index": i,
-            "copy_point_ratio": point_ratio,
-            "prev_mid": prev_mid,
-            "cur_mid": cur_mid,
-            "next_mid": next_mid,
-            "baseline_mid": baseline_mid,
-            "residual": residual,
-            "gap_from_prev": gap_from_prev,
-            "gap_to_next": gap_to_next,
-            "neighbor_gap_mismatch": neighbor_gap_mismatch,
-            "candidate_count": len(matrix[i]) if i < len(matrix) else 0,
-            "selected_shot_id": shots[i].get("shot_id"),
-        }
-    return outlier_indices, details
-
-
-def _collect_polyline_outlier_runs(outlier_indices: List[int], max_run_length: int) -> List[List[int]]:
-    if not outlier_indices or max_run_length <= 0:
-        return []
-
-    ordered = sorted(set(int(x) for x in outlier_indices))
-    runs: List[List[int]] = []
-    current_run: List[int] = []
-    for idx in ordered:
-        if not current_run or idx == current_run[-1] + 1:
-            current_run.append(idx)
-        else:
-            if 0 < len(current_run) <= max_run_length:
-                runs.append(current_run)
-            current_run = [idx]
-    if 0 < len(current_run) <= max_run_length:
-        runs.append(current_run)
-    return runs
-
-
 def _repair_short_outlier_runs(
     shots: List[Dict[str, Any]],
     matrix: List[List[Dict[str, Any]]],
@@ -284,8 +213,7 @@ def _repair_short_outlier_runs(
 
     best_shots = list(shots)
     best_score = _path_score(best_shots, cfg)
-    outlier_indices, _ = _collect_polyline_outlier_candidates(best_shots, matrix, cfg)
-    run_indices = _collect_polyline_outlier_runs(outlier_indices, max_run_length)
+    run_indices: List[List[int]] = []
 
     repair_runs: List[Dict[str, Any]] = []
     replacements: List[Dict[str, Any]] = []
@@ -432,7 +360,8 @@ def _smooth_polyline_outliers(
     residual_improve_ratio = min(1.0, max(0.0, _to_float(cfg.get("smooth_residual_improve_ratio", 0.25), 0.25)))
     residual_hard_cap = max(0.0, _to_float(cfg.get("smooth_residual_hard_cap", 0.0), 0.0))
 
-    outlier_indices, outlier_details = _collect_polyline_outlier_candidates(best_shots, matrix, cfg)
+    outlier_indices: List[int] = []
+    outlier_details: Dict[int, Dict[str, Any]] = {}
     replacements: List[Dict[str, Any]] = []
 
     for i in outlier_indices:
@@ -1086,10 +1015,6 @@ def run_global_path_search(config_path: str = None) -> str:
         compare_top=min(3, max(1, candidate_top_k)),
     )
 
-    outlier_indices_set: Set[int] = set()
-    if isinstance(smoothing_detail, dict):
-        outlier_indices_set = set(smoothing_detail.get("outlier_indices") or [])
-
     out_results: List[Dict[str, Any]] = []
     for i, r in enumerate(results):
         out_item = dict(r) if isinstance(r, dict) else {"item_index": i, "text": ""}
@@ -1099,7 +1024,6 @@ def run_global_path_search(config_path: str = None) -> str:
 
         selected = copy.deepcopy(best_shots[i]) if i < len(best_shots) else None
         if selected is None:
-            out_item["is_polyline_outlier"] = False
             out_results.append(out_item)
             continue
 
@@ -1129,16 +1053,12 @@ def run_global_path_search(config_path: str = None) -> str:
             "candidate_search_pool_size": cand_pool,
         }
         if isinstance(smoothing_detail, dict):
-            outlier_detail = (smoothing_detail.get("outlier_details") or {}).get(i)
             replacement_detail = next(
                 (x for x in (smoothing_detail.get("replacements") or []) if int(x.get("index", -1)) == i),
                 None,
             )
-            out_item["global_path"]["polyline_smoothing"] = {
-                "is_outlier": i in set(smoothing_detail.get("outlier_indices") or []),
-                "outlier_detail": outlier_detail,
-                "replacement_detail": replacement_detail,
-            }
+            if replacement_detail:
+                out_item["global_path"]["polyline_smoothing"] = {"replacement_detail": replacement_detail}
         short_run_detail = best.get("short_outlier_run_repair") or {}
         if isinstance(short_run_detail, dict):
             run_replacement_detail = next(
@@ -1148,7 +1068,6 @@ def run_global_path_search(config_path: str = None) -> str:
             out_item["global_path"]["short_outlier_run_repair"] = {
                 "replacement_detail": run_replacement_detail,
             }
-        out_item["is_polyline_outlier"] = i in outlier_indices_set
         out_results.append(out_item)
 
     out_payload = {
@@ -1169,7 +1088,6 @@ def run_global_path_search(config_path: str = None) -> str:
             "enable_refine": bool(gs_cfg.get("enable_refine", True)),
             "refine_candidate_top_k": int(gs_cfg.get("refine_candidate_top_k", 3) or 3),
             "enable_polyline_smoothing": bool(gs_cfg.get("enable_polyline_smoothing", True)),
-            "enable_polyline_outlier_detection": _strategy_enabled(gs_cfg, "enable_polyline_outlier_detection", True),
             "enable_short_outlier_run_repair": bool(gs_cfg.get("enable_short_outlier_run_repair", True)),
             "short_outlier_run_max_length": int(gs_cfg.get("short_outlier_run_max_length", 3) or 3),
             "short_outlier_run_candidate_top_k": int(gs_cfg.get("short_outlier_run_candidate_top_k", gs_cfg.get("smooth_candidate_top_k", 12)) or 12),
@@ -1223,8 +1141,6 @@ def run_global_path_search(config_path: str = None) -> str:
         ps = global_path.get("polyline_smoothing") if isinstance(global_path.get("polyline_smoothing"), dict) else {}
         if ps.get("replacement_detail"):
             tags.append("折线平滑已替换")
-        elif ps.get("is_outlier"):
-            tags.append("折线离群点(未替换)")
         sr = global_path.get("short_outlier_run_repair") if isinstance(global_path.get("short_outlier_run_repair"), dict) else {}
         if sr.get("replacement_detail"):
             tags.append("短离群段桥接已替换")

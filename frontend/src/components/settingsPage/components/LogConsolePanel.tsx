@@ -1,5 +1,5 @@
 import { Copy, Pause, Play, RefreshCw, Terminal, X } from "lucide-react"
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useLogStream } from "../../../hooks/useLogStream"
 import type { LogItem } from "../../../services/logsService"
@@ -65,12 +65,18 @@ export const LogConsolePanel: React.FC<LogConsolePanelProps> = ({ enabled, proje
   const filtered = useMemo(() => toLines(items), [items])
   const visibleLines = useMemo(() => filtered.slice(-300), [filtered])
 
-  useEffect(() => {
+  // 依赖必须用 visibleLines 引用，不能只依赖 length：超过 slice 上限后条数不变，
+  // 但内容仍在追加，否则不会触发滚动。
+  useLayoutEffect(() => {
     if (!isOpen || paused) return
     const el = scrollerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [isOpen, paused, visibleLines.length])
+    const scrollToBottom = () => {
+      el.scrollTop = el.scrollHeight
+    }
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
+  }, [isOpen, paused, visibleLines])
 
   useEffect(() => {
     if (!isOpen) return

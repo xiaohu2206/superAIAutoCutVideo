@@ -38,20 +38,55 @@ def _ensure_logging_configured(level: int = logging.INFO):
 
 def build_shot_embedding_summary(visual: dict, subtitle_text: str, prompt_language: str = "zh") -> str:
     language = str(prompt_language or "zh").strip().lower()
-    desc = visual.get("desc", "") or ""
-    brief = visual.get("brief", "") or ""
-    if language == "en":
-        return (
-            f"Detail: {desc}\n"
-            f"Brief: {brief}\n"
-            f"Subtitles: {subtitle_text or ''}"
-        ).strip()
 
-    return (
-        f"详细：{desc}\n"
-        f"摘要：{brief}\n"
-        f"字幕：{subtitle_text or ''}"
-    ).strip()
+    raw_objects = visual.get("objects") or []
+    if isinstance(raw_objects, (list, tuple)):
+        object_items = [str(o).strip() for o in raw_objects if str(o).strip()]
+    elif isinstance(raw_objects, str):
+        object_items = [s.strip() for s in raw_objects.split(",") if s.strip()]
+    else:
+        object_items = []
+    seen = set()
+    deduped_objects: list = []
+    for o in object_items:
+        if o in seen:
+            continue
+        seen.add(o)
+        deduped_objects.append(o)
+
+    desc = str(visual.get("desc", "") or "").strip()
+    brief = str(visual.get("brief", "") or "").strip()
+    action = str(visual.get("action", "") or "").strip()
+    scene = str(visual.get("scene", "") or "").strip()
+    emotion = str(visual.get("emotion", "") or "").strip()
+    subtitle = str(subtitle_text or "").strip()
+
+    if language == "en":
+        objects_text = ", ".join(deduped_objects)
+        lines = [f"Visual: {desc}"]
+        if brief and brief != desc:
+            lines.append(f"Brief: {brief}")
+        lines.extend([
+            f"Action: {action}",
+            f"Scene: {scene}",
+            f"Objects: {objects_text}",
+            f"Emotion: {emotion}",
+            f"Subtitles: {subtitle}",
+        ])
+        return "\n".join(lines).strip()
+
+    objects_text = "、".join(deduped_objects)
+    lines = [f"画面：{desc}"]
+    if brief and brief != desc:
+        lines.append(f"简述：{brief}")
+    lines.extend([
+        f"动作：{action}",
+        f"场景：{scene}",
+        f"物体：{objects_text}",
+        f"情绪：{emotion}",
+        f"字幕：{subtitle}",
+    ])
+    return "\n".join(lines).strip()
 
 
 def split_shots(
@@ -127,6 +162,8 @@ def run_step2_multimodal_features(config_path: str = None):
     save_every_n = int(step2_cfg.get("save_every_n", 5) or 0)
     max_retries = int(step2_cfg.get("max_retries", 2) or 0)
     retry_sleep_seconds = float(step2_cfg.get("retry_sleep_seconds", 2) or 0)
+    max_image_long_edge = int(step2_cfg.get("vl_image_max_long_edge", 1280) or 0)
+    vl_jpeg_quality = int(step2_cfg.get("vl_jpeg_quality", 85) or 85)
     concurrency = int(step2_cfg.get("concurrency", 8) or 1)
     frame_concurrency = int(step2_cfg.get("frame_concurrency", concurrency) or 1)
     model_concurrency = int(step2_cfg.get("model_concurrency", concurrency) or 1)
@@ -150,7 +187,7 @@ def run_step2_multimodal_features(config_path: str = None):
     out_frames_abs = os.path.join(os.path.dirname(__file__), out_frames_dir) if not os.path.isabs(out_frames_dir) else out_frames_dir
 
     logger.info(
-        f"[step2] 配置加载完成 total_shots={len(shots)} frame_concurrency={frame_concurrency} model_concurrency={model_concurrency} dispatch_sleep_seconds={dispatch_sleep_seconds} continue_on_error={continue_on_error} save_every_n={save_every_n} max_retries={max_retries} retry_sleep_seconds={retry_sleep_seconds} vl_model={vl_model} emb_model={emb_model}"
+        f"[step2] 配置加载完成 total_shots={len(shots)} frame_concurrency={frame_concurrency} model_concurrency={model_concurrency} dispatch_sleep_seconds={dispatch_sleep_seconds} continue_on_error={continue_on_error} save_every_n={save_every_n} max_retries={max_retries} retry_sleep_seconds={retry_sleep_seconds} vl_image_max_long_edge={max_image_long_edge} vl_jpeg_quality={vl_jpeg_quality} vl_model={vl_model} emb_model={emb_model}"
     )
 
     completed = 0
@@ -189,6 +226,8 @@ def run_step2_multimodal_features(config_path: str = None):
                 prompt_language=prompt_language,
                 max_retries=max_retries,
                 retry_sleep_seconds=retry_sleep_seconds,
+                max_image_long_edge=max_image_long_edge,
+                vl_jpeg_quality=vl_jpeg_quality,
                 log_context={
                     "shot_id": shot_id,
                     "shot_index": shot_index,
@@ -197,7 +236,7 @@ def run_step2_multimodal_features(config_path: str = None):
             )
             visual_elapsed = time.time() - visual_start
             logger.info(
-                f"[step2] shot_id={shot_id} shot_index={shot_index} 视觉分析完成 elapsed={visual_elapsed:.2f}s desc_len={len(visual.get('desc', '') or '')} brief_len={len(visual.get('brief', '') or '')}"
+                f"[step2] shot_id={shot_id} shot_index={shot_index} 视觉分析完成 elapsed={visual_elapsed:.2f}s action={visual.get('action', '')!r} scene={visual.get('scene', '')!r} emotion={visual.get('emotion', '')!r}"
             )
 
             subtitle = {

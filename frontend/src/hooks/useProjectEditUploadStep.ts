@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../types/project";
 import { useTauriFileDrop } from "./useTauriFileDrop";
 import { useVideoOrderDrag } from "./useVideoOrderDrag";
@@ -45,6 +46,15 @@ export interface UseProjectEditUploadStepOptions {
   sceneExtractProgress: number;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
+  runOmniPipeline: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  cancelOmniPipeline: () => Promise<void>;
+  extractingOmniPipeline: boolean;
+  omniPipelineProgress: number;
+  omniPipelineMessage: string;
+  omniPipelinePhase: string | null;
+  omniPipelineShowProgressBar: boolean;
+  omniPipelineCanStop: boolean;
+  omniMultimodalResult: OmniMultimodalResult | null;
   showSuccess: (text: string, durationSec?: number) => void;
   showErrorText: (text: string, durationSec?: number) => void;
   showError: (err: unknown, fallback: string) => void | Promise<void>;
@@ -102,6 +112,16 @@ export interface UseProjectEditUploadStepReturn {
   subtitleOverwriteModalOpen: boolean;
   onSubtitleOverwriteConfirm: () => void;
   onSubtitleOverwriteCancel: () => void;
+  onRunOmniPipeline: () => void;
+  onStopOmniPipeline: () => void;
+  isStoppingOmniPipeline: boolean;
+  extractingOmniPipeline: boolean;
+  omniPipelineProgress: number;
+  omniPipelineMessage: string;
+  omniPipelinePhase: string | null;
+  omniPipelineShowProgressBar: boolean;
+  omniPipelineCanStop: boolean;
+  omniMultimodalResult: OmniMultimodalResult | null;
 }
 
 export function useProjectEditUploadStep(
@@ -143,6 +163,7 @@ export function useProjectEditUploadStep(
   const [visionChoiceModalOpen, setVisionChoiceModalOpen] = useState(false);
   const [subtitleOverwriteModalOpen, setSubtitleOverwriteModalOpen] = useState(false);
   const [isStoppingSceneExtraction, setIsStoppingSceneExtraction] = useState(false);
+  const [isStoppingOmniPipeline, setIsStoppingOmniPipeline] = useState(false);
 
   useEffect(() => {
     const p = options.project;
@@ -523,7 +544,7 @@ export function useProjectEditUploadStep(
       visionAction: "auto" | "continue" | "restart"
     ) => {
       // visual 项目：先同步完成字幕提取（HTTP 阻塞至结束），再提交镜头提取任务；进度仍由 WS 驱动。
-      if (options.project?.project_type !== "subtitle") {
+      if (options.project?.project_type === "visual") {
         const p = options.project;
         const canStartSubtitle =
           !(p.subtitle_source === "user" && Boolean(p.subtitle_path)) &&
@@ -639,6 +660,38 @@ export function useProjectEditUploadStep(
     }
   }, [options, isStoppingSceneExtraction]);
 
+  const onRunOmniPipeline = useCallback(async () => {
+    const p = options.project;
+    if (!p) return;
+    if (!p.video_path && !p.merged_video_path) {
+      options.showErrorText("请先上传视频文件");
+      return;
+    }
+    if (!p.subtitle_path || (p.subtitle_status && p.subtitle_status !== "ready")) {
+      options.showErrorText("请先提取或上传字幕（Omni 管线依赖字幕）");
+      return;
+    }
+    try {
+      await options.runOmniPipeline({ force: Boolean(p.omni_multimodal_json_path) });
+      options.showSuccess("Omni 管线任务已提交");
+    } catch (err) {
+      options.showError(err, "Omni 管线失败");
+    }
+  }, [options]);
+
+  const onStopOmniPipeline = useCallback(async () => {
+    if (isStoppingOmniPipeline) return;
+    try {
+      setIsStoppingOmniPipeline(true);
+      await options.cancelOmniPipeline();
+      options.showSuccess("正在停止 Omni 管线...");
+    } catch (err) {
+      options.showError(err, "停止 Omni 管线失败");
+    } finally {
+      setIsStoppingOmniPipeline(false);
+    }
+  }, [options, isStoppingOmniPipeline]);
+
   return {
     showAdvancedConfig,
     setShowAdvancedConfig,
@@ -691,5 +744,15 @@ export function useProjectEditUploadStep(
     subtitleOverwriteModalOpen,
     onSubtitleOverwriteConfirm,
     onSubtitleOverwriteCancel,
+    onRunOmniPipeline,
+    onStopOmniPipeline,
+    isStoppingOmniPipeline,
+    extractingOmniPipeline: options.extractingOmniPipeline,
+    omniPipelineProgress: options.omniPipelineProgress,
+    omniPipelineMessage: options.omniPipelineMessage,
+    omniPipelinePhase: options.omniPipelinePhase,
+    omniPipelineShowProgressBar: options.omniPipelineShowProgressBar,
+    omniPipelineCanStop: options.omniPipelineCanStop,
+    omniMultimodalResult: options.omniMultimodalResult,
   };
 }

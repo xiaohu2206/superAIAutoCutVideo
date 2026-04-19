@@ -49,7 +49,13 @@ class AIService:
             "active_model": cfg.model_name if cfg else None,
         }
 
-    async def send_chat(self, messages: List[ChatMessage], response_format: Optional[Dict[str, Any]] = None) -> ChatResponse:
+    async def send_chat(
+        self,
+        messages: List[ChatMessage],
+        response_format: Optional[Dict[str, Any]] = None,
+        *,
+        temperature: Optional[float] = None,
+    ) -> ChatResponse:
         """使用当前激活配置发送普通聊天请求"""
         cfg = self._get_active_model_config()
         if not cfg:
@@ -62,10 +68,12 @@ class AIService:
         ai_cfg = self._to_ai_model_config(cfg)
         provider = provider_cls(ai_cfg)
         try:
-            # 允许按请求覆盖结构化输出等参数
-            extra_params = {}
+            # 允许按请求覆盖结构化输出、温度等参数（与 chat_completion payload 合并）
+            extra_params: Dict[str, Any] = {}
             if response_format:
                 extra_params["response_format"] = response_format
+            if temperature is not None:
+                extra_params["temperature"] = float(temperature)
             resp = await provider.chat_completion(messages, extra_params=extra_params if extra_params else None)
             return resp
         finally:

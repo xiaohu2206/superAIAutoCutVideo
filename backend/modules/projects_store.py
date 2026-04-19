@@ -62,6 +62,24 @@ class Project(BaseModel):
     scenes_updated_at: Optional[str] = None
     scenes_raw_path: Optional[str] = None
     scenes_raw_updated_at: Optional[str] = None
+    # Omni 专用产出（与 visual 的 scenes_path 隔离）
+    omni_step1_json_path: Optional[str] = None
+    omni_multimodal_json_path: Optional[str] = None
+    omni_pipeline_updated_at: Optional[str] = None
+    # Omni：解说文案结构化 / 向量化产出（与 omni 多模态管线、visual 镜头数据隔离）
+    omni_copywriting_structured_path: Optional[str] = None
+    omni_copywriting_embeddings_path: Optional[str] = None
+    omni_copywriting_embed_updated_at: Optional[str] = None
+    # Omni：解说向量 ↔ 镜头 粗筛/重排产出（与 visual、copywriting_embed 目录隔离）
+    omni_shot_match_topk_path: Optional[str] = None
+    omni_shot_match_rerank_path: Optional[str] = None
+    omni_shot_match_updated_at: Optional[str] = None
+    # Omni：全局路径搜索产出（与 omni_shot_match 目录隔离）
+    omni_global_path_search_path: Optional[str] = None
+    omni_global_path_search_updated_at: Optional[str] = None
+    # Omni：解说脚本生成产出（与 visual script、全局路径目录隔离）
+    omni_generate_script_path: Optional[str] = None
+    omni_generate_script_updated_at: Optional[str] = None
     # 剪映草稿相关字段
     jianying_draft_last_dir: Optional[str] = None
     jianying_draft_last_dir_web: Optional[str] = None
@@ -156,6 +174,32 @@ class ProjectsStore:
                                 p["scenes_raw_path"] = None
                             if "scenes_raw_updated_at" not in p:
                                 p["scenes_raw_updated_at"] = None
+                            if "omni_step1_json_path" not in p:
+                                p["omni_step1_json_path"] = None
+                            if "omni_multimodal_json_path" not in p:
+                                p["omni_multimodal_json_path"] = None
+                            if "omni_pipeline_updated_at" not in p:
+                                p["omni_pipeline_updated_at"] = None
+                            if "omni_copywriting_structured_path" not in p:
+                                p["omni_copywriting_structured_path"] = None
+                            if "omni_copywriting_embeddings_path" not in p:
+                                p["omni_copywriting_embeddings_path"] = None
+                            if "omni_copywriting_embed_updated_at" not in p:
+                                p["omni_copywriting_embed_updated_at"] = None
+                            if "omni_shot_match_topk_path" not in p:
+                                p["omni_shot_match_topk_path"] = None
+                            if "omni_shot_match_rerank_path" not in p:
+                                p["omni_shot_match_rerank_path"] = None
+                            if "omni_shot_match_updated_at" not in p:
+                                p["omni_shot_match_updated_at"] = None
+                            if "omni_global_path_search_path" not in p:
+                                p["omni_global_path_search_path"] = None
+                            if "omni_global_path_search_updated_at" not in p:
+                                p["omni_global_path_search_updated_at"] = None
+                            if "omni_generate_script_path" not in p:
+                                p["omni_generate_script_path"] = None
+                            if "omni_generate_script_updated_at" not in p:
+                                p["omni_generate_script_updated_at"] = None
                             proj = Project(**p)
                             # 回填生效视频路径
                             proj = self._refresh_effective_video_path(proj)
@@ -278,6 +322,19 @@ class ProjectsStore:
                 "scenes_updated_at",
                 "scenes_raw_path",
                 "scenes_raw_updated_at",
+                "omni_step1_json_path",
+                "omni_multimodal_json_path",
+                "omni_pipeline_updated_at",
+                "omni_copywriting_structured_path",
+                "omni_copywriting_embeddings_path",
+                "omni_copywriting_embed_updated_at",
+                "omni_shot_match_topk_path",
+                "omni_shot_match_rerank_path",
+                "omni_shot_match_updated_at",
+                "omni_global_path_search_path",
+                "omni_global_path_search_updated_at",
+                "omni_generate_script_path",
+                "omni_generate_script_updated_at",
                 "jianying_draft_last_dir",
                 "jianying_draft_last_dir_web",
                 "jianying_draft_dirs",

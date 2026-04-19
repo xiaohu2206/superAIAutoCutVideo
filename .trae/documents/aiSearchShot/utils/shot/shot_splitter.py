@@ -29,7 +29,7 @@ class ShotSplitter:
         export_clips: bool = True,
         export_raw_clips: bool = True,
         min_overlap_ratio: float = 0.4,
-        short_shot_threshold: float = 3.0,
+        short_shot_threshold: float = 1.4,
         max_segment_duration: float = 6.0
     ) -> Dict[str, Any]:
         t0 = time.time()
@@ -53,17 +53,6 @@ class ShotSplitter:
             min_overlap_ratio=min_overlap_ratio,
             short_shot_threshold=short_shot_threshold,
             max_segment_duration=max_segment_duration
-        )
-
-        # 短语义段修复：当段时长过短时，按“前后择优”合并到相邻段
-        # 规则：
-        # - 对比前后相邻段，优先合并到 shot_ids 数量更少的一侧
-        # - 若 shot_ids 数量相同，则合并到 duration 更短的一侧
-        # - 受 max_segment_duration 约束，避免合并出过长的段
-        segments_semantic = self.mapper.merge_short_segments_bidirectional(
-            segments_semantic,
-            short_segment_threshold=short_shot_threshold,
-            max_segment_duration=max_segment_duration,
         )
         logger.info(
             f"[step1] 语义段构建完成 segments_semantic={len(segments_semantic)} elapsed={time.time() - seg_t0:.2f}s"
@@ -154,9 +143,6 @@ class ShotSplitter:
                     'start': segment['start'],
                     'end': segment['end'],
                     'duration': segment['duration'],
-                    'is_merged': bool(len(segment.get('shot_ids') or []) > 1),
-                    'shot_ids': segment.get('shot_ids') or [],
-                    'source_shots': segment.get('source_shots') or [],
                     'subtitles': segment['subtitles'],
                     'subtitle_full_text': segment['subtitle_full_text']
                 }
@@ -256,7 +242,7 @@ class ShotSplitter:
         export_clips: bool = True,
         export_raw_clips: bool = True,
         min_overlap_ratio: float = 0.4,
-        short_shot_threshold: float = 3.0,
+        short_shot_threshold: float = 1.4,
         max_segment_duration: float = 6.0
     ) -> Dict[str, Any]:
         splitter = ShotSplitter(model_path)

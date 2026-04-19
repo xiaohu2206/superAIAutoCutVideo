@@ -46,6 +46,15 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     sceneExtractProgress,
     sceneExtractMessage,
     sceneExtractPhase,
+    runOmniPipeline,
+    cancelOmniPipeline,
+    extractingOmniPipeline,
+    omniPipelineProgress,
+    omniPipelineMessage,
+    omniPipelinePhase,
+    omniPipelineShowProgressBar,
+    omniPipelineCanStop,
+    omniMultimodalResult,
   } = useProjectDetail(projectId);
 
   const [currentStep, setCurrentStep] = useState<"upload" | "generate">("upload");
@@ -56,7 +65,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
         const isReady =
           project.project_type === "subtitle"
             ? project.subtitle_status === "ready"
-            : !!project.scenes_path;
+            : project.project_type === "omni"
+              ? Boolean(project.omni_multimodal_json_path)
+              : Boolean(project.scenes_path);
 
       if (isReady) {
         setCurrentStep("generate");
@@ -119,6 +130,15 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     sceneExtractProgress,
     sceneExtractMessage,
     sceneExtractPhase,
+    runOmniPipeline,
+    cancelOmniPipeline,
+    extractingOmniPipeline,
+    omniPipelineProgress,
+    omniPipelineMessage,
+    omniPipelinePhase,
+    omniPipelineShowProgressBar,
+    omniPipelineCanStop,
+    omniMultimodalResult,
     showSuccess,
     showErrorText,
     showError,
@@ -189,7 +209,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
                 const isReady =
                   project?.project_type === "subtitle"
                     ? project?.subtitle_status === "ready"
-                    : !!project?.scenes_path;
+                    : project?.project_type === "omni"
+                      ? Boolean(project?.omni_multimodal_json_path)
+                      : Boolean(project?.scenes_path);
 
                 if (isReady) {
                   setCurrentStep("generate");
@@ -197,7 +219,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
                   message.warning(
                     project?.project_type === "subtitle"
                       ? "请先提取或上传字幕"
-                      : "请先提取镜头"
+                      : project?.project_type === "omni"
+                        ? "请先完成 Omni 管线（镜头拆分与多模态向量化）"
+                        : "请先提取镜头"
                   );
                 }
               }}
@@ -207,7 +231,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
                   :                     !(
                       project?.project_type === "subtitle"
                         ? project?.subtitle_status === "ready"
-                        : !!project?.scenes_path
+                        : project?.project_type === "omni"
+                          ? Boolean(project?.omni_multimodal_json_path)
+                          : Boolean(project?.scenes_path)
                     )
                   ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-500 hover:text-gray-700"
@@ -231,8 +257,10 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
           onNextStep={() => {
             const isReady =
               project?.project_type === "visual"
-                ? !!project?.scenes_path
-                : project?.subtitle_status === "ready";
+                ? Boolean(project?.scenes_path)
+                : project?.project_type === "omni"
+                  ? Boolean(project?.omni_multimodal_json_path)
+                  : project?.subtitle_status === "ready";
 
             if (isReady) {
               setCurrentStep("generate");
@@ -240,7 +268,9 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
               message.warning(
                 project?.project_type === "visual"
                   ? "请先提取镜头"
-                  : "请先提取或上传字幕"
+                  : project?.project_type === "omni"
+                    ? "请先完成 Omni 管线"
+                    : "请先提取或上传字幕"
               );
             }
           }}

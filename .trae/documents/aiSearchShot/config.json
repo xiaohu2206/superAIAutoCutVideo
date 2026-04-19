@@ -1,5 +1,5 @@
 {
-  "step": "step2_multimodal_features",
+  "step": "step5_generate_video",
   "step1_shot_split": {
     "merge_shots": true,
     "model_path": "models/transnetv2-weights",
@@ -29,7 +29,9 @@
     "continue_on_error": true,
     "save_every_n": 200,
     "max_retries": 5,
-    "retry_sleep_seconds": 2
+    "retry_sleep_seconds": 2,
+    "vl_image_max_long_edge": 480,
+    "vl_jpeg_quality": 50
   },
   "model_provider": "custom_openai",
   "yunwu": {
@@ -37,7 +39,7 @@
     "chat_completions_url": "https://yunwu.ai/v1/chat/completions",
     "embeddings_url": "https://yunwu.ai/v1/embeddings",
     "rerank_url": "https://yunwu.ai/v1/rerank",
-    "vl_model": "qwen3-vl-flash",
+    "vl_model": "gemini-2.5-flash-lite",
     "embedding_model": "gemini-embedding-2-preview",
     "timeout_seconds": 300
   },

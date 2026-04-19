@@ -17,6 +17,7 @@ openai-whisper
 Pillow>=10.0.0
 python-multipart>=0.0.18
 python-jose[cryptography]>=3.3.0
+cryptography>=41.0.0
 passlib[bcrypt]>=1.7.4
 python-dotenv>=1.0.0
 loguru>=0.7.0

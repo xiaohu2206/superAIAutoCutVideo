@@ -116,7 +116,7 @@ class _OnlineVisionRunner:
                     content=content,
                 )
             ],
-            extra_params={"max_tokens": int(max_tokens)},
+            # extra_params={"max_tokens": int(max_tokens)},
         )
         t1 = time.time()
         usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
@@ -172,19 +172,24 @@ def _log_skip_existing_vision_analysis(
     )
 
 
-def _normalize_subtitle_for_vision(sub: Any) -> str:
-    s = (str(sub).strip() if sub is not None else "") or ""
-    if not s or s == "无":
-        return "（本镜头无对白或未识别字幕）"
-    return s
+_FRAME_ANALYSIS_PROMPT_FILES: Dict[str, str] = {
+    "zh": "frame_analysis_zh.md",
+    "en": "frame_analysis_en.md",
+}
 
 
-def _build_online_scene_analysis_prompt(subtitle_text: str, num_frames: int) -> str:
-    sub = _normalize_subtitle_for_vision(subtitle_text)
-    return f"""100字以内，描述这个影视画面，主体人物与动作、环境与背景、字幕与剧情暗示等信息（自然语言）。
-    字幕：
-    {sub}
-    """
+def _frame_analysis_prompts_dir() -> Path:
+    return Path(__file__).resolve().parent / "omni_internal" / "prompts"
+
+
+def load_frame_analysis_prompt(prompt_language: str, subtitle_text: str) -> str:
+    """与 aiSearchShot `_load_frame_analysis_prompt` 一致：从 omni_internal/prompts 读取模板并替换 `{subtitle_text}`。"""
+    language = str(prompt_language or "zh").strip().lower()
+    prompt_name = _FRAME_ANALYSIS_PROMPT_FILES.get(language, _FRAME_ANALYSIS_PROMPT_FILES["zh"])
+    prompt_path = _frame_analysis_prompts_dir() / prompt_name
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        template = f.read()
+    return template.replace("{subtitle_text}", subtitle_text or "")
 
 
 def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
@@ -214,6 +219,7 @@ def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
 
 
 def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
+    brief = str(d.get("brief") or "").strip()
     desc = str(d.get("desc") or "").strip()
     objs = d.get("objects")
     if isinstance(objs, list):
@@ -224,6 +230,8 @@ def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
     scene = str(d.get("scene") or "").strip()
     emotion = str(d.get("emotion") or "").strip()
     lines: List[str] = []
+    if brief:
+        lines.append(f"摘要：{brief}")
     if desc:
         lines.append(f"画面：{desc}")
     if obj_str:
@@ -238,6 +246,11 @@ def _vision_structured_to_display_text(d: Dict[str, Any]) -> str:
 
 
 def _parse_online_vision_model_output(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    parsed = _try_parse_vision_json(raw)
+    if isinstance(parsed, dict):
+        display = _vision_structured_to_display_text(parsed)
+        if display.strip():
+            return parsed, display
     return None, (raw or "").strip()
 
 
@@ -1064,6 +1077,7 @@ class VisionFrameAnalyzer:
         infer_wall_sec: float,
         api_concurrency: int,
         task_id: Optional[str],
+        prompt_language: str = "zh",
     ) -> bool:
         """使用已抽取好的帧并发调用在线视觉模型。"""
         total_to_analyze = len(to_analyze_indices)
@@ -1177,7 +1191,7 @@ class VisionFrameAnalyzer:
 
                     try:
                         optimized_imgs = [self._optimize_image(im, max_edge=1024) for im in imgs]
-                        prompt = _build_online_scene_analysis_prompt(subtitle_for_scene, len(optimized_imgs))
+                        prompt = load_frame_analysis_prompt(prompt_language, str(subtitle_for_scene or ""))
 
                         retry_delays = _ONLINE_VISION_INFER_RETRY_DELAYS_SEC
                         max_attempts = 1 + len(retry_delays)
@@ -1376,6 +1390,7 @@ class VisionFrameAnalyzer:
         task_id: Optional[str] = None,
         max_concurrency: int = 128,
         vision_key_frames: int = 1,
+        prompt_language: str = "zh",
     ) -> List[Dict[str, Any]]:
         """
         Analyze scenes using online vision models (302ai, yunwu, etc.).
@@ -1470,6 +1485,7 @@ class VisionFrameAnalyzer:
             infer_wall_sec=infer_wall_sec,
             api_concurrency=api_concurrency,
             task_id=task_id,
+            prompt_language=prompt_language,
         )
 
         if stopped_early:

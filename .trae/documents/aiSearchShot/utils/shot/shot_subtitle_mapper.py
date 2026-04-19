@@ -137,7 +137,7 @@ class ShotSubtitleMapper:
     def merge_shots_by_subtitle(
         shots: List[Shot],
         min_overlap_ratio: float = 0.4,
-        short_shot_threshold: float = 3.0,
+        short_shot_threshold: float = 1.4,
         max_segment_duration: float = 6.0
     ) -> List[Shot]:
         if len(shots) <= 1:
@@ -223,7 +223,7 @@ class ShotSubtitleMapper:
     def build_semantic_segments(
         shots: List[Shot],
         min_overlap_ratio: float = 0.4,
-        short_shot_threshold: float = 3.0,
+        short_shot_threshold: float = 1.4,
         max_segment_duration: float = 6.0
     ) -> List[Dict[str, Any]]:
         if not shots:
@@ -281,22 +281,12 @@ class ShotSubtitleMapper:
                 subtitles=deduped_subtitles
             )
 
-            source_shots = [
-                {
-                    "shot_id": shot.shot_id,
-                    "start": round(shot.start, 3),
-                    "end": round(shot.end, 3),
-                    "duration": round(shot.end - shot.start, 3),
-                }
-                for shot in grouped
-            ]
             segments.append({
                 'segment_id': segment_id,
                 'start': round(grouped[0].start, 3),
                 'end': round(grouped[-1].end, 3),
                 'duration': round(grouped[-1].end - grouped[0].start, 3),
                 'shot_ids': [shot.shot_id for shot in grouped],
-                'source_shots': source_shots,
                 'subtitles': deduped_subtitles,
                 'subtitle_full_text': ShotSubtitleMapper.get_full_subtitle_text(temp_shot)
             })
@@ -304,141 +294,6 @@ class ShotSubtitleMapper:
             i = j
 
         return segments
-
-    @staticmethod
-    def _pick_merge_target(prev_seg: Dict[str, Any], next_seg: Dict[str, Any]) -> str:
-        """
-        在 prev / next 之间选择合并目标侧：
-        - 优先选择 shot_ids 数量更少的一侧
-        - 若数量相同，选择 duration 更短的一侧
-        返回 "prev" 或 "next"
-        """
-        prev_n = len(prev_seg.get("shot_ids") or [])
-        next_n = len(next_seg.get("shot_ids") or [])
-        if prev_n != next_n:
-            return "prev" if prev_n < next_n else "next"
-        prev_d = float(prev_seg.get("duration") or 0.0)
-        next_d = float(next_seg.get("duration") or 0.0)
-        return "prev" if prev_d <= next_d else "next"
-
-    @staticmethod
-    def _merge_two_segments(left: Dict[str, Any], right: Dict[str, Any], new_segment_id: int) -> Dict[str, Any]:
-        shot_ids = list(left.get("shot_ids") or []) + list(right.get("shot_ids") or [])
-        source_shots = list(left.get("source_shots") or []) + list(right.get("source_shots") or [])
-        subtitles = list(left.get("subtitles") or []) + list(right.get("subtitles") or [])
-        deduped_subtitles = ShotSubtitleMapper._deduplicate_subtitles(subtitles, merge_by_index=True)
-        subtitle_full_text = " ".join([sub.get("text", "") for sub in deduped_subtitles]).strip()
-        start = min(float(left.get("start") or 0.0), float(right.get("start") or 0.0))
-        end = max(float(left.get("end") or 0.0), float(right.get("end") or 0.0))
-        return {
-            "segment_id": new_segment_id,
-            "start": round(start, 3),
-            "end": round(end, 3),
-            "duration": round(end - start, 3),
-            "shot_ids": shot_ids,
-            "source_shots": sorted(source_shots, key=lambda x: x.get("start", 0.0)),
-            "subtitles": deduped_subtitles,
-            "subtitle_full_text": subtitle_full_text,
-        }
-
-    @staticmethod
-    def merge_short_segments_bidirectional(
-        segments: List[Dict[str, Any]],
-        short_segment_threshold: float = 3.0,
-        max_segment_duration: float = 6.0,
-    ) -> List[Dict[str, Any]]:
-        """
-        对过短的语义段做“前后择优”合并：
-        - 优先合并到 shot_ids 数量更少的一侧
-        - 次优：合并到 duration 更短的一侧
-        - 受 max_segment_duration 约束（合并后超长则换另一侧；两侧都不满足则跳过）
-        """
-        if not segments:
-            return []
-        if len(segments) == 1:
-            seg = dict(segments[0])
-            seg["segment_id"] = 1
-            return [seg]
-
-        segs = [dict(s) for s in segments]
-
-        changed = True
-        while changed and len(segs) > 1:
-            changed = False
-            i = 0
-            while i < len(segs):
-                dur = float(segs[i].get("duration") or 0.0)
-                if dur > short_segment_threshold:
-                    i += 1
-                    continue
-
-                prev_idx = i - 1 if i - 1 >= 0 else None
-                next_idx = i + 1 if i + 1 < len(segs) else None
-
-                if prev_idx is None and next_idx is None:
-                    i += 1
-                    continue
-                if prev_idx is None:
-                    merged = ShotSubtitleMapper._merge_two_segments(segs[i], segs[next_idx], new_segment_id=0)
-                    if float(merged["duration"]) <= max_segment_duration:
-                        segs[i:next_idx + 1] = [merged]
-                        changed = True
-                        continue
-                    i += 1
-                    continue
-                if next_idx is None:
-                    merged = ShotSubtitleMapper._merge_two_segments(segs[prev_idx], segs[i], new_segment_id=0)
-                    if float(merged["duration"]) <= max_segment_duration:
-                        segs[prev_idx:i + 1] = [merged]
-                        changed = True
-                        i = max(prev_idx - 1, 0)
-                        continue
-                    i += 1
-                    continue
-
-                prev_seg = segs[prev_idx]
-                next_seg = segs[next_idx]
-                target = ShotSubtitleMapper._pick_merge_target(prev_seg, next_seg)
-
-                def can_merge_with_prev() -> bool:
-                    merged_prev = ShotSubtitleMapper._merge_two_segments(prev_seg, segs[i], new_segment_id=0)
-                    return float(merged_prev["duration"]) <= max_segment_duration
-
-                def can_merge_with_next() -> bool:
-                    merged_next = ShotSubtitleMapper._merge_two_segments(segs[i], next_seg, new_segment_id=0)
-                    return float(merged_next["duration"]) <= max_segment_duration
-
-                if target == "prev":
-                    if can_merge_with_prev():
-                        merged = ShotSubtitleMapper._merge_two_segments(prev_seg, segs[i], new_segment_id=0)
-                        segs[prev_idx:i + 1] = [merged]
-                        changed = True
-                        i = max(prev_idx - 1, 0)
-                        continue
-                    if can_merge_with_next():
-                        merged = ShotSubtitleMapper._merge_two_segments(segs[i], next_seg, new_segment_id=0)
-                        segs[i:next_idx + 1] = [merged]
-                        changed = True
-                        continue
-                else:
-                    if can_merge_with_next():
-                        merged = ShotSubtitleMapper._merge_two_segments(segs[i], next_seg, new_segment_id=0)
-                        segs[i:next_idx + 1] = [merged]
-                        changed = True
-                        continue
-                    if can_merge_with_prev():
-                        merged = ShotSubtitleMapper._merge_two_segments(prev_seg, segs[i], new_segment_id=0)
-                        segs[prev_idx:i + 1] = [merged]
-                        changed = True
-                        i = max(prev_idx - 1, 0)
-                        continue
-
-                i += 1
-
-        # 重新编号 segment_id，保证连续稳定
-        for new_id, seg in enumerate(segs, start=1):
-            seg["segment_id"] = new_id
-        return segs
 
     @staticmethod
     def enrich_shots_with_full_text(shots: List[Shot]) -> List[Shot]:
