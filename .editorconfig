@@ -1,0 +1,7 @@
+root = true
+
+# PowerShell 5.x on Windows treats scripts without BOM as system ANSI (e.g. GBK),
+# which breaks UTF-8 Chinese and causes bogus parse errors (unclosed strings, missing }).
+[*.ps1]
+charset = utf-8-bom
+end_of_line = crlf

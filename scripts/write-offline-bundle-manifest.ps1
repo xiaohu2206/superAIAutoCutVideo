@@ -20,7 +20,7 @@
   强制不写入 shell_installer（即使目录里有 exe）
 
 .EXAMPLE
-  .\scripts\write-offline-bundle-manifest.ps1 -BundleDir "D:\release\v1.2.7"
+  .\scripts\write-offline-bundle-manifest.ps1 -BundleDir "D:\release\v1.2.8"
 .EXAMPLE
   # 仅上传了分块 zip + 清单、未放 NSIS 时
   .\scripts\write-offline-bundle-manifest.ps1 -OmitShellInstaller
