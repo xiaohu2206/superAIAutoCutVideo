@@ -12,6 +12,10 @@
 
   仅改业务代码且依赖版本未变时，通常只有 app-backend 的 sha256 变化，用户只需下载该分块。
 
+  与 -RefManifest 联用时：未变化的分块 zip 会从 OutputDir 删除，但 runtime-manifest.json 仍保留
+  全部分块的 sha256/size/url。离线更新时客户端只对「待更新分块」要求同目录存在 zip；已安装且
+  哈希与清单一致的分块不必放进网盘夹。整理上传目录可再运行：scripts\stage-runtime-patch-for-offline.ps1
+
 .PARAMETER BackendDir
   PyInstaller --onedir 产出目录，默认 backend\dist\superAutoCutVideoBackend
 
@@ -514,6 +518,8 @@ if ($omitPublish.Count -gt 0) {
     Write-Host ""
     Write-Host "说明: 已省略 $($omitPublish -join ', ') 的 zip。清单仍含其 sha256/size，仅已安装该哈希的用户可跳过下载。"
     Write-Host "      首次安装或缺少对应分块的用户需从完整包或其它渠道取得未上传的 zip。"
+    Write-Host "      离线补丁: 将本目录中的 runtime-manifest.json、offline-bundle-manifest.json 与仍存在的 zip 一并发布即可；"
+    Write-Host "      已安装旧版且分块哈希匹配的用户无需再下载被省略的 zip。整理目录: .\scripts\stage-runtime-patch-for-offline.ps1 -SourceDir `"$OutputDir`""
 }
 Write-Host ""
 Write-Host "Next steps:"

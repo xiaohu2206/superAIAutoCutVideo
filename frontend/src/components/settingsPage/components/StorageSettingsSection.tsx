@@ -51,7 +51,7 @@ const StorageSettingsSection: React.FC = () => {
           <div className="space-y-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-700">当前 uploads 根路径（缓存数据存储目录）</p>
+                <p className="text-sm font-medium text-slate-700">当前 uploads 根路径（缓存数据存储目录，不要出现中文路径）</p>
                 <p className="mt-1 text-xs font-medium text-amber-600">更改后重启应用可生效</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

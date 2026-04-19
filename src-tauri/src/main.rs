@@ -1689,6 +1689,12 @@ fn main() {
             resolve_offline_update_bundle,
             launch_local_shell_installer
         ])
-        .run(tauri::generate_context!())
-        .expect("启动Tauri应用失败");
+        .build(tauri::generate_context!())
+        .expect("启动Tauri应用失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                let _ = stop_backend_sync(&*state);
+            }
+        });
 }

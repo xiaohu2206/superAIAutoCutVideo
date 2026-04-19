@@ -87,6 +87,9 @@ pub fn resolve_offline_update_bundle(selected_path: String) -> Result<OfflineBun
 }
 
 /// 启动本机已下载的 Windows 安装包（由用户从网盘放入同一目录）。
+///
+/// 对 `.exe` 追加与 `windows/installer.nsi` 一致的参数：被动安装、按升级处理、完成后启动主程序，
+/// 从而无需在安装向导中逐步点击（仍可能出现一次 UAC 提权）。
 pub fn launch_local_shell_installer(installer_path: String) -> Result<(), String> {
     let p = PathBuf::from(&installer_path);
     if !p.is_file() {
@@ -94,8 +97,15 @@ pub fn launch_local_shell_installer(installer_path: String) -> Result<(), String
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new(&p)
-            .spawn()
+        let is_exe = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+        let mut cmd = std::process::Command::new(&p);
+        if is_exe {
+            cmd.arg("/UPDATE").arg("/P").arg("/R");
+        }
+        cmd.spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
         return Ok(());
     }
