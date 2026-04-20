@@ -27,7 +27,17 @@ from modules.config.video_model_config import video_model_config_manager
 logger = logging.getLogger(__name__)
 
 _SCENES_SPLIT_VERSION = 1
-_VISION_SCENE_KEYS = frozenset({"vision", "vision_status", "vision_analyzed", "vision_error", "vision_frame_error", "vision_stopped_early_infer_timeout"})
+_VISION_SCENE_KEYS = frozenset(
+    {
+        "vision",
+        "vision_status",
+        "vision_analyzed",
+        "vision_error",
+        "vision_frame_error",
+        "vision_stopped_early_infer_timeout",
+        "vision_source_video_fp",
+    }
+)
 
 
 def _json_safe(value: Any) -> Any:
@@ -299,12 +309,24 @@ class ExtractSceneService:
             merged.append(current)
         return merged
 
-    def _has_pending_vision_scenes(self, scenes: List[Dict[str, Any]], mode: str) -> bool:
+    def _has_pending_vision_scenes(
+        self,
+        scenes: List[Dict[str, Any]],
+        mode: str,
+        *,
+        enforce_online_video_file_identity: bool = False,
+        video_abs: Optional[Path] = None,
+    ) -> bool:
+        from services.vision_scene_status import scene_online_vision_skippable_for_current_video
+
         for scene in scenes:
             if not self._scene_needs_vision_analysis(scene, mode):
                 continue
             if not scene_vision_success_ok(scene):
                 return True
+            if enforce_online_video_file_identity and video_abs is not None:
+                if not scene_online_vision_skippable_for_current_video(scene, video_abs):
+                    return True
         return False
 
     def _build_scenes_result_payload(
@@ -866,7 +888,28 @@ class ExtractSceneService:
                         )
                     else:
                         optimized_scenes = self._merge_existing_vision_results(optimized_scenes, existing_scenes)
-                        if not self._has_pending_vision_scenes(optimized_scenes, vision_mode):
+                        enforce_online_vid = False
+                        try:
+                            ac = video_model_config_manager.get_active_config()
+                            enforce_online_vid = bool(
+                                ac
+                                and ac.provider
+                                in (
+                                    "yunwu",
+                                    "302ai",
+                                    "qwen",
+                                    "doubao",
+                                    "custom_openai_vision",
+                                )
+                            )
+                        except Exception:
+                            enforce_online_vid = False
+                        if not self._has_pending_vision_scenes(
+                            optimized_scenes,
+                            vision_mode,
+                            enforce_online_video_file_identity=enforce_online_vid,
+                            video_abs=video_abs_path,
+                        ):
                             if existing_fps > 0:
                                 fps = existing_fps
                             if existing_total_frames > 0:

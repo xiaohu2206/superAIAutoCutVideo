@@ -12,6 +12,8 @@ export interface OmniMultimodalShot {
   start: number;
   end: number;
   duration?: number;
+  /** Step2 占位：pending / error；完成段通常无此字段 */
+  omni_step2_status?: string;
   subtitle_full_text?: string;
   subtitle?: { full_text?: string; segments?: unknown[] };
   visual?: OmniMultimodalShotVisual;

@@ -699,11 +699,16 @@ export class ProjectService {
 
   async runOmniPipeline(
     projectId: string,
-    options?: { force?: boolean; task_id?: string | null }
+    options?: {
+      force?: boolean;
+      task_id?: string | null;
+      multimodal_action?: "auto" | "continue" | "restart";
+    }
   ): Promise<{ task_id: string; status: string; message: string }> {
     const payload = {
       force: Boolean(options?.force),
       task_id: options?.task_id ?? undefined,
+      multimodal_action: options?.multimodal_action ?? "auto",
     };
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
       `/api/projects/${projectId}/omni/run-pipeline`,

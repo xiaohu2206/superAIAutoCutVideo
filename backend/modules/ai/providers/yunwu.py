@@ -84,6 +84,17 @@ class YunwuProvider(AIProviderBase):
 
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            try:
+                _closed = bool(getattr(self.client, "is_closed", False))
+            except Exception:
+                _closed = False
+            logger.debug(
+                "[yunwu] POST chat/completions self_id=%s client_id=%s client_closed=%s model=%s",
+                id(self),
+                id(self.client),
+                _closed,
+                self.config.model_name,
+            )
             thinking = payload.pop("thinking", None)
             _ = thinking
 

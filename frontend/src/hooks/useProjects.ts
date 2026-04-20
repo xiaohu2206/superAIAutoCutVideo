@@ -189,7 +189,11 @@ export interface UseProjectDetailReturn {
   sceneExtractProgress: number;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
-  runOmniPipeline: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  runOmniPipeline: (options?: {
+    force?: boolean;
+    task_id?: string | null;
+    multimodal_action?: "auto" | "continue" | "restart";
+  }) => Promise<void>;
   cancelOmniPipeline: () => Promise<void>;
   extractingOmniPipeline: boolean;
   omniPipelineProgress: number;
@@ -943,7 +947,11 @@ export const useProjectDetail = (
   }, [project, startScenePolling, stopScenePolling]);
 
   const runOmniPipeline = useCallback(
-    async (options?: { force?: boolean; task_id?: string | null }) => {
+    async (options?: {
+      force?: boolean;
+      task_id?: string | null;
+      multimodal_action?: "auto" | "continue" | "restart";
+    }) => {
       if (!project) return;
       setError(null);
       setOmniMultimodalResult(null);
@@ -953,7 +961,10 @@ export const useProjectDetail = (
       setOmniPipelinePhase(null);
       stopOmniPolling();
       try {
-        const res = await projectService.runOmniPipeline(project.id, options);
+        const res = await projectService.runOmniPipeline(project.id, {
+          ...options,
+          multimodal_action: options?.multimodal_action ?? "auto",
+        });
         const taskId = res.task_id;
         setOmniTaskId(taskId || null);
         if (taskId) {

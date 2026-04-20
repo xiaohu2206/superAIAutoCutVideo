@@ -267,40 +267,6 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
               </div>
             )}
 
-            {currentCapabilities?.max_tokens !== false && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  最大输出长度 (Max Tokens)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="128000"
-                  value={currentContentConfig.max_tokens ?? ""}
-                  onChange={(e) => {
-                    const val = e.target.value
-                      ? parseInt(e.target.value)
-                      : undefined;
-                    setCurrentContentConfig((prev) => ({
-                      ...prev,
-                      max_tokens: val,
-                    }));
-                  }}
-                  onBlur={(e) => {
-                    const val = e.target.value
-                      ? parseInt(e.target.value)
-                      : null;
-                    updateCurrentContentConfig("max_tokens", val);
-                  }}
-                  placeholder="留空使用模型默认值"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  限制模型单次回复的最大 token 数，留空则使用模型默认值
-                </p>
-              </div>
-            )}
-
             {currentCapabilities?.thinking && (
               <div className="flex items-center justify-between">
                 <div>

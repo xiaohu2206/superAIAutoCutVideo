@@ -26,8 +26,11 @@ router = APIRouter(prefix="/api/projects", tags=["Omni 多模态管线"])
 
 
 class OmniPipelineRunRequest(BaseModel):
+    """请求体：multimodal_action 为 auto|continue|restart（与镜头提取 visionAction 用法对齐）。"""
+
     force: bool = Field(default=False)
     task_id: Optional[str] = None
+    multimodal_action: str = Field(default="auto", description="auto / continue / restart")
 
 
 @router.post("/{project_id}/omni/run-pipeline")
@@ -37,6 +40,7 @@ async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest = Body(
             project_id=project_id,
             force=bool(req.force),
             task_id=req.task_id,
+            multimodal_action=req.multimodal_action,
         )
         return {"message": "Omni 管线已提交", "data": data, "timestamp": _now_ts()}
     except ValueError as e:

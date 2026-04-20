@@ -10,6 +10,7 @@ import SceneListTable from "./SceneListTable";
 import OmniMultimodalShotsTable from "./OmniMultimodalShotsTable";
 import ScenePlayModal from "./ScenePlayModal";
 import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
+import OmniMultimodalChoiceModal from "./OmniMultimodalChoiceModal";
 import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
@@ -89,6 +90,10 @@ interface ProjectEditUploadStepProps {
   omniPipelineShowProgressBar: boolean;
   omniPipelineCanStop: boolean;
   omniMultimodalResult: OmniMultimodalResult | null;
+  omniMultimodalChoiceModalOpen: boolean;
+  onOmniMultimodalChoiceContinue: () => void;
+  onOmniMultimodalChoiceRestart: () => void;
+  onOmniMultimodalChoiceCancel: () => void;
 }
 
 const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
@@ -158,6 +163,10 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   omniPipelineShowProgressBar,
   omniPipelineCanStop,
   omniMultimodalResult,
+  omniMultimodalChoiceModalOpen,
+  onOmniMultimodalChoiceContinue,
+  onOmniMultimodalChoiceRestart,
+  onOmniMultimodalChoiceCancel,
 }) => {
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
@@ -586,6 +595,12 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         onClose={onVisionChoiceCancel}
         onContinueIncomplete={onVisionChoiceContinue}
         onRestartAll={onVisionChoiceRestart}
+      />
+      <OmniMultimodalChoiceModal
+        isOpen={omniMultimodalChoiceModalOpen}
+        onClose={onOmniMultimodalChoiceCancel}
+        onContinueIncomplete={onOmniMultimodalChoiceContinue}
+        onRestartAll={onOmniMultimodalChoiceRestart}
       />
       <OverwriteConfirmModal
         isOpen={subtitleOverwriteModalOpen}

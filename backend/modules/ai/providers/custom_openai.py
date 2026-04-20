@@ -53,8 +53,6 @@ class CustomOpenAIProvider(AIProviderBase):
             "messages": formatted,
             "temperature": self.config.temperature,
         }
-        if self.config.max_tokens is not None:
-            payload["max_tokens"] = self.config.max_tokens
         if self.config.extra_params:
             try:
                 payload.update(self.config.extra_params)
@@ -248,10 +246,7 @@ class CustomOpenAIVisionProvider(CustomOpenAIProvider):
                     ],
                 )
             ]
-            response = await self.chat_completion(
-                test_messages,
-                extra_params={"max_tokens": 128},
-            )
+            response = await self.chat_completion(test_messages)
             raw = response.content
             if raw is None:
                 raw_text = ""

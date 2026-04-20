@@ -23,6 +23,20 @@ function formatVisual(v: OmniMultimodalShot["visual"]): string {
   return parts.join("\n");
 }
 
+/** 与后端 Step2 完成判定一致：有非空向量 + visual 对象，且非 pending/error */
+function isOmniStep2Ok(s: OmniMultimodalShot): boolean {
+  const st = String(s.omni_step2_status || "").trim().toLowerCase();
+  if (st === "pending" || st === "error") return false;
+  const emb = s.embedding;
+  if (!Array.isArray(emb) || emb.length === 0) return false;
+  const vis = s.visual;
+  return vis != null && typeof vis === "object";
+}
+
+function isOmniStep2Error(s: OmniMultimodalShot): boolean {
+  return String(s.omni_step2_status || "").trim().toLowerCase() === "error";
+}
+
 const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ result, onPlayShot }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -36,6 +50,11 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
     if (vl && emb) return `${vl} · ${emb}`;
     return vl || emb || "";
   }, [result?.omni_pipeline_meta]);
+
+  const analyzedVisionCount = useMemo(() => shots.filter((s) => isOmniStep2Ok(s)).length, [shots]);
+  const visionErrorCount = useMemo(() => shots.filter((s) => isOmniStep2Error(s)).length, [shots]);
+  const notOkCount = Math.max(shots.length - analyzedVisionCount, 0);
+  const nonErrorNotOkCount = Math.max(notOkCount - visionErrorCount, 0);
 
   if (!result || shots.length === 0) {
     return null;
@@ -53,11 +72,19 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
         <div className="w-full min-h-10 px-4 py-2 font-mono text-sm border border-fuchsia-200 rounded-lg bg-fuchsia-50/40 overflow-hidden text-gray-700 hover:border-fuchsia-400 hover:ring-1 hover:ring-fuchsia-300 transition-all flex items-center justify-between gap-4">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>
-              共 {shots.length} 个语义镜头段
+              共 {shots.length} 个语义镜头段，已成功分析画面 {analyzedVisionCount} 个
+              {visionErrorCount > 0 && (
+                <span className="text-amber-600">（分析失败 {visionErrorCount} 个）</span>
+              )}
               {typeof result.total_duration === "number" ? (
                 <span className="text-gray-500">（视频约 {result.total_duration.toFixed(1)}s）</span>
               ) : null}
             </span>
+            {nonErrorNotOkCount > 0 && (
+              <span className="text-red-500 text-xs font-medium">
+                还有 {nonErrorNotOkCount} 个镜头未成功完成画面分析
+              </span>
+            )}
           </span>
           {metaLine ? <span className="text-gray-500 text-xs truncate max-w-[50%]">{metaLine}</span> : null}
         </div>

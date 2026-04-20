@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 顺序编排：文案结构化+向量 → 镜头匹配 → [可选] 全局路径搜索 → 解说脚本生成。
-可通过 skip_global_path_search 关闭第 3 步（须已有全局路径 JSON 或 generate_script_options 传入路径）。
+可通过 skip_global_path_search 关闭第 3 步（默认用上一步镜头匹配的 rerank.json，
+或仅在 generate_script_options 中显式传入 input_global_path_web_path）。
 与 visual / generate_script 及单步 HTTP 路由解耦；仅组合调用各 omni_*_service.submit_run 并等待子任务结束。
 """
 
@@ -244,8 +245,10 @@ class OmniFullNarrationPipelineService:
         )
         gs["force"] = force
         skip_gps = bool(skip_global_path_search)
+        generate_script_gp_web_override: Optional[str] = None
 
         async def _run() -> None:
+            nonlocal generate_script_gp_web_override
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -314,28 +317,35 @@ class OmniFullNarrationPipelineService:
                     step_label="镜头匹配",
                 )
 
-                # 3) 全局路径（可关闭：仍须已有 global_path JSON 供第 4 步使用）
+                # 3) 全局路径（可关闭：第 4 步用上一步 rerank.json，或仅显式 path）
                 if skip_gps:
                     cur_gp = projects_store.get_project(project_id)
                     if not cur_gp:
                         raise ValueError("项目不存在")
                     gs_path_opt = str(gs.get("input_global_path_web_path") or "").strip()
-                    proj_gp = str(getattr(cur_gp, "omni_global_path_search_path", None) or "").strip()
-                    chosen_gp = gs_path_opt or proj_gp
+                    proj_rr = str(getattr(cur_gp, "omni_shot_match_rerank_path", None) or "").strip()
+                    # 与跑全局路径搜索时一致：其输入为镜头匹配 rerank.json；跳过时直接用该文件即可
+                    chosen_gp = gs_path_opt or proj_rr
                     if not chosen_gp:
                         raise ValueError(
                             "skip_global_path_search=true 时，须在 generate_script_options 中传入 "
-                            "input_global_path_web_path，或项目已保存 omni_global_path_search_path"
+                            "input_global_path_web_path，或项目已有本管线镜头重排 omni_shot_match_rerank_path"
                         )
                     if not _resolve_path(chosen_gp).exists():
-                        raise FileNotFoundError(f"全局路径 JSON 不存在: {chosen_gp}")
+                        raise FileNotFoundError(f"解说脚本输入 JSON 不存在: {chosen_gp}")
+                    generate_script_gp_web_override = chosen_gp
+                    skip_msg = (
+                        "已跳过「全局路径搜索」，使用请求指定的路径输入"
+                        if gs_path_opt
+                        else "已跳过「全局路径搜索」，使用镜头重排结果"
+                    )
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,
                         task_id=task_id,
                         status="processing",
                         progress=75.0,
-                        message="已跳过「全局路径搜索」，使用已有全局路径结果",
+                        message=skip_msg,
                         phase="step_skip_global_path",
                         msg_type="progress",
                         timestamp=_now_ts(),
@@ -347,7 +357,7 @@ class OmniFullNarrationPipelineService:
                             "project_id": project_id,
                             "task_id": task_id,
                             "phase": "step_skip_global_path",
-                            "message": "已跳过「全局路径搜索」，使用已有全局路径结果",
+                            "message": skip_msg,
                             "progress": 75,
                             "timestamp": _now_ts(),
                         }
@@ -373,11 +383,12 @@ class OmniFullNarrationPipelineService:
                     )
 
                 # 4) 解说脚本
+                gs_gp = str(gs.get("input_global_path_web_path") or "").strip()
                 r4 = await omni_generate_script_service.submit_run(
                     project_id,
                     force=bool(gs["force"]),
                     task_id=gs.get("task_id"),
-                    input_global_path_web_path=gs.get("input_global_path_web_path"),
+                    input_global_path_web_path=gs_gp or generate_script_gp_web_override,
                     input_multimodal_web_path=gs.get("input_multimodal_web_path"),
                     generation_params=gs.get("generation_params") if isinstance(gs.get("generation_params"), dict) else None,
                     temperature=gs.get("temperature"),

@@ -8,7 +8,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Optional, Any
-from pydantic import BaseModel, Field, field_validator, ValidationInfo
+from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 
 class VideoModelConfig(BaseModel):
     """视频分析模型配置数据模型"""
+
+    model_config = ConfigDict(extra="ignore")
+
     provider: str = Field(..., description="AI提供商名称")
     api_key: str = Field(..., description="API密钥")
     base_url: str = Field(..., description="API基础地址")
     model_name: str = Field(..., description="模型名称")
-    max_tokens: Optional[int] = Field(100000, description="最大token数")
     temperature: Optional[float] = Field(0.7, description="温度参数", ge=0.0, le=2.0)
     timeout: Optional[int] = Field(600, description="超时时间（秒）", ge=1, le=10000)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="额外参数")
@@ -398,7 +400,6 @@ class VideoModelConfigManager:
                 api_key=config.api_key,
                 base_url=config.base_url,
                 model_name=config.model_name,
-                max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 timeout=config.timeout,
                 extra_params={

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 import httpx
 import json
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,6 @@ class AIModelConfig(BaseModel):
     api_key: str  # API密钥
     base_url: str  # API基础地址
     model_name: str  # 模型名称
-    max_tokens: Optional[int] = None  # 最大token数
     temperature: Optional[float] = 0.7  # 温度参数
     timeout: Optional[int] = 600  # 超时时间（秒）
     extra_params: Optional[Dict[str, Any]] = {}  # 额外参数
@@ -43,7 +43,15 @@ class ChatResponse(BaseModel):
 
 class AIProviderBase(ABC):
     """AI模型提供商抽象基类"""
-    
+
+    @staticmethod
+    def _drop_max_tokens(payload: Dict[str, Any]) -> None:
+        """不在请求里传 max_tokens，交由上游模型默认行为。"""
+        try:
+            payload.pop("max_tokens", None)
+        except Exception:
+            pass
+
     def __init__(self, config: AIModelConfig):
         self.config = config
         self.client = httpx.AsyncClient(
@@ -82,6 +90,17 @@ class AIProviderBase(ABC):
             ChatResponse: 聊天响应
         """
         try:
+            try:
+                _closed = bool(getattr(self.client, "is_closed", False))
+            except Exception:
+                _closed = False
+            if _closed:
+                logger.error(
+                    "[ai-provider] chat_completion 被调用时 httpx 客户端已关闭: provider=%s self_id=%s client_id=%s",
+                    getattr(self.config, "provider", "?"),
+                    id(self),
+                    id(self.client),
+                )
             # 格式化消息
             payload = self._format_messages(messages)
             # 合并额外参数（用于控制结构化输出等）
@@ -90,7 +109,8 @@ class AIProviderBase(ABC):
                     payload.update(extra_params)
                 except Exception:
                     pass
-            
+            self._drop_max_tokens(payload)
+
             # 发送请求
             response_data = await self._make_request(payload)
             
@@ -120,7 +140,8 @@ class AIProviderBase(ABC):
                     payload.update(extra_params)
                 except Exception:
                     pass
-            
+            self._drop_max_tokens(payload)
+
             # 发送流式请求
             headers = self._get_headers()
             try:
@@ -208,14 +229,35 @@ class AIProviderBase(ABC):
     
     async def close(self):
         """关闭客户端连接"""
-        await self.client.aclose()
-    
-    def __del__(self):
-        """析构函数，确保连接被关闭"""
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(self.close())
-        except:
+            _closed = bool(getattr(self.client, "is_closed", False))
+        except Exception:
+            _closed = False
+        # 调用栈仅用于排查「谁在关 client」；打 INFO 易被误认为异常，故用 DEBUG
+        logger.info(
+            "[ai-provider] close() provider=%s self_id=%s client_id=%s client_already_closed=%s",
+            getattr(self.config, "provider", "?"),
+            id(self),
+            id(self.client),
+            _closed,
+        )
+        stack = "".join(traceback.format_stack(limit=12))
+        logger.debug("[ai-provider] close() 调用栈:\n%s", stack)
+        await self.client.aclose()
+
+    def __del__(self):
+        """不在析构里关闭 AsyncClient：在运行中的事件循环上 create_task(close) 可能与并发 infer 竞态，导致
+        httpx 报错 “Cannot send a request, as the client has been closed”。请始终 await provider.close()。"""
+        try:
+            if getattr(self, "client", None) is None:
+                return
+            if bool(getattr(self.client, "is_closed", True)):
+                return
+            cfg = getattr(self, "config", None)
+            prov = getattr(cfg, "provider", "?") if cfg is not None else "?"
+            logger.warning(
+                "[ai-provider] 实例被 GC 时 httpx 客户端仍未关闭（可能存在泄漏）: provider=%s",
+                prov,
+            )
+        except Exception:
             pass

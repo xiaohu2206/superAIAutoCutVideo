@@ -20,7 +20,12 @@ from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from services.vision_scene_status import scene_vision_success_ok
+from services.vision_scene_status import (
+    path_stat_fingerprint_for_vision,
+    scene_online_vision_skippable_for_current_video,
+    scene_vision_success_ok,
+    video_abs_for_vision_fp,
+)
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -47,7 +52,7 @@ class _OnlineVisionRunner:
             base_url=base_url,
             model_name=model_name,
             timeout=timeout,
-            extra_params={"max_tokens": 512},
+            extra_params={},
         )
         self._provider_impl = provider_cls(ai_cfg)
 
@@ -95,7 +100,6 @@ class _OnlineVisionRunner:
         self,
         images: List[Image.Image],
         prompt: str,
-        max_tokens: int = 1024,
     ) -> Tuple[str, Dict[str, Any]]:
         if not images:
             raise ValueError("infer_multi 需要至少一张图片")
@@ -109,6 +113,18 @@ class _OnlineVisionRunner:
             
 
         t0 = time.time()
+        try:
+            _closed = bool(getattr(self._provider_impl.client, "is_closed", False))
+        except Exception:
+            _closed = False
+        logger.debug(
+            "[online-vision] infer_multi 即将请求 provider=%s self_id=%s impl_id=%s n_images=%s client_closed=%s",
+            self._provider,
+            id(self),
+            id(self._provider_impl),
+            len(images),
+            _closed,
+        )
         resp = await self._provider_impl.chat_completion(
             [
                 ChatMessage(
@@ -116,7 +132,6 @@ class _OnlineVisionRunner:
                     content=content,
                 )
             ],
-            # extra_params={"max_tokens": int(max_tokens)},
         )
         t1 = time.time()
         usage = (resp.usage or {}) if hasattr(resp, "usage") else {}
@@ -1078,6 +1093,7 @@ class VisionFrameAnalyzer:
         api_concurrency: int,
         task_id: Optional[str],
         prompt_language: str = "zh",
+        video_fp_for_persist: Optional[Dict[str, int]] = None,
     ) -> bool:
         """使用已抽取好的帧并发调用在线视觉模型。"""
         total_to_analyze = len(to_analyze_indices)
@@ -1126,6 +1142,10 @@ class VisionFrameAnalyzer:
             else:
                 scene["vision_status"] = "empty"
             scene["vision_analyzed"] = True
+            if str(scene.get("vision_status") or "").strip().lower() == "ok" and video_fp_for_persist is not None:
+                scene["vision_source_video_fp"] = dict(video_fp_for_persist)
+            elif str(scene.get("vision_status") or "").strip().lower() != "ok":
+                scene.pop("vision_source_video_fp", None)
             if not bump_progress:
                 return
             processed_count += 1
@@ -1414,6 +1434,14 @@ class VisionFrameAnalyzer:
         extract_concurrency = min(8, concurrency_cap)
         api_concurrency = min(64, concurrency_cap)
 
+        video_abs = video_abs_for_vision_fp(video_path)
+        video_fp_for_persist: Optional[Dict[str, int]] = None
+        try:
+            if video_abs.exists():
+                video_fp_for_persist = path_stat_fingerprint_for_vision(video_abs)
+        except OSError:
+            video_fp_for_persist = None
+
         to_analyze_indices = []
         for idx, scene in enumerate(scenes):
             should_analyze = False
@@ -1425,9 +1453,21 @@ class VisionFrameAnalyzer:
                     should_analyze = True
             if not should_analyze:
                 continue
-            if scene_vision_success_ok(scene):
+            if scene_online_vision_skippable_for_current_video(scene, video_abs):
                 _log_skip_existing_vision_analysis(project_id, idx, scene, mode, str(provider or "online"))
                 continue
+            if scene_vision_success_ok(scene):
+                try:
+                    tr = f"{float(scene.get('start_time')):.3f}-{float(scene.get('end_time')):.3f}"
+                except (TypeError, ValueError):
+                    tr = "?"
+                logger.info(
+                    "在线视觉：历史结果与当前视频不一致或缺少 vision_source_video_fp，将重新分析 project_id=%s scene_idx=%s time_range=%s mode=%s",
+                    project_id,
+                    idx,
+                    tr,
+                    mode,
+                )
             to_analyze_indices.append(idx)
 
         total_to_analyze = len(to_analyze_indices)
@@ -1486,6 +1526,7 @@ class VisionFrameAnalyzer:
             api_concurrency=api_concurrency,
             task_id=task_id,
             prompt_language=prompt_language,
+            video_fp_for_persist=video_fp_for_persist,
         )
 
         if stopped_early:

@@ -46,7 +46,11 @@ export interface UseProjectEditUploadStepOptions {
   sceneExtractProgress: number;
   sceneExtractMessage: string;
   sceneExtractPhase: string | null;
-  runOmniPipeline: (options?: { force?: boolean; task_id?: string | null }) => Promise<void>;
+  runOmniPipeline: (options?: {
+    force?: boolean;
+    task_id?: string | null;
+    multimodal_action?: "auto" | "continue" | "restart";
+  }) => Promise<void>;
   cancelOmniPipeline: () => Promise<void>;
   extractingOmniPipeline: boolean;
   omniPipelineProgress: number;
@@ -122,6 +126,10 @@ export interface UseProjectEditUploadStepReturn {
   omniPipelineShowProgressBar: boolean;
   omniPipelineCanStop: boolean;
   omniMultimodalResult: OmniMultimodalResult | null;
+  omniMultimodalChoiceModalOpen: boolean;
+  onOmniMultimodalChoiceContinue: () => void;
+  onOmniMultimodalChoiceRestart: () => void;
+  onOmniMultimodalChoiceCancel: () => void;
 }
 
 export function useProjectEditUploadStep(
@@ -161,6 +169,7 @@ export function useProjectEditUploadStep(
   const subtitleOverwriteResolverRef = useRef<((value: boolean) => void) | null>(null);
 
   const [visionChoiceModalOpen, setVisionChoiceModalOpen] = useState(false);
+  const [omniMultimodalChoiceModalOpen, setOmniMultimodalChoiceModalOpen] = useState(false);
   const [subtitleOverwriteModalOpen, setSubtitleOverwriteModalOpen] = useState(false);
   const [isStoppingSceneExtraction, setIsStoppingSceneExtraction] = useState(false);
   const [isStoppingOmniPipeline, setIsStoppingOmniPipeline] = useState(false);
@@ -671,13 +680,37 @@ export function useProjectEditUploadStep(
       options.showErrorText("请先提取或上传字幕（Omni 管线依赖字幕）");
       return;
     }
+    if (p.omni_multimodal_json_path) {
+      setOmniMultimodalChoiceModalOpen(true);
+      return;
+    }
     try {
-      await options.runOmniPipeline({ force: Boolean(p.omni_multimodal_json_path) });
+      await options.runOmniPipeline({ multimodal_action: "auto" });
       options.showSuccess("Omni 管线任务已提交");
     } catch (err) {
       options.showError(err, "Omni 管线失败");
     }
   }, [options]);
+
+  const onOmniMultimodalChoiceContinue = useCallback(() => {
+    setOmniMultimodalChoiceModalOpen(false);
+    void options
+      .runOmniPipeline({ multimodal_action: "continue" })
+      .then(() => options.showSuccess("Omni 管线任务已提交"))
+      .catch((err) => options.showError(err, "Omni 管线失败"));
+  }, [options]);
+
+  const onOmniMultimodalChoiceRestart = useCallback(() => {
+    setOmniMultimodalChoiceModalOpen(false);
+    void options
+      .runOmniPipeline({ multimodal_action: "restart" })
+      .then(() => options.showSuccess("Omni 管线任务已提交"))
+      .catch((err) => options.showError(err, "Omni 管线失败"));
+  }, [options]);
+
+  const onOmniMultimodalChoiceCancel = useCallback(() => {
+    setOmniMultimodalChoiceModalOpen(false);
+  }, []);
 
   const onStopOmniPipeline = useCallback(async () => {
     if (isStoppingOmniPipeline) return;
@@ -754,5 +787,9 @@ export function useProjectEditUploadStep(
     omniPipelineShowProgressBar: options.omniPipelineShowProgressBar,
     omniPipelineCanStop: options.omniPipelineCanStop,
     omniMultimodalResult: options.omniMultimodalResult,
+    omniMultimodalChoiceModalOpen,
+    onOmniMultimodalChoiceContinue,
+    onOmniMultimodalChoiceRestart,
+    onOmniMultimodalChoiceCancel,
   };
 }

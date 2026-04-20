@@ -35,7 +35,6 @@ class AIService:
             api_key=cfg.api_key,
             base_url=cfg.base_url,
             model_name=cfg.model_name,
-            max_tokens=cfg.max_tokens,
             temperature=cfg.temperature,
             timeout=cfg.timeout,
             extra_params=cfg.extra_params or {},
