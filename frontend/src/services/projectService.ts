@@ -495,6 +495,45 @@ export class ProjectService {
     return response.data ?? {};
   }
 
+  /** Omni：单步 — 解说文案结构化 + 向量（调试用） */
+  async runOmniCopywritingStructEmbed(
+    projectId: string,
+    body?: Record<string, unknown>
+  ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
+      `/api/projects/${projectId}/omni/copywriting-struct-embed/run`,
+      body ?? {},
+      120000
+    );
+    return response.data ?? {};
+  }
+
+  /** Omni：单步 — 镜头匹配（调试用） */
+  async runOmniShotMatch(
+    projectId: string,
+    body?: Record<string, unknown>
+  ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
+      `/api/projects/${projectId}/omni/shot-match/run`,
+      body ?? {},
+      120000
+    );
+    return response.data ?? {};
+  }
+
+  /** Omni：单步 — 解说脚本生成（POST …/omni/generate-script/run，与通用 generateScript 区分） */
+  async runOmniStepGenerateScript(
+    projectId: string,
+    body?: Record<string, unknown>
+  ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
+      `/api/projects/${projectId}/omni/generate-script/run`,
+      body ?? {},
+      120000
+    );
+    return response.data ?? {};
+  }
+
   /**
    * 根据脚本生成输出视频（后台任务 + WebSocket 进度）
    */

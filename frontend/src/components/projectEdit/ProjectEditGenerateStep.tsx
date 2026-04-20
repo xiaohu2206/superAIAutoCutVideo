@@ -152,23 +152,37 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
           hideVisualGenerateScriptButton={project.project_type === "omni"}
-          isOmniFullPipelineRunning={omniNarration.omniPipelineBusy}
+          isOmniFullPipelineRunning={omniNarration.omniAnyPipelineBusy}
           omniScriptGenerateSlot={
             project.project_type === "omni" ? (
               <OmniFullNarrationPipelineControls
-                busy={omniNarration.omniPipelineBusy}
+                busy={omniNarration.omniAnyPipelineBusy}
                 disabled={omniNarration.omniPipelineDisabled}
                 disabledReason={omniNarration.omniPipelineDisabledReason}
+                omniPipelineBusy={omniNarration.omniPipelineBusy}
+                omniStepTestPhase={omniNarration.omniStepTestPhase}
                 onRun={omniNarration.handleRunOmniFullNarrationPipeline}
+                onRunStepEmbed={omniNarration.handleRunOmniStepEmbed}
+                onRunStepShotMatch={omniNarration.handleRunOmniStepShotMatch}
+                onRunStepGenerateScript={omniNarration.handleRunOmniStepGenerateScript}
               />
             ) : undefined
           }
           omniScriptProgressSlot={
             project.project_type === "omni" ? (
               <OmniFullNarrationPipelineProgress
-                busy={omniNarration.omniPipelineBusy}
+                busy={omniNarration.omniAnyPipelineBusy}
                 progress={omniNarration.omniPipelineProgress}
                 logs={omniNarration.omniPipelineLogs}
+                title={
+                  omniNarration.omniStepTestPhase === "embed"
+                    ? "Omni 单步：文案结构化 + 向量"
+                    : omniNarration.omniStepTestPhase === "shotMatch"
+                      ? "Omni 单步：镜头匹配"
+                      : omniNarration.omniStepTestPhase === "generateScript"
+                        ? "Omni 单步：解说脚本生成"
+                        : undefined
+                }
               />
             ) : undefined
           }

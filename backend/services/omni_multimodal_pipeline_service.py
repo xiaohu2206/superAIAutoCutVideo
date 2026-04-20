@@ -80,6 +80,38 @@ def _shot_step2_complete(sh: Dict[str, Any]) -> bool:
     return True
 
 
+def _exception_message_blob(exc: BaseException) -> str:
+    parts: List[str] = []
+    seen: set[int] = set()
+    cur: Optional[BaseException] = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        parts.append(str(cur))
+        cur = cur.__cause__ or cur.__context__
+    return " ".join(parts).lower()
+
+
+def _is_upstream_vision_policy_block(exc: BaseException) -> bool:
+    """Gemini / Vertex 等内容安全策略拒绝（非超时、非鉴权类）时返回 True，用于 Step2 单镜头降级。"""
+    if isinstance(exc, asyncio.TimeoutError):
+        return False
+    blob = _exception_message_blob(exc)
+    if not blob.strip():
+        return False
+    needles = (
+        "prohibited_content",
+        "content is prohibited",
+        "blocked by google gemini",
+        "safety filters",
+        "official usage policies",
+        "image_blocked",
+        "harm category",
+        "responsible ai practices",
+        "person_generation",
+    )
+    return any(n in blob for n in needles)
+
+
 def _try_load_existing_multimodal_json(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
@@ -101,7 +133,7 @@ def _prior_multimodal_map(existing: Dict[str, Any]) -> Dict[Tuple[str, str, str]
 def _merge_shot_with_prior(step1_shot: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(step1_shot)
     out.pop("omni_step2_status", None)
-    for k in ("frames", "visual", "summary", "embedding"):
+    for k in ("frames", "visual", "summary", "embedding", "omni_step2_status", "omni_step2_vl_error"):
         if k in prior:
             out[k] = prior[k]
     sub_text = str(step1_shot.get("subtitle_full_text") or "")
@@ -653,6 +685,7 @@ class OmniMultimodalPipelineService:
                 done_count = len(shots) - len(pending_idx)
 
                 lock = asyncio.Lock()
+                vl_policy_blocked_count = 0
 
                 def _meta_base(*, partial: bool) -> Dict[str, Any]:
                     meta: Dict[str, Any] = {
@@ -661,6 +694,8 @@ class OmniMultimodalPipelineService:
                         "embedding_model": emb_cfg.embedding_model,
                         "completed_at": datetime.now().isoformat(),
                     }
+                    if vl_policy_blocked_count > 0:
+                        meta["step2_vl_policy_blocked_shots"] = int(vl_policy_blocked_count)
                     if partial:
                         meta["partial"] = True
                     return meta
@@ -838,7 +873,7 @@ class OmniMultimodalPipelineService:
                     frame_paths: List[str],
                     images: List[Image.Image],
                 ) -> None:
-                    nonlocal done_count
+                    nonlocal done_count, vl_policy_blocked_count
                     if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                         raise asyncio.CancelledError()
                     sub_text = str(shot.get("subtitle_full_text") or "")
@@ -903,6 +938,54 @@ class OmniMultimodalPipelineService:
                                 )
                                 await asyncio.sleep(retry_delays[attempt])
                     if raw is None:
+                        if last_fail is not None and (not last_was_timeout) and _is_upstream_vision_policy_block(last_fail):
+                            logger.warning(
+                                "[omni-pipeline] Step2 上游视觉内容策略拦截，改为仅字幕/占位语义向量: project_id=%s task_id=%s shot_idx=%s err=%s",
+                                project_id,
+                                task_id,
+                                idx,
+                                last_fail,
+                            )
+                            visual = _parse_visual_json("")
+                            summary = _build_shot_embedding_summary(visual, sub_text, vl_prompt_language)
+                            summary = (summary + "\n[omni:vl_policy_blocked]").strip()[:12000]
+                            try:
+                                embedding = await _embed_one(summary)
+                            except Exception as emb_exc:
+                                logger.warning(
+                                    "[omni-pipeline] Step2 策略降级后向量化失败，尝试中性占位文本: project_id=%s shot_idx=%s err=%s",
+                                    project_id,
+                                    idx,
+                                    emb_exc,
+                                )
+                                embedding = await _embed_one("omni_shot_semantic_placeholder")
+                            item = dict(shot)
+                            item["frames"] = list(frame_paths)
+                            item["subtitle"] = {
+                                "full_text": sub_text,
+                                "segments": shot.get("subtitles") or [],
+                            }
+                            item["visual"] = visual
+                            item["summary"] = summary
+                            item["embedding"] = embedding
+                            item["omni_step2_status"] = "vl_policy_blocked"
+                            item["omni_step2_vl_error"] = str(last_fail)[:2000]
+                            async with lock:
+                                enriched[idx] = item
+                                vl_policy_blocked_count += 1
+                                done_count += 1
+                                pct = 35.0 + 60.0 * (done_count / max(1, len(shots)))
+                                task_progress_store.set_state(
+                                    scope=self.SCOPE,
+                                    project_id=project_id,
+                                    task_id=task_id,
+                                    status="processing",
+                                    progress=min(95.0, pct),
+                                    message=f"Step2: 多模态处理 {done_count}/{len(shots)}（含策略降级）",
+                                    phase="step2",
+                                )
+                            await _persist_snapshot(partial=True)
+                            return
                         if last_fail is not None:
                             if last_was_timeout:
                                 msg = f"单次模型调用超过{int(infer_wall_sec)}秒未返回（已重试{len(retry_delays)}次）"
@@ -966,12 +1049,22 @@ class OmniMultimodalPipelineService:
                         len(bundles),
                         api_concurrency,
                     )
-                    await asyncio.gather(
+                    # 必须用 return_exceptions=True：默认 gather 在首个子任务抛错时会立刻返回，
+                    # 但 finally 仍会关闭 runner，其余仍在跑的推理会打到已关闭的 httpx 客户端，
+                    # 从而刷屏「Cannot send a request, as the client has been closed」。
+                    step2_results = await asyncio.gather(
                         *(
                             _infer_embed_one(idx, sh, fps, imgs)
                             for idx, sh, fps, imgs in bundles
-                        )
+                        ),
+                        return_exceptions=True,
                     )
+                    for res in step2_results:
+                        if isinstance(res, asyncio.CancelledError):
+                            raise res
+                    for res in step2_results:
+                        if isinstance(res, BaseException):
+                            raise res
                     logger.info(
                         "[omni-pipeline] Step2 gather 正常结束 project_id=%s task_id=%s runner_id=%s",
                         project_id,
@@ -998,13 +1091,16 @@ class OmniMultimodalPipelineService:
 
                 await _persist_snapshot(partial=False)
 
+                done_msg = "Omni 管线完成（镜头拆分 + 多模态向量化）"
+                if vl_policy_blocked_count > 0:
+                    done_msg += f"；{vl_policy_blocked_count} 个语义段因上游内容策略未生成画面描述，已用语义占位向量继续"
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,
                     task_id=task_id,
                     status="completed",
                     progress=100,
-                    message="Omni 管线完成（镜头拆分 + 多模态向量化）",
+                    message=done_msg,
                     phase="done",
                 )
             except asyncio.CancelledError:

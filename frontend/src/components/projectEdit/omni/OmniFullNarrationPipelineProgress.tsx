@@ -6,6 +6,8 @@ export interface OmniFullNarrationPipelineProgressProps {
   busy: boolean;
   progress: number;
   logs: WsProgressLog[];
+  /** 进度条左侧标题（全链路 vs 单步测试） */
+  title?: string;
 }
 
 /**
@@ -15,13 +17,14 @@ const OmniFullNarrationPipelineProgress: React.FC<OmniFullNarrationPipelineProgr
   busy,
   progress,
   logs,
+  title = "Omni 全链路进度（结构化 → 镜头 → 路径 → 脚本）",
 }) => {
   if (!busy && !(progress > 0 && progress < 100)) return null;
 
   return (
     <div className="w-full ml-0 mt-3">
       <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-        <span>Omni 全链路进度（结构化 → 镜头 → 路径 → 脚本）</span>
+        <span>{title}</span>
         <span>{Math.round(progress)}%</span>
       </div>
       <div className="w-full h-2 mb-2 bg-gray-200 rounded">

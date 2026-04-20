@@ -1,41 +1,96 @@
 import { Loader } from "lucide-react";
 import React from "react";
+import type { OmniStepTestPhase } from "../../../hooks/omni/useOmniFullNarrationPipeline";
 
 export interface OmniFullNarrationPipelineControlsProps {
+  /** 全链路或任一单步运行中 */
   busy: boolean;
   disabled: boolean;
   disabledReason?: string;
+  omniPipelineBusy: boolean;
+  omniStepTestPhase: OmniStepTestPhase | null;
   onRun: () => void;
+  onRunStepEmbed: () => void;
+  onRunStepShotMatch: () => void;
+  onRunStepGenerateScript: () => void;
 }
 
 /**
- * Omni 专用：仅「全链路」触发按钮（进度条由 ProjectOperations 内全宽 slot 渲染，与 visual 脚本进度布局一致）。
+ * Omni：全链路触发 + 三个单步测试按钮（与 visual 脚本进度布局一致的上层 slot）。
  */
 const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineControlsProps> = ({
   busy,
   disabled,
   disabledReason,
+  omniPipelineBusy,
+  omniStepTestPhase,
   onRun,
+  onRunStepEmbed,
+  onRunStepShotMatch,
+  onRunStepGenerateScript,
 }) => {
   const btnDisabled = disabled || busy;
 
+  const stepSpin = (phase: OmniStepTestPhase) =>
+    busy && omniStepTestPhase === phase && !omniPipelineBusy ? (
+      <Loader className="h-4 w-4 mr-1.5 animate-spin shrink-0" />
+    ) : null;
+
   return (
-    <button
-      type="button"
-      onClick={onRun}
-      disabled={btnDisabled}
-      title={disabledReason}
-      className="flex items-center justify-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {busy ? (
-        <>
-          <Loader className="h-5 w-5 mr-2 animate-spin" />
-          全链路生成中…
-        </>
-      ) : (
-        <>生成解说脚本（Omni 全链路）</>
-      )}
-    </button>
+    <div className="flex flex-col gap-3 items-stretch w-full max-w-xl">
+      <div className="rounded-lg border border-dashed border-amber-300/80 bg-amber-50/60 px-3 py-2">
+        <div className="text-xs text-amber-900/80 mb-2 font-medium">分步测试（按全链路顺序点击）</div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onRunStepEmbed}
+            disabled={btnDisabled}
+            title={disabledReason}
+            className="inline-flex items-center justify-center px-3 py-1.5 text-sm bg-white text-amber-900 border border-amber-400 rounded-md hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {stepSpin("embed")}
+            ① 文案结构化 + 向量
+          </button>
+          <button
+            type="button"
+            onClick={onRunStepShotMatch}
+            disabled={btnDisabled}
+            title={disabledReason}
+            className="inline-flex items-center justify-center px-3 py-1.5 text-sm bg-white text-amber-900 border border-amber-400 rounded-md hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {stepSpin("shotMatch")}
+            ② 镜头匹配
+          </button>
+          <button
+            type="button"
+            onClick={onRunStepGenerateScript}
+            disabled={btnDisabled}
+            title={disabledReason}
+            className="inline-flex items-center justify-center px-3 py-1.5 text-sm bg-white text-amber-900 border border-amber-400 rounded-md hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {stepSpin("generateScript")}
+            ③ 解说脚本生成
+          </button>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={btnDisabled}
+        title={disabledReason}
+        className="flex items-center justify-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {busy && omniPipelineBusy ? (
+          <>
+            <Loader className="h-5 w-5 mr-2 animate-spin" />
+            全链路生成中…
+          </>
+        ) : (
+          <>生成解说脚本（Omni 全链路）</>
+        )}
+      </button>
+    </div>
   );
 };
 

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 多模态结果 JSON（shots_multimodal.json）磁盘加密：保存时加密、读取时解密。
+Omni 多模态结果 JSON（shots_multimodal.json）磁盘格式。
 
-- 磁盘格式：魔数 OMMJ1 + 换行 + Fernet 密文（ASCII）。
-- 兼容：仍以 `{` / `[` 开头的旧明文文件按 JSON 解析。
-- 密钥：优先环境变量 OMNI_MULTIMODAL_JSON_FERNET_KEY（Fernet.generate_key() 产出的 44 字符）；
-  否则用 OMNI_MULTIMODAL_JSON_SECRET 经 PBKDF2 派生；若均未设置则用本机指纹材料派生（本地混淆，非强安全）。
+- 写入：当前为明文 UTF-8 JSON（不再写入 OMMJ1 加密包）。
+- 读取：支持明文；仍兼容历史 OMMJ1（魔数 + Fernet 密文），密钥规则见 get_multimodal_json_fernet。
 """
 
 from __future__ import annotations
@@ -79,9 +77,10 @@ def decrypt_json_text(blob: bytes) -> str:
 
 
 def write_encrypted_multimodal_json(path: Path, payload: Dict[str, Any]) -> None:
+    """历史函数名保留：实际按明文 JSON 写入磁盘。"""
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encrypt_json_text(text))
+    path.write_text(text, encoding="utf-8")
 
 
 def read_multimodal_json(path: Path) -> Dict[str, Any]:
