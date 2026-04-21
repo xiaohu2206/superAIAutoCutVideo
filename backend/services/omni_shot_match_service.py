@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_shot_match"
 
+# 常量开关：为 True 时跳过 Stage1 rerank HTTP 调用，直接用 embedding_score 作为粗排分数
+SKIP_STAGE1_RERANK = True
+
 
 def _work_dir(project_id: str) -> Path:
     return _uploads_dir() / "omni_shot_match" / project_id
@@ -59,10 +62,9 @@ class OmniShotMatchService:
         stage1_top_n: int = 10,
         stage2_top_n: int = 3,
         stage2_return_n: int = 3,
-        output_top_k: int = 0,
-        concurrency: int = 4,
-        skip_stage1_rerank: bool = False,
-        rerank_instruct: Optional[str] = None,
+    output_top_k: int = 0,
+    concurrency: int = 4,
+    rerank_instruct: Optional[str] = None,
         temperature: float = 0.2,
         weights: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
@@ -153,7 +155,7 @@ class OmniShotMatchService:
                 cfg = ai_search_shot_model_config_manager.get_config()
                 if not cfg or not (cfg.api_key or "").strip():
                     raise ValueError("请先在「向量模型」设置中配置 API Key")
-                if not skip_stage1_rerank and not str(cfg.rerank_base_url or "").strip():
+                if not SKIP_STAGE1_RERANK and not str(cfg.rerank_base_url or "").strip():
                     raise ValueError("未配置召回/重排接口 rerank_base_url")
 
                 task_progress_store.set_state(
@@ -298,7 +300,7 @@ class OmniShotMatchService:
                             items=items,
                             search_rows=search_rows,
                             prompt_language=prompt_language,
-                            skip_stage1_rerank=skip_stage1_rerank,
+                            skip_stage1_rerank=SKIP_STAGE1_RERANK,
                             rerank_model=rerank_model,
                             stage1_instruct=stage1_instruct,
                             stage1_top_n=stage1_top_n,
@@ -359,7 +361,7 @@ class OmniShotMatchService:
                         "stage1_top_n": int(stage1_top_n or 10),
                         "stage2_top_n": int(stage2_top_n or 3),
                         "stage2_return_n": int(stage2_return_n or 3),
-                        "skip_stage1_rerank": bool(skip_stage1_rerank),
+                        "skip_stage1_rerank": bool(SKIP_STAGE1_RERANK),
                         "models": {"stage1": rerank_model, "stage2": llm_label},
                         "weights": {"rerank_score": w_rerank, "embedding_score": w_embed, "continuity_score": w_cont},
                         "generated_at": datetime.now().isoformat(),

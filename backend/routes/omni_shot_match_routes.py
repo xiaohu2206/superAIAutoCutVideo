@@ -37,10 +37,6 @@ class OmniShotMatchRunRequest(BaseModel):
     stage2_return_n: int = Field(default=3, ge=1, le=20)
     output_top_k: int = Field(default=0, ge=0, le=100, description="0 表示不截断；>0 时每条解说仅保留前 N 个镜头")
     concurrency: int = Field(default=4, ge=1, le=32)
-    skip_stage1_rerank: bool = Field(
-        default=False,
-        description="为 true 时跳过召回 API，阶段1直接用 embedding 分数",
-    )
     rerank_instruct: Optional[str] = Field(default=None, description="覆盖默认的 stage1 粗排指令")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     weights: Optional[OmniShotMatchWeights] = None
@@ -63,7 +59,6 @@ async def omni_shot_match_run(
             stage2_return_n=int(req.stage2_return_n),
             output_top_k=int(req.output_top_k),
             concurrency=int(req.concurrency),
-            skip_stage1_rerank=bool(req.skip_stage1_rerank),
             rerank_instruct=req.rerank_instruct,
             temperature=float(req.temperature),
             weights=w,

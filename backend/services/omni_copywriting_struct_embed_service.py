@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 项目：解说文案结构化（文案生成模型） + 向量化（向量模型设置）。
+Omni 项目：解说文案结构化（与在线视觉共用「视频理解模型」）+ 向量化（向量模型设置）。
 与 visual / generate_script 等业务模块解耦；产出 uploads/omni_copywriting_embed/{project_id}/。
 """
 
@@ -17,8 +17,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from modules.ai import ChatMessage
+from modules.ai import AIModelConfig, ChatMessage, get_provider_class
 from modules.config.ai_search_shot_model_config import ai_search_shot_model_config_manager
+from modules.config.video_model_config import video_model_config_manager
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
     load_structuring_prompt,
@@ -30,12 +31,29 @@ from modules.omni_copywriting_struct_embed import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.ai_service import ai_service
 from services.extract_subtitle_service import _to_web_path, _uploads_dir
 
 logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_copywriting_embed"
+
+# 与 omni_multimodal_pipeline Step2 / vision_frame_analysis 在线视觉一致，需可调 chat completions 的在线 VL
+_STRUCT_ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_openai_vision"})
+
+
+def _video_cfg_to_ai_cfg(cfg: Any) -> AIModelConfig:
+    return AIModelConfig(
+        provider=cfg.provider,
+        api_key=cfg.api_key,
+        base_url=cfg.base_url,
+        model_name=cfg.model_name,
+        temperature=cfg.temperature,
+        timeout=cfg.timeout,
+        extra_params={
+            **(cfg.extra_params or {}),
+            "stream_output": bool(getattr(cfg, "stream_output", False)),
+        },
+    )
 
 
 def _work_dir(project_id: str) -> Path:
@@ -68,10 +86,28 @@ async def _call_structuring_chunk(
     prompt = prompt_template.replace("{copywriting}", chunk_text)
     messages = [ChatMessage(role="user", content=prompt)]
 
+    active_vl = video_model_config_manager.get_active_config()
+    if not active_vl or active_vl.provider not in _STRUCT_ONLINE_VL_PROVIDERS:
+        raise ValueError(
+            "文案结构化需与在线视觉分析共用「视频理解模型」：请在设置中选择 "
+            "yunwu / 302ai / qwen / doubao / custom_openai_vision 之一并配置密钥"
+        )
+
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
-            resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+            provider_cls = get_provider_class(active_vl.provider)
+            if not provider_cls:
+                raise RuntimeError(f"不支持的AI提供商: {active_vl.provider}")
+            ai_cfg = _video_cfg_to_ai_cfg(active_vl)
+            provider = provider_cls(ai_cfg)
+            try:
+                resp = await provider.chat_completion(
+                    messages,
+                    extra_params={"response_format": {"type": "json_object"}},
+                )
+            finally:
+                await provider.close()
             raw = (resp.content or "").strip()
             parsed = parse_model_json_array(raw)
             out: List[Dict[str, Any]] = []
@@ -301,8 +337,9 @@ class OmniCopywritingStructEmbedService:
                 lock = asyncio.Lock()
                 llm_label = ""
                 try:
-                    info = ai_service.get_provider_info()
-                    llm_label = f"{info.get('active_provider') or ''}/{info.get('active_model') or ''}".strip("/")
+                    av = video_model_config_manager.get_active_config()
+                    if av:
+                        llm_label = f"{av.provider}/{av.model_name}".strip("/")
                 except Exception:
                     llm_label = ""
 
