@@ -126,18 +126,50 @@ def _truncate_text(text: str, max_len: int) -> str:
 
 def _pick_scene_text(shot: Dict[str, Any]) -> str:
     visual = shot.get("visual") or {}
-    summary = _normalize_spaces(shot.get("summary", ""))
-    if summary:
-        return summary
-    parts = [
-        f"画面：{_normalize_spaces(visual.get('brief') or visual.get('desc') or '')}"
-        if (visual.get("brief") or visual.get("desc"))
-        else "",
-        f"动作：{_normalize_spaces(visual.get('action', ''))}" if visual.get("action") else "",
-        f"情绪：{_normalize_spaces(visual.get('emotion', ''))}" if visual.get("emotion") else "",
-        f"字幕：{_normalize_spaces(shot.get('subtitle_full_text', ''))}" if shot.get("subtitle_full_text") else "",
-    ]
-    return _normalize_spaces(" | ".join([p for p in parts if p]))
+    brief = _normalize_spaces(visual.get("brief") or "")
+    sub = _normalize_spaces(shot.get("subtitle_full_text") or "")
+    parts: List[str] = []
+    if brief:
+        parts.append(brief)
+    if sub:
+        parts.append(f"字幕：{sub}")
+    return _normalize_spaces(" | ".join(parts))
+
+
+def _parse_summary_subtitle_from_blob(blob: str) -> Tuple[str, str]:
+    """从检索 match 的 summary 长文本中拆出「摘要」「字幕」段落。"""
+    blob = (blob or "").strip()
+    if not blob:
+        return "", ""
+    m_sub = re.search(r"(?:^|\r?\n)\s*字幕：\s*(.+)$", blob, re.MULTILINE | re.DOTALL)
+    sub_from_blob = _normalize_spaces(m_sub.group(1)) if m_sub else ""
+    m_abs = re.search(
+        r"(?:^|\r?\n)\s*摘要：\s*(.+?)(?=\r?\n\s*字幕：|\Z)", blob, re.MULTILINE | re.DOTALL
+    )
+    abstract = _normalize_spaces(m_abs.group(1)) if m_abs else ""
+    if not abstract and not sub_from_blob:
+        abstract = _normalize_spaces(re.sub(r"^详细：\s*", "", blob, flags=re.MULTILINE))
+        return abstract, ""
+    if not abstract and sub_from_blob:
+        before = re.split(r"\r?\n\s*字幕：", blob, maxsplit=1)[0]
+        abstract = _normalize_spaces(re.sub(r"^详细：\s*", "", before.strip()))
+    return abstract, sub_from_blob
+
+
+def _pick_retrieval_candidate_scene_text(match: Dict[str, Any]) -> str:
+    """检索候选展示用：优先 brief+字幕；为空则用 summary 中的摘要/字幕。"""
+    primary = _pick_scene_text(match)
+    if primary:
+        return primary
+    sub = _normalize_spaces(match.get("subtitle_full_text") or "")
+    abstract, sub_blob = _parse_summary_subtitle_from_blob(match.get("summary") or "")
+    sub = sub or sub_blob
+    parts: List[str] = []
+    if abstract:
+        parts.append(f"摘要：{abstract}")
+    if sub:
+        parts.append(f"字幕：{sub}")
+    return _normalize_spaces(" | ".join(parts))
 
 
 def _build_copywriting_outline(results: List[Dict[str, Any]]) -> str:
@@ -161,7 +193,7 @@ def _build_retrieval_candidates(results: List[Dict[str, Any]], item_limit: int) 
         end = _format_ts(_safe_float(match.get("end")))
         score = _safe_float(match.get("final_score", match.get("score", 0.0)))
         reason = _truncate_text(match.get("reason", ""), 72)
-        scene = _truncate_text(_pick_scene_text(match), 120)
+        scene = _truncate_text(_pick_retrieval_candidate_scene_text(match), 120)
         lines.append(
             f"  候选1 | shot_id={match.get('shot_id')} | {start}-{end} | score={score:.3f} | {scene} "  # | 匹配原因:{reason}
         )

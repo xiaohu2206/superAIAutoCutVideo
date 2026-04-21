@@ -275,6 +275,24 @@ def get_shot_embedding(shot: Dict[str, Any]) -> Optional[List[float]]:
     return get_item_embedding(shot)
 
 
+def build_shot_embedding_text(shot: Dict[str, Any], *, prompt_language: str = "zh") -> str:
+    """
+    与 omni_multimodal_pipeline Step2 写入 embedding 时一致：优先 summary；
+    否则由 visual + 字幕拼出与 _build_shot_embedding_summary 相同的文本。
+    """
+    summary = str(shot.get("summary") or "").strip()
+    if summary:
+        return summary
+    visual = shot.get("visual") if isinstance(shot.get("visual"), dict) else {}
+    subtitle_text = str(shot.get("subtitle_full_text") or "")
+    language = str(prompt_language or "zh").strip().lower()
+    desc = str(visual.get("desc", "") or "")
+    brief = str(visual.get("brief", "") or "")
+    if language == "en":
+        return (f"Detail: {desc}\n" f"Brief: {brief}\n" f"Subtitles: {subtitle_text}").strip()
+    return (f"详细：{desc}\n" f"摘要：{brief}\n" f"字幕：{subtitle_text}").strip()
+
+
 def fine_rerank_json_schema() -> Dict[str, Any]:
     return {
         "name": "omni_fine_rerank",

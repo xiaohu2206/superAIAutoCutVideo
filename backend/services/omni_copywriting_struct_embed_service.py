@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 项目：解说文案结构化（与在线视觉共用「视频理解模型」）+ 向量化（向量模型设置）。
+Omni 项目：解说文案结构化（与在线视觉共用「视频理解模型」）+ 向量化（本地 BGE-base-zh-v1.5）。
 与 visual / generate_script 等业务模块解耦；产出 uploads/omni_copywriting_embed/{project_id}/。
 """
 
@@ -15,10 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from modules.config.ai_search_shot_model_config import ai_search_shot_model_config_manager
 from modules.config.video_model_config import video_model_config_manager
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
@@ -32,6 +29,11 @@ from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from services.extract_subtitle_service import _to_web_path, _uploads_dir
+from services.omni_local_bge_embedding import (
+    LOCAL_BGE_MODEL_DISPLAY_NAME,
+    assert_local_bge_model_available,
+    encode_text_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,40 +152,6 @@ async def _call_structuring_chunk(
             )
             raise
     return []
-
-
-async def _embed_one_text(
-    emb_cfg: Any,
-    text: str,
-) -> List[float]:
-    headers = {
-        "Authorization": f"Bearer {emb_cfg.api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {"model": emb_cfg.embedding_model, "input": text}
-    timeout = httpx.Timeout(float(emb_cfg.timeout_seconds or 300))
-    last_err: Optional[Exception] = None
-    retries = max(1, int(emb_cfg.max_retries or 3))
-    base_sleep = float(emb_cfg.retry_sleep_seconds or 2.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in range(retries):
-            try:
-                r = await client.post(str(emb_cfg.embedding_base_url), headers=headers, json=payload)
-                r.raise_for_status()
-                data = r.json()
-                emb = data["data"][0]["embedding"]
-                if isinstance(emb, list) and emb:
-                    return emb
-                raise RuntimeError("embedding 为空")
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                last_err = e
-                if attempt + 1 >= retries:
-                    break
-                delay = min(60.0, base_sleep * (2**attempt))
-                await asyncio.sleep(delay)
-    raise RuntimeError(f"向量化失败: {last_err}")
 
 
 class OmniCopywritingStructEmbedService:
@@ -317,9 +285,10 @@ class OmniCopywritingStructEmbedService:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
 
-                emb_cfg = ai_search_shot_model_config_manager.get_config()
-                if not emb_cfg or not (emb_cfg.api_key or "").strip():
-                    raise ValueError("请先在「向量模型」设置中配置向量接口与 API Key")
+                try:
+                    assert_local_bge_model_available()
+                except (FileNotFoundError, RuntimeError) as e:
+                    raise ValueError(str(e)) from e
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -353,9 +322,9 @@ class OmniCopywritingStructEmbedService:
                         out = dict(row)
                         try:
                             emb_in = build_omni_embedding_input(row, prompt_language=plang)
-                            emb = await _embed_one_text(emb_cfg, emb_in)
+                            emb = await encode_text_async(emb_in)
                             out["embedding_input"] = emb_in
-                            out["embedding_model"] = str(emb_cfg.embedding_model or "")
+                            out["embedding_model"] = LOCAL_BGE_MODEL_DISPLAY_NAME
                             out["embedding"] = emb
                         except Exception as e:
                             out["error"] = str(e)
@@ -381,7 +350,7 @@ class OmniCopywritingStructEmbedService:
                     "meta": {
                         "project_id": project_id,
                         "structured_count": len(merged_items),
-                        "embedding_model": emb_cfg.embedding_model,
+                        "embedding_model": LOCAL_BGE_MODEL_DISPLAY_NAME,
                         "content_model_hint": llm_label,
                         "prompt_language": plang,
                         "generated_at": datetime.now().isoformat(),

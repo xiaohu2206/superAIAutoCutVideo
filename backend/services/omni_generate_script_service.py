@@ -57,6 +57,39 @@ def _read_video_duration(video_path: Path) -> float:
         return 0.0
 
 
+def _pick_paragraph_shot_json_web_path(
+    *,
+    input_web: Optional[str],
+    proj_global: Optional[str],
+    proj_rerank: Optional[str],
+) -> str:
+    """
+    显式 input_web 必须存在；否则在项目的全局路径结果与镜头重排结果之间，
+    按优先级选用磁盘上第一个存在的路径（避免跳过全局路径搜索后仍命中已失效的
+    omni_global_path_search_path）。
+    """
+    exp = (input_web or "").strip()
+    if exp:
+        if not _resolve_path(exp).exists():
+            raise FileNotFoundError(f"段落-镜头候选 JSON 不存在: {exp}")
+        return exp
+
+    fallbacks: List[str] = []
+    for x in ((proj_global or "").strip(), (proj_rerank or "").strip()):
+        if x:
+            fallbacks.append(x)
+    for cand in fallbacks:
+        if _resolve_path(cand).exists():
+            return cand
+    if not fallbacks:
+        raise ValueError(
+            "缺少段落-镜头候选 JSON：请先完成镜头匹配或全局路径搜索，"
+            "或传入 input_global_path_web_path，或项目已保存 "
+            "omni_global_path_search_path / omni_shot_match_rerank_path"
+        )
+    raise FileNotFoundError("段落-镜头候选 JSON 不存在，以下项目路径均无效: " + ", ".join(fallbacks))
+
+
 def _params_from_request_and_project(
     project: Any,
     generation_params: Optional[Dict[str, Any]],
@@ -151,9 +184,11 @@ class OmniGenerateScriptService:
                 if not cur:
                     raise ValueError("项目不存在")
 
-                gp_web = (input_global_path_web_path or "").strip() or (getattr(cur, "omni_global_path_search_path", None) or "")
-                if not str(gp_web).strip():
-                    raise ValueError("缺少全局路径结果：请先完成全局路径搜索或传入 input_global_path_web_path")
+                gp_web = _pick_paragraph_shot_json_web_path(
+                    input_web=input_global_path_web_path,
+                    proj_global=getattr(cur, "omni_global_path_search_path", None),
+                    proj_rerank=getattr(cur, "omni_shot_match_rerank_path", None),
+                )
 
                 mm_web = (input_multimodal_web_path or "").strip() or (getattr(cur, "omni_multimodal_json_path", None) or "")
                 if not str(mm_web).strip():
@@ -164,8 +199,6 @@ class OmniGenerateScriptService:
                     raise ValueError("项目缺少视频路径")
 
                 gp_abs = _resolve_path(str(gp_web))
-                if not gp_abs.exists():
-                    raise FileNotFoundError(f"全局路径 JSON 不存在: {gp_web}")
 
                 mm_abs = _resolve_path(str(mm_web))
                 if not mm_abs.exists():
@@ -181,17 +214,17 @@ class OmniGenerateScriptService:
                     task_id=task_id,
                     status="processing",
                     progress=10,
-                    message="读取全局路径与镜头表…",
+                    message="读取段落-镜头候选与镜头表…",
                     phase="loading",
                 )
 
                 raw_gp = await asyncio.to_thread(lambda: gp_abs.read_text(encoding="utf-8"))
                 gp_payload = json.loads(raw_gp)
                 if not isinstance(gp_payload, dict):
-                    raise ValueError("global_path.json 根须为对象")
+                    raise ValueError("段落-镜头候选 JSON 根须为对象")
                 results = gp_payload.get("results")
                 if not isinstance(results, list) or not results:
-                    raise ValueError("global_path.json 须包含非空 results")
+                    raise ValueError("段落-镜头候选 JSON 须包含非空 results")
 
                 mm_payload = await asyncio.to_thread(read_multimodal_json, mm_abs)
                 if not isinstance(mm_payload, dict):

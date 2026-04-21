@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Omni：镜头向量粗筛 + 召回粗排 + LLM 精排 + 连续性融合（独立路由）。"""
+"""Omni：本地 BGE 向量粗筛 + LLM 精排 + 连续性融合（独立路由）。"""
 
 import logging
 from datetime import datetime
@@ -37,7 +37,10 @@ class OmniShotMatchRunRequest(BaseModel):
     stage2_return_n: int = Field(default=3, ge=1, le=20)
     output_top_k: int = Field(default=0, ge=0, le=100, description="0 表示不截断；>0 时每条解说仅保留前 N 个镜头")
     concurrency: int = Field(default=4, ge=1, le=32)
-    rerank_instruct: Optional[str] = Field(default=None, description="覆盖默认的 stage1 粗排指令")
+    rerank_instruct: Optional[str] = Field(
+        default=None,
+        description="已废弃：粗排固定为本地向量分数，该字段将被忽略",
+    )
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     weights: Optional[OmniShotMatchWeights] = None
 

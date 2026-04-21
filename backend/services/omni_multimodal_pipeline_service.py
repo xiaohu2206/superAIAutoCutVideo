@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 项目专用：镜头拆分（TransNet + 字幕语义段）与多模态特征（在线视觉 + 向量模型配置）。
+Omni 项目专用：镜头拆分（TransNet + 字幕语义段）与多模态特征（在线视觉 + 本地 BGE 句向量）。
 与 extract_scene / visual 流程完全隔离；产出写入 uploads/omni_multimodal/{project_id}/。
 """
 
@@ -20,10 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
-import httpx
 from PIL import Image
 
-from modules.config.ai_search_shot_model_config import ai_search_shot_model_config_manager
 from modules.config.video_model_config import video_model_config_manager
 from modules.projects_store import projects_store
 from modules.subtitle_utils import parse_srt
@@ -33,6 +31,7 @@ from services.extract_subtitle_service import _resolve_path, _to_web_path, _uplo
 from services.omni_internal.frame_extract import extract_quarter_frames
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json, write_encrypted_multimodal_json
 from services.omni_internal.shot_subtitle_mapper import ShotSubtitleMapper
+from services.omni_local_bge_embedding import LOCAL_BGE_MODEL_DISPLAY_NAME, assert_local_bge_model_available, encode_text_async
 from services.omni_internal.transnet_omni import detect_shots_from_video
 from services.omni_internal.types import Shot, Subtitle
 from services.vision_frame_analysis_service import (
@@ -649,9 +648,10 @@ class OmniMultimodalPipelineService:
                     raise ValueError(
                         "Omni Step2 需要在线视觉模型：请在「视频理解模型」中选择 yunwu / 302ai / qwen / doubao / custom_openai_vision 之一并配置密钥"
                     )
-                emb_cfg = ai_search_shot_model_config_manager.get_config()
-                if not emb_cfg or not (emb_cfg.api_key or "").strip():
-                    raise ValueError("请先在「向量模型」设置中配置云雾向量接口与 API Key")
+                try:
+                    assert_local_bge_model_available()
+                except (FileNotFoundError, RuntimeError) as e:
+                    raise ValueError(str(e)) from e
 
                 try:
                     infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
@@ -691,7 +691,7 @@ class OmniMultimodalPipelineService:
                     meta: Dict[str, Any] = {
                         "vl_provider": active_vl.provider,
                         "vl_model": active_vl.model_name,
-                        "embedding_model": emb_cfg.embedding_model,
+                        "embedding_model": LOCAL_BGE_MODEL_DISPLAY_NAME,
                         "completed_at": datetime.now().isoformat(),
                     }
                     if vl_policy_blocked_count > 0:
@@ -798,34 +798,7 @@ class OmniMultimodalPipelineService:
                 vl_prompt_language = "zh"
 
                 async def _embed_one(text: str) -> List[float]:
-                    headers = {
-                        "Authorization": f"Bearer {emb_cfg.api_key}",
-                        "Content-Type": "application/json",
-                    }
-                    payload = {"model": emb_cfg.embedding_model, "input": text}
-                    timeout = httpx.Timeout(float(emb_cfg.timeout_seconds or 300))
-                    last_err: Optional[Exception] = None
-                    retries = max(1, int(emb_cfg.max_retries or 3))
-                    base_sleep = float(emb_cfg.retry_sleep_seconds or 2.0)
-                    async with httpx.AsyncClient(timeout=timeout) as client:
-                        for attempt in range(retries):
-                            try:
-                                r = await client.post(str(emb_cfg.embedding_base_url), headers=headers, json=payload)
-                                r.raise_for_status()
-                                data = r.json()
-                                emb = data["data"][0]["embedding"]
-                                if isinstance(emb, list) and emb:
-                                    return emb
-                                raise RuntimeError("embedding 为空")
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as e:
-                                last_err = e
-                                if attempt + 1 >= retries:
-                                    break
-                                delay = min(60.0, base_sleep * (2**attempt))
-                                await asyncio.sleep(delay)
-                    raise RuntimeError(f"向量化失败: {last_err}")
+                    return await encode_text_async(text)
 
                 loop = asyncio.get_running_loop()
                 extract_executor = ThreadPoolExecutor(

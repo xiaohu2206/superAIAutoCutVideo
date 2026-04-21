@@ -324,21 +324,22 @@ class OmniFullNarrationPipelineService:
                         raise ValueError("项目不存在")
                     gs_path_opt = str(gs.get("input_global_path_web_path") or "").strip()
                     proj_rr = str(getattr(cur_gp, "omni_shot_match_rerank_path", None) or "").strip()
-                    # 与跑全局路径搜索时一致：其输入为镜头匹配 rerank.json；跳过时直接用该文件即可
-                    chosen_gp = gs_path_opt or proj_rr
-                    if not chosen_gp:
-                        raise ValueError(
-                            "skip_global_path_search=true 时，须在 generate_script_options 中传入 "
-                            "input_global_path_web_path，或项目已有本管线镜头重排 omni_shot_match_rerank_path"
+                    # 跳过时不再强制磁盘路径存在：优先请求路径，其次 rerank；均缺失则交给解说脚本
+                    # 按「全局路径结果 → 重排」选用第一个存在的文件。
+                    if gs_path_opt and _resolve_path(gs_path_opt).exists():
+                        generate_script_gp_web_override = gs_path_opt
+                        skip_msg = "已跳过「全局路径搜索」，使用请求指定的候选 JSON"
+                    elif proj_rr and _resolve_path(proj_rr).exists():
+                        generate_script_gp_web_override = proj_rr
+                        skip_msg = (
+                            "已跳过「全局路径搜索」，使用镜头重排结果"
+                            if not gs_path_opt
+                            else "已跳过「全局路径搜索」，请求路径不可用，已改用镜头重排结果"
                         )
-                    if not _resolve_path(chosen_gp).exists():
-                        raise FileNotFoundError(f"解说脚本输入 JSON 不存在: {chosen_gp}")
-                    generate_script_gp_web_override = chosen_gp
-                    skip_msg = (
-                        "已跳过「全局路径搜索」，使用请求指定的路径输入"
-                        if gs_path_opt
-                        else "已跳过「全局路径搜索」，使用镜头重排结果"
-                    )
+                    else:
+                        skip_msg = (
+                            "已跳过「全局路径搜索」，解说脚本将按磁盘上可用的项目候选 JSON 解析"
+                        )
                     task_progress_store.set_state(
                         scope=self.SCOPE,
                         project_id=project_id,

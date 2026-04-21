@@ -26,8 +26,8 @@ class OmniFullNarrationPipelineRunRequest(BaseModel):
     task_id: Optional[str] = None
     skip_global_path_search: bool = Field(
         default=False,
-        description="为 true 时不执行全局路径搜索；默认使用本链路刚完成的镜头重排 omni_shot_match_rerank_path，"
-        "或在 generate_script_options 中显式传入 input_global_path_web_path；文件须存在",
+        description="为 true 时不执行全局路径搜索；解说脚本步骤默认使用本链路镜头重排或项目已保存的候选 JSON，"
+        "也可在 generate_script_options 中显式传入 input_global_path_web_path（若指定则须存在）",
     )
     copywriting_embed_options: Optional[Dict[str, Any]] = Field(
         default=None,

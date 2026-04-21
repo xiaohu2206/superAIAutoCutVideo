@@ -27,7 +27,7 @@ class OmniGenerateScriptRunRequest(BaseModel):
     task_id: Optional[str] = None
     input_global_path_web_path: Optional[str] = Field(
         default=None,
-        description="覆盖项目上的 omni_global_path_search_path；默认使用已保存的 global_path.json",
+        description="可选。显式指定段落-镜头候选 JSON；省略时依次使用项目 omni_global_path_search_path、omni_shot_match_rerank_path",
     )
     input_multimodal_web_path: Optional[str] = Field(
         default=None,

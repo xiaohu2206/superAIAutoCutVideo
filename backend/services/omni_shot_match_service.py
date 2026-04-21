@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni：在「文案结构化 + 向量化」与「多模态镜头 JSON」之上做镜头粗筛（向量）、
-粗排（召回 rerank API）、精排（content 模型）与连续性融合重排。
+Omni：在「文案结构化 + 向量化」与「多模态镜头 JSON」之上做镜头粗筛（本地 BGE 向量 cosine）、
+粗排（与向量分数一致，无在线 rerank）、精排（content 模型）与连续性融合重排。
 独立目录 uploads/omni_shot_match/{project_id}/；与 visual、copywriting_embed 任务 scope 隔离。
 """
 
@@ -16,14 +16,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
-
 from modules.ai import ChatMessage
-from modules.config.ai_search_shot_model_config import ai_search_shot_model_config_manager
+from modules.omni_copywriting_struct_embed import build_omni_embedding_input
 from modules.omni_shot_match import (
     build_embedding_search_results,
     build_narration_block,
     build_rerank_documents,
+    build_shot_embedding_text,
+    get_item_embedding,
+    get_shot_embedding,
     get_timeline_info,
     load_fine_prompt_template,
     merge_fine_scores_and_continuity,
@@ -36,13 +37,15 @@ from modules.task_progress_store import task_progress_store
 from services.ai_service import ai_service
 from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
+from services.omni_local_bge_embedding import (
+    LOCAL_BGE_MODEL_DISPLAY_NAME,
+    assert_local_bge_model_available,
+    encode_text_async,
+)
 
 logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_shot_match"
-
-# 常量开关：为 True 时跳过 Stage1 rerank HTTP 调用，直接用 embedding_score 作为粗排分数
-SKIP_STAGE1_RERANK = True
 
 
 def _work_dir(project_id: str) -> Path:
@@ -62,9 +65,9 @@ class OmniShotMatchService:
         stage1_top_n: int = 10,
         stage2_top_n: int = 3,
         stage2_return_n: int = 3,
-    output_top_k: int = 0,
-    concurrency: int = 4,
-    rerank_instruct: Optional[str] = None,
+        output_top_k: int = 0,
+        concurrency: int = 4,
+        rerank_instruct: Optional[str] = None,
         temperature: float = 0.2,
         weights: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
@@ -145,18 +148,96 @@ class OmniShotMatchService:
                 prompt_language = str((meta or {}).get("prompt_language") or "zh").strip().lower()
                 if prompt_language not in ("zh", "en"):
                     prompt_language = "zh"
-                embedding_model_hint = (meta or {}).get("embedding_model") if isinstance(meta, dict) else None
 
                 mm_data = await asyncio.to_thread(read_multimodal_json, mm_abs)
                 shots = (mm_data.get("shots") if isinstance(mm_data, dict) else None) or []
                 if not isinstance(shots, list) or not shots:
                     raise ValueError("多模态 JSON 中 shots 为空")
 
-                cfg = ai_search_shot_model_config_manager.get_config()
-                if not cfg or not (cfg.api_key or "").strip():
-                    raise ValueError("请先在「向量模型」设置中配置 API Key")
-                if not SKIP_STAGE1_RERANK and not str(cfg.rerank_base_url or "").strip():
-                    raise ValueError("未配置召回/重排接口 rerank_base_url")
+                # 以解说侧向量为基准维度，避免仅重跑多模态时误删新镜头向量
+                ref_dim = 0
+                for it in items:
+                    if isinstance(it, dict):
+                        e = get_item_embedding(it)
+                        if e:
+                            ref_dim = len(e)
+                            break
+                if ref_dim == 0:
+                    for sh in shots:
+                        if isinstance(sh, dict):
+                            e = get_shot_embedding(sh)
+                            if e:
+                                ref_dim = len(e)
+                                break
+                if ref_dim > 0:
+                    for it in items:
+                        if not isinstance(it, dict):
+                            continue
+                        e = get_item_embedding(it)
+                        if e and len(e) != ref_dim:
+                            it.pop("embedding", None)
+                            it.pop("embedding_model", None)
+                            it.pop("embedding_input", None)
+                    for sh in shots:
+                        if not isinstance(sh, dict):
+                            continue
+                        e = get_shot_embedding(sh)
+                        if e and len(e) != ref_dim:
+                            sh.pop("embedding", None)
+                            sh.pop("embedding_model", None)
+                            sh.pop("embedding_input", None)
+
+                try:
+                    assert_local_bge_model_available()
+                except (FileNotFoundError, RuntimeError) as e:
+                    raise ValueError(str(e)) from e
+
+                missing_items = sum(1 for it in items if isinstance(it, dict) and not get_item_embedding(it))
+                missing_shots = sum(1 for sh in shots if isinstance(sh, dict) and not get_shot_embedding(sh))
+                if missing_items or missing_shots:
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=4,
+                        message=f"本地 BGE 补全向量（解说 {missing_items} 条、镜头 {missing_shots} 个）…",
+                        phase="embedding_backfill",
+                    )
+                    fill_sem = asyncio.Semaphore(min(8, max(sem_n, 4)))
+
+                    async def _fill_item(it: Dict[str, Any]) -> None:
+                        if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                            raise asyncio.CancelledError()
+                        if get_item_embedding(it):
+                            return
+                        async with fill_sem:
+                            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError()
+                            txt = build_omni_embedding_input(it, prompt_language=prompt_language)
+                            it["embedding"] = await encode_text_async(txt)
+                            it["embedding_model"] = LOCAL_BGE_MODEL_DISPLAY_NAME
+                            it["embedding_input"] = txt
+
+                    async def _fill_shot(sh: Dict[str, Any]) -> None:
+                        if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                            raise asyncio.CancelledError()
+                        if get_shot_embedding(sh):
+                            return
+                        async with fill_sem:
+                            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError()
+                            txt = build_shot_embedding_text(sh, prompt_language=prompt_language)
+                            sh["embedding"] = await encode_text_async(txt)
+                            sh["embedding_model"] = LOCAL_BGE_MODEL_DISPLAY_NAME
+                            sh["embedding_input"] = txt
+
+                    await asyncio.gather(
+                        *(_fill_item(it) for it in items if isinstance(it, dict)),
+                        *(_fill_shot(sh) for sh in shots if isinstance(sh, dict)),
+                    )
+
+                embedding_model_hint = LOCAL_BGE_MODEL_DISPLAY_NAME
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -172,7 +253,7 @@ class OmniShotMatchService:
                     copy_items=items,
                     shots=shots,
                     top_k=max(1, int(top_k or 20)),
-                    embedding_model_hint=str(embedding_model_hint) if embedding_model_hint else None,
+                    embedding_model_hint=embedding_model_hint,
                     prompt_language=prompt_language,
                 )
 
@@ -189,6 +270,7 @@ class OmniShotMatchService:
                         "count_copywriting_items": len(items),
                         "count_shots_total": len(shots),
                         "prompt_language": prompt_language,
+                        "embedding_model": LOCAL_BGE_MODEL_DISPLAY_NAME,
                         "generated_at": datetime.now().isoformat(),
                     },
                     "results": search_rows,
@@ -206,16 +288,7 @@ class OmniShotMatchService:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
 
-                rerank_model = str(cfg.rerank_model or "")
-                stage1_instruct = (rerank_instruct or "").strip()
-                if not stage1_instruct:
-                    if prompt_language == "en":
-                        stage1_instruct = (
-                            "Given a narration query, retrieve the most relevant shot descriptions "
-                            "that best match the query."
-                        )
-                    else:
-                        stage1_instruct = "给定一段解说文案，检索与其最相关、最匹配的镜头描述。"
+                stage1_model = LOCAL_BGE_MODEL_DISPLAY_NAME
 
                 fine_template = load_fine_prompt_template(prompt_language)
                 llm_info = ai_service.get_provider_info()
@@ -237,57 +310,6 @@ class OmniShotMatchService:
                 done = 0
                 lock = asyncio.Lock()
 
-                async def _rerank_http(
-                    query: str,
-                    documents: List[str],
-                    top_n: int,
-                ) -> List[Dict[str, Any]]:
-                    headers = {
-                        "Authorization": f"Bearer {cfg.api_key}",
-                        "Content-Type": "application/json",
-                    }
-                    payload: Dict[str, Any] = {
-                        "model": rerank_model,
-                        "query": query,
-                        "documents": documents,
-                        "top_n": max(1, min(top_n, len(documents))),
-                    }
-                    if stage1_instruct:
-                        payload["instruct"] = stage1_instruct
-                    timeout = httpx.Timeout(float(cfg.timeout_seconds or 300))
-                    retries = max(1, int(cfg.max_retries or 3))
-                    base_sleep = float(cfg.retry_sleep_seconds or 2.0)
-                    last_err: Optional[Exception] = None
-                    async with httpx.AsyncClient(timeout=timeout) as client:
-                        for attempt in range(retries):
-                            try:
-                                r = await client.post(str(cfg.rerank_base_url), headers=headers, json=payload)
-                                r.raise_for_status()
-                                data = r.json()
-                                results = None
-                                if isinstance(data, list):
-                                    results = data
-                                elif isinstance(data, dict):
-                                    if isinstance(data.get("results"), list):
-                                        results = data.get("results")
-                                    elif isinstance(data.get("data"), list):
-                                        results = data.get("data")
-                                if not isinstance(results, list):
-                                    raise RuntimeError(f"rerank 返回结构异常: {data}")
-                                out: List[Dict[str, Any]] = []
-                                for row in results:
-                                    if isinstance(row, dict):
-                                        out.append(row)
-                                return out
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as e:
-                                last_err = e
-                                if attempt + 1 >= retries:
-                                    break
-                                await asyncio.sleep(min(60.0, base_sleep * (2**attempt)))
-                    raise RuntimeError(f"rerank 调用失败: {last_err}")
-
                 async def _one_item(pos: int, r: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
                     if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                         raise asyncio.CancelledError()
@@ -300,9 +322,7 @@ class OmniShotMatchService:
                             items=items,
                             search_rows=search_rows,
                             prompt_language=prompt_language,
-                            skip_stage1_rerank=SKIP_STAGE1_RERANK,
-                            rerank_model=rerank_model,
-                            stage1_instruct=stage1_instruct,
+                            stage1_model=stage1_model,
                             stage1_top_n=stage1_top_n,
                             stage2_top_n=stage2_top_n,
                             stage2_return_n=stage2_return_n,
@@ -312,7 +332,6 @@ class OmniShotMatchService:
                             w_embed=w_embed,
                             w_cont=w_cont,
                             llm_label=llm_label,
-                            _rerank_http=_rerank_http,
                         )
 
                 async def _wrapped(pos: int, r: Dict[str, Any]) -> None:
@@ -361,8 +380,8 @@ class OmniShotMatchService:
                         "stage1_top_n": int(stage1_top_n or 10),
                         "stage2_top_n": int(stage2_top_n or 3),
                         "stage2_return_n": int(stage2_return_n or 3),
-                        "skip_stage1_rerank": bool(SKIP_STAGE1_RERANK),
-                        "models": {"stage1": rerank_model, "stage2": llm_label},
+                        "stage1_mode": "embedding",
+                        "models": {"stage1": stage1_model, "stage2": llm_label},
                         "weights": {"rerank_score": w_rerank, "embedding_score": w_embed, "continuity_score": w_cont},
                         "generated_at": datetime.now().isoformat(),
                     },
@@ -418,9 +437,7 @@ async def _process_row(
     items: List[Dict[str, Any]],
     search_rows: List[Dict[str, Any]],
     prompt_language: str,
-    skip_stage1_rerank: bool,
-    rerank_model: str,
-    stage1_instruct: str,
+    stage1_model: str,
     stage1_top_n: int,
     stage2_top_n: int,
     stage2_return_n: int,
@@ -430,7 +447,6 @@ async def _process_row(
     w_embed: float,
     w_cont: float,
     llm_label: str,
-    _rerank_http: Any,
 ) -> Tuple[int, Dict[str, Any]]:
     import time as _time
 
@@ -478,34 +494,13 @@ async def _process_row(
 
     coarse_cost = 0.0
     coarse_score_map: Dict[Any, float] = {}
-    stage1_mode = "rerank"
+    stage1_mode = "embedding"
     t1 = _time.time()
-    if skip_stage1_rerank:
-        stage1_mode = "embedding"
-        for d in docs:
-            sid = d.get("shot_id")
-            if sid is not None:
-                coarse_score_map[sid] = float(d.get("embedding_score") or 0.0)
-    else:
-        documents = [d.get("text", "") or "" for d in docs]
-        coarse_raw = await _rerank_http(
-            query=(narr.get("text", "") or ""),
-            documents=documents,
-            top_n=max(1, min(int(stage1_top_n or 10), len(documents))),
-        )
-        coarse_cost = _time.time() - t1
-        if isinstance(coarse_raw, list):
-            for rr_item in coarse_raw:
-                if not isinstance(rr_item, dict):
-                    continue
-                try:
-                    idx = int(rr_item.get("index"))
-                    sc = float(rr_item.get("relevance_score"))
-                except Exception:
-                    continue
-                if 0 <= idx < len(docs):
-                    sid = docs[idx].get("shot_id")
-                    coarse_score_map[sid] = sc
+    for d in docs:
+        sid = d.get("shot_id")
+        if sid is not None:
+            coarse_score_map[sid] = float(d.get("embedding_score") or 0.0)
+    coarse_cost = _time.time() - t1
 
     docs_sorted = sorted(docs, key=lambda d: coarse_score_map.get(d.get("shot_id"), 0.0), reverse=True)
     top_stage1 = docs_sorted[: max(1, min(int(stage1_top_n or 10), len(docs_sorted)))]
@@ -568,7 +563,7 @@ async def _process_row(
     out_row = {
         **dict(r),
         "rerank": {
-            "models": {"stage1": rerank_model, "stage2": llm_label},
+            "models": {"stage1": stage1_model, "stage2": llm_label},
             "stage1_mode": stage1_mode,
             "weights": {"rerank_score": w_rerank, "embedding_score": w_embed, "continuity_score": w_cont},
             "timing_seconds": {"stage1": float(coarse_cost), "stage2": float(fine_cost), "total": float(elapsed)},
