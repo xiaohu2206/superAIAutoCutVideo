@@ -11,7 +11,7 @@ Requirements:
 
 Field definitions:
 - desc: These are two frames from a single shot in the film. Please describe all the effective information in this shot in detail.
-- brief: within 100 words, describe the shot naturally, including main subjects and actions, environment and background, and any subtitle-driven narrative hints (natural language).
+- brief: within 150 words, describe the shot naturally, including main subjects and actions, environment and background, and any subtitle-driven narrative hints (natural language).
 - objects: main visible objects in the frame(s) as an array.
 - action: the core action as a verb or verb phrase, such as leave, run, talk.
 - scene: the setting, such as indoor, outdoor, street, room.

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from modules.app_paths import resolve_uploads_path
@@ -34,7 +34,7 @@ class OmniPipelineRunRequest(BaseModel):
 
 
 @router.post("/{project_id}/omni/run-pipeline")
-async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest = Body(default=OmniPipelineRunRequest())):
+async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest):
     try:
         data = await omni_multimodal_pipeline_service.submit_pipeline(
             project_id=project_id,

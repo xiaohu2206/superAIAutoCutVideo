@@ -489,11 +489,15 @@ class OmniMultimodalPipelineService:
         if not abs_srt.exists() or abs_srt.stat().st_size <= 0:
             raise ValueError("字幕文件不存在或为空")
 
+        mma = _normalize_multimodal_action(multimodal_action)
+        # 全部重做多模态时必须抢占「进行中」任务，否则会继续轮询旧 task_id，表现为仍走 auto/continue。
+        effective_force = bool(force) or (mma == "restart")
+
         running = task_progress_store.get_latest_running(self.SCOPE, project_id)
         if running:
             r_status = str(running.get("status") or "").strip().lower()
             r_task_id = running.get("task_id")
-            if not force:
+            if not effective_force:
                 if r_status in ("pending", "processing", "running"):
                     return {"task_id": r_task_id, "status": r_status, "message": "已有任务在运行"}
             else:
@@ -512,8 +516,6 @@ class OmniMultimodalPipelineService:
 
         if not task_id:
             task_id = f"omni_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-
-        mma = _normalize_multimodal_action(multimodal_action)
 
         task_progress_store.set_state(
             scope=self.SCOPE,

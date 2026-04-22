@@ -961,9 +961,12 @@ export const useProjectDetail = (
       setOmniPipelinePhase(null);
       stopOmniPolling();
       try {
+        const mma = options?.multimodal_action ?? "auto";
         const res = await projectService.runOmniPipeline(project.id, {
           ...options,
-          multimodal_action: options?.multimodal_action ?? "auto",
+          multimodal_action: mma,
+          // 与后端一致：restart 需抢占进行中的任务，否则会继续轮询旧 task_id
+          force: Boolean(options?.force) || mma === "restart",
         });
         const taskId = res.task_id;
         setOmniTaskId(taskId || null);

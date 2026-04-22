@@ -13,7 +13,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 from modules.ai import ChatMessage
@@ -36,6 +36,9 @@ from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_generate_script"
+
+# 单批 LLM：网络空响应、JSON 损坏、后验校验失败等均重试（与视觉管线相近的退避）
+_CHUNK_LLM_RETRY_DELAYS_SEC: Tuple[float, ...] = (1.0, 2.0, 3.0, 5.0)
 
 
 def _work_dir(project_id: str) -> Path:
@@ -265,20 +268,48 @@ class OmniGenerateScriptService:
                         ChatMessage(role="system", content=sys_p),
                         ChatMessage(role="user", content=usr_p),
                     ]
-                    async with sem:
+                    delays = _CHUNK_LLM_RETRY_DELAYS_SEC
+                    max_attempts = 1 + len(delays)
+                    last_exc: Optional[BaseException] = None
+                    for attempt in range(max_attempts):
                         if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                             raise asyncio.CancelledError()
-                        resp = await ai_service.send_chat(
-                            messages,
-                            response_format={"type": "json_object"},
-                            temperature=temp,
-                        )
-                    data, _ = sanitize_json_text_to_dict(resp.content or "")
-                    items = data.get("items") if isinstance(data, dict) else None
-                    if not isinstance(items, list) or not items:
-                        raise ValueError(f"第 {idx + 1} 批模型未返回 items")
-                    await asyncio.to_thread(post_check_chunk_items, items)
-                    chunk_outputs[idx] = items
+                        try:
+                            async with sem:
+                                if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                    raise asyncio.CancelledError()
+                                resp = await ai_service.send_chat(
+                                    messages,
+                                    response_format={"type": "json_object"},
+                                    temperature=temp,
+                                )
+                            data, _ = sanitize_json_text_to_dict(resp.content or "")
+                            items = data.get("items") if isinstance(data, dict) else None
+                            if not isinstance(items, list) or not items:
+                                raise ValueError(f"第 {idx + 1} 批模型未返回 items")
+                            await asyncio.to_thread(post_check_chunk_items, items)
+                            chunk_outputs[idx] = items
+                            return
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            last_exc = e
+                            if attempt >= len(delays):
+                                break
+                            wait_sec = float(delays[attempt])
+                            logger.warning(
+                                "omni_generate_script 第 %s 批 LLM 第 %s/%s 次失败: %s；%.1fs 后重试",
+                                idx + 1,
+                                attempt + 1,
+                                max_attempts,
+                                e,
+                                wait_sec,
+                            )
+                            if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                                raise asyncio.CancelledError()
+                            await asyncio.sleep(wait_sec)
+                    assert last_exc is not None
+                    raise last_exc
 
                 await asyncio.gather(*[_one(c) for c in chunks])
 
