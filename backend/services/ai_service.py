@@ -9,6 +9,7 @@ AI统一调用服务
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
@@ -16,6 +17,11 @@ from modules.ai import AIModelConfig, ChatMessage, ChatResponse, get_provider_cl
 from modules.config.content_model_config import content_model_config_manager, ContentModelConfig
 
 logger = logging.getLogger(__name__)
+
+# 文案/结构化等大模型 HTTP 调用：统一读超时与失败重试（避免单行 ReadTimeout 直接失败）
+LLM_HTTP_TIMEOUT_SEC = 180
+LLM_MAX_ATTEMPTS = 4  # 首次 + 最多 3 次重试
+LLM_RETRY_BASE_DELAY_SEC = 1.0
 
 
 class AIService:
@@ -64,19 +70,43 @@ class AIService:
         if not provider_cls:
             raise RuntimeError(f"不支持的AI提供商: {cfg.provider}")
 
-        ai_cfg = self._to_ai_model_config(cfg)
-        provider = provider_cls(ai_cfg)
-        try:
-            # 允许按请求覆盖结构化输出、温度等参数（与 chat_completion payload 合并）
-            extra_params: Dict[str, Any] = {}
-            if response_format:
-                extra_params["response_format"] = response_format
-            if temperature is not None:
-                extra_params["temperature"] = float(temperature)
-            resp = await provider.chat_completion(messages, extra_params=extra_params if extra_params else None)
-            return resp
-        finally:
-            await provider.close()
+        ai_cfg = self._to_ai_model_config(cfg).model_copy(update={"timeout": LLM_HTTP_TIMEOUT_SEC})
+        extra_params: Dict[str, Any] = {}
+        if response_format:
+            extra_params["response_format"] = response_format
+        if temperature is not None:
+            extra_params["temperature"] = float(temperature)
+        extra_for_call = extra_params if extra_params else None
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+            provider = provider_cls(ai_cfg)
+            try:
+                if attempt > 1:
+                    logger.warning(
+                        "send_chat 重试第 %s/%s 次（上次错误: %s）",
+                        attempt,
+                        LLM_MAX_ATTEMPTS,
+                        last_exc,
+                    )
+                return await provider.chat_completion(messages, extra_params=extra_for_call)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                last_exc = e
+                logger.warning(
+                    "send_chat 失败 attempt=%s/%s: %s",
+                    attempt,
+                    LLM_MAX_ATTEMPTS,
+                    e,
+                )
+            finally:
+                await provider.close()
+            if attempt < LLM_MAX_ATTEMPTS:
+                delay = min(30.0, LLM_RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1)))
+                await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     async def send_chat_stream(self, messages: List[ChatMessage]) -> AsyncGenerator[str, None]:
         """使用当前激活配置发送流式聊天请求"""
@@ -88,7 +118,7 @@ class AIService:
         if not provider_cls:
             raise RuntimeError(f"不支持的AI提供商: {cfg.provider}")
 
-        ai_cfg = self._to_ai_model_config(cfg)
+        ai_cfg = self._to_ai_model_config(cfg).model_copy(update={"timeout": LLM_HTTP_TIMEOUT_SEC})
         provider = provider_cls(ai_cfg)
         try:
             async for chunk in provider.stream_chat_completion(messages):

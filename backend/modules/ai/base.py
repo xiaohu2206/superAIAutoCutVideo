@@ -23,7 +23,7 @@ class AIModelConfig(BaseModel):
     base_url: str  # API基础地址
     model_name: str  # 模型名称
     temperature: Optional[float] = 0.7  # 温度参数
-    timeout: Optional[int] = 600  # 超时时间（秒）
+    timeout: Optional[int] = 180  # 超时时间（秒）
     extra_params: Optional[Dict[str, Any]] = {}  # 额外参数
 
 
@@ -55,7 +55,7 @@ class AIProviderBase(ABC):
     def __init__(self, config: AIModelConfig):
         self.config = config
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(config.timeout or 600),
+            timeout=httpx.Timeout(config.timeout or 180),
             headers=self._get_headers()
         )
     

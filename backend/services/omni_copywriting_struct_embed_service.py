@@ -28,6 +28,7 @@ from modules.omni_copywriting_struct_embed import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
+from services.ai_service import LLM_HTTP_TIMEOUT_SEC
 from services.extract_subtitle_service import _to_web_path, _uploads_dir
 from services.omni_local_bge_embedding import (
     LOCAL_BGE_MODEL_DISPLAY_NAME,
@@ -50,7 +51,7 @@ def _video_cfg_to_ai_cfg(cfg: Any) -> AIModelConfig:
         base_url=cfg.base_url,
         model_name=cfg.model_name,
         temperature=cfg.temperature,
-        timeout=cfg.timeout,
+        timeout=LLM_HTTP_TIMEOUT_SEC,
         extra_params={
             **(cfg.extra_params or {}),
             "stream_output": bool(getattr(cfg, "stream_output", False)),

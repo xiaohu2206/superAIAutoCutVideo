@@ -66,7 +66,7 @@ class OmniShotMatchService:
         stage2_top_n: int = 3,
         stage2_return_n: int = 3,
         output_top_k: int = 0,
-        concurrency: int = 4,
+        concurrency: int = 64,
         rerank_instruct: Optional[str] = None,
         temperature: float = 0.2,
         weights: Optional[Dict[str, float]] = None,
@@ -115,7 +115,7 @@ class OmniShotMatchService:
             phase="preparing",
         )
 
-        sem_n = max(1, int(concurrency or 4))
+        sem_n = max(1, int(concurrency or 64))
 
         async def _run() -> None:
             try:
