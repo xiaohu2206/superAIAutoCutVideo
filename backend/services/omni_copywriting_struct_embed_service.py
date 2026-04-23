@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from modules.config.video_model_config import video_model_config_manager
+from services.unified_model_usage import resolve_video_model_for_online_vision
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
     load_structuring_prompt,
@@ -89,7 +89,7 @@ async def _call_structuring_chunk(
     prompt = prompt_template.replace("{copywriting}", chunk_text)
     messages = [ChatMessage(role="user", content=prompt)]
 
-    active_vl = video_model_config_manager.get_active_config()
+    active_vl = resolve_video_model_for_online_vision()
     if not active_vl or active_vl.provider not in _STRUCT_ONLINE_VL_PROVIDERS:
         raise ValueError(
             "文案结构化需与在线视觉分析共用「视频理解模型」：请在设置中选择 "
@@ -307,7 +307,10 @@ class OmniCopywritingStructEmbedService:
                 lock = asyncio.Lock()
                 llm_label = ""
                 try:
-                    av = video_model_config_manager.get_active_config()
+                    try:
+                        av = resolve_video_model_for_online_vision()
+                    except Exception:
+                        av = None
                     if av:
                         llm_label = f"{av.provider}/{av.model_name}".strip("/")
                 except Exception:

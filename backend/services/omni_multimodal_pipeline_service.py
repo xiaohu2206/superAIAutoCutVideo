@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import cv2
 from PIL import Image
 
-from modules.config.video_model_config import video_model_config_manager
+from services.unified_model_usage import resolve_video_model_for_online_vision
 from modules.projects_store import projects_store
 from modules.subtitle_utils import parse_srt
 from modules.task_cancel_store import task_cancel_store
@@ -645,7 +645,7 @@ class OmniMultimodalPipelineService:
                     phase="step2",
                 )
 
-                active_vl = video_model_config_manager.get_active_config()
+                active_vl = resolve_video_model_for_online_vision()
                 if not active_vl or active_vl.provider not in _ONLINE_VL_PROVIDERS:
                     raise ValueError(
                         "Omni Step2 需要在线视觉模型：请在「视频理解模型」中选择 yunwu / 302ai / qwen / doubao / custom_openai_vision 之一并配置密钥"

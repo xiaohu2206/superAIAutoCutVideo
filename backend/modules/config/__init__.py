@@ -8,6 +8,12 @@
 
 from .video_model_config import VideoModelConfig, VideoModelConfigManager, video_model_config_manager
 from .content_model_config import ContentModelConfig, ContentModelConfigManager, content_model_config_manager
+from .unified_yunwu_models_config import (
+    UnifiedYunwuModelsRoot,
+    UnifiedYunwuModelsSettings,
+    UnifiedYunwuModelsConfigManager,
+    unified_yunwu_models_config_manager,
+)
 
 __all__ = [
     "AIConfigModel",
@@ -18,5 +24,9 @@ __all__ = [
     "video_model_config_manager",
     "ContentModelConfig",
     "ContentModelConfigManager",
-    "content_model_config_manager"
+    "content_model_config_manager",
+    "UnifiedYunwuModelsRoot",
+    "UnifiedYunwuModelsSettings",
+    "UnifiedYunwuModelsConfigManager",
+    "unified_yunwu_models_config_manager",
 ]

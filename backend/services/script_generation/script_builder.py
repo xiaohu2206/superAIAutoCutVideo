@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
 from services.ai_service import ai_service
+from services.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
@@ -288,7 +289,11 @@ async def _generate_script_chunk(
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
-            resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+            resp = await ai_service.send_chat(
+                messages,
+                response_format={"type": "json_object"},
+                usage=LlmModelUsage.SCRIPT_GENERATION,
+            )
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             items = data.get("items") or []
@@ -443,7 +448,11 @@ async def _refine_full_script(
     for attempt in range(max_retries + 1):
         try:
             logger.info(f"✨ 正在进行全局润色... (目标条数: {target})")
-            resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+            resp = await ai_service.send_chat(
+                messages,
+                response_format={"type": "json_object"},
+                usage=LlmModelUsage.SCRIPT_GENERATION,
+            )
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
             llm_items = data.get("items", [])

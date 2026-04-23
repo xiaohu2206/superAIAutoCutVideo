@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from modules.ai import ChatMessage
 from services.ai_service import ai_service
+from services.unified_model_usage import LlmModelUsage
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,9 @@ async def call_llm_text(
             raise asyncio.CancelledError()
         try:
             if cancel_event:
-                llm_task = asyncio.create_task(ai_service.send_chat(messages))
+                llm_task = asyncio.create_task(
+                    ai_service.send_chat(messages, usage=LlmModelUsage.COPYWRITING)
+                )
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 done, _ = await asyncio.wait({llm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
                 if cancel_task in done:
@@ -60,7 +63,7 @@ async def call_llm_text(
                     pass
                 resp = await llm_task
             else:
-                resp = await ai_service.send_chat(messages)
+                resp = await ai_service.send_chat(messages, usage=LlmModelUsage.COPYWRITING)
             return _strip_code_fences(str(resp.content or "").strip())
         except asyncio.CancelledError:
             raise

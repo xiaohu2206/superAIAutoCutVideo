@@ -35,6 +35,7 @@ from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from services.ai_service import ai_service
+from services.unified_model_usage import LlmModelUsage
 from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 from services.omni_local_bge_embedding import (
@@ -291,7 +292,7 @@ class OmniShotMatchService:
                 stage1_model = LOCAL_BGE_MODEL_DISPLAY_NAME
 
                 fine_template = load_fine_prompt_template(prompt_language)
-                llm_info = ai_service.get_provider_info()
+                llm_info = ai_service.get_provider_info(LlmModelUsage.LLM_RERANK)
                 llm_label = f"{llm_info.get('active_provider') or ''}/{llm_info.get('active_model') or ''}".strip("/")
 
                 task_progress_store.set_state(
@@ -532,6 +533,7 @@ async def _process_row(
         [ChatMessage(role="user", content=fine_prompt + machine_hint)],
         response_format={"type": "json_object"},
         temperature=float(temperature),
+        usage=LlmModelUsage.LLM_RERANK,
     )
     fine_cost = _time.time() - t2
     fine_items = normalize_llm_scores(parse_fine_llm_payload(resp.content or ""))[:n_ret]

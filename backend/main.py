@@ -52,6 +52,7 @@ print("Backend initializing...")  # Debug marker
 from routes import health_router
 from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
+from routes.unified_yunwu_models_routes import router as unified_yunwu_models_router
 from routes.project_routes import router as project_router
 from routes.omni_pipeline_routes import router as omni_pipeline_router
 from routes.omni_copywriting_embed_routes import router as omni_copywriting_embed_router
@@ -388,6 +389,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(video_model_router)
 app.include_router(content_model_router)
+app.include_router(unified_yunwu_models_router)
 app.include_router(project_router)
 app.include_router(omni_pipeline_router)
 app.include_router(omni_copywriting_embed_router)

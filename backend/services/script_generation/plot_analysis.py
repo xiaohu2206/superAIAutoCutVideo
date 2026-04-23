@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict
 from services.ai_service import ai_service
+from services.unified_model_usage import LlmModelUsage
 
 from .subtitle_utils import _parse_timestamp_pair
 
@@ -26,7 +27,7 @@ async def generate_plot_analysis(subtitle_content: str) -> str:
             ),
         ),
     ]
-    resp = await ai_service.send_chat(messages)
+    resp = await ai_service.send_chat(messages, usage=LlmModelUsage.SCRIPT_GENERATION)
     return str(resp.content)
 
 
@@ -122,7 +123,11 @@ async def _extract_plot_points_for_chunk(
         ChatMessage(role="system", content=sys_prompt),
         ChatMessage(role="user", content=user_prompt),
     ]
-    resp = await ai_service.send_chat(messages, response_format={"type": "json_object"})
+    resp = await ai_service.send_chat(
+        messages,
+        response_format={"type": "json_object"},
+        usage=LlmModelUsage.SCRIPT_GENERATION,
+    )
     data, _raw = sanitize_json_text_to_dict(resp.content)
     items = data.get("plot_points") or []
     if not isinstance(items, list):

@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from modules.json_sanitizer import validate_script_items
 from modules.projects_store import projects_store
 from services.ai_service import ai_service
+from services.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_ITEMS_PER_CALL, SOFT_INPUT_FACTOR
 from .length_planner import parse_script_length_selection, allocate_output_counts, estimate_auto_script_length_plan
@@ -180,7 +181,7 @@ class ScriptGenerationService:
                 sel_length = None
 
         try:
-            model_info = ai_service.get_provider_info()
+            model_info = ai_service.get_provider_info(LlmModelUsage.SCRIPT_GENERATION)
             m_name = model_info.get("active_model", "Unknown")
             m_prov = model_info.get("active_provider", "Unknown")
             logger.info(f"🚀 开始生成脚本 | 剧名: {drama_name} | 模型: {m_name} ({m_prov})")
@@ -291,7 +292,7 @@ class ScriptGenerationService:
                 sel_length = None
 
         try:
-            model_info = ai_service.get_provider_info()
+            model_info = ai_service.get_provider_info(LlmModelUsage.SCRIPT_GENERATION)
             m_name = model_info.get("active_model", "Unknown")
             m_prov = model_info.get("active_provider", "Unknown")
             logger.info(f"🚀 开始生成脚本(visual) | 剧名: {drama_name} | 模型: {m_name} ({m_prov})")

@@ -63,6 +63,19 @@ export interface SettingsSection {
   icon: any;
 }
 
+/** 与后端 unified_yunwu_models_config 对齐（GET 返回 api_key 可能脱敏） */
+export interface UnifiedYunwuModelsPayload {
+  use_custom_models: boolean;
+  yunwu: {
+    api_key: string;
+    base_url: string;
+    copywriting_model_name: string;
+    video_analysis_model_name: string;
+    llm_rerank_model_name: string;
+    script_generation_model_name: string;
+  };
+}
+
 /**
  * TTS 引擎元信息
  */

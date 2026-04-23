@@ -22,7 +22,7 @@ from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_w
 from services.vision_scene_status import scene_vision_success_ok
 from services.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
-from modules.config.video_model_config import video_model_config_manager
+from services.unified_model_usage import resolve_video_model_for_online_vision
 
 logger = logging.getLogger(__name__)
 
@@ -890,7 +890,7 @@ class ExtractSceneService:
                         optimized_scenes = self._merge_existing_vision_results(optimized_scenes, existing_scenes)
                         enforce_online_vid = False
                         try:
-                            ac = video_model_config_manager.get_active_config()
+                            ac = resolve_video_model_for_online_vision()
                             enforce_online_vid = bool(
                                 ac
                                 and ac.provider
@@ -969,7 +969,7 @@ class ExtractSceneService:
                             message="准备进行视觉分析...",
                         )
 
-                        active_config = video_model_config_manager.get_active_config()
+                        active_config = resolve_video_model_for_online_vision()
                         if active_config and active_config.provider in (
                             "yunwu",
                             "302ai",

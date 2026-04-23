@@ -14,7 +14,8 @@ import logging
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from modules.ai import AIModelConfig, ChatMessage, ChatResponse, get_provider_class
-from modules.config.content_model_config import content_model_config_manager, ContentModelConfig
+from modules.config.content_model_config import ContentModelConfig, content_model_config_manager
+from services.unified_model_usage import LlmModelUsage, resolve_content_model_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,8 @@ class AIService:
         self._active_provider_name: Optional[str] = None
         self._active_model_name: Optional[str] = None
 
-    def _get_active_model_config(self) -> Optional[ContentModelConfig]:
-        cfg = content_model_config_manager.get_active_config()
-        return cfg
+    def _get_model_config_for_llm(self, usage: LlmModelUsage) -> ContentModelConfig:
+        return resolve_content_model_for_llm(usage)
 
     def _to_ai_model_config(self, cfg: ContentModelConfig) -> AIModelConfig:
         return AIModelConfig(
@@ -46,12 +46,15 @@ class AIService:
             extra_params=cfg.extra_params or {},
         )
 
-    def get_provider_info(self) -> Dict[str, Any]:
-        """返回当前激活的提供商与模型信息"""
-        cfg = self._get_active_model_config()
+    def get_provider_info(self, usage: LlmModelUsage = LlmModelUsage.COPYWRITING) -> Dict[str, Any]:
+        """返回指定 LLM 场景下实际使用的提供商与模型（尊重云雾整合总控）。"""
+        try:
+            cfg = self._get_model_config_for_llm(usage)
+        except Exception:
+            return {"active_provider": None, "active_model": None}
         return {
-            "active_provider": cfg.provider if cfg else None,
-            "active_model": cfg.model_name if cfg else None,
+            "active_provider": cfg.provider,
+            "active_model": cfg.model_name,
         }
 
     async def send_chat(
@@ -60,11 +63,10 @@ class AIService:
         response_format: Optional[Dict[str, Any]] = None,
         *,
         temperature: Optional[float] = None,
+        usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
     ) -> ChatResponse:
-        """使用当前激活配置发送普通聊天请求"""
-        cfg = self._get_active_model_config()
-        if not cfg:
-            raise RuntimeError("没有激活的文案生成模型配置，请先在设置中启用一个配置")
+        """发送聊天请求；usage 指定业务场景以便在云雾整合模式下选用对应模型。"""
+        cfg = self._get_model_config_for_llm(usage)
 
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:
@@ -108,11 +110,14 @@ class AIService:
         assert last_exc is not None
         raise last_exc
 
-    async def send_chat_stream(self, messages: List[ChatMessage]) -> AsyncGenerator[str, None]:
-        """使用当前激活配置发送流式聊天请求"""
-        cfg = self._get_active_model_config()
-        if not cfg:
-            raise RuntimeError("没有激活的文案生成模型配置，请先在设置中启用一个配置")
+    async def send_chat_stream(
+        self,
+        messages: List[ChatMessage],
+        *,
+        usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
+    ) -> AsyncGenerator[str, None]:
+        """流式聊天；usage 与 send_chat 一致。"""
+        cfg = self._get_model_config_for_llm(usage)
 
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:
