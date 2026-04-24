@@ -41,6 +41,52 @@ _SCOPE = "omni_generate_script"
 # 单批 LLM：网络空响应、JSON 损坏、后验校验失败等均重试（与视觉管线相近的退避）
 _CHUNK_LLM_RETRY_DELAYS_SEC: Tuple[float, ...] = (1.0, 2.0, 3.0, 5.0)
 
+# 测试：为 True 时，将每次分块 send_chat 的 messages 以 JSON 写入 `omni_multimodal_json_path` 同目录
+_OMNI_GS_LOG_LLM_MESSAGES = True
+
+
+def _safe_log_filename_segment(s: str) -> str:
+    bad = "<>:\"/\\|?*"
+    out = "".join(c if c not in bad else "_" for c in (s or ""))
+    return (out or "x")[:180]
+
+
+def _log_llm_messages_beside_multimodal(
+    mm_abs: Path,
+    messages: List[ChatMessage],
+    *,
+    project_id: str,
+    task_id: str,
+    chunk_index0: int,
+    attempt0: int,
+) -> None:
+    if not _OMNI_GS_LOG_LLM_MESSAGES:
+        return
+    try:
+        base_dir = mm_abs.parent
+        base_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        fn = (
+            f"omni_gs_llm_messages_{_safe_log_filename_segment(task_id)}_"
+            f"c{chunk_index0 + 1:04d}_a{attempt0 + 1:02d}_{ts}.json"
+        )
+        path = base_dir / fn
+        payload: Dict[str, Any] = {
+            "meta": {
+                "source": "omni_generate_script",
+                "project_id": project_id,
+                "task_id": task_id,
+                "chunk_index": chunk_index0,
+                "attempt": attempt0,
+                "multimodal_json": str(mm_abs),
+                "logged_at": datetime.now().isoformat(),
+            },
+            "messages": [m.model_dump(mode="json") for m in messages],
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("omni_generate_script: 写入 LLM messages 测试 log 失败: %s", e)
+
 
 def _work_dir(project_id: str) -> Path:
     return _uploads_dir() / "omni_generate_script" / project_id
@@ -137,7 +183,7 @@ class OmniGenerateScriptService:
         input_multimodal_web_path: Optional[str] = None,
         generation_params: Optional[Dict[str, Any]] = None,
         temperature: Optional[float] = None,
-        chunk_llm_concurrency: int = 4,
+        chunk_llm_concurrency: int = 32,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -245,7 +291,7 @@ class OmniGenerateScriptService:
                 total_duration = await asyncio.to_thread(_read_video_duration, video_abs)
 
                 temp = float(temperature) if temperature is not None else None
-                conc = max(1, int(chunk_llm_concurrency or 4))
+                conc = max(1, int(chunk_llm_concurrency or 32))
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -279,11 +325,22 @@ class OmniGenerateScriptService:
                             async with sem:
                                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                                     raise asyncio.CancelledError()
+                                # await asyncio.to_thread(
+                                #     _log_llm_messages_beside_multimodal,
+                                #     mm_abs,
+                                #     messages,
+                                #     project_id=project_id,
+                                #     task_id=task_id,
+                                #     chunk_index0=idx,
+                                #     attempt0=attempt,
+                                # )
+                                # HTTP 重试仅由本函数外层 delays 负责，避免与 send_chat 内层双重重试
                                 resp = await ai_service.send_chat(
                                     messages,
                                     response_format={"type": "json_object"},
                                     temperature=temp,
                                     usage=LlmModelUsage.SCRIPT_GENERATION,
+                                    http_max_attempts=1,
                                 )
                             data, _ = sanitize_json_text_to_dict(resp.content or "")
                             items = data.get("items") if isinstance(data, dict) else None

@@ -36,7 +36,7 @@ class OmniShotMatchRunRequest(BaseModel):
     stage2_top_n: int = Field(default=3, ge=1, le=50)
     stage2_return_n: int = Field(default=3, ge=1, le=20)
     output_top_k: int = Field(default=0, ge=0, le=100, description="0 表示不截断；>0 时每条解说仅保留前 N 个镜头")
-    concurrency: int = Field(default=4, ge=1, le=32)
+    concurrency: int = Field(default=32, ge=1, le=32)
     rerank_instruct: Optional[str] = Field(
         default=None,
         description="已废弃：粗排固定为本地向量分数，该字段将被忽略",

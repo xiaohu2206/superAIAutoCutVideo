@@ -27,7 +27,7 @@ class UnifiedYunwuModelsSettings(BaseModel):
     api_key: str = Field("", description="云雾 API Key")
     base_url: str = Field(DEFAULT_YUNWU_CHAT_URL, description="Chat Completions 地址")
     copywriting_model_name: str = Field(
-        "gemini-3.1-pro-preview",
+        "deepseek-v4-flash",
         description="文案生成 / 参考文案清洗等",
     )
     video_analysis_model_name: str = Field(
@@ -35,11 +35,11 @@ class UnifiedYunwuModelsSettings(BaseModel):
         description="在线视频帧 / 多模态视觉理解",
     )
     llm_rerank_model_name: str = Field(
-        "gemini-3.1-pro-preview",
+        "deepseek-v4-flash",
         description="Omni 镜头 LLM 精排",
     )
     script_generation_model_name: str = Field(
-        "gemini-3.1-pro-preview",
+        "deepseek-v4-flash",
         description="脚本 JSON / 分镜脚本等",
     )
 

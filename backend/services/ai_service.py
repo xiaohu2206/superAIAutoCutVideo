@@ -10,7 +10,10 @@ AI统一调用服务
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from modules.ai import AIModelConfig, ChatMessage, ChatResponse, get_provider_class
@@ -20,8 +23,8 @@ from services.unified_model_usage import LlmModelUsage, resolve_content_model_fo
 logger = logging.getLogger(__name__)
 
 # 文案/结构化等大模型 HTTP 调用：统一读超时与失败重试（避免单行 ReadTimeout 直接失败）
-LLM_HTTP_TIMEOUT_SEC = 180
-LLM_MAX_ATTEMPTS = 4  # 首次 + 最多 3 次重试
+LLM_HTTP_TIMEOUT_SEC = 600
+LLM_MAX_ATTEMPTS = 2  # 首次 + 最多 3 次重试
 LLM_RETRY_BASE_DELAY_SEC = 1.0
 
 
@@ -57,6 +60,51 @@ class AIService:
             "active_model": cfg.model_name,
         }
 
+    def _log_chat_failure(
+        self,
+        attempt: int,
+        max_attempts: int,
+        exception: Exception,
+        messages: List[ChatMessage],
+        ai_cfg: AIModelConfig,
+        extra_params: Optional[Dict[str, Any]],
+    ) -> None:
+        """将失败的请求详情追加写入持久化日志，用于事后排查大模型返回或网络问题。"""
+        try:
+            # 持久化目录统一落到 backend/logs/，确保 programme 根目录可被任意包导入时都能找到
+            logs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            log_path = os.path.join(logs_dir, "chat_failure_logs.jsonl")
+
+            serializable_messages: List[Dict[str, Any]] = []
+            for m in messages:
+                if hasattr(m, "model_dump"):
+                    serializable_messages.append(m.model_dump())
+                elif hasattr(m, "dict"):
+                    serializable_messages.append(m.dict())
+                else:
+                    serializable_messages.append(
+                        {"role": getattr(m, "role", None), "content": getattr(m, "content", None)}
+                    )
+
+            record: Dict[str, Any] = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "provider": ai_cfg.provider,
+                "model": ai_cfg.model_name,
+                "base_url": ai_cfg.base_url,
+                "exception_type": type(exception).__name__,
+                "exception_msg": str(exception),
+                "messages": serializable_messages,
+                "extra_params": extra_params,
+            }
+
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as log_err:
+            logger.error("_log_chat_failure 写入失败: %s", log_err)
+
     async def send_chat(
         self,
         messages: List[ChatMessage],
@@ -64,8 +112,13 @@ class AIService:
         *,
         temperature: Optional[float] = None,
         usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
+        http_max_attempts: Optional[int] = None,
     ) -> ChatResponse:
-        """发送聊天请求；usage 指定业务场景以便在云雾整合模式下选用对应模型。"""
+        """发送聊天请求；usage 指定业务场景以便在云雾整合模式下选用对应模型。
+
+        http_max_attempts: 单次调用的 HTTP 层最大尝试次数（含首次）；默认 LLM_MAX_ATTEMPTS。
+        业务侧若已有自己的退避重试（如分块脚本生成），可传 1 以避免与 send_chat 内层双重重试。
+        """
         cfg = self._get_model_config_for_llm(usage)
 
         provider_cls = get_provider_class(cfg.provider)
@@ -80,15 +133,18 @@ class AIService:
             extra_params["temperature"] = float(temperature)
         extra_for_call = extra_params if extra_params else None
 
+        attempts = http_max_attempts if http_max_attempts is not None else LLM_MAX_ATTEMPTS
+        attempts = max(1, int(attempts))
+
         last_exc: Optional[Exception] = None
-        for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             provider = provider_cls(ai_cfg)
             try:
                 if attempt > 1:
                     logger.warning(
                         "send_chat 重试第 %s/%s 次（上次错误: %s）",
                         attempt,
-                        LLM_MAX_ATTEMPTS,
+                        attempts,
                         last_exc,
                     )
                 return await provider.chat_completion(messages, extra_params=extra_for_call)
@@ -99,12 +155,20 @@ class AIService:
                 logger.warning(
                     "send_chat 失败 attempt=%s/%s: %s",
                     attempt,
-                    LLM_MAX_ATTEMPTS,
+                    attempts,
                     e,
+                )
+                self._log_chat_failure(
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    exception=e,
+                    messages=messages,
+                    ai_cfg=ai_cfg,
+                    extra_params=extra_for_call,
                 )
             finally:
                 await provider.close()
-            if attempt < LLM_MAX_ATTEMPTS:
+            if attempt < attempts:
                 delay = min(30.0, LLM_RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1)))
                 await asyncio.sleep(delay)
         assert last_exc is not None
