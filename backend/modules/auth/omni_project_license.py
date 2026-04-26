@@ -63,7 +63,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     auth = authorization.strip()
     base = get_auth_upstream_base()
     list_url = f"{base}/api/licenses"
-    async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.get(
             list_url,
             headers={"Accept": "application/json", "Authorization": auth},
@@ -123,9 +123,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
             "deviceId": device_id,
             "deviceName": device_name,
         }
-        async with httpx.AsyncClient(
-            timeout=_TIMEOUT, trust_env=False
-        ) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             vr = await client.post(
                 verify_url,
                 json=payload,
