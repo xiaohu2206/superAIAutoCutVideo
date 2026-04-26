@@ -5,6 +5,8 @@
 
 - 开发：http://127.0.0.1:3000
 - 打包（frozen）：http://47.92.113.170
+
+httpx 使用 trust_env=False，避免本机 HTTP(S)_PROXY 把对明确上游地址的请求走代理导致 502 等，与 curl 直连 127.0.0.1 行为一致。
 """
 
 from __future__ import annotations
@@ -56,7 +58,9 @@ async def forward_upstream_post(
     }
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(
+        timeout=_DEFAULT_TIMEOUT, trust_env=False
+    ) as client:
         r = await client.post(url, json=body, headers=headers)
     return _passthrough_response(r)
 
@@ -76,7 +80,9 @@ async def forward_upstream_post_raw(
     headers["Content-Type"] = ct if ct else "application/json"
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(
+        timeout=_DEFAULT_TIMEOUT, trust_env=False
+    ) as client:
         r = await client.post(url, content=content, headers=headers)
     return _passthrough_response(r)
 
@@ -86,6 +92,8 @@ async def forward_upstream_get(path: str, authorization: Optional[str]) -> Respo
     headers = {"Accept": "application/json, text/plain, */*"}
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(
+        timeout=_DEFAULT_TIMEOUT, trust_env=False
+    ) as client:
         r = await client.get(url, headers=headers)
     return _passthrough_response(r)
