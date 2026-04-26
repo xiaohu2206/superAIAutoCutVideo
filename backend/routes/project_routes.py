@@ -35,6 +35,7 @@ from threading import RLock
 import subprocess
 
 from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_path, resolve_uploads_path
+from modules.auth.omni_project_license import require_valid_license_for_omni
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor, _trim_log_tag, _trim_timeout_label
 from services.video_generation_service import video_generation_service
@@ -505,7 +506,9 @@ async def get_project_detail(project_id: str):
 
 
 @router.post("")
-async def create_project(req: CreateProjectRequest):
+async def create_project(req: CreateProjectRequest, request: Request):
+    if (req.project_type or "").strip().lower() == "omni":
+        await require_valid_license_for_omni(request.headers.get("Authorization"))
     if not req.name or not req.name.strip():
         raise HTTPException(status_code=400, detail="项目名称无效")
     name_clean = req.name.strip()

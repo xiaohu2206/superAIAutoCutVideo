@@ -2,20 +2,19 @@ import {
   User,
   Mail,
   Shield,
-  Calendar,
-  Clock,
   LogOut,
   CheckCircle,
   XCircle,
 } from "lucide-react";
 import { useAuth } from "./AuthContext";
+import UserProfileLicenses from "./UserProfileLicenses";
 
 interface UserProfileProps {
   onBack: () => void;
 }
 
 export default function UserProfile({ onBack }: UserProfileProps) {
-  const { user, logout, isLoading } = useAuth();
+  const { user, logout, isLoading, token } = useAuth();
 
   const handleLogout = () => {
     logout();
@@ -31,21 +30,6 @@ export default function UserProfile({ onBack }: UserProfileProps) {
   }
 
   if (!user) return null;
-
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "-";
-    try {
-      return new Date(dateStr).toLocaleString("zh-CN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
 
   const infoItems = [
     {
@@ -129,6 +113,8 @@ export default function UserProfile({ onBack }: UserProfileProps) {
           })}
         </div>
       </div>
+
+      {token ? <UserProfileLicenses accessToken={token} /> : null}
 
       {/* 退出登录 */}
       <button

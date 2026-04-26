@@ -61,6 +61,26 @@ async def forward_upstream_post(
     return _passthrough_response(r)
 
 
+async def forward_upstream_post_raw(
+    path: str,
+    content: bytes,
+    authorization: Optional[str],
+    content_type: Optional[str],
+) -> Response:
+    """POST 原样转发请求体字节与 Content-Type，避免 JSON 解析后再 dumps 与上游校验不一致。"""
+    url = f"{get_auth_upstream_base()}{path}"
+    headers: dict[str, str] = {
+        "Accept": "application/json, text/plain, */*",
+    }
+    ct = (content_type or "").strip()
+    headers["Content-Type"] = ct if ct else "application/json"
+    if authorization:
+        headers["Authorization"] = authorization
+    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        r = await client.post(url, content=content, headers=headers)
+    return _passthrough_response(r)
+
+
 async def forward_upstream_get(path: str, authorization: Optional[str]) -> Response:
     url = f"{get_auth_upstream_base()}{path}"
     headers = {"Accept": "application/json, text/plain, */*"}

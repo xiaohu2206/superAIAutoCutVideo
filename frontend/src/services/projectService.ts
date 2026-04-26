@@ -58,12 +58,22 @@ export class ProjectService {
 
   /**
    * 创建项目
+   * omni 类型需后端校验 License，故在已登录时附带与「我的 License」相同的 Bearer Token。
    */
   async createProject(data: CreateProjectRequest): Promise<Project> {
+    const token =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("sacv_auth_token")
+        : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed
+      ? { Authorization: `Bearer ${trimmed}` }
+      : undefined;
     const response = await apiClient.post<{ data: Project }>(
       "/api/projects",
       data,
-      10000
+      10000,
+      authHeaders
     );
     return response.data;
   }
