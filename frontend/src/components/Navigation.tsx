@@ -105,7 +105,7 @@ const Navigation: React.FC<NavigationProps> = ({
               <User className="h-4 w-4" />
             </button>
             <LogConsolePanel enabled={true} />
-            <button
+            {/* <button
               onClick={() =>
                 TauriCommands.openExternalLink("https://github.com/xiaohu2206/superAIAutoCutVideo")
               }
@@ -113,7 +113,7 @@ const Navigation: React.FC<NavigationProps> = ({
               title="查看源代码"
             >
               <Github className="h-4 w-4" />
-            </button>
+            </button> */}
           </div>
         </div>
       </aside>

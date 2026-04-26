@@ -51,7 +51,7 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
     setSuccess("");
   }, []);
 
-  // 弹框关闭时重置状态
+  // 弹框关闭时重置状态（含 loading：避免请求未正常结束时再次打开仍显示「处理中」）
   useEffect(() => {
     if (!open) {
       setEmail("");
@@ -62,16 +62,19 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
       setSuccess("");
       setCountdown(0);
       setTab("login");
+      setLoading(false);
     }
   }, [open]);
 
   const handleSendCode = async (type: "register" | "reset") => {
     if (!email.trim()) {
+      setSuccess("");
       setError("请输入邮箱");
       return;
     }
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
       if (type === "register") {
         await sendRegisterCode(email);
@@ -79,8 +82,10 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
         await sendResetCode(email);
       }
       setCountdown(60);
+      setError("");
       setSuccess("验证码已发送，请查收邮箱");
     } catch (e: any) {
+      setSuccess("");
       setError(e.message || "发送验证码失败");
     } finally {
       setLoading(false);
@@ -89,22 +94,27 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
 
   const handleRegister = async () => {
     if (!email.trim() || !password || !code) {
+      setSuccess("");
       setError("请填写完整信息");
       return;
     }
     if (password.length < 6) {
+      setSuccess("");
       setError("密码至少6位");
       return;
     }
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
       await register(email, password, code);
+      setError("");
       setSuccess("注册成功，请登录");
       setTab("login");
       setCode("");
       setPassword("");
     } catch (e: any) {
+      setSuccess("");
       setError(e.message || "注册失败");
     } finally {
       setLoading(false);
@@ -113,15 +123,18 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
+      setSuccess("");
       setError("请输入邮箱和密码");
       return;
     }
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
       await loginAction(email, password);
       onClose();
     } catch (e: any) {
+      setSuccess("");
       setError(e.message || "登录失败");
     } finally {
       setLoading(false);
@@ -130,22 +143,27 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
 
   const handleResetPassword = async () => {
     if (!email.trim() || !code || !newPassword) {
+      setSuccess("");
       setError("请填写完整信息");
       return;
     }
     if (newPassword.length < 6) {
+      setSuccess("");
       setError("新密码至少6位");
       return;
     }
     setLoading(true);
     setError("");
+    setSuccess("");
     try {
       await resetPassword(email, code, newPassword);
+      setError("");
       setSuccess("密码重置成功，请登录");
       setTab("login");
       setCode("");
       setNewPassword("");
     } catch (e: any) {
+      setSuccess("");
       setError(e.message || "重置密码失败");
     } finally {
       setLoading(false);
@@ -213,16 +231,15 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
 
         {/* 消息提示 */}
         <div className="px-7 pt-4">
-          {error && (
+          {error ? (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 ring-1 ring-red-200/80">
               {error}
             </div>
-          )}
-          {success && (
+          ) : success ? (
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 ring-1 ring-green-200/80">
               {success}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* 表单 */}

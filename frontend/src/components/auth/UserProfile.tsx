@@ -64,17 +64,7 @@ export default function UserProfile({ onBack }: UserProfileProps) {
       value: user.status === "active" ? "正常" : "已禁用",
       badge: true,
       active: user.status === "active",
-    },
-    {
-      icon: Calendar,
-      label: "注册时间",
-      value: formatDate((user as any).createdAt),
-    },
-    {
-      icon: Clock,
-      label: "更新时间",
-      value: formatDate((user as any).updatedAt),
-    },
+    }
   ];
 
   return (

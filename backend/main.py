@@ -377,10 +377,27 @@ app = FastAPI(
 logger.info(f"Python 解释器: {sys.executable}")
 _inject_ffmpeg_into_path()
 
-# 配置CORS - 允许Tauri前端访问
+
+def _cors_allow_origins() -> List[str]:
+    """浏览器访问 API 时的允许来源。设置环境变量 CORS_ORIGINS 为逗号分隔列表可完全覆盖默认值。"""
+    raw = (os.getenv("CORS_ORIGINS") or "").strip()
+    if raw:
+        return [x.strip() for x in raw.split(",") if x.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "http://47.92.113.170",
+        "tauri://localhost",
+        "http://tauri.localhost",
+    ]
+
+
+# 配置 CORS（含浏览器直连后端时的跨域；Tauri 使用 tauri:// / tauri.localhost）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

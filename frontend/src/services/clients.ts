@@ -890,12 +890,20 @@ export class TauriCommands {
 export const apiClient = new ApiClient();
 export const wsClient = new WebSocketClient();
 
+/** 后端 baseUrl 已就绪，供认证等在正确端口上请求 /api（需在 configureBackend 之后） */
+export const BACKEND_CONFIGURED_EVENT = "sacv-backend-configured";
+
 // 运行时配置：根据端口动态更新 API 与 WS 端点
 export function configureBackend(port: number, host: string = DEFAULT_HOST) {
   const httpBase = `http://${host}:${port}`;
   const wsBase = `ws://${host}:${port}/ws`;
   apiClient.setBaseUrl(httpBase);
   wsClient.setUrl(wsBase);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(BACKEND_CONFIGURED_EVENT, { detail: { baseUrl: httpBase } })
+    );
+  }
 }
 
 export async function fetchServerInfo(
