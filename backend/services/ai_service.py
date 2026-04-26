@@ -16,16 +16,36 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
-from modules.ai import AIModelConfig, ChatMessage, ChatResponse, get_provider_class
+from modules.ai import AIModelConfig, ChatMessage, ChatResponse, LlmProviderResponseError, get_provider_class
 from modules.config.content_model_config import ContentModelConfig, content_model_config_manager
 from services.unified_model_usage import LlmModelUsage, resolve_content_model_for_llm
 
 logger = logging.getLogger(__name__)
 
 # 文案/结构化等大模型 HTTP 调用：统一读超时与失败重试（避免单行 ReadTimeout 直接失败）
-LLM_HTTP_TIMEOUT_SEC = 600
-LLM_MAX_ATTEMPTS = 2  # 首次 + 最多 3 次重试
+LLM_HTTP_TIMEOUT_SEC = 300
+LLM_MAX_ATTEMPTS = 3  # 首次 + 最多 5 次重试
 LLM_RETRY_BASE_DELAY_SEC = 1.0
+_CHAT_FAILURE_LLM_RAW_MAX = 200_000
+
+
+def _message_for_failure_log(m: ChatMessage) -> Dict[str, Any]:
+    """
+    尽量还原请求体中的 messages 用于排查；Pydantic model_dump 在部分多模态/Any
+    场景下 content 可能空，回退为实例属性，并带 content 长度信息。
+    """
+    try:
+        d = m.model_dump(mode="json", exclude_unset=False, exclude_none=False)
+    except Exception:  # noqa: BLE001
+        d = {"role": getattr(m, "role", None), "content": getattr(m, "content", None)}
+
+    raw_c = getattr(m, "content", None)
+    dumped = d.get("content")
+    if (dumped in (None, "")) and raw_c not in (None, ""):
+        d["content"] = raw_c
+    if isinstance(d.get("content"), str) and d["content"]:
+        d["content_len"] = len(d["content"])
+    return d
 
 
 class AIService:
@@ -78,10 +98,17 @@ class AIService:
 
             serializable_messages: List[Dict[str, Any]] = []
             for m in messages:
-                if hasattr(m, "model_dump"):
-                    serializable_messages.append(m.model_dump())
+                if isinstance(m, ChatMessage):
+                    serializable_messages.append(_message_for_failure_log(m))
+                elif hasattr(m, "model_dump"):
+                    try:
+                        serializable_messages.append(m.model_dump(mode="json", exclude_unset=False, exclude_none=False))  # type: ignore[union-attr]
+                    except Exception:  # noqa: BLE001
+                        serializable_messages.append(
+                            {"role": getattr(m, "role", None), "content": getattr(m, "content", None)}
+                        )
                 elif hasattr(m, "dict"):
-                    serializable_messages.append(m.dict())
+                    serializable_messages.append(m.dict())  # type: ignore[union-attr]
                 else:
                     serializable_messages.append(
                         {"role": getattr(m, "role", None), "content": getattr(m, "content", None)}
@@ -100,8 +127,22 @@ class AIService:
                 "extra_params": extra_params,
             }
 
+            if isinstance(exception, LlmProviderResponseError):
+                body = exception.raw_body
+                max_len = int(_CHAT_FAILURE_LLM_RAW_MAX)
+                record["llm_response_raw"] = {
+                    "http_status": exception.status_code,
+                    "content_type": exception.content_type,
+                    "body_length": len(body),
+                    "body_text": (
+                        body
+                        if len(body) <= max_len
+                        else f"{body[:max_len]}\n...<truncated total {len(body)} bytes>"
+                    ),
+                }
+
             with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         except Exception as log_err:
             logger.error("_log_chat_failure 写入失败: %s", log_err)
 

@@ -10,7 +10,7 @@ from .video_model_config import VideoModelConfig, VideoModelConfigManager, video
 from .content_model_config import ContentModelConfig, ContentModelConfigManager, content_model_config_manager
 from .unified_yunwu_models_config import (
     UnifiedYunwuModelsRoot,
-    UnifiedYunwuModelsSettings,
+    YunwuTierSettings,
     UnifiedYunwuModelsConfigManager,
     unified_yunwu_models_config_manager,
 )
@@ -26,7 +26,7 @@ __all__ = [
     "ContentModelConfigManager",
     "content_model_config_manager",
     "UnifiedYunwuModelsRoot",
-    "UnifiedYunwuModelsSettings",
+    "YunwuTierSettings",
     "UnifiedYunwuModelsConfigManager",
     "unified_yunwu_models_config_manager",
 ]

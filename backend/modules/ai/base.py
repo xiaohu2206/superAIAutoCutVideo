@@ -33,6 +33,23 @@ class ChatMessage(BaseModel):
     content: Any  # 消息内容，支持字符串或多模态内容块列表
 
 
+class LlmProviderResponseError(Exception):
+    """提供方 HTTP / 非预期响应体，携带状态码与原文便于写入 chat_failure 等日志。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        raw_body: str = "",
+        content_type: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = int(status_code)
+        self.raw_body = raw_body or ""
+        self.content_type = (content_type or "")[:200]
+
+
 class ChatResponse(BaseModel):
     """聊天响应"""
     content: str  # 响应内容

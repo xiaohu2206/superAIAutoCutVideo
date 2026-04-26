@@ -1,6 +1,6 @@
-import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
+import { AuthProvider } from './components/auth/AuthContext'
 import './index.css'
 
 // 确保DOM已加载
@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const root = ReactDOM.createRoot(rootElement)
   
   root.render(
-    <App />,
+    <AuthProvider>
+      <App />
+    </AuthProvider>,
   )
 })

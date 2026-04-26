@@ -31,12 +31,6 @@ class OmniShotMatchWeights(BaseModel):
 class OmniShotMatchRunRequest(BaseModel):
     force: bool = Field(default=False)
     task_id: Optional[str] = None
-    top_k: int = Field(default=20, ge=1, le=200)
-    stage1_top_n: int = Field(default=10, ge=1, le=100)
-    stage2_top_n: int = Field(default=3, ge=1, le=50)
-    stage2_return_n: int = Field(default=3, ge=1, le=20)
-    output_top_k: int = Field(default=0, ge=0, le=100, description="0 表示不截断；>0 时每条解说仅保留前 N 个镜头")
-    concurrency: int = Field(default=32, ge=1, le=32)
     rerank_instruct: Optional[str] = Field(
         default=None,
         description="已废弃：粗排固定为本地向量分数，该字段将被忽略",
@@ -56,12 +50,6 @@ async def omni_shot_match_run(
             project_id,
             force=bool(req.force),
             task_id=req.task_id,
-            top_k=int(req.top_k),
-            stage1_top_n=int(req.stage1_top_n),
-            stage2_top_n=int(req.stage2_top_n),
-            stage2_return_n=int(req.stage2_return_n),
-            output_top_k=int(req.output_top_k),
-            concurrency=int(req.concurrency),
             rerank_instruct=req.rerank_instruct,
             temperature=float(req.temperature),
             weights=w,

@@ -6,6 +6,7 @@ import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
 import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
+import UserProfile from "./components/auth/UserProfile";
 import { useAppVersion } from "./hooks/useAppVersion";
 import {
   TauriCommands,
@@ -52,6 +53,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
   const { appVersion } = useAppVersion();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
   const [isMaximized, setIsMaximized] = useState(false);
@@ -298,6 +300,10 @@ const App: React.FC = () => {
   }
 
   const handleHomeClick = () => {
+    if (showProfile) {
+      setShowProfile(false);
+      return;
+    }
     if (currentProjectId) {
       setCurrentProjectId(null);
       return;
@@ -308,9 +314,13 @@ const App: React.FC = () => {
   return (
     <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
       <Navigation
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+        activeTab={showProfile ? "profile" : activeTab}
+        onTabChange={(tab) => {
+          setShowProfile(false);
+          setActiveTab(tab);
+        }}
         onHomeClick={handleHomeClick}
+        onProfileClick={() => setShowProfile(true)}
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))]">
@@ -390,17 +400,21 @@ const App: React.FC = () => {
                   : "scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
               }
             >
-              {activeTab === "home" && !currentProjectId && (
+              {activeTab === "home" && !currentProjectId && !showProfile && (
                 <ProjectManagementPage
                   onEditProject={(projectId) => setCurrentProjectId(projectId)}
                 />
               )}
 
-              {activeTab === "home" && currentProjectId && (
+              {activeTab === "home" && currentProjectId && !showProfile && (
                 <ProjectEditPage
                   projectId={currentProjectId}
                   onBack={() => setCurrentProjectId(null)}
                 />
+              )}
+
+              {showProfile && (
+                <UserProfile onBack={() => setShowProfile(false)} />
               )}
 
               {activeTab === "settings" && (

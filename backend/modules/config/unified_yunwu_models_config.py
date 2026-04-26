@@ -3,6 +3,9 @@
 """
 云雾「整合模型」配置：关闭自定义模型时，文案 / 脚本 / LLM 精排 / 在线视频理解
 共用云雾 API Key，并按角色使用各自默认模型名（可由本配置文件调整）。
+
+现在支持三档：low / medium / high，每档可独立配置 Key 与分角色模型名。
+若某档缺少子配置，回退到 high 的默认值。
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,13 +21,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_YUNWU_CHAT_URL = "https://yunwu.ai/v1/chat/completions"
 
+TierKey = Union[str, None]
+ALLOWED_TIERS = {"low", "medium", "high"}
+DEFAULT_TIER = "high"
 
-class UnifiedYunwuModelsSettings(BaseModel):
-    """云雾整合：单一 Key + 分角色模型名（仅 provider=yunwu）。"""
+
+# ---------- 单档模型配置 ----------
+
+class YunwuTierSettings(BaseModel):
+    """单档云雾整合模型配置（low / medium / high）。"""
 
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 
-    api_key: str = Field("", description="云雾 API Key")
+    api_key: str = Field("", description="云雾 API Key（该档位）")
     base_url: str = Field(DEFAULT_YUNWU_CHAT_URL, description="Chat Completions 地址")
     copywriting_model_name: str = Field(
         "deepseek-v4-flash",
@@ -63,23 +72,61 @@ class UnifiedYunwuModelsSettings(BaseModel):
         return s
 
 
+def _default_yunwu_tiers() -> Dict[str, YunwuTierSettings]:
+    return {
+        "low": YunwuTierSettings(),
+        "medium": YunwuTierSettings(),
+        "high": YunwuTierSettings(),
+    }
+
+
+# ---------- 根配置 ----------
+
 class UnifiedYunwuModelsRoot(BaseModel):
-    """根配置：是否使用自定义（分开展示）模型。"""
+    """三档云雾整合根配置。"""
 
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 
     use_custom_models: bool = Field(
         True,
-        description="为 True 时文案/视频等仍走原 content_model / video_model；为 False 时走云雾整合",
+        description="为 True 时文案/视频等仍走原 content_model / video_model；为 False 时走云雾整合按档位",
     )
-    yunwu: UnifiedYunwuModelsSettings = Field(default_factory=UnifiedYunwuModelsSettings)
+    yunwu: Dict[str, YunwuTierSettings] = Field(
+        default_factory=_default_yunwu_tiers,
+        description="low / medium / high 三档云雾配置",
+    )
 
+    def tier_or_default(self, tier: TierKey) -> YunwuTierSettings:
+        """获取指定档位配置；非法或缺少时回退到 high。"""
+        t = str(tier or "").strip().lower()
+        if t not in ALLOWED_TIERS:
+            t = DEFAULT_TIER
+        if t not in self.yunwu:
+            return YunwuTierSettings()
+        return self.yunwu[t]
+
+    @field_validator("yunwu")
+    @classmethod
+    def _ensure_tiers(cls, v: Any) -> Dict[str, YunwuTierSettings]:
+        """确保 low/medium/high 始终存在（兼容旧单层配置迁移）。"""
+        if not isinstance(v, dict):
+            return _default_yunwu_tiers()
+        out: Dict[str, YunwuTierSettings] = {}
+        for tk in ALLOWED_TIERS:
+            raw = v.get(tk)
+            try:
+                out[tk] = YunwuTierSettings.model_validate(raw if isinstance(raw, dict) else {})
+            except Exception:
+                out[tk] = YunwuTierSettings()
+        return out
+
+
+# ---------- 管理器 ----------
 
 class UnifiedYunwuModelsConfigManager:
     def __init__(self, config_file: Optional[Path] = None) -> None:
         if config_file is None:
             from ..app_paths import user_config_dir
-
             config_file = user_config_dir() / "unified_yunwu_models_config.json"
         self.config_file = Path(config_file)
         self._root: UnifiedYunwuModelsRoot = UnifiedYunwuModelsRoot()
@@ -90,8 +137,19 @@ class UnifiedYunwuModelsConfigManager:
             if self.config_file.exists():
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     raw: Dict[str, Any] = json.load(f)
+                # ---- 兼容旧版单层 yunwu → 迁移为三层 high 档 ----
+                y = raw.get("yunwu")
+                if isinstance(y, dict):
+                    has_tiers = any(k in y for k in ALLOWED_TIERS)
+                    if not has_tiers:
+                        # 旧平面配置 → 全部放入 high
+                        raw["yunwu"] = {
+                            "low": {},
+                            "medium": {},
+                            "high": y,
+                        }
                 self._root = UnifiedYunwuModelsRoot.model_validate(raw)
-                logger.info("已加载云雾整合模型配置")
+                logger.info("已加载云雾整合模型配置（三层档位）")
             else:
                 self._root = UnifiedYunwuModelsRoot()
                 self.save()

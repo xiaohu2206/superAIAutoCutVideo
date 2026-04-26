@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { message } from "@/services/message";
 import unifiedYunwuModelService from "@/services/unifiedYunwuModelService";
-import type { UnifiedYunwuModelsPayload } from "../types";
+import type { UnifiedYunwuModelsPayload, YunwuTierConfig } from "../types";
 
-const YUNWU_DEFAULTS: UnifiedYunwuModelsPayload["yunwu"] = {
+const DEFAULT_TIER: YunwuTierConfig = {
   api_key: "",
   base_url: "https://yunwu.ai/v1/chat/completions",
   copywriting_model_name: "gemini-3.1-pro-preview",
@@ -11,6 +11,37 @@ const YUNWU_DEFAULTS: UnifiedYunwuModelsPayload["yunwu"] = {
   llm_rerank_model_name: "gemini-3.1-pro-preview",
   script_generation_model_name: "gemini-3.1-pro-preview",
 };
+
+const YUNWU_DEFAULTS: UnifiedYunwuModelsPayload["yunwu"] = {
+  low: { ...DEFAULT_TIER },
+  medium: { ...DEFAULT_TIER },
+  high: { ...DEFAULT_TIER },
+};
+
+/** 兼容旧版平面 yunwu → 三层结构 */
+function normalizeYunwu(raw: unknown): UnifiedYunwuModelsPayload["yunwu"] {
+  if (!raw || typeof raw !== "object") return { ...YUNWU_DEFAULTS };
+  const y = raw as Record<string, unknown>;
+  // 已经是三层结构
+  if ("low" in y || "medium" in y || "high" in y) {
+    const tiers = ["low", "medium", "high"] as const;
+    const result: Record<string, YunwuTierConfig> = {};
+    for (const tk of tiers) {
+      const tier = y[tk];
+      result[tk] =
+        tier && typeof tier === "object"
+          ? { ...DEFAULT_TIER, ...(tier as Partial<YunwuTierConfig>) }
+          : { ...DEFAULT_TIER };
+    }
+    return result as UnifiedYunwuModelsPayload["yunwu"];
+  }
+  // 旧版平面结构 → 放入 high
+  return {
+    low: { ...DEFAULT_TIER },
+    medium: { ...DEFAULT_TIER },
+    high: { ...DEFAULT_TIER, ...(y as Partial<YunwuTierConfig>) },
+  };
+}
 
 const emptyRoot = (): UnifiedYunwuModelsPayload => ({
   use_custom_models: true,
@@ -37,10 +68,7 @@ export const useUnifiedYunwuModelConfig = () => {
       if (res?.success && data && typeof data === "object") {
         setRoot({
           use_custom_models: Boolean(data.use_custom_models),
-          yunwu: {
-            ...YUNWU_DEFAULTS,
-            ...(typeof data.yunwu === "object" && data.yunwu ? data.yunwu : {}),
-          },
+          yunwu: normalizeYunwu(data.yunwu),
         });
       }
     } catch (e) {
@@ -83,10 +111,7 @@ export const useUnifiedYunwuModelConfig = () => {
         if (res?.success && data && typeof data === "object") {
           setRoot({
             use_custom_models: Boolean(data.use_custom_models),
-            yunwu: {
-              ...YUNWU_DEFAULTS,
-              ...(typeof data.yunwu === "object" && data.yunwu ? data.yunwu : {}),
-            },
+            yunwu: normalizeYunwu(data.yunwu),
           });
           message.success(
             value ? "已开启自定义模型（文案 / 视频分析）" : "已使用云雾整合模型"
@@ -110,10 +135,15 @@ export const useUnifiedYunwuModelConfig = () => {
       const toastOnSuccess = options?.toastOnSuccess ?? false;
       try {
         setSaving(true);
-        const yunwu: Record<string, unknown> = { ...payload.yunwu };
-        const ak = String(yunwu.api_key ?? "");
-        if (ak.includes("*") && ak.length > 8) {
-          delete yunwu.api_key;
+        // 深拷贝 yunwu 三档，逐档过滤脱敏 api_key
+        const yunwu: Record<string, unknown> = {};
+        for (const [tierKey, tierVal] of Object.entries(payload.yunwu)) {
+          const tierCopy: Record<string, unknown> = { ...tierVal };
+          const ak = String(tierCopy.api_key ?? "");
+          if (ak.includes("*") && ak.length > 8) {
+            delete tierCopy.api_key;
+          }
+          yunwu[tierKey] = tierCopy;
         }
         const body: Record<string, unknown> = {
           use_custom_models: payload.use_custom_models,
@@ -124,10 +154,7 @@ export const useUnifiedYunwuModelConfig = () => {
         if (res?.success && data && typeof data === "object") {
           setRoot({
             use_custom_models: Boolean(data.use_custom_models),
-            yunwu: {
-              ...YUNWU_DEFAULTS,
-              ...(typeof data.yunwu === "object" && data.yunwu ? data.yunwu : {}),
-            },
+            yunwu: normalizeYunwu(data.yunwu),
           });
           if (toastOnSuccess) {
             message.success("整合模型配置已保存");
@@ -156,18 +183,31 @@ export const useUnifiedYunwuModelConfig = () => {
     }, AUTOSAVE_DEBOUNCE_MS);
   }, [persistRoot]);
 
-  const setYunwuField = useCallback(
-    <K extends keyof UnifiedYunwuModelsPayload["yunwu"]>(
+  /** 更新指定档位的指定字段 */
+  const setYunwuTierField = useCallback(
+    <K extends keyof YunwuTierConfig>(
+      tier: "low" | "medium" | "high",
       field: K,
-      value: UnifiedYunwuModelsPayload["yunwu"][K]
+      value: YunwuTierConfig[K]
     ) => {
       setRoot((prev) => ({
         ...prev,
-        yunwu: { ...prev.yunwu, [field]: value },
+        yunwu: {
+          ...prev.yunwu,
+          [tier]: { ...prev.yunwu[tier], [field]: value },
+        },
       }));
       scheduleAutosave();
     },
     [scheduleAutosave]
+  );
+
+  /** 兼容旧调用：更新 high 档位字段 */
+  const setYunwuField = useCallback(
+    <K extends keyof YunwuTierConfig>(field: K, value: YunwuTierConfig[K]) => {
+      setYunwuTierField("high", field, value);
+    },
+    [setYunwuTierField]
   );
 
   const save = useCallback(async () => {
@@ -208,6 +248,7 @@ export const useUnifiedYunwuModelConfig = () => {
     setUseCustomModels,
     setUseCustomModelsPersist,
     setYunwuField,
+    setYunwuTierField,
     save,
     testConnection,
   };

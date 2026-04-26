@@ -74,6 +74,7 @@ from routes.storage_routes import router as settings_router
 from routes.ai_search_shot_settings_routes import router as ai_search_shot_settings_router
 from routes.moondream_routes import router as moondream_router
 from routes.log_routes import router as log_router
+from routes.auth_routes import router as auth_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import (
@@ -411,6 +412,7 @@ app.include_router(settings_router)
 app.include_router(ai_search_shot_settings_router)
 app.include_router(moondream_router)
 app.include_router(log_router)
+app.include_router(auth_router)
 
 
 @app.exception_handler(HTTPException)

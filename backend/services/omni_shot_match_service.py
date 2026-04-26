@@ -46,7 +46,53 @@ from services.omni_local_bge_embedding import (
 
 logger = logging.getLogger(__name__)
 
+# 为 True 时，精排 send_chat 失败时在同目录写 JSON（与 omni_generate_script 的 messages log 类似，便于对 HTTP 5xx/空体 对照排查）
+_OMNI_SM_LOG_RERANK_ON_FAILURE = True
+
 _SCOPE = "omni_shot_match"
+
+
+def _safe_log_sm_segment(s: str) -> str:
+    bad = "<>:\"/\\|?*"
+    out = "".join(c if c not in bad else "_" for c in (s or ""))
+    return (out or "x")[:180]
+
+
+def _log_omni_shot_match_rerank_failure(
+    out_dir: Path,
+    pos: int,
+    project_id: str,
+    task_id: str,
+    exc: str,
+    user_content: str,
+) -> None:
+    if not _OMNI_SM_LOG_RERANK_ON_FAILURE:
+        return
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        fn = f"omni_sm_rerank_fail_{_safe_log_sm_segment(task_id)}_i{pos:05d}_{ts}.json"
+        path = out_dir / fn
+        payload = {
+            "meta": {
+                "source": "omni_shot_match",
+                "project_id": project_id,
+                "task_id": task_id,
+                "row_index": pos,
+                "logged_at": datetime.now().isoformat(),
+            },
+            "exception": exc,
+            "user_content": user_content,
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as werr:  # noqa: BLE001
+        logger.warning("omni_shot_match: 写入精排失败调试 log 失败: %s", werr)
+_TOP_K = 20
+_STAGE1_TOP_N = 15
+_STAGE2_TOP_N = 15
+_STAGE2_RETURN_N = 3
+_OUTPUT_TOP_K = 0
+_CONCURRENCY = 32
 
 
 def _work_dir(project_id: str) -> Path:
@@ -62,12 +108,6 @@ class OmniShotMatchService:
         *,
         force: bool = False,
         task_id: Optional[str] = None,
-        top_k: int = 20,
-        stage1_top_n: int = 10,
-        stage2_top_n: int = 3,
-        stage2_return_n: int = 3,
-        output_top_k: int = 0,
-        concurrency: int = 32,
         rerank_instruct: Optional[str] = None,
         temperature: float = 0.2,
         weights: Optional[Dict[str, float]] = None,
@@ -116,7 +156,7 @@ class OmniShotMatchService:
             phase="preparing",
         )
 
-        sem_n = max(1, int(concurrency or 32))
+        sem_n = _CONCURRENCY
 
         async def _run() -> None:
             try:
@@ -253,7 +293,7 @@ class OmniShotMatchService:
                 search_rows = build_embedding_search_results(
                     copy_items=items,
                     shots=shots,
-                    top_k=max(1, int(top_k or 20)),
+                    top_k=_TOP_K,
                     embedding_model_hint=embedding_model_hint,
                     prompt_language=prompt_language,
                 )
@@ -266,7 +306,7 @@ class OmniShotMatchService:
                         "project_id": project_id,
                         "copywriting_embeddings_path": str(emb_web),
                         "omni_multimodal_json_path": str(mm_web),
-                        "top_k": max(1, int(top_k or 20)),
+                        "top_k": _TOP_K,
                         "score_method": "cosine_similarity",
                         "count_copywriting_items": len(items),
                         "count_shots_total": len(shots),
@@ -324,15 +364,18 @@ class OmniShotMatchService:
                             search_rows=search_rows,
                             prompt_language=prompt_language,
                             stage1_model=stage1_model,
-                            stage1_top_n=stage1_top_n,
-                            stage2_top_n=stage2_top_n,
-                            stage2_return_n=stage2_return_n,
+                            stage1_top_n=_STAGE1_TOP_N,
+                            stage2_top_n=_STAGE2_TOP_N,
+                            stage2_return_n=_STAGE2_RETURN_N,
                             fine_template=fine_template,
                             temperature=temperature,
                             w_rerank=w_rerank,
                             w_embed=w_embed,
                             w_cont=w_cont,
                             llm_label=llm_label,
+                            project_id=project_id,
+                            task_id=task_id,
+                            rerank_work_dir=work,
                         )
 
                 async def _wrapped(pos: int, r: Dict[str, Any]) -> None:
@@ -364,7 +407,7 @@ class OmniShotMatchService:
                 out_rows = merge_fine_scores_and_continuity(
                     search_results=search_rows,
                     partial_by_index=partial,
-                    output_top_k=max(0, int(output_top_k or 0)),
+                    output_top_k=_OUTPUT_TOP_K,
                     w_rerank=w_rerank,
                     w_embed=w_embed,
                     w_cont=w_cont,
@@ -377,10 +420,10 @@ class OmniShotMatchService:
                         "input_search_topk_path": topk_web,
                         "copywriting_embeddings_path": str(emb_web),
                         "omni_multimodal_json_path": str(mm_web),
-                        "output_top_k": int(output_top_k or 0),
-                        "stage1_top_n": int(stage1_top_n or 10),
-                        "stage2_top_n": int(stage2_top_n or 3),
-                        "stage2_return_n": int(stage2_return_n or 3),
+                        "output_top_k": _OUTPUT_TOP_K,
+                        "stage1_top_n": _STAGE1_TOP_N,
+                        "stage2_top_n": _STAGE2_TOP_N,
+                        "stage2_return_n": _STAGE2_RETURN_N,
                         "stage1_mode": "embedding",
                         "models": {"stage1": stage1_model, "stage2": llm_label},
                         "weights": {"rerank_score": w_rerank, "embedding_score": w_embed, "continuity_score": w_cont},
@@ -448,6 +491,9 @@ async def _process_row(
     w_embed: float,
     w_cont: float,
     llm_label: str,
+    project_id: str,
+    task_id: str,
+    rerank_work_dir: Path,
 ) -> Tuple[int, Dict[str, Any]]:
     import time as _time
 
@@ -504,17 +550,17 @@ async def _process_row(
     coarse_cost = _time.time() - t1
 
     docs_sorted = sorted(docs, key=lambda d: coarse_score_map.get(d.get("shot_id"), 0.0), reverse=True)
-    top_stage1 = docs_sorted[: max(1, min(int(stage1_top_n or 10), len(docs_sorted)))]
+    top_stage1 = docs_sorted[: max(1, min(int(stage1_top_n or 15), len(docs_sorted)))]
 
     fine_docs = [
         {
             "shot_id": d["shot_id"],
             "start": d.get("start"),
             "end": d.get("end"),
-            "summary": d.get("summary"),
+            "summary": d.get("summary_no_abstract"),
             "embedding_score": d.get("embedding_score"),
         }
-        for d in top_stage1[: max(1, min(int(stage2_top_n or 3), len(top_stage1)))]
+        for d in top_stage1[: max(1, min(int(stage2_top_n or 15), len(top_stage1)))]
     ]
     n_ret = max(1, int(stage2_return_n or 3))
     fine_prompt = fine_template.format(
@@ -522,19 +568,31 @@ async def _process_row(
         candidates_json=json.dumps(fine_docs, ensure_ascii=False),
         stage2_return_n=n_ret,
     )
-    # 与 omni_copywriting_struct_embed 一致：content 模型 + response_format json_object（对应 demo 的 chat_json）
     machine_hint = (
-        "\n\n【机器可读输出】仅输出一个 JSON 对象（不要 markdown 代码块、不要其它说明文字）。"
-        "格式：{\"items\":[{\"shot_id\":<与候选一致>,\"score\":0到1的小数,\"reason\":\"一句简短理由\"},...]}；"
-        f"items 按 score 从高到低排序，最多 {n_ret} 条；reason 勿为空。"
+        "\n\n【最终输出（硬性约束）】除相邻两行之间的单个换行外，不要输出任何其它文字。"
+        f"至多 {n_ret} 行，每行唯一格式：shot_id|score（ASCII 竖线 |，score 为 0~1 小数）；"
+        "shot_id 须与候选 JSON 中完全一致；按 score 从高到低；行末不要空格。"
+        "禁止：标题、##、**、列表、分析、理由、空行、markdown、代码块。"
     )
+    user_full = fine_prompt + machine_hint
     t2 = _time.time()
-    resp = await ai_service.send_chat(
-        [ChatMessage(role="user", content=fine_prompt + machine_hint)],
-        response_format={"type": "json_object"},
-        temperature=float(temperature),
-        usage=LlmModelUsage.LLM_RERANK,
-    )
+    try:
+        resp = await ai_service.send_chat(
+            [ChatMessage(role="user", content=user_full)],
+            temperature=float(temperature),
+            usage=LlmModelUsage.LLM_RERANK,
+        )
+    except Exception as e:
+        await asyncio.to_thread(
+            _log_omni_shot_match_rerank_failure,
+            rerank_work_dir,
+            pos,
+            project_id,
+            task_id,
+            f"{type(e).__name__}: {e}",
+            user_full,
+        )
+        raise
     fine_cost = _time.time() - t2
     fine_items = normalize_llm_scores(parse_fine_llm_payload(resp.content or ""))[:n_ret]
     fine_map: Dict[Any, Dict[str, Any]] = {it.get("shot_id"): it for it in fine_items if isinstance(it, dict)}

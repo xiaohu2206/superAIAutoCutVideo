@@ -25,6 +25,8 @@ class Project(BaseModel):
     name: str
     description: Optional[str] = None
     project_type: str = Field(default="subtitle") # subtitle | visual | omni
+    # 全感知（omni）生成档位：low=低消耗/低效果，medium=中消耗，high=高消耗/高效果；非 omni 为 None
+    omni_effect_tier: Optional[str] = Field(default=None)
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
@@ -166,6 +168,12 @@ class ProjectsStore:
                                 p["narration_reference_copywriting"] = None
                             if "project_type" not in p:
                                 p["project_type"] = "subtitle"
+                            if "omni_effect_tier" not in p:
+                                p["omni_effect_tier"] = (
+                                    "high"
+                                    if str(p.get("project_type") or "").strip().lower() == "omni"
+                                    else None
+                                )
                             if "scenes_path" not in p:
                                 p["scenes_path"] = None
                             if "scenes_updated_at" not in p:
@@ -236,15 +244,28 @@ class ProjectsStore:
         with self._lock:
             return self._projects.get(project_id)
 
-    def create_project(self, name: str, description: Optional[str] = None, narration_type: str = "短剧解说", project_type: str = "subtitle") -> Project:
+    def create_project(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        narration_type: str = "短剧解说",
+        project_type: str = "subtitle",
+        omni_effect_tier: Optional[str] = None,
+    ) -> Project:
         now = datetime.now().isoformat()
         new_id = str(uuid.uuid4())
         effective_narration_type = narration_type or "短剧解说"
+        pt = str(project_type or "subtitle").strip().lower()
+        tier_norm: Optional[str] = None
+        if pt == "omni":
+            t = str(omni_effect_tier or "high").strip().lower()
+            tier_norm = t if t in ("low", "medium", "high") else "high"
         project = Project(
             id=new_id,
             name=name,
             description=description,
             project_type=project_type,
+            omni_effect_tier=tier_norm,
             narration_type=effective_narration_type,
             script_length="auto",
             script_language="zh",
@@ -289,6 +310,7 @@ class ProjectsStore:
                 "name",
                 "description",
                 "project_type",
+                "omni_effect_tier",
                 "narration_type",
                 "script_length",
                 "original_ratio",
@@ -347,10 +369,23 @@ class ProjectsStore:
                 elif key in ("narration_film_context", "narration_reference_copywriting"):
                     v = updates.get(key)
                     data[key] = None if v is None else str(v)
+                elif key == "omni_effect_tier":
+                    v = updates.get(key)
+                    if v is None or v == "":
+                        data[key] = None
+                    else:
+                        s = str(v).strip().lower()
+                        data[key] = s if s in ("low", "medium", "high") else None
                 elif updates[key] is not None:
                     data[key] = updates[key]
                 elif key in {"script_length", "original_ratio"}:
                     data[key] = updates[key]
+            pt = str(data.get("project_type") or "").strip().lower()
+            if pt != "omni":
+                data["omni_effect_tier"] = None
+            else:
+                t = str(data.get("omni_effect_tier") or "high").strip().lower()
+                data["omni_effect_tier"] = t if t in ("low", "medium", "high") else "high"
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)

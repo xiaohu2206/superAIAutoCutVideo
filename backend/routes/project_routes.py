@@ -297,11 +297,14 @@ class CreateProjectRequest(BaseModel):
     description: Optional[str] = None
     project_type: Optional[str] = Field(default="subtitle")
     narration_type: Optional[str] = Field(default="短剧解说")
+    # omni 专用：low | medium | high，缺省按高消耗
+    omni_effect_tier: Optional[str] = Field(default=None)
 
 
 class UpdateProjectRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    omni_effect_tier: Optional[str] = None
     narration_type: Optional[str] = None
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
@@ -509,7 +512,13 @@ async def create_project(req: CreateProjectRequest):
     for existing in projects_store.list_projects():
         if (existing.name or "").strip() == name_clean:
             raise HTTPException(status_code=400, detail="项目名称已存在")
-    p = projects_store.create_project(name_clean, req.description, req.narration_type or "短剧解说", req.project_type or "subtitle")
+    p = projects_store.create_project(
+        name_clean,
+        req.description,
+        req.narration_type or "短剧解说",
+        req.project_type or "subtitle",
+        omni_effect_tier=req.omni_effect_tier,
+    )
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),

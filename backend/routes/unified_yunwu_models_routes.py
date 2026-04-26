@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 云雾整合模型配置 API（后端持久化；前端可后续对接）。
+支持三档配置（low / medium / high），更新时按档位合并。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 from modules.ai import AIModelConfig, get_provider_class
 from modules.config.unified_yunwu_models_config import (
     UnifiedYunwuModelsRoot,
-    UnifiedYunwuModelsSettings,
+    YunwuTierSettings,
     unified_yunwu_models_config_manager,
 )
 from services.unified_model_usage import (
@@ -37,17 +38,24 @@ def _mask_key(api_key: str) -> str:
 def _root_to_public_dict(root: UnifiedYunwuModelsRoot) -> Dict[str, Any]:
     d = root.model_dump()
     y = d.get("yunwu") or {}
-    if isinstance(y, dict) and y.get("api_key"):
-        y = {**y, "api_key": _mask_key(str(y["api_key"]))}
-        d["yunwu"] = y
+    # yunwu 现在是 {low: {...}, medium: {...}, high: {...}}，逐档脱敏
+    if isinstance(y, dict):
+        masked: Dict[str, Any] = {}
+        for tier_key, tier_dict in y.items():
+            if isinstance(tier_dict, dict) and tier_dict.get("api_key"):
+                masked[tier_key] = {**tier_dict, "api_key": _mask_key(str(tier_dict["api_key"]))}
+            else:
+                masked[tier_key] = tier_dict
+        d["yunwu"] = masked
     return d
 
 
 class UnifiedYunwuModelsUpdateRequest(BaseModel):
     """与 UnifiedYunwuModelsRoot 同结构；部分字段可选由调用方只传需要更新的项。"""
 
-    use_custom_models: bool | None = None
-    yunwu: Dict[str, Any] | None = Field(default=None, description="云雾子配置，可部分字段")
+    use_custom_models: Optional[bool] = None
+    # 顶层 yunwu 是三档 dict；前端可传完整 yunwu 或只传某档部分字段
+    yunwu: Optional[Dict[str, Any]] = Field(default=None, description="云雾三档子配置，可部分字段")
 
 
 @router.get("/unified-yunwu", summary="获取云雾整合模型配置")
@@ -60,23 +68,57 @@ async def get_unified_yunwu_models():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _merge_tier_inplace(
+    merged_tiers: Dict[str, Dict[str, Any]],
+    tier_key: str,
+    tier_updates: Dict[str, Any],
+    existing: Dict[str, YunwuTierSettings],
+) -> None:
+    """将前端传来的单档更新合并到 merged_tiers[tier_key] 中。"""
+    cur = existing.get(tier_key, YunwuTierSettings())
+    cur_dict = cur.model_dump()
+    for k, v in tier_updates.items():
+        if k == "api_key" and isinstance(v, str):
+            if "*" in v and len(v) > 8:
+                old = str(cur.api_key or "")
+                if old and len(old) > 8 and old[:4] == v[:4] and old[-4:] == v[-4:]:
+                    cur_dict["api_key"] = old
+                else:
+                    cur_dict["api_key"] = v
+            else:
+                cur_dict["api_key"] = v
+        else:
+            cur_dict[k] = v
+    merged_tiers[tier_key] = cur_dict
+
+
 @router.put("/unified-yunwu", summary="更新云雾整合模型配置")
 async def put_unified_yunwu_models(body: UnifiedYunwuModelsUpdateRequest):
     try:
         cur = unified_yunwu_models_config_manager.get_root()
-        merged_yunwu: Dict[str, Any] = dict(cur.yunwu.model_dump())
+        existing_tiers = cur.yunwu  # Dict[str, YunwuTierSettings]
+
+        merged_tiers: Dict[str, Dict[str, Any]] = {}
         if body.yunwu:
-            for k, v in body.yunwu.items():
-                if k == "api_key" and isinstance(v, str):
-                    if "*" in v and len(v) > 8:
-                        old = str(cur.yunwu.api_key or "")
-                        if old and len(old) > 8 and old[:4] == v[:4] and old[-4:] == v[-4:]:
-                            merged_yunwu["api_key"] = old
-                    else:
-                        merged_yunwu["api_key"] = v
+            # body.yunwu 可能是 {low: {...}, medium: {...}, high: {...}} 三档结构
+            for tier_key, tier_val in body.yunwu.items():
+                if tier_key in ("low", "medium", "high") and isinstance(tier_val, dict):
+                    _merge_tier_inplace(merged_tiers, tier_key, tier_val, existing_tiers)
                 else:
-                    merged_yunwu[k] = v
-        new_yunwu = UnifiedYunwuModelsSettings.model_validate(merged_yunwu)
+                    # 兼容旧版：body.yunwu 直接是平面字段（如 {api_key: ..., copywriting_model_name: ...}）
+                    # 视为更新 high 档
+                    _merge_tier_inplace(merged_tiers, "high", {tier_key: tier_val}, existing_tiers)
+
+        # 确保三档齐全
+        for tk in ("low", "medium", "high"):
+            if tk not in merged_tiers:
+                merged_tiers[tk] = existing_tiers.get(tk, YunwuTierSettings()).model_dump()
+
+        # 校验每档
+        new_yunwu: Dict[str, YunwuTierSettings] = {}
+        for tk, td in merged_tiers.items():
+            new_yunwu[tk] = YunwuTierSettings.model_validate(td)
+
         new_root = UnifiedYunwuModelsRoot(
             use_custom_models=cur.use_custom_models if body.use_custom_models is None else bool(body.use_custom_models),
             yunwu=new_yunwu,

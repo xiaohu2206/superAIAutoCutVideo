@@ -22,6 +22,9 @@ export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
 export type ScriptLanguage = "zh" | "en";
 
+/** 全感知（omni）生成档位：低/中/高消耗与效果 */
+export type OmniEffectTier = "low" | "medium" | "high";
+
 /**
  * 项目状态枚举
  */
@@ -99,6 +102,8 @@ export interface Project {
   name: string; // 项目名称
   description?: string; // 项目描述
   project_type?: "subtitle" | "visual" | "omni";
+  /** 仅 omni 项目：生成档位 low | medium | high */
+  omni_effect_tier?: OmniEffectTier | null;
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number | null;
@@ -189,6 +194,7 @@ export interface CreateProjectRequest {
   description?: string;
   project_type?: "subtitle" | "visual" | "omni";
   narration_type?: NarrationType;
+  omni_effect_tier?: OmniEffectTier;
 }
 
 /**
@@ -198,6 +204,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   project_type?: "subtitle" | "visual" | "omni";
+  omni_effect_tier?: OmniEffectTier | null;
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number | null;

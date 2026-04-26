@@ -1,19 +1,16 @@
 // 创建项目模态框组件
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, Folder } from "lucide-react";
+import type { CreateProjectRequest, OmniEffectTier } from "../../types/project";
 import { NarrationType } from "../../types/project";
+import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import AppSelect from "../ui/AppSelect";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: {
-    name: string;
-    description?: string;
-    narration_type: NarrationType;
-    project_type: "subtitle" | "visual" | "omni";
-  }) => Promise<void>;
+  onCreate: (data: CreateProjectRequest) => Promise<void>;
 }
 
 /**
@@ -30,8 +27,39 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     NarrationType.SHORT_DRAMA
   );
   const [projectType, setProjectType] = useState<"subtitle" | "visual" | "omni">("subtitle");
+  const [omniEffectTier, setOmniEffectTier] = useState<OmniEffectTier>("high");
+  /** null：尚未拉取；与设置页「使用自定义模型」一致，为 true 时不展示全感知档位 */
+  const [yunwuUseCustomModels, setYunwuUseCustomModels] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const showOmniEffectTier =
+    projectType === "omni" && yunwuUseCustomModels === false;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setYunwuUseCustomModels(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await unifiedYunwuModelService.get();
+        const data = res?.data;
+        if (cancelled) return;
+        if (res?.success && data && typeof data === "object") {
+          setYunwuUseCustomModels(Boolean(data.use_custom_models));
+        } else {
+          setYunwuUseCustomModels(false);
+        }
+      } catch {
+        if (!cancelled) setYunwuUseCustomModels(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   /**
    * 处理提交
@@ -48,18 +76,23 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setLoading(true);
 
     try {
-      await onCreate({
+      const payload: CreateProjectRequest = {
         name: name.trim(),
         description: description.trim() || undefined,
         narration_type: narrationType,
         project_type: projectType,
-      });
+      };
+      if (showOmniEffectTier) {
+        payload.omni_effect_tier = omniEffectTier;
+      }
+      await onCreate(payload);
 
       // 重置表单
       setName("");
       setDescription("");
       setNarrationType(NarrationType.SHORT_DRAMA);
       setProjectType("subtitle");
+      setOmniEffectTier("high");
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建项目失败");
@@ -75,6 +108,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     if (!loading) {
       setName("");
       setDescription("");
+      setOmniEffectTier("high");
       setError(null);
       onClose();
     }
@@ -224,6 +258,77 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {showOmniEffectTier && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  全感知生成效果 <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  档位越高，模型调用与计算越多，效果通常越好；默认高消耗。
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(
+                    [
+                      {
+                        tier: "low" as const,
+                        title: "低消耗",
+                        sub: "低效果",
+                        activeBorder: "border-amber-500",
+                        activeBg: "bg-amber-50",
+                        hoverBorder: "hover:border-amber-300",
+                        titleActive: "text-amber-800",
+                        dot: "bg-amber-500",
+                      },
+                      {
+                        tier: "medium" as const,
+                        title: "中消耗",
+                        sub: "均衡",
+                        activeBorder: "border-purple-500",
+                        activeBg: "bg-purple-50",
+                        hoverBorder: "hover:border-purple-300",
+                        titleActive: "text-purple-800",
+                        dot: "bg-purple-500",
+                      },
+                      {
+                        tier: "high" as const,
+                        title: "高消耗",
+                        sub: "高效果",
+                        activeBorder: "border-violet-600",
+                        activeBg: "bg-violet-50",
+                        hoverBorder: "hover:border-violet-400",
+                        titleActive: "text-violet-900",
+                        dot: "bg-violet-600",
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <div
+                      key={opt.tier}
+                      onClick={() => !loading && setOmniEffectTier(opt.tier)}
+                      className={`relative p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                        omniEffectTier === opt.tier
+                          ? `${opt.activeBorder} ${opt.activeBg}`
+                          : `border-gray-200 bg-white ${opt.hoverBorder}`
+                      }`}
+                    >
+                      {omniEffectTier === opt.tier && (
+                        <div
+                          className={`absolute top-2 right-2 w-3.5 h-3.5 ${opt.dot} rounded-full border-2 border-white shadow-sm`}
+                        />
+                      )}
+                      <h4
+                        className={`text-sm font-bold ${
+                          omniEffectTier === opt.tier ? opt.titleActive : "text-gray-700"
+                        }`}
+                      >
+                        {opt.title}
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-0.5">{opt.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 项目描述 */}
             {/* <div>

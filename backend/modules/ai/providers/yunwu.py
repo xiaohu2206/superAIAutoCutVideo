@@ -6,11 +6,49 @@
 """
 
 from typing import Dict, List, Any, Optional
+import asyncio
+import json
 import logging
+from datetime import datetime
+from pathlib import Path
 
-from ..base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse
+from ..base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse, LlmProviderResponseError
 
 logger = logging.getLogger(__name__)
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent.parent
+_YUNWU_HTTP_DEBUG_DIR = _BACKEND_DIR / "logs"
+
+
+def _write_yunwu_http_debug_file(
+    *,
+    status_code: int,
+    request_url: str,
+    model_name: str,
+    content_type: str,
+    body_text: str,
+) -> None:
+    """在同步上下文中将原始 HTTP 信息写入文件，供 asyncio.to_thread 调用以免阻塞事件循环。"""
+    try:
+        _YUNWU_HTTP_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        fn = f"yunwu_http_{status_code}_{ts}.txt"
+        path = _YUNWU_HTTP_DEBUG_DIR / fn
+        text = "\n".join(
+            [
+                f"status_code={status_code}",
+                f"url={request_url}",
+                f"model={model_name}",
+                f"content_type={content_type}",
+                f"body_length={len(body_text)}",
+                "",
+                "--- body (truncated 500k) ---",
+                (body_text or "")[:500000],
+            ]
+        )
+        path.write_text(text, encoding="utf-8")
+    except Exception as werr:  # noqa: BLE001
+        logger.warning("写入 yunwu HTTP 调试文件失败: %s", werr)
 
 
 class YunwuProvider(AIProviderBase):
@@ -115,19 +153,97 @@ class YunwuProvider(AIProviderBase):
                 json=payload,
                 headers=headers,
             )
-            response_data = response.json()
-            if response.status_code >= 400:
+            status_code = int(response.status_code)
+            raw_text = response.text or ""
+            ct = (response.headers.get("content-type") or "").split(";")[0].strip()
+
+            response_data: Any
+            if not raw_text.strip():
+                if status_code >= 400:
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text="(empty body)",
+                    )
+                    raise LlmProviderResponseError(
+                        f"云雾API 错误: HTTP {status_code} 响应体为空或仅空白"
+                        "（常见于 5xx；已写入 backend/logs/ 下 yunwu_http_*.txt 便于对比网关/HTML 页）",
+                        status_code=status_code,
+                        raw_body="",
+                        content_type=ct,
+                    )
+                response_data = {}
+            else:
+                try:
+                    response_data = json.loads(raw_text)
+                except json.JSONDecodeError as je:
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text=raw_text,
+                    )
+                    logger.error(
+                        "云雾API 响应体非 JSON: status=%s content_type=%s len=%s preview=%r",
+                        status_code,
+                        ct,
+                        len(raw_text),
+                        raw_text[:800],
+                    )
+                    raise LlmProviderResponseError(
+                        f"云雾API 响应体非有效 JSON (HTTP {status_code}): {je!s}；"
+                        f"已写入 backend/logs/ 下 yunwu_http_*.txt",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    ) from je
+
+            if status_code >= 400:
                 err = response_data.get("error") if isinstance(response_data, dict) else None
                 if isinstance(err, dict):
-                    raise Exception(f"云雾API错误: {err.get('message') or response.text}")
-                else:
-                    raise Exception(f"云雾API请求失败: {response.text}")
+                    raise LlmProviderResponseError(
+                        f"云雾API错误: {err.get('message') or raw_text[:2000]}",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    )
+                # 非标准 JSON 错误体已在上方 json.loads 分支处理
+                if not (isinstance(response_data, dict) and response_data.get("error")):
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text=raw_text,
+                    )
+                raise LlmProviderResponseError(
+                    f"云雾API请求失败: {raw_text[:2000]}",
+                    status_code=status_code,
+                    raw_body=raw_text,
+                    content_type=ct,
+                )
 
             if isinstance(response_data, dict) and "error" in response_data:
                 error_info = response_data["error"]
                 if isinstance(error_info, dict):
-                    raise Exception(f"云雾API错误: {error_info.get('message', 'Unknown error')}")
-                raise Exception(f"云雾API错误: {str(error_info)}")
+                    raise LlmProviderResponseError(
+                        f"云雾API错误: {error_info.get('message', 'Unknown error')}",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    )
+                raise LlmProviderResponseError(
+                    f"云雾API错误: {str(error_info)}",
+                    status_code=status_code,
+                    raw_body=raw_text,
+                    content_type=ct,
+                )
 
             return response_data
         except Exception as e:
