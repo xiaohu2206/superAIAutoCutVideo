@@ -435,73 +435,88 @@ app.include_router(licenses_router)
 app.include_router(license_public_router)
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+def _extract_project_id_from_request(request: Request) -> Optional[str]:
+    """从 URL 路径或查询参数中安全提取 project_id，不读取 body。"""
     try:
-        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
-        project_id = m.group(1) if m else None
-    except Exception:
-        project_id = None
-    if not project_id:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                pid = body.get("project_id") or body.get("projectId")
-                if pid:
-                    project_id = str(pid)
-        except Exception:
-            pass
-    payload = runtime_log_store.append(
-        {
-            "type": "error",
-            "scope": "http_exception",
-            "method": request.method,
-            "path": str(request.url.path),
-            "status_code": int(exc.status_code),
-            "detail": str(exc.detail),
-            "_stored": True,
-        },
-        project_id=project_id,
-    )
-    try:
-        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+        path = str(request.url.path or "")
+        m = re.match(r"^/api/projects/([^/]+)", path)
+        if m:
+            return m.group(1)
     except Exception:
         pass
+    try:
+        return request.query_params.get("project_id") or request.query_params.get("projectId")
+    except Exception:
+        pass
+    return None
+
+
+async def _bg_log_and_broadcast(
+    scope: str,
+    method: str,
+    path: str,
+    project_id: Optional[str],
+    status_code: int,
+    detail: str,
+):
+    """后台任务：在线程池执行同步日志写盘，再异步广播；任何异常都不抛。"""
+    loop = asyncio.get_running_loop()
+    try:
+        payload = await loop.run_in_executor(
+            None,
+            lambda: runtime_log_store.append(
+                {
+                    "type": "error",
+                    "scope": scope,
+                    "method": method,
+                    "path": path,
+                    "status_code": int(status_code),
+                    "detail": str(detail),
+                    "_stored": True,
+                },
+                project_id=project_id,
+            ),
+        )
+    except Exception:
+        return
+    try:
+        await asyncio.wait_for(
+            manager.broadcast(json.dumps(payload, ensure_ascii=False)),
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    project_id = _extract_project_id_from_request(request)
+    asyncio.create_task(
+        _bg_log_and_broadcast(
+            scope="http_exception",
+            method=request.method,
+            path=str(request.url.path),
+            project_id=project_id,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
+    )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    try:
-        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
-        project_id = m.group(1) if m else None
-    except Exception:
-        project_id = None
-    if not project_id:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                pid = body.get("project_id") or body.get("projectId")
-                if pid:
-                    project_id = str(pid)
-        except Exception:
-            pass
-    payload = runtime_log_store.append(
-        {
-            "type": "error",
-            "scope": "unhandled_exception",
-            "method": request.method,
-            "path": str(request.url.path),
-            "status_code": 500,
-            "error": str(exc),
-            "_stored": True,
-        },
-        project_id=project_id,
+    project_id = _extract_project_id_from_request(request)
+    asyncio.create_task(
+        _bg_log_and_broadcast(
+            scope="unhandled_exception",
+            method=request.method,
+            path=str(request.url.path),
+            project_id=project_id,
+            status_code=500,
+            detail=str(exc),
+        )
     )
-    try:
-        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 def get_app_paths():

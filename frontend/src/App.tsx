@@ -403,6 +403,11 @@ const App: React.FC = () => {
               {activeTab === "home" && !currentProjectId && !showProfile && (
                 <ProjectManagementPage
                   onEditProject={(projectId) => setCurrentProjectId(projectId)}
+                  onShowLogin={() => {
+                    const event = new CustomEvent("sacv:show-login-modal");
+                    window.dispatchEvent(event);
+                  }}
+                  onShowProfile={() => setShowProfile(true)}
                 />
               )}
 

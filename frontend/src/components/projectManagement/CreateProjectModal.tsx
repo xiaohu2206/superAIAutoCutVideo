@@ -6,11 +6,14 @@ import type { CreateProjectRequest, OmniEffectTier } from "../../types/project";
 import { NarrationType } from "../../types/project";
 import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import AppSelect from "../ui/AppSelect";
+import { useAuth } from "../auth/AuthContext";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: CreateProjectRequest) => Promise<void>;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
 }
 
 /**
@@ -20,7 +23,10 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   isOpen,
   onClose,
   onCreate,
+  onShowLogin,
+  onShowProfile,
 }) => {
+  const { isAuthenticated } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [narrationType, setNarrationType] = useState<NarrationType>(
@@ -95,7 +101,21 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       setOmniEffectTier("high");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建项目失败");
+      const msg = err instanceof Error ? err.message : "创建项目失败";
+      if (projectType === "omni") {
+        const isLicenseError = /license|401|403|登录|未授权|无权限|过期|校验|绑定/i.test(msg);
+        if (isLicenseError) {
+          setError(msg);
+          onClose();
+          if (!isAuthenticated) {
+            onShowLogin?.();
+          } else {
+            onShowProfile?.();
+          }
+          return;
+        }
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }

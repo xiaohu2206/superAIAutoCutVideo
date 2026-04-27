@@ -20,6 +20,7 @@ interface ApiResponse<T = unknown> {
 }
 
 const AUTH_REQUEST_TIMEOUT_MS = 45_000;
+const GET_ME_TIMEOUT_MS = 8_000;
 
 function parseHttpErrorMessage(status: number, body: unknown): string {
   if (body == null) {
@@ -59,9 +60,10 @@ interface UserInfo {
   updatedAt?: string;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<ApiResponse<T>> {
+async function request<T>(url: string, options?: RequestInit & { timeoutMs?: number }): Promise<ApiResponse<T>> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+  const timeoutMs = options?.timeoutMs ?? AUTH_REQUEST_TIMEOUT_MS;
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
@@ -147,6 +149,7 @@ export async function getMe(token: string): Promise<UserInfo & { createdAt: stri
     headers: {
       ...authHeaders(token),
     },
+    timeoutMs: GET_ME_TIMEOUT_MS,
   });
   return res.data;
 }

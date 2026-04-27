@@ -72,7 +72,7 @@ export class ProjectService {
     const response = await apiClient.post<{ data: Project }>(
       "/api/projects",
       data,
-      10000,
+      30000,
       authHeaders
     );
     return response.data;

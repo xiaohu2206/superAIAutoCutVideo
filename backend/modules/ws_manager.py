@@ -4,6 +4,7 @@
 统一的 WebSocket 连接管理器，供后端各路由广播实时进度使用，避免 main.py 的循环依赖。
 """
 
+import asyncio
 import logging
 import json
 from typing import List
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
+    WS_SEND_TIMEOUT = 2.0
+
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
@@ -28,7 +31,7 @@ class ConnectionManager:
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         try:
-            await websocket.send_text(message)
+            await asyncio.wait_for(websocket.send_text(message), timeout=self.WS_SEND_TIMEOUT)
         except Exception as e:
             logger.error(f"发送个人消息失败: {e}")
 
@@ -73,7 +76,7 @@ class ConnectionManager:
         disconnected = []
         for connection in list(self.active_connections):
             try:
-                await connection.send_text(message)
+                await asyncio.wait_for(connection.send_text(message), timeout=self.WS_SEND_TIMEOUT)
             except Exception as e:
                 logger.error(f"广播消息失败: {e}")
                 disconnected.append(connection)

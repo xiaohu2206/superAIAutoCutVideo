@@ -18,7 +18,7 @@ from modules.auth.license_device_id import get_host_device_fingerprint
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = httpx.Timeout(connect=8.0, read=45.0, write=20.0, pool=8.0)
+_TIMEOUT = httpx.Timeout(connect=8.0, read=15.0, write=10.0, pool=8.0)
 
 
 def _unwrap_licenses_json(body: Any) -> list[dict[str, Any]]:
@@ -70,7 +70,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
         )
     if r.status_code == 401:
         raise HTTPException(
-            status_code=401,
+            status_code=400,
             detail="登录已过期或无效，请重新登录后再创建全感知项目。",
         )
     if r.status_code != 200:
@@ -83,7 +83,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
         list_body: Any = r.json()
     except Exception:
         raise HTTPException(
-            status_code=403,
+            status_code=400,
             detail="License 服务返回异常，请稍后重试。",
         )
     items = _unwrap_licenses_json(list_body)
@@ -97,7 +97,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
         candidates.append(it)
     if not candidates:
         raise HTTPException(
-            status_code=403,
+            status_code=400,
             detail="创建全感知项目需要有效的 License：请先在个人中心绑定并处于生效中的 License。",
         )
     # 与列表 API 一致：id 大的优先
@@ -142,4 +142,4 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
         err = _error_detail_from_any(vbody) if vbody else f"License 校验失败 (HTTP {vr.status_code})"
         if err:
             last_error = err
-    raise HTTPException(status_code=403, detail=last_error)
+    raise HTTPException(status_code=400, detail=last_error)

@@ -20,6 +20,8 @@ _AUTH_UPSTREAM_PROD = "http://47.92.113.170"
 
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=8.0, read=45.0, write=20.0, pool=8.0)
 
+_UPSTREAM_UNREACHABLE_MSG = "认证服务暂时不可用，请稍后重试"
+
 
 def _use_production_upstream() -> bool:
     return bool(getattr(sys, "frozen", False))
@@ -56,8 +58,14 @@ async def forward_upstream_post(
     }
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        r = await client.post(url, json=body, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+            r = await client.post(url, json=body, headers=headers)
+    except httpx.ConnectError:
+        return JSONResponse(
+            status_code=502,
+            content={"detail": _UPSTREAM_UNREACHABLE_MSG},
+        )
     return _passthrough_response(r)
 
 
@@ -76,8 +84,14 @@ async def forward_upstream_post_raw(
     headers["Content-Type"] = ct if ct else "application/json"
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        r = await client.post(url, content=content, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+            r = await client.post(url, content=content, headers=headers)
+    except httpx.ConnectError:
+        return JSONResponse(
+            status_code=502,
+            content={"detail": _UPSTREAM_UNREACHABLE_MSG},
+        )
     return _passthrough_response(r)
 
 
@@ -86,6 +100,12 @@ async def forward_upstream_get(path: str, authorization: Optional[str]) -> Respo
     headers = {"Accept": "application/json, text/plain, */*"}
     if authorization:
         headers["Authorization"] = authorization
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        r = await client.get(url, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+            r = await client.get(url, headers=headers)
+    except httpx.ConnectError:
+        return JSONResponse(
+            status_code=502,
+            content={"detail": _UPSTREAM_UNREACHABLE_MSG},
+        )
     return _passthrough_response(r)

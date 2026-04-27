@@ -4,7 +4,7 @@ import {
   Settings,
   User,
 } from "lucide-react";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Logo from "@/assets/logo.png";
 import LogConsolePanel from "@/components/settingsPage/components/LogConsolePanel";
 import { TauriCommands } from "@/services/clients";
@@ -28,6 +28,12 @@ const Navigation: React.FC<NavigationProps> = ({
 }) => {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const { isAuthenticated, user } = useAuth();
+
+  useEffect(() => {
+    const handler = () => setShowAuthModal(true);
+    window.addEventListener("sacv:show-login-modal", handler);
+    return () => window.removeEventListener("sacv:show-login-modal", handler);
+  }, []);
 
   const navItems = [
     {

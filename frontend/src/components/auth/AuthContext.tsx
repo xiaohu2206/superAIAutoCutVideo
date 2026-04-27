@@ -19,6 +19,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const TOKEN_KEY = "sacv_auth_token";
 
+const isAuthFailureMessage = (msg: string) =>
+  /401|403|unauthorized|未授权|无权限|token|登录|过期|expired|invalid|无效/i.test(msg);
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     token: null,
@@ -43,9 +46,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState((s) => ({ ...s, isLoading: false }));
       return;
     }
-
-    const isAuthFailureMessage = (msg: string) =>
-      /401|403|unauthorized|未授权|无权限|token|登录|过期|expired|invalid|无效/i.test(msg);
 
     const restore = async () => {
       if (restoreSessionInFlight.current) return;
@@ -126,8 +126,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const user = await getMe(currentToken);
       setState((s) => ({ ...s, user }));
-    } catch {
-      logout();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isAuthFailureMessage(msg)) {
+        logout();
+      }
     }
   }, [logout]);
 
