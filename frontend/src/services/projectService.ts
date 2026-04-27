@@ -746,6 +746,9 @@ export class ProjectService {
     return response.data;
   }
 
+  /**
+   * 提交 Omni 管线：后端会校验 License，需与「我的 License」一致附带 Bearer Token。
+   */
   async runOmniPipeline(
     projectId: string,
     options?: {
@@ -759,9 +762,15 @@ export class ProjectService {
       task_id: options?.task_id ?? undefined,
       multimodal_action: options?.multimodal_action ?? "auto",
     };
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
       `/api/projects/${projectId}/omni/run-pipeline`,
-      payload
+      payload,
+      undefined,
+      authHeaders
     );
     if (!response.data) {
       throw new Error("Omni 管线提交失败：响应为空");

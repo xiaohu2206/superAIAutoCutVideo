@@ -12,6 +12,8 @@ import ScriptEditor from "./ScriptEditor";
 interface ProjectEditGenerateStepProps {
   project: Project;
   refreshProject: () => Promise<void>;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
 
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
@@ -58,6 +60,8 @@ interface ProjectEditGenerateStepProps {
 const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   project,
   refreshProject,
+  onShowLogin,
+  onShowProfile,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
   handleStopGenerateCopywriting,
@@ -98,6 +102,8 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   const omniNarration = useOmniFullNarrationPipeline({
     project,
     refreshProject,
+    onShowLogin,
+    onShowProfile,
   });
 
   return (

@@ -1,5 +1,17 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "../components/auth/AuthContext";
+
+const OMNI_PIPELINE_LICENSE_GATE_MSG =
+  "运行 Omni 管线需要先登录，并在个人中心绑定处于生效中的 License。";
+
+/** 与 CreateProjectModal handleSubmit 中 omni License 错误判定一致 */
+const OMNI_LICENSE_ERROR_RE = /license|401|403|登录|未授权|无权限|过期|校验|绑定/i;
+
+function readSacvAuthTokenTrimmed(): string {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem("sacv_auth_token")?.trim() ?? "";
+}
 import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../types/project";
 import { useTauriFileDrop } from "./useTauriFileDrop";
@@ -59,12 +71,16 @@ export interface UseProjectEditUploadStepOptions {
   omniPipelineShowProgressBar: boolean;
   omniPipelineCanStop: boolean;
   omniMultimodalResult: OmniMultimodalResult | null;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
   showSuccess: (text: string, durationSec?: number) => void;
   showErrorText: (text: string, durationSec?: number) => void;
   showError: (err: unknown, fallback: string) => void | Promise<void>;
 }
 
 export interface UseProjectEditUploadStepReturn {
+  /** 已登录（本地有 sacv token），Omni 管线按钮可点；完整 License 仍由后端校验 */
+  omniRunPipelineAuthReady: boolean;
   showAdvancedConfig: boolean;
   setShowAdvancedConfig: React.Dispatch<React.SetStateAction<boolean>>;
   uploadingSubtitle: boolean;
@@ -135,6 +151,7 @@ export interface UseProjectEditUploadStepReturn {
 export function useProjectEditUploadStep(
   options: UseProjectEditUploadStepOptions
 ): UseProjectEditUploadStepReturn {
+  const { isAuthenticated } = useAuth();
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
 
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
@@ -672,6 +689,10 @@ export function useProjectEditUploadStep(
   const onRunOmniPipeline = useCallback(async () => {
     const p = options.project;
     if (!p) return;
+    if (!readSacvAuthTokenTrimmed()) {
+      options.showErrorText(OMNI_PIPELINE_LICENSE_GATE_MSG);
+      return;
+    }
     if (!p.video_path && !p.merged_video_path) {
       options.showErrorText("请先上传视频文件");
       return;
@@ -688,25 +709,52 @@ export function useProjectEditUploadStep(
       await options.runOmniPipeline({ multimodal_action: "auto" });
       options.showSuccess("Omni 管线任务已提交");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+        if (!isAuthenticated) options.onShowLogin?.();
+        else options.onShowProfile?.();
+      }
       options.showError(err, "Omni 管线失败");
     }
-  }, [options]);
+  }, [options, isAuthenticated]);
 
   const onOmniMultimodalChoiceContinue = useCallback(() => {
+    if (!readSacvAuthTokenTrimmed()) {
+      options.showErrorText(OMNI_PIPELINE_LICENSE_GATE_MSG);
+      return;
+    }
     setOmniMultimodalChoiceModalOpen(false);
     void options
       .runOmniPipeline({ multimodal_action: "continue" })
       .then(() => options.showSuccess("Omni 管线任务已提交"))
-      .catch((err) => options.showError(err, "Omni 管线失败"));
-  }, [options]);
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+          if (!isAuthenticated) options.onShowLogin?.();
+          else options.onShowProfile?.();
+        }
+        options.showError(err, "Omni 管线失败");
+      });
+  }, [options, isAuthenticated]);
 
   const onOmniMultimodalChoiceRestart = useCallback(() => {
+    if (!readSacvAuthTokenTrimmed()) {
+      options.showErrorText(OMNI_PIPELINE_LICENSE_GATE_MSG);
+      return;
+    }
     setOmniMultimodalChoiceModalOpen(false);
     void options
       .runOmniPipeline({ multimodal_action: "restart" })
       .then(() => options.showSuccess("Omni 管线任务已提交"))
-      .catch((err) => options.showError(err, "Omni 管线失败"));
-  }, [options]);
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+          if (!isAuthenticated) options.onShowLogin?.();
+          else options.onShowProfile?.();
+        }
+        options.showError(err, "Omni 管线失败");
+      });
+  }, [options, isAuthenticated]);
 
   const onOmniMultimodalChoiceCancel = useCallback(() => {
     setOmniMultimodalChoiceModalOpen(false);
@@ -725,7 +773,10 @@ export function useProjectEditUploadStep(
     }
   }, [options, isStoppingOmniPipeline]);
 
+  const omniRunPipelineAuthReady = Boolean(readSacvAuthTokenTrimmed());
+
   return {
+    omniRunPipelineAuthReady,
     showAdvancedConfig,
     setShowAdvancedConfig,
     uploadingSubtitle,

@@ -1,9 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "../../components/auth/AuthContext";
+import {
+  fetchLicenseClientDeviceId,
+  fetchMyLicenses,
+  type LicenseRecord,
+} from "../../components/auth/licenseApi";
 import type { WebSocketMessage } from "../../services/clients";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
 import type { Project, ProjectLatestTasks, TaskProgressState, VideoScript } from "../../types/project";
 import { useWsTaskProgress, type WsProgressLog } from "../useWsTaskProgress";
+
+const OMNI_PIPELINE_LICENSE_GATE_MSG =
+  "运行 Omni 全链路需要先登录，并在个人中心绑定处于生效中且包含本机的 License。";
+
+/** 与 CreateProjectModal / useProjectEditUploadStep 中 Omni License 错误判定一致 */
+const OMNI_LICENSE_ERROR_RE = /license|401|403|登录|未授权|无权限|过期|校验|绑定/i;
+
+function readSacvAuthTokenTrimmed(): string {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem("sacv_auth_token")?.trim() ?? "";
+}
+
+function licenseCoversDevice(lic: LicenseRecord, deviceId: string): boolean {
+  if (String(lic.status).toLowerCase() !== "active") return false;
+  if (lic.expireAt) {
+    const t = new Date(lic.expireAt).getTime();
+    if (!Number.isNaN(t) && t < Date.now()) return false;
+  }
+  return lic.devices.some((d) => String(d.deviceId) === String(deviceId));
+}
+
+function hasActiveLicenseForThisDevice(licenses: LicenseRecord[], deviceId: string): boolean {
+  if (!deviceId) return false;
+  return licenses.some((lic) => licenseCoversDevice(lic, deviceId));
+}
 
 /** 与后端 task scope 一致 */
 export const OMNI_STEP_SCOPE = {
@@ -19,6 +50,8 @@ export type OmniStepTestPhase = keyof typeof OMNI_STEP_SCOPE;
 export interface UseOmniFullNarrationPipelineOptions {
   project?: Project | null;
   refreshProject: () => Promise<void>;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
 }
 
 export interface UseOmniFullNarrationPipelineReturn {
@@ -72,6 +105,9 @@ export function useOmniFullNarrationPipeline(
   options: UseOmniFullNarrationPipelineOptions
 ): UseOmniFullNarrationPipelineReturn {
   const project = options.project;
+  const onShowLogin = options.onShowLogin;
+  const onShowProfile = options.onShowProfile;
+  const { isAuthenticated, token } = useAuth();
 
   const [omniEditedScript, setOmniEditedScript] = useState("");
   const [omniScriptDirty, setOmniScriptDirty] = useState(false);
@@ -297,6 +333,31 @@ export function useOmniFullNarrationPipeline(
       return;
     }
     if (omniStepTestBusy) return;
+
+    const apiToken = (token?.trim() || readSacvAuthTokenTrimmed());
+    if (!apiToken) {
+      message.error(OMNI_PIPELINE_LICENSE_GATE_MSG);
+      onShowLogin?.();
+      return;
+    }
+    try {
+      const deviceId = await fetchLicenseClientDeviceId();
+      const licenses = await fetchMyLicenses(apiToken);
+      if (!hasActiveLicenseForThisDevice(licenses, deviceId)) {
+        message.error("请先在个人中心绑定处于生效中且包含本机的 License。");
+        onShowProfile?.();
+        return;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+        if (!isAuthenticated) onShowLogin?.();
+        else onShowProfile?.();
+      }
+      message.error(msg);
+      return;
+    }
+
     setOmniPipelineBusy(true);
     setOmniPipelineProgress(0);
     setOmniPipelineLogs([]);
@@ -313,10 +374,24 @@ export function useOmniFullNarrationPipeline(
       setOmniPipelineTaskId(tid);
       message.success(res?.message || "全链路任务已提交");
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "提交 Omni 全链路任务失败");
+      const msg = e instanceof Error ? e.message : "提交 Omni 全链路任务失败";
+      if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+        if (!isAuthenticated) onShowLogin?.();
+        else onShowProfile?.();
+      }
+      message.error(msg);
       setOmniPipelineBusy(false);
     }
-  }, [omniPipelineDisabled, omniPipelineDisabledReason, omniStepTestBusy, project?.id]);
+  }, [
+    isAuthenticated,
+    omniPipelineDisabled,
+    omniPipelineDisabledReason,
+    omniStepTestBusy,
+    onShowLogin,
+    onShowProfile,
+    project?.id,
+    token,
+  ]);
 
   const runOmniStep = useCallback(
     async (

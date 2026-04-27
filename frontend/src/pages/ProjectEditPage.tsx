@@ -12,9 +12,16 @@ import { message } from "../services/message";
 interface ProjectEditPageProps {
   projectId: string;
   onBack: () => void;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
 }
 
-const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) => {
+const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
+  projectId,
+  onBack,
+  onShowLogin,
+  onShowProfile,
+}) => {
   const {
     project,
     loading,
@@ -139,6 +146,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
     omniPipelineShowProgressBar,
     omniPipelineCanStop,
     omniMultimodalResult,
+    onShowLogin,
+    onShowProfile,
     showSuccess,
     showErrorText,
     showError,
@@ -254,6 +263,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
           mergeProgress={mergeProgress}
           subtitleLoading={subtitleLoading}
           subtitleMeta={subtitleMeta}
+          onShowLogin={onShowLogin}
+          onShowProfile={onShowProfile}
           onNextStep={() => {
             const isReady =
               project?.project_type === "visual"
@@ -282,6 +293,8 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({ projectId, onBack }) 
         <ProjectEditGenerateStep
           project={project}
           refreshProject={refreshProject}
+          onShowLogin={onShowLogin}
+          onShowProfile={onShowProfile}
           {...generateStep}
         />
       )}

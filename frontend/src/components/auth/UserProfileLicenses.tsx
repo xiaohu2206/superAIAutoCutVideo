@@ -12,6 +12,7 @@ const PLAN_LABEL: Record<string, string> = {
   monthly: "月付",
   half_year: "半年",
   permanent: "永久",
+  trial: "试用",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -41,6 +42,40 @@ function formatDateTime(iso: string | null | undefined): string {
   } catch {
     return iso;
   }
+}
+
+function isLicenseExpired(expireAt: string | null | undefined): boolean {
+  if (!expireAt) return false;
+  try {
+    return new Date(expireAt).getTime() <= Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function getEffectiveStatus(lic: LicenseRecord): string {
+  if (lic.status === "active" && isLicenseExpired(lic.expireAt)) {
+    return "expired";
+  }
+  return lic.status;
+}
+
+function getExpireStatus(lic: LicenseRecord): { color: string; text: string } {
+  if (!lic.expireAt) {
+    return { color: "text-slate-400", text: "无到期时间" };
+  }
+  if (lic.status === "revoked") {
+    return { color: "text-slate-400", text: "已撤销" };
+  }
+  if (isLicenseExpired(lic.expireAt)) {
+    return { color: "text-red-600", text: "已过期" };
+  }
+  const remaining = new Date(lic.expireAt).getTime() - Date.now();
+  const days = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+  if (days <= 7) {
+    return { color: "text-amber-600", text: `${days} 天后到期` };
+  }
+  return { color: "text-green-600", text: "生效中" };
 }
 
 interface UserProfileLicensesProps {
@@ -131,9 +166,7 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
       </div>
 
       <div className="border-b border-slate-100 px-5 py-4">
-        <p className="mb-3 text-xs text-slate-500">
-          设备 ID 由本机程序根据系统信息（如 mac 与 Windows 的标识不同）在后台生成并提交，绑定时会附带，无需在浏览器中填写或保存。
-        </p>
+    
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
@@ -161,7 +194,7 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
               绑定
             </button>
           </div>
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2">
+          {/* <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
               <Smartphone className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               将写入的设备信息（自动生成）
@@ -181,7 +214,7 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
                   ? clientDeviceId
                   : "本机设备 ID 不可用，请确保后台已运行"}
             </p>
-          </div>
+          </div> */}
         </div>
       </div>
 
@@ -220,25 +253,28 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
                   </div>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
-                      lic.status === "active"
+                      getEffectiveStatus(lic) === "active"
                         ? "bg-green-50 text-green-700 ring-green-200/80"
-                        : lic.status === "expired"
+                        : getEffectiveStatus(lic) === "expired"
                           ? "bg-amber-50 text-amber-800 ring-amber-200/80"
                           : "bg-slate-100 text-slate-600 ring-slate-200/80"
                     }`}
                   >
-                    {formatStatus(lic.status)}
+                    {formatStatus(getEffectiveStatus(lic))}
                   </span>
                 </div>
                 <dl className="mt-2 grid grid-cols-1 gap-1 text-xs text-slate-500 sm:grid-cols-2">
                   <div>
                     <dt className="inline text-slate-400">过期：</dt>
-                    <dd className="inline text-slate-600">{formatDateTime(lic.expireAt)}</dd>
+                    <dd className={`inline font-medium ${getExpireStatus(lic).color}`}>
+                      {formatDateTime(lic.expireAt)}
+                      <span className="ml-1 text-[11px]">({getExpireStatus(lic).text})</span>
+                    </dd>
                   </div>
-                  <div>
+                  {/* <div>
                     <dt className="inline text-slate-400">激活：</dt>
                     <dd className="inline text-slate-600">{formatDateTime(lic.activateAt)}</dd>
-                  </div>
+                  </div> */}
                   <div className="sm:col-span-2">
                     <dt className="inline text-slate-400">设备：</dt>
                     <dd className="inline text-slate-600">

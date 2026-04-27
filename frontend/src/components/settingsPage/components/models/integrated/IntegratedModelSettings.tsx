@@ -4,10 +4,9 @@ import { TauriCommands } from "@/services/clients";
 import { ContentModelSettings } from "../content/ContentModelSettings";
 import { VideoModelSettings } from "../video/VideoModelSettings";
 import { useUnifiedYunwuModelConfig } from "../../../hooks/useUnifiedYunwuModelConfig";
-import type { ContentModelConfig, TestResult, VideoModelConfig, YunwuTierConfig } from "../../../types";
+import type { ContentModelConfig, TestResult, VideoModelConfig } from "../../../types";
 
 type IntegratedSubTab = "yunwu" | "content" | "video";
-type TierKey = "low" | "medium" | "high";
 
 interface IntegratedModelSettingsProps {
   contentSelectedProvider: string;
@@ -32,21 +31,8 @@ interface IntegratedModelSettingsProps {
 const tabBtn =
   "rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60";
 
-const tierLabel: Record<TierKey, { name: string; desc: string }> = {
-  low: { name: "低消耗", desc: "低效果" },
-  medium: { name: "中消耗", desc: "均衡" },
-  high: { name: "高消耗", desc: "高效果" },
-};
-
-const tierTabBtn = (active: boolean) =>
-  `rounded-lg px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none ${
-    active
-      ? "border-b-2 border-blue-600 text-blue-800"
-      : "text-slate-600 hover:bg-slate-100/80"
-  }`;
-
 /**
- * 整合模型：默认云雾一键配置（三档）；开启「自定义模型」后横向切换文案 / 视频分析。
+ * 整合模型：云雾 API Key + 测试；开启「自定义模型」后横向切换文案 / 视频分析。
  */
 export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = ({
   contentSelectedProvider,
@@ -73,15 +59,13 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
     saving,
     testing,
     testMessage,
-    load,
     setUseCustomModelsPersist,
     togglingCustom,
-    setYunwuTierField,
+    setYunwuApiKeyForAllTiers,
     testConnection,
   } = useUnifiedYunwuModelConfig();
 
   const [subTab, setSubTab] = useState<IntegratedSubTab>("yunwu");
-  const [activeTier, setActiveTier] = useState<TierKey>("high");
 
   useEffect(() => {
     if (root.use_custom_models) {
@@ -92,8 +76,6 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
   }, [root.use_custom_models]);
 
   const useCustom = root.use_custom_models;
-
-  const curTier: YunwuTierConfig = root.yunwu[activeTier];
 
   return (
     <div className="space-y-6">
@@ -159,122 +141,29 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
           </div>
         ) : !useCustom ? (
           <div className="space-y-5">
-            {/* 档位切换 Tab */}
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">
-                全感知生成效果档位
+                云雾 API 密钥
               </label>
-              <div
-                role="tablist"
-                aria-label="云雾档位"
-                className="flex flex-wrap gap-2 border-b border-slate-200 pb-0.5"
+              <input
+                type="password"
+                autoComplete="off"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="请输入云雾平台 API Key"
+                value={root.yunwu.high.api_key}
+                onChange={(e) => setYunwuApiKeyForAllTiers(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => TauriCommands.openExternalLink("https://yunwu.apifox.cn")}
+                className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
               >
-                {(["low", "medium", "high"] as const).map((tk) => (
-                  <button
-                    key={tk}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTier === tk}
-                    className={tierTabBtn(activeTier === tk)}
-                    onClick={() => setActiveTier(tk)}
-                  >
-                    {tierLabel[tk].name}（{tierLabel[tk].desc}）
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 当前档位配置表单 */}
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">
-                  云雾 API 密钥
-                </label>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="请输入云雾平台 API Key"
-                  value={curTier.api_key}
-                  onChange={(e) => setYunwuTierField(activeTier, "api_key", e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => TauriCommands.openExternalLink("https://yunwu.apifox.cn")}
-                  className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                >
-                  <ExternalLink className="mr-1 h-3 w-3" />
-                  前往云雾平台
-                </button>
-                <span className="mt-2 text-xs text-slate-500">
-                  （与平台没有任何合作，保险使用，建议充值2元即可）
-                </span>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">
-                  API 地址
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="Chat Completions 地址"
-                  value={curTier.base_url}
-                  onChange={(e) => setYunwuTierField(activeTier, "base_url", e.target.value)}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                    文案生成模型
-                  </label>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={curTier.copywriting_model_name}
-                    onChange={(e) => setYunwuTierField(activeTier, "copywriting_model_name", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                    视频分析模型
-                  </label>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={curTier.video_analysis_model_name}
-                    onChange={(e) => setYunwuTierField(activeTier, "video_analysis_model_name", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                    LLM 精排模型
-                  </label>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={curTier.llm_rerank_model_name}
-                    onChange={(e) => setYunwuTierField(activeTier, "llm_rerank_model_name", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                    脚本生成模型
-                  </label>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={curTier.script_generation_model_name}
-                    onChange={(e) => setYunwuTierField(activeTier, "script_generation_model_name", e.target.value)}
-                  />
-                </div>
-              </div>
+                <ExternalLink className="mr-1 h-3 w-3" />
+                前往云雾平台
+              </button>
+              <span className="mt-2 text-xs text-slate-500">
+                （与平台没有任何合作，保险使用，建议充值2元即可）
+              </span>
             </div>
 
             {testMessage && (

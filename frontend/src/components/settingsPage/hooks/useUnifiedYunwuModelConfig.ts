@@ -50,6 +50,14 @@ const emptyRoot = (): UnifiedYunwuModelsPayload => ({
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
+/** 与后端 _mask_key 一致：前 4 + 全 * 中段 + 后 4；仅此时省略 api_key 以免用脱敏串覆盖明文 */
+function isMaskedYunwuApiKey(ak: string): boolean {
+  const s = String(ak ?? "");
+  if (s.length <= 8) return false;
+  const mid = s.slice(4, -4);
+  return mid.length > 0 && /^\*+$/.test(mid);
+}
+
 export const useUnifiedYunwuModelConfig = () => {
   const [root, setRoot] = useState<UnifiedYunwuModelsPayload>(emptyRoot);
   const rootRef = useRef(root);
@@ -140,7 +148,7 @@ export const useUnifiedYunwuModelConfig = () => {
         for (const [tierKey, tierVal] of Object.entries(payload.yunwu)) {
           const tierCopy: Record<string, unknown> = { ...tierVal };
           const ak = String(tierCopy.api_key ?? "");
-          if (ak.includes("*") && ak.length > 8) {
+          if (isMaskedYunwuApiKey(ak)) {
             delete tierCopy.api_key;
           }
           yunwu[tierKey] = tierCopy;
@@ -152,10 +160,10 @@ export const useUnifiedYunwuModelConfig = () => {
         const res = await unifiedYunwuModelService.update(body);
         const data = res?.data;
         if (res?.success && data && typeof data === "object") {
-          setRoot({
+          setRoot((prev) => ({
+            ...prev,
             use_custom_models: Boolean(data.use_custom_models),
-            yunwu: normalizeYunwu(data.yunwu),
-          });
+          }));
           if (toastOnSuccess) {
             message.success("整合模型配置已保存");
           }
@@ -210,6 +218,22 @@ export const useUnifiedYunwuModelConfig = () => {
     [setYunwuTierField]
   );
 
+  /** 整合页只保留一个 API Key 输入时，与三档共用同一把 Key。 */
+  const setYunwuApiKeyForAllTiers = useCallback(
+    (value: string) => {
+      setRoot((prev) => ({
+        ...prev,
+        yunwu: {
+          low: { ...prev.yunwu.low, api_key: value },
+          medium: { ...prev.yunwu.medium, api_key: value },
+          high: { ...prev.yunwu.high, api_key: value },
+        },
+      }));
+      scheduleAutosave();
+    },
+    [scheduleAutosave]
+  );
+
   const save = useCallback(async () => {
     await persistRoot(root, { toastOnSuccess: true });
   }, [persistRoot, root]);
@@ -248,6 +272,7 @@ export const useUnifiedYunwuModelConfig = () => {
     setUseCustomModels,
     setUseCustomModelsPersist,
     setYunwuField,
+    setYunwuApiKeyForAllTiers,
     setYunwuTierField,
     save,
     testConnection,

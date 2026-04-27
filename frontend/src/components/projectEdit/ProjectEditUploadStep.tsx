@@ -13,6 +13,7 @@ import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
 import OmniMultimodalChoiceModal from "./OmniMultimodalChoiceModal";
 import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
+import { useAuth } from "../auth/AuthContext";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
 import { videoModelService } from "@/services/videoModelService";
 
@@ -81,6 +82,10 @@ interface ProjectEditUploadStepProps {
   subtitleOverwriteModalOpen: boolean;
   onSubtitleOverwriteConfirm: () => void;
   onSubtitleOverwriteCancel: () => void;
+  /** 本地已登录（有 token）；License 有效性由后端在提交时校验 */
+  omniRunPipelineAuthReady: boolean;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
   onRunOmniPipeline: () => void;
   onStopOmniPipeline: () => void;
   isStoppingOmniPipeline: boolean;
@@ -154,6 +159,9 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   subtitleOverwriteModalOpen,
   onSubtitleOverwriteConfirm,
   onSubtitleOverwriteCancel,
+  omniRunPipelineAuthReady,
+  onShowLogin,
+  onShowProfile,
   onRunOmniPipeline,
   onStopOmniPipeline,
   isStoppingOmniPipeline,
@@ -168,6 +176,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onOmniMultimodalChoiceRestart,
   onOmniMultimodalChoiceCancel,
 }) => {
+  const { isAuthenticated } = useAuth();
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
     Boolean(project.subtitle_path) &&
@@ -175,6 +184,19 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
   const canReExtractScenes = Boolean(project.scenes_path);
   const canReRunOmniPipeline = Boolean(project.omni_multimodal_json_path);
+
+  /** 与 CreateProjectModal handleSubmit 一致：未登录 → 登录；已登录但无本地 token / 需绑 License → 个人中心 */
+  const handleRunOmniPipelineClick = () => {
+    if (!isAuthenticated) {
+      onShowLogin?.();
+      return;
+    }
+    if (!omniRunPipelineAuthReady) {
+      onShowProfile?.();
+      return;
+    }
+    onRunOmniPipeline();
+  };
 
   const [scenePlayState, setScenePlayState] = React.useState<{
     isOpen: boolean;
@@ -371,7 +393,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                 )}
               </button>
               <button
-                onClick={onRunOmniPipeline}
+                onClick={handleRunOmniPipelineClick}
                 disabled={
                   Boolean(subtitleLoading) ||
                   extractingSubtitle ||
@@ -379,6 +401,13 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   (!project.video_path && !project.merged_video_path) ||
                   !project.subtitle_path ||
                   Boolean(project.subtitle_status && project.subtitle_status !== "ready")
+                }
+                title={
+                  !isAuthenticated
+                    ? "请先登录；点击可打开登录"
+                    : !omniRunPipelineAuthReady
+                      ? "登录后需带有效凭据；点击前往个人中心绑定 License"
+                      : undefined
                 }
                 className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -601,6 +630,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         onClose={onOmniMultimodalChoiceCancel}
         onContinueIncomplete={onOmniMultimodalChoiceContinue}
         onRestartAll={onOmniMultimodalChoiceRestart}
+        actionsEnabled={omniRunPipelineAuthReady}
       />
       <OverwriteConfirmModal
         isOpen={subtitleOverwriteModalOpen}

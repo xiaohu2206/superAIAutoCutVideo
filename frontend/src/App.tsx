@@ -415,6 +415,11 @@ const App: React.FC = () => {
                 <ProjectEditPage
                   projectId={currentProjectId}
                   onBack={() => setCurrentProjectId(null)}
+                  onShowLogin={() => {
+                    const event = new CustomEvent("sacv:show-login-modal");
+                    window.dispatchEvent(event);
+                  }}
+                  onShowProfile={() => setShowProfile(true)}
                 />
               )}
 

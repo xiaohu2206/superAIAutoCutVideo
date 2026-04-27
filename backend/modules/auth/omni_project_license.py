@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -54,6 +55,27 @@ def _verify_response_ok(body: Any) -> bool:
     return body.get("valid") is True
 
 
+def _parse_expire_at(lic: dict[str, Any]) -> Optional[datetime]:
+    raw = lic.get("expireAt")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        logger.warning("omni license: invalid expireAt format: %s", raw)
+        return None
+
+
+def _is_license_expired(lic: dict[str, Any]) -> bool:
+    expire_dt = _parse_expire_at(lic)
+    if expire_dt is None:
+        return False
+    return expire_dt <= datetime.now(timezone.utc)
+
+
 async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     if not (authorization and authorization.strip()):
         raise HTTPException(
@@ -90,6 +112,8 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     candidates: list[dict[str, Any]] = []
     for it in items:
         if it.get("status") != "active":
+            continue
+        if _is_license_expired(it):
             continue
         k = it.get("licenseKey")
         if not isinstance(k, str) or not k.strip():

@@ -7,9 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from modules.auth.omni_project_license import require_valid_license_for_omni
 from modules.app_paths import resolve_uploads_path
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
@@ -34,7 +35,8 @@ class OmniPipelineRunRequest(BaseModel):
 
 
 @router.post("/{project_id}/omni/run-pipeline")
-async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest):
+async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest, request: Request):
+    await require_valid_license_for_omni(request.headers.get("Authorization"))
     try:
         data = await omni_multimodal_pipeline_service.submit_pipeline(
             project_id=project_id,

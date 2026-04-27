@@ -6,9 +6,10 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from modules.auth.omni_project_license import require_valid_license_for_omni
 from modules.task_progress_store import task_progress_store
 from omni_full_narration_pipeline import omni_full_narration_pipeline_service
 
@@ -50,8 +51,10 @@ class OmniFullNarrationPipelineRunRequest(BaseModel):
 @router.post("/{project_id}/omni/full-narration-pipeline/run")
 async def omni_full_narration_pipeline_run(
     project_id: str,
+    request: Request,
     req: OmniFullNarrationPipelineRunRequest = Body(default=OmniFullNarrationPipelineRunRequest()),
 ):
+    await require_valid_license_for_omni(request.headers.get("Authorization"))
     try:
         data = await omni_full_narration_pipeline_service.submit_run(
             project_id,

@@ -953,6 +953,16 @@ export const useProjectDetail = (
       multimodal_action?: "auto" | "continue" | "restart";
     }) => {
       if (!project) return;
+      const authTrim =
+        typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token")?.trim() : "";
+      if (!authTrim) {
+        const msg = "运行 Omni 管线需要先登录，并在个人中心绑定处于生效中的 License。";
+        setError(msg);
+        setOmniPipelineMessage(msg);
+        setOmniPipelinePhase(null);
+        stopOmniPolling();
+        throw new Error(msg);
+      }
       setError(null);
       setOmniMultimodalResult(null);
       setExtractingOmniPipeline(true);

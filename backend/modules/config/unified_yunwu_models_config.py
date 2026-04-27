@@ -115,7 +115,12 @@ class UnifiedYunwuModelsRoot(BaseModel):
         for tk in ALLOWED_TIERS:
             raw = v.get(tk)
             try:
-                out[tk] = YunwuTierSettings.model_validate(raw if isinstance(raw, dict) else {})
+                # PUT 路由会先 model_validate 成 YunwuTierSettings 再组 root；此处必须接受实例，
+                # 否则 isinstance(raw, dict) 为假时会用 {} 校验，把 api_key 等全部打回默认值。
+                if raw is None:
+                    out[tk] = YunwuTierSettings()
+                else:
+                    out[tk] = YunwuTierSettings.model_validate(raw)
             except Exception:
                 out[tk] = YunwuTierSettings()
         return out
