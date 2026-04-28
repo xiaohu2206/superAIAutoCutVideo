@@ -5,6 +5,8 @@
 
 - 开发：http://127.0.0.1:3000
 - 打包（frozen）：http://47.92.113.170
+
+直连上游时关闭 trust_env，避免 VPN/系统设置的 HTTP(S)_PROXY 把 localhost 或固定 IP 走代理导致 ConnectError→502。
 """
 
 from __future__ import annotations
@@ -59,7 +61,10 @@ async def forward_upstream_post(
     if authorization:
         headers["Authorization"] = authorization
     try:
-        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=_DEFAULT_TIMEOUT,
+            trust_env=False,
+        ) as client:
             r = await client.post(url, json=body, headers=headers)
     except httpx.ConnectError:
         return JSONResponse(
@@ -85,7 +90,10 @@ async def forward_upstream_post_raw(
     if authorization:
         headers["Authorization"] = authorization
     try:
-        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=_DEFAULT_TIMEOUT,
+            trust_env=False,
+        ) as client:
             r = await client.post(url, content=content, headers=headers)
     except httpx.ConnectError:
         return JSONResponse(
@@ -101,7 +109,10 @@ async def forward_upstream_get(path: str, authorization: Optional[str]) -> Respo
     if authorization:
         headers["Authorization"] = authorization
     try:
-        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=_DEFAULT_TIMEOUT,
+            trust_env=False,
+        ) as client:
             r = await client.get(url, headers=headers)
     except httpx.ConnectError:
         return JSONResponse(
