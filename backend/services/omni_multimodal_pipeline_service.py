@@ -658,9 +658,9 @@ class OmniMultimodalPipelineService:
                 try:
                     infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
                 except Exception:
-                    infer_wall_sec = 300.0
+                    infer_wall_sec = 60
                 if infer_wall_sec < 1.0:
-                    infer_wall_sec = 300.0
+                    infer_wall_sec = 60
                 effective_http_timeout = max(int(active_vl.timeout or 0), int(infer_wall_sec + 0.999))
 
                 shots: List[Dict[str, Any]] = list(step1.get("shots") or [])

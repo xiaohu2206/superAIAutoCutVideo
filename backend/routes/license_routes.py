@@ -17,6 +17,7 @@ from modules.auth.auth_upstream import (
     forward_upstream_get,
     forward_upstream_post_raw,
 )
+from modules.auth.device_id_crypto import encrypt_device_id
 from modules.auth.license_device_id import get_host_device_fingerprint
 
 licenses_router = APIRouter(prefix="/api/licenses", tags=["Licenses"])
@@ -68,9 +69,10 @@ async def bind_license(request: Request):
         )
 
     device_id = await asyncio.to_thread(get_host_device_fingerprint)
+    encrypted_device_id = encrypt_device_id(device_id)
     payload = {
         "licenseKey": key.strip(),
-        "devices": [{"deviceId": device_id}],
+        "devices": [{"deviceId": encrypted_device_id}],
     }
     out = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return await forward_upstream_post_raw(

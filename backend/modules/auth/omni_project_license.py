@@ -15,6 +15,7 @@ import httpx
 from fastapi import HTTPException
 
 from modules.auth.auth_upstream import get_auth_upstream_base
+from modules.auth.device_id_crypto import encrypt_device_id
 from modules.auth.license_device_id import get_host_device_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     candidates.sort(key=_key_id, reverse=True)
 
     device_id = await asyncio.to_thread(get_host_device_fingerprint)
+    encrypted_device_id = encrypt_device_id(device_id)
     device_name = "SuperAI 自动剪辑 本机"
     verify_url = f"{base}/api/license/verify"
     last_error = "当前账号下无可用 License 通过校验（设备绑定、过期等），请检查个人中心或联系支持。"
@@ -144,7 +146,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
             continue
         payload = {
             "licenseKey": key,
-            "deviceId": device_id,
+            "deviceId": encrypted_device_id,
             "deviceName": device_name,
         }
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

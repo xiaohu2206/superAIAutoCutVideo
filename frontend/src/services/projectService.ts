@@ -497,10 +497,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/full-narration-pipeline/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -510,10 +515,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/copywriting-struct-embed/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -523,10 +533,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/shot-match/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -536,10 +551,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/generate-script/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
