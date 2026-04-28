@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
 from modules.prompts.prompt_manager import prompt_manager
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
@@ -332,7 +332,7 @@ async def _call_llm_text(
         try:
             if cancel_event:
                 llm_task = asyncio.create_task(
-                    ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING)
+                    ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING, timeout=600)
                 )
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 done, _ = await asyncio.wait({llm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -348,7 +348,7 @@ async def _call_llm_text(
                     pass
                 resp = await llm_task
             else:
-                resp = await ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING)
+                resp = await ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING, timeout=600)
             return _strip_code_fences(str(resp.content or "").strip())
         except asyncio.CancelledError:
             raise

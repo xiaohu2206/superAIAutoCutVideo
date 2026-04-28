@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from services.unified_model_usage import resolve_video_model_for_online_vision
+from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
     load_structuring_prompt,
@@ -28,9 +28,9 @@ from modules.omni_copywriting_struct_embed import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.ai_service import LLM_HTTP_TIMEOUT_SEC
-from services.extract_subtitle_service import _to_web_path, _uploads_dir
-from services.omni_local_bge_embedding import (
+from services.ai_models.ai_service import LLM_HTTP_TIMEOUT_SEC
+from services.asr.extract_subtitle_service import _to_web_path, _uploads_dir
+from services.ai_models.omni_local_bge_embedding import (
     LOCAL_BGE_MODEL_DISPLAY_NAME,
     assert_local_bge_model_available,
     encode_text_async,

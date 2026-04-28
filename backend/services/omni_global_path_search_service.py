@@ -19,7 +19,7 @@ from modules.omni_global_path_search import build_global_path_payload
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 
 logger = logging.getLogger(__name__)
 

@@ -29,9 +29,9 @@ from modules.omni_generate_script import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
-from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 
 logger = logging.getLogger(__name__)
@@ -341,6 +341,7 @@ class OmniGenerateScriptService:
                                     temperature=temp,
                                     usage=LlmModelUsage.SCRIPT_GENERATION,
                                     http_max_attempts=1,
+                                    timeout=600,
                                 )
                             data, _ = sanitize_json_text_to_dict(resp.content or "")
                             items = data.get("items") if isinstance(data, dict) else None

@@ -22,19 +22,19 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import cv2
 from PIL import Image
 
-from services.unified_model_usage import resolve_video_model_for_online_vision
+from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 from modules.projects_store import projects_store
 from modules.subtitle_utils import parse_srt
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.frame_extract import extract_quarter_frames
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json, write_encrypted_multimodal_json
 from services.omni_internal.shot_subtitle_mapper import ShotSubtitleMapper
-from services.omni_local_bge_embedding import LOCAL_BGE_MODEL_DISPLAY_NAME, assert_local_bge_model_available, encode_text_async
+from services.ai_models.omni_local_bge_embedding import LOCAL_BGE_MODEL_DISPLAY_NAME, assert_local_bge_model_available, encode_text_async
 from services.omni_internal.transnet_omni import detect_shots_from_video
 from services.omni_internal.types import Shot, Subtitle
-from services.vision_frame_analysis_service import (
+from services.ai_models.vision_frame_analysis_service import (
     _ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC,
     _ONLINE_VISION_INFER_RETRY_DELAYS_SEC,
     _OnlineVisionRunner,
@@ -656,7 +656,7 @@ class OmniMultimodalPipelineService:
                     raise ValueError(str(e)) from e
 
                 try:
-                    infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
+                    infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "180")
                 except Exception:
                     infer_wall_sec = 60
                 if infer_wall_sec < 1.0:

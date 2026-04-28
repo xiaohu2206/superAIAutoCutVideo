@@ -9,8 +9,8 @@ from fastapi import HTTPException
 
 from modules.json_sanitizer import validate_script_items
 from modules.projects_store import projects_store
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_ITEMS_PER_CALL, SOFT_INPUT_FACTOR
 from .length_planner import parse_script_length_selection, allocate_output_counts, estimate_auto_script_length_plan

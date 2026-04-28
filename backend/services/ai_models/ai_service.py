@@ -18,12 +18,12 @@ from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from modules.ai import AIModelConfig, ChatMessage, ChatResponse, LlmProviderResponseError, get_provider_class
 from modules.config.content_model_config import ContentModelConfig, content_model_config_manager
-from services.unified_model_usage import LlmModelUsage, resolve_content_model_for_llm
+from services.ai_models.unified_model_usage import LlmModelUsage, resolve_content_model_for_llm
 
 logger = logging.getLogger(__name__)
 
 # 文案/结构化等大模型 HTTP 调用：统一读超时与失败重试（避免单行 ReadTimeout 直接失败）
-LLM_HTTP_TIMEOUT_SEC = 300
+LLM_HTTP_TIMEOUT_SEC = 600
 LLM_MAX_ATTEMPTS = 3  # 首次 + 最多 5 次重试
 LLM_RETRY_BASE_DELAY_SEC = 1.0
 _CHAT_FAILURE_LLM_RAW_MAX = 200_000
@@ -154,6 +154,7 @@ class AIService:
         temperature: Optional[float] = None,
         usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
         http_max_attempts: Optional[int] = None,
+        timeout: Optional[int] = None,
     ) -> ChatResponse:
         """发送聊天请求；usage 指定业务场景以便在云雾整合模式下选用对应模型。
 
@@ -166,7 +167,7 @@ class AIService:
         if not provider_cls:
             raise RuntimeError(f"不支持的AI提供商: {cfg.provider}")
 
-        ai_cfg = self._to_ai_model_config(cfg).model_copy(update={"timeout": LLM_HTTP_TIMEOUT_SEC})
+        ai_cfg = self._to_ai_model_config(cfg).model_copy(update={"timeout": timeout if timeout is not None else LLM_HTTP_TIMEOUT_SEC})
         extra_params: Dict[str, Any] = {}
         if response_format:
             extra_params["response_format"] = response_format

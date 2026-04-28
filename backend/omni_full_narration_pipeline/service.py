@@ -20,7 +20,7 @@ from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.ws_manager import manager
-from services.extract_subtitle_service import _resolve_path
+from services.asr.extract_subtitle_service import _resolve_path
 from services.omni_copywriting_struct_embed_service import omni_copywriting_struct_embed_service
 from services.omni_generate_script_service import omni_generate_script_service
 from services.omni_global_path_search_service import omni_global_path_search_service

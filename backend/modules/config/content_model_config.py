@@ -180,7 +180,7 @@ class ContentModelConfigManager:
                     provider='deepseek',
                     api_key='xxx',
                     base_url='https://api.deepseek.com/chat/completions',
-                    model_name='deepseek-chat',
+                    model_name='deepseek-v4-pro',
                     description='DeepSeek文案生成模型',
                     enabled=False
                 )

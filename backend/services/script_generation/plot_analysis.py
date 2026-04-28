@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
 
 from .subtitle_utils import _parse_timestamp_pair
 

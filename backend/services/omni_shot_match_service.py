@@ -34,11 +34,11 @@ from modules.omni_shot_match import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
-from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
-from services.omni_local_bge_embedding import (
+from services.ai_models.omni_local_bge_embedding import (
     LOCAL_BGE_MODEL_DISPLAY_NAME,
     assert_local_bge_model_available,
     encode_text_async,
@@ -581,6 +581,7 @@ async def _process_row(
             [ChatMessage(role="user", content=user_full)],
             temperature=float(temperature),
             usage=LlmModelUsage.LLM_RERANK,
+            timeout=300,
         )
     except Exception as e:
         await asyncio.to_thread(

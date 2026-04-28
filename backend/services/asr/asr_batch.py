@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
-from services.asr_bcut import BcutASR
+from .asr_bcut import BcutASR
 
 
 @dataclass

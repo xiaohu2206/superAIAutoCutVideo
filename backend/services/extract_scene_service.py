@@ -18,11 +18,11 @@ import numpy as np
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
-from services.vision_scene_status import scene_vision_success_ok
-from services.vision_frame_analysis_service import vision_frame_analyzer
+from services.asr.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
+from services.ai_models.vision_scene_status import scene_vision_success_ok
+from services.ai_models.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
-from services.unified_model_usage import resolve_video_model_for_online_vision
+from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ class ExtractSceneService:
         enforce_online_video_file_identity: bool = False,
         video_abs: Optional[Path] = None,
     ) -> bool:
-        from services.vision_scene_status import scene_online_vision_skippable_for_current_video
+        from services.ai_models.vision_scene_status import scene_online_vision_skippable_for_current_video
 
         for scene in scenes:
             if not self._scene_needs_vision_analysis(scene, mode):

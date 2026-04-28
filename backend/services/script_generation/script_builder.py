@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
-from services.ai_service import ai_service
-from services.unified_model_usage import LlmModelUsage
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
@@ -293,6 +293,7 @@ async def _generate_script_chunk(
                 messages,
                 response_format={"type": "json_object"},
                 usage=LlmModelUsage.SCRIPT_GENERATION,
+                timeout=600,
             )
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)
@@ -452,6 +453,7 @@ async def _refine_full_script(
                 messages,
                 response_format={"type": "json_object"},
                 usage=LlmModelUsage.SCRIPT_GENERATION,
+                timeout=600,
             )
             data, _ = sanitize_json_text_to_dict(resp.content)
             data = validate_script_items(data)

@@ -17,7 +17,7 @@ import json
 from modules.config.content_model_config import content_model_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
-from services.asr_bcut import BcutASR
+from services.asr.asr_bcut import BcutASR
 
 logger = logging.getLogger(__name__)
 

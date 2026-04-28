@@ -20,7 +20,7 @@ from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from services.vision_scene_status import (
+from services.ai_models.vision_scene_status import (
     path_stat_fingerprint_for_vision,
     scene_online_vision_skippable_for_current_video,
     scene_vision_success_ok,

@@ -19,8 +19,8 @@ from modules.video_processor import video_processor
 from modules.ws_manager import manager
 from modules.fun_asr_service import fun_asr_service
 from modules.fun_asr_model_manager import FunASRPathManager, validate_model_dir
-from services.asr_bcut import BcutASR
-from services.asr_utils import utterances_to_srt
+from .asr_bcut import BcutASR
+from .asr_utils import utterances_to_srt
 
 
 logger = logging.getLogger(__name__)

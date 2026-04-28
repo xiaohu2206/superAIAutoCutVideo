@@ -19,7 +19,7 @@ from modules.config.unified_yunwu_models_config import (
     YunwuTierSettings,
     unified_yunwu_models_config_manager,
 )
-from services.unified_model_usage import (
+from services.ai_models.unified_model_usage import (
     LlmModelUsage,
     resolve_unified_yunwu_for_integration_connection_test,
 )

@@ -20,7 +20,7 @@ from modules.moondream_inference_settings import (
     resolve_moondream_runtime_config,
     update_moondream_settings,
 )
-from services.vision_frame_analysis_service import vision_frame_analyzer
+from services.ai_models.vision_frame_analysis_service import vision_frame_analyzer
 from modules.app_paths import user_data_dir
 from modules.ws_manager import manager
 
