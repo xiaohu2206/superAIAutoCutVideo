@@ -280,51 +280,26 @@ class YunwuProvider(AIProviderBase):
     async def test_connection(self) -> Dict[str, Any]:
         try:
             test_messages = [
-                ChatMessage(role="system", content="你是结构化输出测试助手。请严格以json输出。"),
-                ChatMessage(
-                    role="user",
-                    content="返回一个对象，包含字段：ok(bool)、provider(string)、model(string)、timestamp(ISO8601)。仅输出JSON。",
-                ),
+                ChatMessage(role="user", content="请回复'连接成功-SUCCESS'。"),
             ]
-            schema = {
-                "name": "connectivity_check",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "ok": {"type": "boolean", "description": "连接是否正常"},
-                        "provider": {"type": "string", "description": "提供商名称"},
-                        "model": {"type": "string", "description": "模型名称"},
-                        "timestamp": {"type": "string", "description": "ISO8601时间戳"},
-                    },
-                    "required": ["ok", "provider", "model", "timestamp"],
-                    "additionalProperties": False,
-                },
-            }
-            response = await self.chat_completion(
-                test_messages,
-                extra_params={
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": schema,
-                    }
-                },
-            )
-            structured_output: Optional[Dict[str, Any]] = None
+            response = await self.chat_completion(test_messages)
             raw_content = response.content or ""
-            try:
-                import json as _json
-
-                structured_output = _json.loads(raw_content)
-            except Exception:
-                structured_output = None
+            if not raw_content.strip():
+                return {
+                    "success": False,
+                    "message": "连接已建立，但模型返回内容为空，请检查模型配置或接口状态",
+                    "provider": self.config.provider,
+                    "model": self.config.model_name,
+                    "response_preview": "",
+                    "raw_content": raw_content,
+                    "error": "empty_response",
+                }
             return {
                 "success": True,
-                "message": "连接测试成功",
+                "message": raw_content[:100] + "..." if len(raw_content) > 100 else raw_content,
                 "provider": self.config.provider,
                 "model": self.config.model_name,
                 "response_preview": raw_content[:100] + "..." if len(raw_content) > 100 else raw_content,
-                "structured_output": structured_output,
                 "raw_content": raw_content,
             }
         except Exception as e:

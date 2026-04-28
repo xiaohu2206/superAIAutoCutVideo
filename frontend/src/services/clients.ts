@@ -428,7 +428,7 @@ export class ApiClient {
     return this.post(`/api/models/content-generation/test`);
   }
 
-  /** 云雾整合模型（与自定义文案/视频模型二选一总控） */
+  /** 聚合模型（与自定义文案/视频模型二选一总控） */
   async getUnifiedYunwuModels(): Promise<any> {
     return this.get("/api/models/unified-yunwu");
   }
@@ -438,6 +438,10 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(body),
     });
+  }
+
+  async getUnifiedYunwuPlatforms(): Promise<any> {
+    return this.get("/api/models/unified-yunwu/platforms");
   }
 
   async testUnifiedYunwuModels(): Promise<any> {

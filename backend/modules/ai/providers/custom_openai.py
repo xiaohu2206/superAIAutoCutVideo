@@ -255,6 +255,17 @@ class CustomOpenAIVisionProvider(CustomOpenAIProvider):
             else:
                 raw_text = str(raw).strip()
 
+            if not raw_text:
+                return {
+                    "success": False,
+                    "message": "连接已建立，但模型返回内容为空，请检查模型配置或接口状态",
+                    "provider": self.config.provider,
+                    "model": self.config.model_name,
+                    "response_preview": "",
+                    "raw_content": raw_text,
+                    "error": "empty_response",
+                }
+
             lowered = raw_text.lower()
             vision_failure_markers = [
                 "无法直接处理这张图像",
@@ -271,7 +282,7 @@ class CustomOpenAIVisionProvider(CustomOpenAIProvider):
             if any(marker in raw_text or marker in lowered for marker in vision_failure_markers):
                 return {
                     "success": False,
-                    "message": "连接已建立，但模型未正确识别测试图片，请检查接口是否真的支持视觉输入格式",
+                    "message": raw_text[:100] + "..." if len(raw_text) > 100 else raw_text,
                     "provider": self.config.provider,
                     "model": self.config.model_name,
                     "response_preview": raw_text[:120] + "..." if len(raw_text) > 120 else raw_text,
@@ -281,7 +292,7 @@ class CustomOpenAIVisionProvider(CustomOpenAIProvider):
 
             return {
                 "success": True,
-                "message": "连接测试成功（已发送测试图片，多模态可用）",
+                "message": raw_text[:100] + "..." if len(raw_text) > 100 else raw_text,
                 "provider": self.config.provider,
                 "model": self.config.model_name,
                 "response_preview": raw_text[:120] + "..." if len(raw_text) > 120 else raw_text,

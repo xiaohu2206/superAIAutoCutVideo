@@ -32,7 +32,7 @@ const tabBtn =
   "rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60";
 
 /**
- * 整合模型：云雾 API Key + 测试；开启「自定义模型」后横向切换文案 / 视频分析。
+ * 整合模型：选择聚合平台 + API Key + 测试；开启「自定义模型」后横向切换文案 / 视频分析。
  */
 export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = ({
   contentSelectedProvider,
@@ -55,13 +55,16 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 }) => {
   const {
     root,
+    platformList,
+    activePlatform,
     loading,
     saving,
     testing,
     testMessage,
     setUseCustomModelsPersist,
     togglingCustom,
-    setYunwuApiKeyForAllTiers,
+    setActivePlatform,
+    setPlatformApiKey,
     testConnection,
   } = useUnifiedYunwuModelConfig();
 
@@ -77,6 +80,9 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 
   const useCustom = root.use_custom_models;
 
+  // 当前激活平台的 API Key（三档共用）
+  const currentApiKey = activePlatform?.tiers?.high?.api_key ?? "";
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
@@ -90,7 +96,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         <div className="min-w-0">
           <div className="text-sm font-medium text-slate-900">使用自定义模型</div>
           <p className="mt-1 text-xs text-slate-500">
-            (小白不建议开启) 开启后将显示「文案模型」「视频分析模型」配置页，并隐藏云雾整合默认项；关闭后仅保留云雾整合。
+            (小白不建议开启) 开启后将显示「文案模型」「视频分析模型」配置页，并隐藏聚合整合默认项；关闭后仅保留聚合整合。
           </p>
         </div>
       </div>
@@ -141,30 +147,91 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
           </div>
         ) : !useCustom ? (
           <div className="space-y-5">
+            {/* 平台选择器 */}
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">
-                云雾 API 密钥
+                选择聚合平台
+              </label>
+              <select
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={root.active_platform}
+                onChange={(e) => setActivePlatform(e.target.value)}
+              >
+                {platformList.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.display_name || p.key}
+                  </option>
+                ))}
+                {/* 如果 platformList 为空（加载失败），回退用 root.platforms 的 key */}
+                {platformList.length === 0 &&
+                  Object.keys(root.platforms).map((k) => (
+                    <option key={k} value={k}>
+                      {root.platforms[k].display_name || k}
+                    </option>
+                  ))}
+              </select>
+              {/* 平台官网链接 */}
+              {activePlatform?.office_web && (
+                <button
+                  type="button"
+                  onClick={() => TauriCommands.openExternalLink(activePlatform.office_web)}
+                  className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  <ExternalLink className="mr-1 h-3 w-3" />
+                  前往{activePlatform.display_name || root.active_platform}官网
+                </button>
+              )}
+            </div>
+
+            {/* API Key 输入 */}
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">
+                API 密钥
               </label>
               <input
                 type="password"
                 autoComplete="off"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="请输入云雾平台 API Key"
-                value={root.yunwu.high.api_key}
-                onChange={(e) => setYunwuApiKeyForAllTiers(e.target.value)}
+                placeholder={`请输入${activePlatform?.display_name || root.active_platform}平台 API Key`}
+                value={currentApiKey}
+                onChange={(e) => setPlatformApiKey(root.active_platform, e.target.value)}
               />
-              <button
-                type="button"
-                onClick={() => TauriCommands.openExternalLink("https://yunwu.apifox.cn")}
-                className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
-              >
-                <ExternalLink className="mr-1 h-3 w-3" />
-                前往云雾平台
-              </button>
-              <span className="mt-2 text-xs text-slate-500">
-                （与平台没有任何合作，保险使用，建议充值2元即可）
-              </span>
             </div>
+
+            {/* 模型信息展示（只读） */}
+            {activePlatform && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  当前平台模型配置（high 档）
+                </h4>
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                  <div>
+                    <span className="text-slate-500">文案生成：</span>
+                    <span className="font-medium text-slate-800">
+                      {activePlatform.tiers.high.copywriting_model_name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">视频分析：</span>
+                    <span className="font-medium text-slate-800">
+                      {activePlatform.tiers.high.video_analysis_model_name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">LLM 精排：</span>
+                    <span className="font-medium text-slate-800">
+                      {activePlatform.tiers.high.llm_rerank_model_name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">脚本生成：</span>
+                    <span className="font-medium text-slate-800">
+                      {activePlatform.tiers.high.script_generation_model_name}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {testMessage && (
               <p
@@ -222,7 +289,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 
       {useCustom && (
         <p className="text-xs text-slate-500">
-          自定义模式下请分别在「文案模型」「视频分析模型」标签内保存各自配置；与云雾整合配置相互独立。
+          自定义模式下请分别在「文案模型」「视频分析模型」标签内保存各自配置；与聚合整合配置相互独立。
         </p>
       )}
     </div>

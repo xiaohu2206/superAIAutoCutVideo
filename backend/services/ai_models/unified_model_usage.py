@@ -60,7 +60,7 @@ def _unified_yunwu_content_cfg(*, model_name: str, tier_settings: YunwuTierSetti
         extra_params={},
         stream_output=False,
         enabled=True,
-        description="云雾整合模型（由 unified_model_usage 合成）",
+        description="聚合整合模型（由 unified_model_usage 合成）",
     )
 
 
@@ -137,5 +137,5 @@ def resolve_video_model_for_online_vision(
         extra_params={},
         stream_output=False,
         enabled=True,
-        description="云雾整合视频理解模型（由 unified_model_usage 合成）",
+        description="聚合整合视频理解模型（由 unified_model_usage 合成）",
     )
