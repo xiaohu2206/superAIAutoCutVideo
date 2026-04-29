@@ -103,6 +103,24 @@ async def forward_upstream_post_raw(
     return _passthrough_response(r)
 
 
+async def fetch_upstream_json(path: str, authorization: Optional[str] = None) -> Optional[dict]:
+    """从上游获取 JSON 数据，成功返回 dict，失败返回 None（不抛异常）。"""
+    url = f"{get_auth_upstream_base()}{path}"
+    headers = {"Accept": "application/json, text/plain, */*"}
+    if authorization:
+        headers["Authorization"] = authorization
+    try:
+        async with httpx.AsyncClient(
+            timeout=_DEFAULT_TIMEOUT,
+            trust_env=False,
+        ) as client:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return None
+
+
 async def forward_upstream_get(path: str, authorization: Optional[str]) -> Response:
     url = f"{get_auth_upstream_base()}{path}"
     headers = {"Accept": "application/json, text/plain, */*"}

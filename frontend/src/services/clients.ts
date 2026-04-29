@@ -428,24 +428,40 @@ export class ApiClient {
     return this.post(`/api/models/content-generation/test`);
   }
 
+  private _authHeaders(): Record<string, string> | undefined {
+    if (typeof localStorage === "undefined") return undefined;
+    const token = localStorage.getItem("sacv_auth_token")?.trim();
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+  }
+
   /** 聚合模型（与自定义文案/视频模型二选一总控） */
   async getUnifiedYunwuModels(): Promise<any> {
-    return this.get("/api/models/unified-yunwu");
+    return this.request("/api/models/unified-yunwu", {
+      method: "GET",
+      headers: this._authHeaders(),
+    });
   }
 
   async updateUnifiedYunwuModels(body: Record<string, unknown>): Promise<any> {
     return this.request("/api/models/unified-yunwu", {
       method: "PUT",
       body: JSON.stringify(body),
+      headers: this._authHeaders(),
     });
   }
 
   async getUnifiedYunwuPlatforms(): Promise<any> {
-    return this.get("/api/models/unified-yunwu/platforms");
+    return this.request("/api/models/unified-yunwu/platforms", {
+      method: "GET",
+      headers: this._authHeaders(),
+    });
   }
 
   async testUnifiedYunwuModels(): Promise<any> {
-    return this.post("/api/models/unified-yunwu/test");
+    return this.request("/api/models/unified-yunwu/test", {
+      method: "POST",
+      headers: this._authHeaders(),
+    });
   }
 
   // ===== 向量模型 设置相关 API =====

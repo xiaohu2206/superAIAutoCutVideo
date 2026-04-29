@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from modules.ai import AIModelConfig, get_provider_class
@@ -78,8 +78,9 @@ class UnifiedYunwuModelsUpdateRequest(BaseModel):
 
 
 @router.get("/unified-yunwu", summary="获取聚合模型配置")
-async def get_unified_yunwu_models():
+async def get_unified_yunwu_models(request: Request):
     try:
+        await unified_yunwu_models_config_manager.ensure_remote_synced(request.headers.get("Authorization"))
         root = unified_yunwu_models_config_manager.get_root()
         return {"success": True, "data": _root_to_public_dict(root)}
     except Exception as e:
@@ -135,8 +136,9 @@ def _merge_platform_tiers(
 
 
 @router.put("/unified-yunwu", summary="更新聚合模型配置")
-async def put_unified_yunwu_models(body: UnifiedYunwuModelsUpdateRequest):
+async def put_unified_yunwu_models(body: UnifiedYunwuModelsUpdateRequest, request: Request):
     try:
+        await unified_yunwu_models_config_manager.ensure_remote_synced(request.headers.get("Authorization"))
         cur = unified_yunwu_models_config_manager.get_root()
 
         new_use_custom = cur.use_custom_models if body.use_custom_models is None else bool(body.use_custom_models)
@@ -189,9 +191,10 @@ async def put_unified_yunwu_models(body: UnifiedYunwuModelsUpdateRequest):
 
 
 @router.get("/unified-yunwu/platforms", summary="获取可用平台列表")
-async def list_platforms():
+async def list_platforms(request: Request):
     """返回所有可用平台标识、显示名称和官网地址。"""
     try:
+        await unified_yunwu_models_config_manager.ensure_remote_synced(request.headers.get("Authorization"))
         root = unified_yunwu_models_config_manager.get_root()
         platforms: List[Dict[str, str]] = []
         for pk, pv in root.platforms.items():
@@ -207,9 +210,10 @@ async def list_platforms():
 
 
 @router.post("/unified-yunwu/test", summary="测试当前激活平台连接")
-async def test_unified_yunwu_models():
+async def test_unified_yunwu_models(request: Request):
     """使用整合配置中「文案生成」模型名做一次连通性探测。"""
     try:
+        await unified_yunwu_models_config_manager.ensure_remote_synced(request.headers.get("Authorization"))
         cfg = resolve_unified_yunwu_for_integration_connection_test()
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:

@@ -199,7 +199,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             </div>
 
             {/* 模型信息展示（只读） */}
-            {/* {activePlatform && (
+            {activePlatform && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   当前平台模型配置（high 档）
@@ -231,7 +231,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
                   </div>
                 </div>
               </div>
-            )} */}
+            )}
 
             {testMessage && (
               <p

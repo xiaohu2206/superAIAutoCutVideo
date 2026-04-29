@@ -4,13 +4,19 @@
 聚合模型平台配置：支持多个平台（如 yunwu、rightCodes 等），每个平台有三档（low / medium / high），
 每档可独立配置 Key 与分角色模型名。
 
-用户只需选择平台 + 输入 API Key，base_url / 模型名等由配置文件预设，前端不可编辑。
+用户只需选择平台 + 输入 API Key，base_url / 模型名等可由远程接口下发，也可本地配置。
+
+远程同步：每 1 小时从上游 /api/model-platforms 拉取平台与模型组合数据，合并到本地配置。
+- FORCE_REMOTE_SYNC=True 时每次 load() 都请求远程。
+- 请求失败则沿用本地/缓存配置。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -23,6 +29,13 @@ DEFAULT_YUNWU_CHAT_URL = "https://yunwu.ai/v1/chat/completions"
 TierKey = Union[str, None]
 ALLOWED_TIERS = {"low", "medium", "high"}
 DEFAULT_TIER = "high"
+
+FORCE_REMOTE_SYNC: bool = True
+_REMOTE_SYNC_PATH: str = "/api/model-platforms"
+_REMOTE_SYNC_CACHE_SECONDS: float = 3600.0
+
+_remote_sync_last_time: float = 0.0
+_remote_sync_lock = asyncio.Lock()
 
 
 # ---------- 单档模型配置 ----------
@@ -224,6 +237,97 @@ class UnifiedYunwuModelsRoot(BaseModel):
         return self.get_active_platform().tiers
 
 
+# ---------- 远程数据转换 ----------
+
+def _transform_remote_data(
+    remote_data: Dict[str, Any],
+    existing_root: UnifiedYunwuModelsRoot,
+) -> UnifiedYunwuModelsRoot:
+    """将远程 /api/model-platforms 返回的数据合并到现有根配置中。
+
+    远程仅控制平台元信息（display_name、office_web、base_url）与模型名；
+    api_key 字段始终保留本地的值。
+    """
+    data = remote_data.get("data") if isinstance(remote_data, dict) else None
+    if isinstance(data, list):
+        remote_list: List[Dict[str, Any]] = data
+    elif isinstance(data, dict):
+        remote_list = data.get("list") or []
+    else:
+        logger.warning("远程模型平台数据格式异常，跳过合并")
+        return existing_root
+
+    if not isinstance(remote_list, list):
+        return existing_root
+
+    new_platforms: Dict[str, PlatformSettings] = {}
+    for pk, pv in existing_root.platforms.items():
+        new_platforms[pk] = pv.model_copy(deep=True)
+
+    for remote_plat in remote_list:
+        if not isinstance(remote_plat, dict):
+            continue
+        name = (remote_plat.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        base_url = (remote_plat.get("baseUrl") or "").strip().strip("`") or DEFAULT_YUNWU_CHAT_URL
+        office_web = (remote_plat.get("officialWebsite") or "").strip()
+        display_name = remote_plat.get("displayName") or name
+
+        existing_plat = new_platforms.get(key)
+        existing_tiers: Dict[str, YunwuTierSettings] = (
+            {tk: tv.model_copy(deep=True) for tk, tv in existing_plat.tiers.items()}
+            if existing_plat
+            else {}
+        )
+
+        combinations: List[Dict[str, Any]] = remote_plat.get("combinations") or []
+        if not isinstance(combinations, list):
+            combinations = []
+
+        merged_tiers: Dict[str, YunwuTierSettings] = {}
+        for tk in ALLOWED_TIERS:
+            old_tier = existing_tiers.get(tk, YunwuTierSettings())
+            merged_tiers[tk] = YunwuTierSettings(
+                api_key=old_tier.api_key,
+                base_url=base_url,
+                copywriting_model_name=old_tier.copywriting_model_name,
+                video_analysis_model_name=old_tier.video_analysis_model_name,
+                llm_rerank_model_name=old_tier.llm_rerank_model_name,
+                script_generation_model_name=old_tier.script_generation_model_name,
+            )
+
+        for combo in combinations:
+            if not isinstance(combo, dict):
+                continue
+            level = (combo.get("level") or "").strip().lower()
+            if level not in ALLOWED_TIERS:
+                continue
+
+            old_tier = existing_tiers.get(level, YunwuTierSettings())
+            merged_tiers[level] = YunwuTierSettings(
+                api_key=old_tier.api_key,
+                base_url=base_url,
+                copywriting_model_name=(combo.get("copywritingModelName") or old_tier.copywriting_model_name or "deepseek-v4-flash").strip(),
+                video_analysis_model_name=(combo.get("videoAnalysisModelName") or old_tier.video_analysis_model_name or "gemini-2.5-flash-lite").strip(),
+                llm_rerank_model_name=(combo.get("llmRerankModelName") or old_tier.llm_rerank_model_name or "deepseek-v4-flash").strip(),
+                script_generation_model_name=(combo.get("scriptGenerationModelName") or old_tier.script_generation_model_name or "deepseek-v4-flash").strip(),
+            )
+
+        new_platforms[key] = PlatformSettings(
+            display_name=display_name,
+            office_web=office_web,
+            tiers=merged_tiers,
+        )
+
+    return UnifiedYunwuModelsRoot(
+        use_custom_models=existing_root.use_custom_models,
+        active_platform=existing_root.active_platform,
+        platforms=new_platforms,
+    )
+
+
 # ---------- 管理器 ----------
 
 class UnifiedYunwuModelsConfigManager:
@@ -233,6 +337,7 @@ class UnifiedYunwuModelsConfigManager:
             config_file = user_config_dir() / "unified_yunwu_models_config.json"
         self.config_file = Path(config_file)
         self._root: UnifiedYunwuModelsRoot = UnifiedYunwuModelsRoot()
+        self._sync_guard: Optional[asyncio.Task] = None
         self.load()
 
     def load(self) -> None:
@@ -271,6 +376,64 @@ class UnifiedYunwuModelsConfigManager:
         except Exception as e:
             logger.error("加载聚合模型配置失败，使用默认: %s", e)
             self._root = UnifiedYunwuModelsRoot()
+
+    async def ensure_remote_synced(self, authorization: Optional[str] = None) -> None:
+        """确保远程数据已同步。会在首次调用时触发同步并等待完成。
+
+        路由层在 get_root() 之前调用此方法，避免拿到 fire-and-forget 任务还没完成时的旧数据。
+        后续调用受缓存时间控制（FORCE_REMOTE_SYNC=True 时跳过缓存）。
+        """
+        if self._sync_guard is not None and not self._sync_guard.done():
+            await self._sync_guard
+            return
+
+        global _remote_sync_last_time
+        now = time.time()
+        if not FORCE_REMOTE_SYNC and (now - _remote_sync_last_time) < _REMOTE_SYNC_CACHE_SECONDS:
+            return
+
+        async with _remote_sync_lock:
+            now = time.time()
+            if not FORCE_REMOTE_SYNC and (now - _remote_sync_last_time) < _REMOTE_SYNC_CACHE_SECONDS:
+                return
+
+            if self._sync_guard is not None and not self._sync_guard.done():
+                await self._sync_guard
+                return
+
+            async def _do_sync() -> None:
+                try:
+                    from modules.auth.auth_upstream import fetch_upstream_json
+
+                    remote_data = await fetch_upstream_json(_REMOTE_SYNC_PATH, authorization)
+                    if remote_data is None:
+                        logger.warning("远程模型平台数据获取失败，沿用本地配置")
+                        return
+
+                    code = remote_data.get("code")
+                    if code != 0:
+                        logger.warning("远程模型平台接口返回 code=%s，沿用本地配置", code)
+                        return
+
+                    new_root = _transform_remote_data(remote_data, self._root)
+                    self._root = new_root
+                    self.save()
+                    nonlocal now
+                    _remote_sync_last_time = time.time()
+                    active = new_root.active_platform
+                    total_platforms = len(new_root.platforms)
+                    logger.info(
+                        "远程模型平台配置已同步（%d 个平台，当前激活: %s）",
+                        total_platforms,
+                        active,
+                    )
+                except Exception as e:
+                    logger.error("远程同步模型平台配置失败: %s", e)
+                finally:
+                    self._sync_guard = None
+
+            self._sync_guard = asyncio.ensure_future(_do_sync())
+            await self._sync_guard
 
     def save(self) -> None:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
