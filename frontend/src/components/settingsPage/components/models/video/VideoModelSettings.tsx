@@ -203,7 +203,7 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
         </AppSelect>
         <p className="text-xs text-gray-500 mt-1">
           {isLocalModel
-            ? "选择本地视觉分析模型"
+            ? "选择本地视觉分析模型（不支持全感知推理）"
             : selectedProvider === "custom_openai_vision"
               ? "自定义端点需支持 OpenAI 格式图文消息（image_url + text），用于抽帧后的画面描述"
               : "选择用于视频生成的AI模型提供商 （视频模型可能消耗巨大，请谨慎使用）"}

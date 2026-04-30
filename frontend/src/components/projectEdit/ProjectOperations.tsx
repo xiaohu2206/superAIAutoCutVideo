@@ -34,6 +34,8 @@ interface ProjectOperationsProps {
   showMergedPreview: boolean;
   setShowMergedPreview: (show: boolean) => void;
   refreshProject: () => Promise<void>;
+  /** 隐藏文案生成相关 UI（按钮、进度、影片信息、洗稿），用于步骤拆分场景 */
+  hideCopywritingOperations?: boolean;
   /** Omni：隐藏 visual 的「生成解说脚本」，由独立组件提供全链路入口 */
   hideVisualGenerateScriptButton?: boolean;
   /** Omni：替代原「生成解说脚本」按钮区域的 React 节点 */
@@ -73,6 +75,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   showMergedPreview,
   setShowMergedPreview,
   refreshProject,
+  hideCopywritingOperations = false,
   hideVisualGenerateScriptButton = false,
   omniScriptGenerateSlot,
   omniScriptProgressSlot,
@@ -243,52 +246,54 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
 
   return (
     <div className="pt-4 border-t border-gray-200 flex flex-wrap items-start gap-3">
-      <div className="flex flex-col items-start space-y-2">
-        <button
-          onClick={handleGenerateCopywriting}
-          disabled={copywritingButtonDisabled}
-          className="flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isGeneratingCopywriting ? (
-            <>
-              <Loader className="h-5 w-5 mr-2 animate-spin" />
-              生成中...
-            </>
-          ) : (
-            <>生成解说文案</>
-          )}
-        </button>
-        {isMovieNarration && (
-          <div className="flex items-center gap-2 pl-1">
-            {!hasReferenceCopywritingSaved && (
+      {!hideCopywritingOperations && (
+        <div className="flex flex-col items-start space-y-2">
+          <button
+            onClick={handleGenerateCopywriting}
+            disabled={copywritingButtonDisabled}
+            className="flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingCopywriting ? (
+              <>
+                <Loader className="h-5 w-5 mr-2 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>生成解说文案</>
+            )}
+          </button>
+          {isMovieNarration && (
+            <div className="flex items-center gap-2 pl-1">
+              {!hasReferenceCopywritingSaved && (
+                <button
+                  onClick={handleOpenFilmContextModal}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                    hasFilmContextSaved 
+                      ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
+                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  }`}
+                  title="设置影片脉络与人物简介"
+                >
+                  {hasFilmContextSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                  <span>附加影片信息</span>
+                </button>
+              )}
               <button
-                onClick={handleOpenFilmContextModal}
+                onClick={handleOpenReferenceModal}
                 className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
-                  hasFilmContextSaved 
+                  hasReferenceCopywritingSaved 
                     ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
                     : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                 }`}
-                title="设置影片脉络与人物简介"
+                title="设置洗稿文案"
               >
-                {hasFilmContextSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                <span>附加影片信息</span>
+                {hasReferenceCopywritingSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                <span>洗稿（推荐）</span>
               </button>
-            )}
-            <button
-              onClick={handleOpenReferenceModal}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
-                hasReferenceCopywritingSaved 
-                  ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100" 
-                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-              }`}
-              title="设置洗稿文案"
-            >
-              {hasReferenceCopywritingSaved ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-              <span>洗稿（推荐）</span>
-            </button>
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {hideVisualGenerateScriptButton ? (
         omniScriptGenerateSlot ?? null
@@ -343,8 +348,8 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         ]}
       />
       }
-      {/* 生成视频实时进度显示 */}
-      {(isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100)) && (
+      {/* 文案生成进度 */}
+      {!hideCopywritingOperations && (isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100)) && (
         <div className="w-full ml-0 mt-3">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <span>文案生成进度(预计1～2分钟)</span>

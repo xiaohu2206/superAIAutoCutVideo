@@ -5,6 +5,7 @@ import { X, Folder } from "lucide-react";
 import type { CreateProjectRequest, OmniEffectTier } from "../../types/project";
 import { NarrationType } from "../../types/project";
 import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
+import videoModelService from "../../services/videoModelService";
 import AppSelect from "../ui/AppSelect";
 import { useAuth } from "../auth/AuthContext";
 
@@ -30,12 +31,14 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [narrationType, setNarrationType] = useState<NarrationType>(
-    NarrationType.SHORT_DRAMA
+    NarrationType.MOVIE
   );
   const [projectType, setProjectType] = useState<"subtitle" | "visual" | "omni">("subtitle");
   const [omniEffectTier, setOmniEffectTier] = useState<OmniEffectTier>("high");
   /** null：尚未拉取；与设置页「使用自定义模型」一致，为 true 时不展示全感知档位 */
   const [yunwuUseCustomModels, setYunwuUseCustomModels] = useState<boolean | null>(null);
+  /** 当前启用的视频分析模型是否为 moondream 本地模型 */
+  const [isMoondreamEnabled, setIsMoondreamEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +48,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setYunwuUseCustomModels(null);
+      setIsMoondreamEnabled(false);
       return;
     }
     let cancelled = false;
@@ -60,6 +64,24 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         }
       } catch {
         if (!cancelled) setYunwuUseCustomModels(false);
+      }
+
+      try {
+        const videoRes = await videoModelService.getConfigs();
+        if (cancelled) return;
+        if (videoRes?.success && videoRes.data?.configs) {
+          const configs = videoRes.data.configs;
+          const enabledConfigId = Object.keys(configs).find(
+            (id) => configs[id].enabled === true
+          );
+          const isMoondream =
+            enabledConfigId && configs[enabledConfigId].provider === "moondream";
+          setIsMoondreamEnabled(!!isMoondream);
+        } else {
+          setIsMoondreamEnabled(false);
+        }
+      } catch {
+        if (!cancelled) setIsMoondreamEnabled(false);
       }
     })();
     return () => {
@@ -253,20 +275,31 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
                 {/* 全感知推理 */}
                 <div
-                  onClick={() => !loading && setProjectType("omni")}
-                  className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    projectType === "omni"
-                      ? "border-purple-500 bg-purple-50"
-                      : "border-gray-200 bg-white hover:border-purple-300"
+                  onClick={() => {
+                    if (loading) return;
+                    if (isMoondreamEnabled) {
+                      setError("本地模型不支持全感知推理");
+                      return;
+                    }
+                    setProjectType("omni");
+                  }}
+                  className={`relative p-4 border-2 rounded-lg transition-all ${
+                    isMoondreamEnabled
+                      ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50"
+                      : projectType === "omni"
+                        ? "border-purple-500 bg-purple-50 cursor-pointer"
+                        : "border-gray-200 bg-white hover:border-purple-300 cursor-pointer"
                   }`}
                 >
-                  {projectType === "omni" && (
+                  {projectType === "omni" && !isMoondreamEnabled && (
                     <div className="absolute top-3 right-3 w-4 h-4 bg-purple-500 rounded-full border-2 border-white shadow-sm"></div>
                   )}
                   <div className="flex items-center justify-between mb-2">
                     <h4
                       className={`text-lg font-bold ${
-                        projectType === "omni" ? "text-purple-700" : "text-gray-700"
+                        projectType === "omni" && !isMoondreamEnabled
+                          ? "text-purple-700"
+                          : "text-gray-700"
                       }`}
                     >
                       全感知推理

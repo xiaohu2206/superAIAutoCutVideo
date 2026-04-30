@@ -222,13 +222,13 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
           setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
         />
       )}
-      <ScriptLengthSelector
+      {/* <ScriptLengthSelector
         scriptLength={scriptLength}
         loading={scriptLengthLoading}
         saving={scriptLengthSaving}
         setScriptLengthAndPersist={setScriptLengthAndPersist}
         onOpenCustomModal={openCustomModal}
-      />
+      /> */}
       <OriginalRatioSlider
         originalRatio={originalRatio}
         loading={originalRatioLoading}

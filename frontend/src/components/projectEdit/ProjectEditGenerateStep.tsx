@@ -1,13 +1,12 @@
 import React from "react";
 import { useOmniFullNarrationPipeline } from "../../hooks/omni/useOmniFullNarrationPipeline";
 import type { Project } from "../../types/project";
-import GenerateAdvancedConfigSection from "./GenerateAdvancedConfigSection";
-import CopywritingSection from "./CopywritingSection";
+import VideoGenAdvancedConfig from "./advancedConfig/VideoGenAdvancedConfig";
 import OmniFullNarrationPipelineControls from "./omni/OmniFullNarrationPipelineControls";
 import OmniFullNarrationPipelineProgress from "./omni/OmniFullNarrationPipelineProgress";
 import OmniFullNarrationScriptWorkspace from "./omni/OmniFullNarrationScriptWorkspace";
 import ProjectOperations from "./ProjectOperations";
-import ScriptEditor from "./ScriptEditor";
+import ScriptJsonEditor from "./ScriptJsonEditor";
 
 interface ProjectEditGenerateStepProps {
   project: Project;
@@ -46,11 +45,6 @@ interface ProjectEditGenerateStepProps {
   showMergedPreview: boolean;
   setShowMergedPreview: React.Dispatch<React.SetStateAction<boolean>>;
 
-  editedCopywriting: string;
-  setEditedCopywriting: (copywriting: string) => void;
-  isSavingCopywriting: boolean;
-  handleSaveCopywriting: (content?: string) => void;
-
   editedScript: string;
   setEditedScript: (script: string) => void;
   isSaving: boolean;
@@ -88,10 +82,6 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   draftGenLogs,
   showMergedPreview,
   setShowMergedPreview,
-  editedCopywriting,
-  setEditedCopywriting,
-  isSavingCopywriting,
-  handleSaveCopywriting,
   editedScript,
   setEditedScript,
   isSaving,
@@ -110,22 +100,18 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
     <>
       <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">项目生成</h2>
+          <h2 className="text-lg font-semibold text-gray-900">生成视频</h2>
           <button
             onClick={() => setShowAdvancedConfig((v) => !v)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-             <span className="text-xs text-gray-500">（解说文案字数、脚本条数、原片占比范围、生成语言、解说风格）</span>
+             <span className="text-xs text-gray-500">（原片占比范围、生成语言）</span>
             高级配置
           </button>
         </div>
 
         {showAdvancedConfig && (
-          <GenerateAdvancedConfigSection
-            projectId={project.id}
-            narrationType={project.narration_type}
-            hasReferenceCopywriting={Boolean((project.narration_reference_copywriting || "").trim())}
-          />
+          <VideoGenAdvancedConfig projectId={project.id} />
         )}
 
         <ProjectOperations
@@ -157,6 +143,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           draftGenLogs={draftGenLogs}
           showMergedPreview={showMergedPreview}
           setShowMergedPreview={setShowMergedPreview}
+          hideCopywritingOperations
           hideVisualGenerateScriptButton={project.project_type === "omni"}
           isOmniFullPipelineRunning={omniNarration.omniAnyPipelineBusy}
           omniScriptGenerateSlot={
@@ -195,15 +182,9 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
         />
       </div>
 
+      {/* 脚本编辑区 */}
       {project.project_type === "omni" ? (
         <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
-          <CopywritingSection
-            editedCopywriting={editedCopywriting}
-            setEditedCopywriting={setEditedCopywriting}
-            isSavingCopywriting={isSavingCopywriting}
-            handleSaveCopywriting={handleSaveCopywriting}
-          />
-          <hr className="border-gray-200" />
           <OmniFullNarrationScriptWorkspace
             editedScript={omniNarration.omniEditedScript}
             setEditedScript={omniNarration.setOmniEditedScript}
@@ -212,16 +193,14 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           />
         </div>
       ) : (
-        <ScriptEditor
-          editedCopywriting={editedCopywriting}
-          setEditedCopywriting={setEditedCopywriting}
-          isSavingCopywriting={isSavingCopywriting}
-          handleSaveCopywriting={handleSaveCopywriting}
-          editedScript={editedScript}
-          setEditedScript={setEditedScript}
-          isSaving={isSaving}
-          handleSaveScript={handleSaveScript}
-        />
+        <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
+          <ScriptJsonEditor
+            editedScript={editedScript}
+            setEditedScript={setEditedScript}
+            isSaving={isSaving}
+            handleSaveScript={handleSaveScript}
+          />
+        </div>
       )}
     </>
   );
