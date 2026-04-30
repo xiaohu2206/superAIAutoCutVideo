@@ -464,6 +464,13 @@ export class ApiClient {
     });
   }
 
+  async forceSyncUnifiedYunwuModels(): Promise<any> {
+    return this.request("/api/models/unified-yunwu/force-sync", {
+      method: "POST",
+      headers: this._authHeaders(),
+    });
+  }
+
   // ===== 向量模型 设置相关 API =====
   async getAiSearchShotModelConfig(): Promise<any> {
     return this.get("/api/settings/ai-search-shot");

@@ -408,7 +408,7 @@ async def _refine_full_script(
 
     ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
     if ratio_val is None:
-        ratio_hint = "**原声片段标识**：OST=1表示原声，OST=0表示解说"
+        ratio_hint = "**原声片段分配**：原声片段（OST=1）占比约 40%，解说片段（OST=0）占比约 60%"
     elif ratio_val <= 0:
         ratio_hint = "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
     elif ratio_val >= 100:

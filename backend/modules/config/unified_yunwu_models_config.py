@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -30,12 +30,16 @@ TierKey = Union[str, None]
 ALLOWED_TIERS = {"low", "medium", "high"}
 DEFAULT_TIER = "high"
 
-FORCE_REMOTE_SYNC: bool = True
+FORCE_REMOTE_SYNC: bool = False
 _REMOTE_SYNC_PATH: str = "/api/model-platforms"
 _REMOTE_SYNC_CACHE_SECONDS: float = 3600.0
 
-_remote_sync_last_time: float = 0.0
 _remote_sync_lock = asyncio.Lock()
+
+
+def _beijing_now() -> datetime:
+    """返回北京时间（UTC+8）的当前时间。"""
+    return datetime.now(timezone(timedelta(hours=8)))
 
 
 # ---------- 单档模型配置 ----------
@@ -192,6 +196,10 @@ class UnifiedYunwuModelsRoot(BaseModel):
         default_factory=_default_platforms,
         description="所有可用聚合平台",
     )
+    last_remote_sync_time: Optional[str] = Field(
+        default=None,
+        description="上次远程同步时间（ISO 8601 / 北京时间字符串）",
+    )
 
     def get_active_platform(self) -> PlatformSettings:
         """获取当前激活平台的配置；若不存在则回退到第一个可用平台。"""
@@ -207,10 +215,28 @@ class UnifiedYunwuModelsRoot(BaseModel):
         """获取激活平台的指定档位配置。"""
         return self.get_active_platform().tier_or_default(tier)
 
+    def needs_remote_sync(self, cache_seconds: float = _REMOTE_SYNC_CACHE_SECONDS) -> bool:
+        """基于北京时间判断是否需要再次远程同步。"""
+        if FORCE_REMOTE_SYNC:
+            return True
+        if not self.last_remote_sync_time:
+            return True
+        try:
+            last_sync = datetime.fromisoformat(self.last_remote_sync_time)
+            elapsed = (_beijing_now() - last_sync).total_seconds()
+            return elapsed >= cache_seconds
+        except Exception:
+            return True
+
+    def mark_remote_synced(self) -> None:
+        """记录本次同步成功时间为当前北京时间。"""
+        now = _beijing_now().replace(microsecond=0)
+        self.last_remote_sync_time = now.isoformat()
+
     @field_validator("platforms")
     @classmethod
     def _ensure_platforms(cls, v: Any) -> Dict[str, PlatformSettings]:
-        """确保至少有 yunwu 平台。"""
+        """校验各平台配置合法性；仅在完全没有平台时回退到默认。"""
         if not isinstance(v, dict) or not v:
             return _default_platforms()
         out: Dict[str, PlatformSettings] = {}
@@ -222,11 +248,6 @@ class UnifiedYunwuModelsRoot(BaseModel):
                     out[k] = PlatformSettings.model_validate(raw)
             except Exception:
                 out[k] = PlatformSettings()
-        if "yunwu" not in out:
-            out["yunwu"] = PlatformSettings(
-                display_name="云雾",
-                office_web="https://yunwu.apifox.cn",
-            )
         return out
 
     # ---------- 旧版兼容属性 ----------
@@ -243,10 +264,10 @@ def _transform_remote_data(
     remote_data: Dict[str, Any],
     existing_root: UnifiedYunwuModelsRoot,
 ) -> UnifiedYunwuModelsRoot:
-    """将远程 /api/model-platforms 返回的数据合并到现有根配置中。
+    """将远程 /api/model-platforms 返回的数据直接覆盖本地配置。
 
-    远程仅控制平台元信息（display_name、office_web、base_url）与模型名；
-    api_key 字段始终保留本地的值。
+    远程数据作为唯一数据源，完全替换本地平台列表；
+    仅保留本地已有的 api_key（用户输入的密钥）。
     """
     data = remote_data.get("data") if isinstance(remote_data, dict) else None
     if isinstance(data, list):
@@ -254,15 +275,18 @@ def _transform_remote_data(
     elif isinstance(data, dict):
         remote_list = data.get("list") or []
     else:
-        logger.warning("远程模型平台数据格式异常，跳过合并")
+        logger.warning("远程模型平台数据格式异常，跳过覆盖")
         return existing_root
 
     if not isinstance(remote_list, list):
         return existing_root
 
-    new_platforms: Dict[str, PlatformSettings] = {}
+    # 提取本地各平台各档位的 api_key，供覆盖后保留
+    existing_keys: Dict[str, Dict[str, str]] = {}
     for pk, pv in existing_root.platforms.items():
-        new_platforms[pk] = pv.model_copy(deep=True)
+        existing_keys[pk] = {tk: tv.api_key for tk, tv in pv.tiers.items()}
+
+    new_platforms: Dict[str, PlatformSettings] = {}
 
     for remote_plat in remote_list:
         if not isinstance(remote_plat, dict):
@@ -275,27 +299,18 @@ def _transform_remote_data(
         office_web = (remote_plat.get("officialWebsite") or "").strip()
         display_name = remote_plat.get("displayName") or name
 
-        existing_plat = new_platforms.get(key)
-        existing_tiers: Dict[str, YunwuTierSettings] = (
-            {tk: tv.model_copy(deep=True) for tk, tv in existing_plat.tiers.items()}
-            if existing_plat
-            else {}
-        )
+        preserved_keys = existing_keys.get(key, {})
 
         combinations: List[Dict[str, Any]] = remote_plat.get("combinations") or []
         if not isinstance(combinations, list):
             combinations = []
 
-        merged_tiers: Dict[str, YunwuTierSettings] = {}
+        # 以 base_url 填充默认档位，后续用远程 combinations 覆盖
+        tiers: Dict[str, YunwuTierSettings] = {}
         for tk in ALLOWED_TIERS:
-            old_tier = existing_tiers.get(tk, YunwuTierSettings())
-            merged_tiers[tk] = YunwuTierSettings(
-                api_key=old_tier.api_key,
+            tiers[tk] = YunwuTierSettings(
+                api_key=preserved_keys.get(tk, ""),
                 base_url=base_url,
-                copywriting_model_name=old_tier.copywriting_model_name,
-                video_analysis_model_name=old_tier.video_analysis_model_name,
-                llm_rerank_model_name=old_tier.llm_rerank_model_name,
-                script_generation_model_name=old_tier.script_generation_model_name,
             )
 
         for combo in combinations:
@@ -304,26 +319,35 @@ def _transform_remote_data(
             level = (combo.get("level") or "").strip().lower()
             if level not in ALLOWED_TIERS:
                 continue
-
-            old_tier = existing_tiers.get(level, YunwuTierSettings())
-            merged_tiers[level] = YunwuTierSettings(
-                api_key=old_tier.api_key,
+            tiers[level] = YunwuTierSettings(
+                api_key=preserved_keys.get(level, ""),
                 base_url=base_url,
-                copywriting_model_name=(combo.get("copywritingModelName") or old_tier.copywriting_model_name or "deepseek-v4-flash").strip(),
-                video_analysis_model_name=(combo.get("videoAnalysisModelName") or old_tier.video_analysis_model_name or "gemini-2.5-flash-lite").strip(),
-                llm_rerank_model_name=(combo.get("llmRerankModelName") or old_tier.llm_rerank_model_name or "deepseek-v4-flash").strip(),
-                script_generation_model_name=(combo.get("scriptGenerationModelName") or old_tier.script_generation_model_name or "deepseek-v4-flash").strip(),
+                copywriting_model_name=(combo.get("copywritingModelName") or "deepseek-v4-flash").strip(),
+                video_analysis_model_name=(combo.get("videoAnalysisModelName") or "gemini-2.5-flash-lite").strip(),
+                llm_rerank_model_name=(combo.get("llmRerankModelName") or "deepseek-v4-flash").strip(),
+                script_generation_model_name=(combo.get("scriptGenerationModelName") or "deepseek-v4-flash").strip(),
             )
 
         new_platforms[key] = PlatformSettings(
             display_name=display_name,
             office_web=office_web,
-            tiers=merged_tiers,
+            tiers=tiers,
         )
+
+    if not new_platforms:
+        logger.warning("远程数据中无有效平台，沿用本地配置")
+        return existing_root
+
+    # 若当前激活平台在覆盖后不存在，自动切换到第一个可用平台
+    active = existing_root.active_platform
+    if active and active not in new_platforms:
+        fallback = next(iter(new_platforms))
+        logger.info("激活平台 '%s' 在远程数据中不存在，切换到 '%s'", active, fallback)
+        active = fallback
 
     return UnifiedYunwuModelsRoot(
         use_custom_models=existing_root.use_custom_models,
-        active_platform=existing_root.active_platform,
+        active_platform=active,
         platforms=new_platforms,
     )
 
@@ -387,14 +411,11 @@ class UnifiedYunwuModelsConfigManager:
             await self._sync_guard
             return
 
-        global _remote_sync_last_time
-        now = time.time()
-        if not FORCE_REMOTE_SYNC and (now - _remote_sync_last_time) < _REMOTE_SYNC_CACHE_SECONDS:
+        if not self._root.needs_remote_sync():
             return
 
         async with _remote_sync_lock:
-            now = time.time()
-            if not FORCE_REMOTE_SYNC and (now - _remote_sync_last_time) < _REMOTE_SYNC_CACHE_SECONDS:
+            if not self._root.needs_remote_sync():
                 return
 
             if self._sync_guard is not None and not self._sync_guard.done():
@@ -416,10 +437,9 @@ class UnifiedYunwuModelsConfigManager:
                         return
 
                     new_root = _transform_remote_data(remote_data, self._root)
+                    new_root.mark_remote_synced()
                     self._root = new_root
                     self.save()
-                    nonlocal now
-                    _remote_sync_last_time = time.time()
                     active = new_root.active_platform
                     total_platforms = len(new_root.platforms)
                     logger.info(
@@ -434,6 +454,49 @@ class UnifiedYunwuModelsConfigManager:
 
             self._sync_guard = asyncio.ensure_future(_do_sync())
             await self._sync_guard
+
+    async def force_sync_remote(self, authorization: Optional[str] = None) -> bool:
+        """强制跳过缓存，立即执行一次远程同步。返回是否成功。"""
+        if self._sync_guard is not None and not self._sync_guard.done():
+            await self._sync_guard
+        async with _remote_sync_lock:
+            if self._sync_guard is not None and not self._sync_guard.done():
+                await self._sync_guard
+                return True
+
+            async def _do_sync() -> bool:
+                ok = False
+                try:
+                    from modules.auth.auth_upstream import fetch_upstream_json
+
+                    remote_data = await fetch_upstream_json(_REMOTE_SYNC_PATH, authorization)
+                    if remote_data is None:
+                        logger.warning("远程模型平台数据获取失败，沿用本地配置")
+                        return False
+
+                    code = remote_data.get("code")
+                    if code != 0:
+                        logger.warning("远程模型平台接口返回 code=%s，沿用本地配置", code)
+                        return False
+
+                    new_root = _transform_remote_data(remote_data, self._root)
+                    new_root.mark_remote_synced()
+                    self._root = new_root
+                    self.save()
+                    ok = True
+                    logger.info(
+                        "远程模型平台配置已强制同步（%d 个平台，当前激活: %s）",
+                        len(new_root.platforms),
+                        new_root.active_platform,
+                    )
+                except Exception as e:
+                    logger.error("强制远程同步模型平台配置失败: %s", e)
+                finally:
+                    self._sync_guard = None
+                return ok
+
+            self._sync_guard = asyncio.ensure_future(_do_sync())
+            return await self._sync_guard
 
     def save(self) -> None:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)

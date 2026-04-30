@@ -126,9 +126,9 @@ def _build_fixed_visual_script_prompt(
     requirements_extra = ""
     ost_rules = ""
     if ratio_val is None:
-        requirements_extra = "- 合理分配原声片段（OST=1）和解说片段（OST=0）\n"
+        requirements_extra = "- 原声片段（OST=1）占比约 40%，解说片段（OST=0）占比约 60%\n"
         ost_rules = (
-            "## 原声片段规则\n"
+            "## 原声片段规则（约 40%）\n"
             "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
             "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"

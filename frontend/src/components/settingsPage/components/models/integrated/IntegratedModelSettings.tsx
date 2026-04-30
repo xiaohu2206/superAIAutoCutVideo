@@ -55,7 +55,6 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 }) => {
   const {
     root,
-    platformList,
     activePlatform,
     loading,
     saving,
@@ -66,6 +65,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
     setActivePlatform,
     setPlatformApiKey,
     testConnection,
+    forceSync,
+    syncing,
   } = useUnifiedYunwuModelConfig();
 
   const [subTab, setSubTab] = useState<IntegratedSubTab>("yunwu");
@@ -82,6 +83,10 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 
   // 当前激活平台的 API Key（三档共用）
   const currentApiKey = activePlatform?.tiers?.high?.api_key ?? "";
+  const platformOptions = Object.entries(root.platforms).map(([key, platform]) => ({
+    key,
+    display_name: platform.display_name || key,
+  }));
 
   return (
     <div className="space-y-6">
@@ -94,9 +99,12 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
           onChange={(e) => void setUseCustomModelsPersist(e.target.checked)}
         />
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-900">使用自定义模型</div>
+          <div className="text-sm font-medium text-slate-900">
+            使用自定义模型
+          </div>
           <p className="mt-1 text-xs text-slate-500">
-            (小白不建议开启) 开启后将显示「文案模型」「视频分析模型」配置页，并隐藏聚合整合默认项；关闭后仅保留聚合整合。
+            (小白不建议开启)
+            开启后将显示「文案模型」「视频分析模型」配置页，并隐藏聚合整合默认项；关闭后仅保留聚合整合。
           </p>
         </div>
       </div>
@@ -157,30 +165,41 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
                 value={root.active_platform}
                 onChange={(e) => setActivePlatform(e.target.value)}
               >
-                {platformList.map((p) => (
+                {platformOptions.map((p) => (
                   <option key={p.key} value={p.key}>
                     {p.display_name || p.key}
                   </option>
                 ))}
-                {/* 如果 platformList 为空（加载失败），回退用 root.platforms 的 key */}
-                {platformList.length === 0 &&
-                  Object.keys(root.platforms).map((k) => (
-                    <option key={k} value={k}>
-                      {root.platforms[k].display_name || k}
-                    </option>
-                  ))}
               </select>
               {/* 平台官网链接 */}
-              {activePlatform?.office_web && (
-                <button
-                  type="button"
-                  onClick={() => TauriCommands.openExternalLink(activePlatform.office_web)}
-                  className="mt-2 inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                >
-                  <ExternalLink className="mr-1 h-3 w-3" />
-                  前往{activePlatform.display_name || root.active_platform}官网
-                </button>
-              )}
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                {activePlatform?.office_web && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      TauriCommands.openExternalLink(activePlatform.office_web)
+                    }
+                    className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    <ExternalLink className="mr-1 h-3 w-3" />
+                    前往{activePlatform.display_name || root.active_platform}
+                    官网
+                  </button>
+                )}
+              </div>
+              <span className="mt-1 text-xs text-slate-500">
+                建议少量充值，中转平台容易跑路
+              </span>
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={() => void forceSync()}
+                className="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                title="强制从远程同步最新模型平台配置"
+              >
+                {syncing && <Loader2 className="mr-1 h-3 w-3 animate-spin text-sm" />}
+                {syncing ? "（同步中…）" : "（强制同步）"}
+              </button>
             </div>
 
             {/* API Key 输入 */}
@@ -194,7 +213,9 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 placeholder={`请输入${activePlatform?.display_name || root.active_platform}平台 API Key`}
                 value={currentApiKey}
-                onChange={(e) => setPlatformApiKey(root.active_platform, e.target.value)}
+                onChange={(e) =>
+                  setPlatformApiKey(root.active_platform, e.target.value)
+                }
               />
             </div>
 
@@ -236,7 +257,9 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             {testMessage && (
               <p
                 className={`text-sm ${
-                  testMessage.includes("成功") ? "text-emerald-700" : "text-amber-800"
+                  testMessage.includes("成功")
+                    ? "text-emerald-700"
+                    : "text-amber-800"
                 }`}
               >
                 {testMessage}

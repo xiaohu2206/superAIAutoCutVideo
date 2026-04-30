@@ -134,6 +134,20 @@ def _merge_platform_tiers(
         new_tiers[tk] = YunwuTierSettings.model_validate(td)
     return new_tiers
 
+@router.post("/unified-yunwu/force-sync", summary="强制同步远程模型平台配置")
+async def force_sync_unified_yunwu_models(request: Request):
+    try:
+        ok = await unified_yunwu_models_config_manager.force_sync_remote(
+            request.headers.get("Authorization")
+        )
+        if ok:
+            root = unified_yunwu_models_config_manager.get_root()
+            return {"success": True, "data": _root_to_public_dict(root)}
+        return {"success": False, "data": {"error": "同步失败，请检查网络或上游服务"}}
+    except Exception as e:
+        logger.error("强制同步聚合模型配置失败: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @router.put("/unified-yunwu", summary="更新聚合模型配置")
 async def put_unified_yunwu_models(body: UnifiedYunwuModelsUpdateRequest, request: Request):

@@ -93,24 +93,29 @@ export const useUnifiedYunwuModelConfig = () => {
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [togglingCustom, setTogglingCustom] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       const res = await unifiedYunwuModelService.get();
       const data = res?.data;
+      let nextRoot = rootRef.current;
       if (res?.success && data && typeof data === "object") {
-        setRoot(normalizePayload(data as Record<string, unknown>));
+        nextRoot = normalizePayload(data as Record<string, unknown>);
+        setRoot(nextRoot);
       }
-      // 同步加载平台列表
-      try {
-        const platRes = await unifiedYunwuModelService.getPlatforms();
-        const platData = platRes?.data;
-        if (platRes?.success && platData?.platforms) {
-          setPlatformList(platData.platforms as PlatformListItem[]);
+      // 非自定义模型模式才加载平台列表
+      if (!nextRoot.use_custom_models) {
+        try {
+          const platRes = await unifiedYunwuModelService.getPlatforms();
+          const platData = platRes?.data;
+          if (platRes?.success && platData?.platforms) {
+            setPlatformList(platData.platforms as PlatformListItem[]);
+          }
+        } catch {
+          // 平台列表加载失败不影响主流程
         }
-      } catch {
-        // 平台列表加载失败不影响主流程
       }
     } catch (e) {
       console.error("加载聚合模型配置失败:", e);
@@ -349,6 +354,24 @@ export const useUnifiedYunwuModelConfig = () => {
     }
   }, []);
 
+  const forceSync = useCallback(async () => {
+    try {
+      setSyncing(true);
+      const res = await unifiedYunwuModelService.forceSync();
+      const data = res?.data;
+      if (res?.success && data && typeof data === "object") {
+        setRoot(normalizePayload(data as Record<string, unknown>));
+        message.success("远程模型平台配置已同步");
+      } else {
+        message.error(res?.data?.error || "同步失败");
+      }
+    } catch (e: any) {
+      message.error(e?.message || "同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
   return {
     root,
     platformList,
@@ -358,6 +381,7 @@ export const useUnifiedYunwuModelConfig = () => {
     testing,
     testMessage,
     togglingCustom,
+    syncing,
     load,
     setUseCustomModels,
     setUseCustomModelsPersist,
@@ -369,5 +393,6 @@ export const useUnifiedYunwuModelConfig = () => {
     setYunwuTierField,
     save,
     testConnection,
+    forceSync,
   };
 };

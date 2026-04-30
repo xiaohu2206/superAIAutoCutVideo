@@ -3,7 +3,7 @@
 """
 模型使用总控：根据「是否自定义模型」在
 - 自定义：沿用 content_model_config / video_model_config 的当前启用项；
-- 整合（云雾）：用 unified_yunwu_models_config 的三档（low/medium/high）配置，
+- 整合平台：用 unified_yunwu_models_config 的三档（low/medium/high）配置，
   按项目 omni_effect_tier 选择对应档位的 Key + 分角色模型名。
 
 在线向量 / 召回相关配置已弃用，不在此模块处理。
@@ -46,7 +46,7 @@ def _unified_yunwu_content_cfg(*, model_name: str, tier_settings: YunwuTierSetti
     """根据指定档位的 yunwu 子配置合成 ContentModelConfig。"""
     if not _unified_api_key_valid(tier_settings.api_key):
         raise RuntimeError(
-            "已关闭「自定义模型」并启用云雾整合，但未配置有效的云雾 API Key。"
+            "已关闭「自定义模型」并启用整合平台，但未配置有效的整合平台 API Key。"
             "请在整合模型设置中填写 Key，或重新开启自定义模型。"
         )
     base = (tier_settings.base_url or "").strip().strip("`") or DEFAULT_YUNWU_CHAT_URL
@@ -68,14 +68,14 @@ def resolve_unified_yunwu_for_integration_connection_test(
     omni_effect_tier: Optional[str] = None,
 ) -> ContentModelConfig:
     """
-    「整合模型设置」里「测试连接」专用：始终读取 unified_yunwu_models 的云雾 Key / base_url /
+    「整合模型设置」里「测试连接」专用：始终读取 unified_yunwu_models 的整合平台 Key / base_url /
     copywriting_model_name，与 use_custom_models 以及当前激活的文案自定义模型无关。
     """
     root = unified_yunwu_models_config_manager.get_root()
     ts = root.tier_or_default(omni_effect_tier)
     if not _unified_api_key_valid(ts.api_key):
         raise RuntimeError(
-            "请先在整合模型设置中填写有效的云雾 API Key（占位符 xxx 或空值无效）。"
+            "请先在整合模型设置中填写有效的整合平台 API Key（占位符 xxx 或空值无效）。"
         )
     return _unified_yunwu_content_cfg(model_name=ts.copywriting_model_name, tier_settings=ts)
 
@@ -87,7 +87,7 @@ def resolve_content_model_for_llm(
     """
     返回一次 LLM 调用应使用的 ContentModelConfig（形态与原有文案模型一致，便于走现有 Provider）。
 
-    omni_effect_tier: 仅云雾整合模式下生效，决定使用 low / medium / high 哪档配置。
+    omni_effect_tier: 仅整合平台模式下生效，决定使用 low / medium / high 哪档配置。
     """
     if unified_yunwu_models_config_manager.get_root().use_custom_models:
         cfg = content_model_config_manager.get_active_config()
@@ -112,9 +112,9 @@ def resolve_video_model_for_online_vision(
     """
     在线视觉 / 多模态 / 文案结构化里「与视频理解共用」的 VL 配置。
     自定义模式：与原先一致，返回当前启用的 video_model。
-    整合模式：用云雾 Key + video_analysis 模型名合成一条（enabled 恒为 True 语义，仅用于调用）。
+    整合模式：用整合平台 Key + video_analysis 模型名合成一条（enabled 恒为 True 语义，仅用于调用）。
 
-    omni_effect_tier: 仅云雾整合模式下生效，决定使用 low / medium / high 哪档配置。
+    omni_effect_tier: 仅整合平台模式下生效，决定使用 low / medium / high 哪档配置。
     """
     if unified_yunwu_models_config_manager.get_root().use_custom_models:
         return video_model_config_manager.get_active_config()
@@ -123,7 +123,7 @@ def resolve_video_model_for_online_vision(
     ts = root.tier_or_default(omni_effect_tier)
     if not _unified_api_key_valid(ts.api_key):
         raise RuntimeError(
-            "已关闭「自定义模型」并启用云雾整合，但未配置有效的云雾 API Key。"
+            "已关闭「自定义模型」并启用整合平台，但未配置有效的整合平台 API Key。"
             "请在整合模型设置中填写 Key，或重新开启自定义模型。"
         )
     base = (ts.base_url or "").strip().strip("`") or DEFAULT_YUNWU_CHAT_URL

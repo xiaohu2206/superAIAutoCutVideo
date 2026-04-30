@@ -26,6 +26,7 @@ from modules.omni_generate_script import (
     omni_items_to_video_script,
     post_check_chunk_items,
 )
+from modules.omni_generate_script.prompt_options import normalize_original_ratio, normalize_script_language
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
@@ -143,13 +144,35 @@ def _pick_paragraph_shot_json_web_path(
 def _params_from_request_and_project(
     project: Any,
     generation_params: Optional[Dict[str, Any]],
+    script_language: Optional[str] = None,
+    original_ratio: Optional[int] = None,
 ) -> OmniNarrationParams:
+    project_ratio = getattr(project, "original_ratio", None)
+    effective_script_language = normalize_script_language(
+        script_language if script_language is not None else getattr(project, "script_language", None)
+    )
+    effective_original_ratio = (
+        normalize_original_ratio(original_ratio)
+        if original_ratio is not None
+        else (normalize_original_ratio(project_ratio) if project_ratio is not None else None)
+    )
     base = OmniNarrationParams(
-        script_language=str(getattr(project, "script_language", None) or "zh"),
+        script_language=effective_script_language,
+        original_ratio=effective_original_ratio,
     )
     if not generation_params:
         return base
     g = generation_params
+    gp_script_language = g.get("script_language") if g.get("script_language") is not None else base.script_language
+    gp_original_ratio = g.get("original_ratio") if g.get("original_ratio") is not None else base.original_ratio
+    effective_script_language = normalize_script_language(
+        script_language if script_language is not None else gp_script_language
+    )
+    effective_original_ratio = (
+        normalize_original_ratio(original_ratio)
+        if original_ratio is not None
+        else (normalize_original_ratio(gp_original_ratio) if gp_original_ratio is not None else None)
+    )
     return OmniNarrationParams(
         max_items_for_retrieval=int(g.get("max_items_for_retrieval", base.max_items_for_retrieval) or base.max_items_for_retrieval),
         chunk_target_size=max(1, int(g.get("chunk_target_size", base.chunk_target_size) or base.chunk_target_size)),
@@ -166,7 +189,8 @@ def _params_from_request_and_project(
         ),
         system_prompt=g.get("system_prompt") if isinstance(g.get("system_prompt"), str) else None,
         user_prompt_template=g.get("user_prompt_template") if isinstance(g.get("user_prompt_template"), str) else None,
-        script_language=str(g.get("script_language", base.script_language) or base.script_language),
+        script_language=effective_script_language,
+        original_ratio=effective_original_ratio,
     )
 
 
@@ -182,6 +206,8 @@ class OmniGenerateScriptService:
         input_global_path_web_path: Optional[str] = None,
         input_multimodal_web_path: Optional[str] = None,
         generation_params: Optional[Dict[str, Any]] = None,
+        script_language: Optional[str] = None,
+        original_ratio: Optional[int] = None,
         temperature: Optional[float] = None,
         chunk_llm_concurrency: int = 32,
     ) -> Dict[str, Any]:
@@ -283,7 +309,12 @@ class OmniGenerateScriptService:
                 if not isinstance(all_shots, list) or not all_shots:
                     raise ValueError("多模态 JSON 须包含非空 shots")
 
-                params = _params_from_request_and_project(cur, generation_params)
+                params = _params_from_request_and_project(
+                    cur,
+                    generation_params,
+                    script_language=script_language,
+                    original_ratio=original_ratio,
+                )
                 chunks = build_chunk_metas_and_prompts(results, all_shots, params)
                 if not chunks:
                     raise ValueError("分块为空")
@@ -398,6 +429,8 @@ class OmniGenerateScriptService:
                         "input_global_path_web_path": str(gp_web),
                         "input_multimodal_web_path": str(mm_web),
                         "chunk_batches": len(chunks),
+                        "script_language": params.script_language,
+                        "original_ratio": params.original_ratio,
                     },
                     "prompt_preview": preview0,
                     "video_duration_sec": total_duration,

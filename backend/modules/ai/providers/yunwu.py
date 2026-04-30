@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-云雾API平台模型提供商实现
+整合平台模型提供商实现
 遵循 OpenAI Chat Completions 接口规范，支持结构化输出（response_format）
 """
 
@@ -52,7 +52,7 @@ def _write_yunwu_http_debug_file(
 
 
 class YunwuProvider(AIProviderBase):
-    """云雾API平台模型提供商"""
+    """整合平台模型提供商"""
 
     def __init__(self, config: AIModelConfig):
         if not config.base_url:
@@ -117,7 +117,7 @@ class YunwuProvider(AIProviderBase):
                 finish_reason=choice.get("finish_reason"),
             )
         except Exception as e:
-            logger.error(f"解析云雾API响应失败: {e}")
+            logger.error(f"解析整合平台API响应失败: {e}")
             raise ValueError(f"解析响应失败: {e}")
 
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -169,7 +169,7 @@ class YunwuProvider(AIProviderBase):
                         body_text="(empty body)",
                     )
                     raise LlmProviderResponseError(
-                        f"云雾API 错误: HTTP {status_code} 响应体为空或仅空白"
+                        f"整合平台API 错误: HTTP {status_code} 响应体为空或仅空白"
                         "（常见于 5xx；已写入 backend/logs/ 下 yunwu_http_*.txt 便于对比网关/HTML 页）",
                         status_code=status_code,
                         raw_body="",
@@ -189,14 +189,14 @@ class YunwuProvider(AIProviderBase):
                         body_text=raw_text,
                     )
                     logger.error(
-                        "云雾API 响应体非 JSON: status=%s content_type=%s len=%s preview=%r",
+                        "整合平台API 响应体非 JSON: status=%s content_type=%s len=%s preview=%r",
                         status_code,
                         ct,
                         len(raw_text),
                         raw_text[:800],
                     )
                     raise LlmProviderResponseError(
-                        f"云雾API 响应体非有效 JSON (HTTP {status_code}): {je!s}；"
+                        f"整合平台API 响应体非有效 JSON (HTTP {status_code}): {je!s}；"
                         f"已写入 backend/logs/ 下 yunwu_http_*.txt",
                         status_code=status_code,
                         raw_body=raw_text,
@@ -207,7 +207,7 @@ class YunwuProvider(AIProviderBase):
                 err = response_data.get("error") if isinstance(response_data, dict) else None
                 if isinstance(err, dict):
                     raise LlmProviderResponseError(
-                        f"云雾API错误: {err.get('message') or raw_text[:2000]}",
+                        f"整合平台API错误: {err.get('message') or raw_text[:2000]}",
                         status_code=status_code,
                         raw_body=raw_text,
                         content_type=ct,
@@ -223,7 +223,7 @@ class YunwuProvider(AIProviderBase):
                         body_text=raw_text,
                     )
                 raise LlmProviderResponseError(
-                    f"云雾API请求失败: {raw_text[:2000]}",
+                    f"整合平台API请求失败: {raw_text[:2000]}",
                     status_code=status_code,
                     raw_body=raw_text,
                     content_type=ct,
@@ -233,13 +233,13 @@ class YunwuProvider(AIProviderBase):
                 error_info = response_data["error"]
                 if isinstance(error_info, dict):
                     raise LlmProviderResponseError(
-                        f"云雾API错误: {error_info.get('message', 'Unknown error')}",
+                        f"整合平台API错误: {error_info.get('message', 'Unknown error')}",
                         status_code=status_code,
                         raw_body=raw_text,
                         content_type=ct,
                     )
                 raise LlmProviderResponseError(
-                    f"云雾API错误: {str(error_info)}",
+                    f"整合平台API错误: {str(error_info)}",
                     status_code=status_code,
                     raw_body=raw_text,
                     content_type=ct,
@@ -247,7 +247,7 @@ class YunwuProvider(AIProviderBase):
 
             return response_data
         except Exception as e:
-            logger.error(f"云雾API请求失败: {e}")
+            logger.error(f"整合平台API请求失败: {e}")
             raise
 
     def _extract_stream_content(self, chunk_data: Dict[str, Any]) -> Optional[str]:
@@ -303,7 +303,7 @@ class YunwuProvider(AIProviderBase):
                 "raw_content": raw_content,
             }
         except Exception as e:
-            logger.error(f"云雾API连接测试失败: {e}")
+            logger.error(f"整合平台API连接测试失败: {e}")
             return {
                 "success": False,
                 "message": f"连接测试失败: {str(e)}",
