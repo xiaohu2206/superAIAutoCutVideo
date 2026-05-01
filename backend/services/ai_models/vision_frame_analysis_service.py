@@ -16,6 +16,7 @@ import cv2
 from PIL import Image
 
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
@@ -684,6 +685,10 @@ class VisionFrameAnalyzer:
     def _extract_frame_with_ffmpeg_with_reason(
         self, video_path: str, seek_t: float
     ) -> Tuple[Optional[Image.Image], Optional[Dict[str, Any]]]:
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        if not ffmpeg_bin:
+            return None, {"code": "ffmpeg_not_found", "message": "未找到 ffmpeg 可执行文件"}
+
         def run_one(args: List[str]) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]:
             try:
                 kwargs: Dict[str, Any] = {
@@ -703,8 +708,6 @@ class VisionFrameAnalyzer:
                         "stderr": (p.stderr or b"")[:2000].decode("utf-8", errors="ignore"),
                     }
                 return p.stdout, None
-            except FileNotFoundError:
-                return None, {"code": "ffmpeg_not_found", "message": "未找到 ffmpeg 可执行文件"}
             except subprocess.TimeoutExpired:
                 return None, {"code": "ffmpeg_timeout", "message": "ffmpeg 抽帧超时"}
             except Exception as e:
@@ -712,7 +715,7 @@ class VisionFrameAnalyzer:
 
         ts = f"{float(seek_t):.3f}"
         cmd_fast = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -732,7 +735,7 @@ class VisionFrameAnalyzer:
         out, err = run_one(cmd_fast)
         if out is None:
             cmd_acc = [
-                "ffmpeg",
+                ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel",
                 "error",

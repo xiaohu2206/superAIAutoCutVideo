@@ -17,6 +17,7 @@ import subprocess
 
 from modules.projects_store import Project, projects_store
 from modules.video_processor import WIN_NO_WINDOW, video_processor
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
 from modules.audio_normalizer import AudioNormalizer
@@ -63,8 +64,11 @@ async def _trim_audio_silence(
             f"stop_periods=-1:stop_duration={stop_dur}:stop_threshold={th_stop}:"
             f"stop_silence={keep_tail}"
         )
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        if not ffmpeg_bin:
+            return False
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -196,8 +200,11 @@ class VideoGenerationService:
                     return clip_path
 
                 out_copy = clip_path.with_name(f"{clip_path.stem}_sync{clip_path.suffix}")
+                ffmpeg_bin = resolve_ffmpeg_bin()
+                if not ffmpeg_bin:
+                    return {"success": False, "error": "ffmpeg_not_found"}
                 cmd_copy = [
-                    "ffmpeg",
+                    ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -245,7 +252,7 @@ class VideoGenerationService:
                     f"[0:a]atrim=0:{adur_str},asetpts=PTS-STARTPTS[a]"
                 )
                 cmd_re = [
-                    "ffmpeg",
+                    ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -659,7 +666,7 @@ class VideoGenerationService:
                     if vinfo_chk is None:
                         logger.info(f"DEBUG segment_narration_fallback idx={idx} reencode nar to ensure video stream")
                         cmd_fb = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-i", str(clip_abs),
                             "-i", str(seg_audio),
                             "-map", "0:v:0", "-map", "1:a:0",

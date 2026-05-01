@@ -10,7 +10,25 @@
 
 ## 1. 创建并使用 GPU 虚拟环境
 
-在仓库根目录执行：
+### 方式一：使用 uv 管理 Python 版本（推荐）
+
+```powershell
+Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
+
+# 安装 uv（如果尚未安装）
+irm https://astral.sh/uv/install.ps1 | iex
+
+# 安装 Python 3.11 并创建虚拟环境（--python 3.11 指定版本）
+uv venv .\backend\.venv_pack_gpu --python 3.11
+
+# 激活虚拟环境（后续命令自动使用 .venv 中的 Python）
+.\backend\.venv_pack_gpu\Scripts\Activate.ps1
+
+# 基础工具
+uv pip install -U pip setuptools wheel
+```
+
+### 方式二：使用 py + venv（传统方式）
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
@@ -28,8 +46,12 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv 安装（推荐，配合上面的 uv venv 使用）
+uv pip install -r .\backend\requirements.runtime.txt
+
+# 方式二：使用 pip 安装
+$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 & $py -m pip install -r .\backend\requirements.runtime.txt
 ```
 
@@ -39,8 +61,13 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv 安装（推荐）
+uv pip install --no-deps torch==2.7.1+cu128 torchvision==0.22.1+cu128 torchaudio==2.7.1+cu128 --index-url https://download.pytorch.org/whl/cu128
+python -c "import torch; print('torch', torch.__version__, 'cuda', bool(torch.cuda.is_available()))"
+
+# 方式二：使用 pip 安装
+$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 & $py -m pip install --no-deps torch==2.7.1+cu128 torchvision==0.22.1+cu128 torchaudio==2.7.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 & $py -c "import torch; print('torch', torch.__version__, 'cuda', bool(torch.cuda.is_available()))"
 ```
@@ -51,8 +78,13 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv 安装（推荐）
+uv pip install --no-deps qwen-tts
+python -c "import qwen_tts; print('qwen_tts_ok')"
+
+# 方式二：使用 pip 安装
+$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 & $py -m pip install qwen-tts --no-deps
 & $py -c "import qwen_tts; print('qwen_tts_ok')"
 ```
@@ -68,8 +100,13 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv 安装（推荐）
+uv pip install --no-deps voxcpm
+python -c "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
+
+# 方式二：使用 pip 安装
+$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 & $py -m pip install --no-deps voxcpm
 & $py -c "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
 ```
@@ -89,8 +126,13 @@ Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv（激活虚拟环境后直接用 python）
+uv pip install --no-deps llama-cpp-python
+python -c "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', llama_cpp.__version__); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
+
+# 方式二：使用 pip
+$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 & $py -c "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', llama_cpp.__version__); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
 ```
 
@@ -100,8 +142,13 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 
 ```powershell
 Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo\backend
-$py = Resolve-Path .\.\.venv_pack_gpu\Scripts\python.exe
 
+# 方式一：使用 uv
+uv pip install -r requirements.runtime.txt
+python -c "import json; from modules.moondream_acceleration import get_moondream_acceleration_status; print(json.dumps(get_moondream_acceleration_status(), ensure_ascii=False))"
+
+# 方式二：使用 pip
+$py = Resolve-Path .\.\.venv_pack_gpu\Scripts\python.exe
 & $py -c "import json; from modules.moondream_acceleration import get_moondream_acceleration_status; print(json.dumps(get_moondream_acceleration_status(), ensure_ascii=False))"
 ```
 

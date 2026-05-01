@@ -104,7 +104,6 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       message.success("项目创建成功！");
       onEditProject(newProject.id);
     } catch (err) {
-      await showError(err, "创建项目失败");
       throw err;
     }
   };

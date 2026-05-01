@@ -100,12 +100,7 @@ const Navigation: React.FC<NavigationProps> = ({
           <div className="flex flex-col items-center gap-2">
             <button
               onClick={handlePersonClick}
-              className={[
-                "group flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200",
-                isAuthenticated
-                  ? "text-blue-600 bg-blue-50"
-                  : "text-slate-400 hover:bg-slate-100 hover:text-slate-700",
-              ].join(" ")}
+              className="group flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
               title={isAuthenticated ? `已登录: ${user?.email}` : "登录 / 注册"}
             >
               <User className="h-4 w-4" />

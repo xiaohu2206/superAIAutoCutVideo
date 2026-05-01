@@ -28,6 +28,7 @@ from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
 from modules.ws_manager import manager
 from modules.voxcpm_tts_service import voxcpm_tts_service
 from modules.voxcpm_tts_acceleration import get_voxcpm_tts_acceleration_status
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 
 
 router = APIRouter(prefix="/api/tts/voxcpm", tags=["VoxCPM-TTS"])
@@ -666,82 +667,6 @@ async def delete_voxcpm_voice(voice_id: str, remove_files: bool = Query(False, d
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _find_ffmpeg() -> Optional[str]:
-    name = "ffmpeg.exe" if "windows" in platform.system().lower() else "ffmpeg"
-    env_path = os.environ.get("FFMPEG_PATH")
-    if env_path:
-        try:
-            p = Path(env_path)
-            if p.exists():
-                return str(p)
-        except Exception:
-            pass
-    env_dir = os.environ.get("FFMPEG_DIR") or os.environ.get("FFMPEG_HOME")
-    if env_dir:
-        try:
-            p = Path(env_dir) / name
-            if p.exists():
-                return str(p)
-        except Exception:
-            pass
-    hit = shutil.which("ffmpeg")
-    if hit:
-        return hit
-    try:
-        import imageio_ffmpeg
-        p = imageio_ffmpeg.get_ffmpeg_exe()
-        if p:
-            pp = Path(p)
-            if pp.exists():
-                return str(pp)
-    except Exception:
-        pass
-    candidates: List[Path] = []
-    try:
-        exe_dir = Path(sys.executable).resolve().parent
-        candidates.append(exe_dir / "resources" / name)
-        candidates.append(exe_dir / name)
-    except Exception:
-        pass
-    try:
-        root = Path(__file__).resolve().parents[2]
-        candidates.append(root / "src-tauri" / "resources" / name)
-        candidates.append(root / "src-tauri" / "target" / "debug" / "resources" / name)
-        candidates.append(root / "src-tauri" / "target" / "release" / "resources" / name)
-    except Exception:
-        pass
-    install_dir = os.environ.get("SACV_INSTALL_DIR")
-    if install_dir:
-        try:
-            candidates.append(Path(install_dir) / "resources" / name)
-        except Exception:
-            pass
-    try:
-        here = Path(__file__).resolve()
-        candidates.append(here.parent.parent / "resources" / name)
-    except Exception:
-        pass
-    try:
-        candidates.append(Path.cwd() / "resources" / name)
-    except Exception:
-        pass
-    try:
-        if os.name == "nt":
-            candidates.append(Path("C:/Program Files/ffmpeg/bin") / "ffmpeg.exe")
-            candidates.append(Path("C:/ffmpeg/bin") / "ffmpeg.exe")
-            candidates.append(Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / "ffmpeg.exe")
-            candidates.append(Path("C:/ProgramData/chocolatey/bin") / "ffmpeg.exe")
-    except Exception:
-        pass
-    for c in candidates:
-        try:
-            if c.exists():
-                return str(c)
-        except Exception:
-            continue
-    return None
-
-
 async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
@@ -750,7 +675,7 @@ async def _broadcast_voice_clone(payload: Dict[str, Any]) -> None:
 
 
 async def _convert_to_16k_mono_wav(raw_path: Path, out_wav: Path) -> Dict[str, Any]:
-    ffmpeg_bin = _find_ffmpeg()
+    ffmpeg_bin = resolve_ffmpeg_bin()
     if not ffmpeg_bin:
         raise RuntimeError(
             "Missing dependency 'ffmpeg'. Put ffmpeg.exe/ffprobe.exe into src-tauri/resources or install FFmpeg to PATH. "
@@ -898,7 +823,7 @@ async def _run_voice_clone_job(voice_id: str, job_id: str) -> None:
 @router.post("/voices/{voice_id}/clone", summary="开始克隆音色（预处理参考音频）")
 async def start_voxcpm_voice_clone(voice_id: str) -> Dict[str, Any]:
     try:
-        if _find_ffmpeg() is None:
+        if resolve_ffmpeg_bin() is None:
             voxcpm_tts_voice_store.delete(voice_id, remove_files=True)
             raise HTTPException(status_code=500, detail="Missing dependency 'ffmpeg'. Please install it on server.")
 

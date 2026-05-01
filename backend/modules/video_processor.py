@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 from .audio_normalizer import AudioNormalizer
 from modules.task_cancel_store import task_cancel_store
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -49,6 +50,8 @@ class VideoProcessor:
         self.last_concat_error: Optional[str] = None
         self.last_concat_cmd: Optional[List[str]] = None
         self._encoder_usable_cache: Dict[str, bool] = {}
+        self._ffmpeg_bin = resolve_ffmpeg_bin()
+        self._ffprobe_bin = resolve_ffprobe_bin()
 
     def _should_track(self, scope: Optional[str], project_id: Optional[str], task_id: Optional[str], cancel_event: Optional[asyncio.Event]) -> bool:
         return bool(scope and project_id and task_id and cancel_event)
@@ -200,7 +203,7 @@ class VideoProcessor:
             trim_tag = _trim_log_tag(project_id, task_id) if scope == "trim_video" else ""
             clip_timeout = max(45.0, min(12 * 60.0, float(duration or 0.0) * 3.0 + 30.0))
             cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-ss", str(start_time),
@@ -280,7 +283,7 @@ class VideoProcessor:
                 enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
             reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
             reencode_cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", input_path,
@@ -430,7 +433,7 @@ class VideoProcessor:
             if n == 1:
                 src = str(inputs[0])
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", src,
                     "-c", "copy",
                     "-movflags", "+faststart",
@@ -618,7 +621,7 @@ class VideoProcessor:
                         ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
                         ts_files.append(ts_path)
                         cmd_ts = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-i", str(p),
                             "-c", "copy",
                             "-bsf:v", bsfilter_v,
@@ -677,7 +680,7 @@ class VideoProcessor:
                             raise
 
                         cmd = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-f", "concat", "-safe", "0",
                             "-i", str(ts_list_path),
                             "-c", "copy",
@@ -740,7 +743,7 @@ class VideoProcessor:
 
             if can_concat_demuxer and not can_concat_ts:
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-f", "concat", "-safe", "0",
                     "-i", str(list_path),
                     "-c", "copy",
@@ -793,7 +796,7 @@ class VideoProcessor:
                     return False
 
             cmd: List[str] = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
             ]
             for p in inputs:
                 cmd.extend(["-i", str(p)])
@@ -939,7 +942,7 @@ class VideoProcessor:
     async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-print_format", "json",
                 "-show_streams",
                 path,
@@ -1042,7 +1045,7 @@ class VideoProcessor:
                     pass
                 out_final = path.with_suffix(".mp4")
                 cmd_remux: List[str] = [
-                    "ffmpeg",
+                    self._ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -1099,7 +1102,7 @@ class VideoProcessor:
                 pass
             out_final = path.with_suffix(".mp4")
             cmd: List[str] = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel",
                 "error",
@@ -1224,7 +1227,7 @@ class VideoProcessor:
             return getattr(self, "_encoders_cache")
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-encoders",
+                self._ffmpeg_bin, "-hide_banner", "-encoders",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=WIN_NO_WINDOW
@@ -1265,7 +1268,7 @@ class VideoProcessor:
             return bool(cached)
         pix_fmt = self._preferred_pix_fmt(key)
         cmd = [
-            "ffmpeg",
+            self._ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -1319,7 +1322,7 @@ class VideoProcessor:
     async def _ffmpeg_supports_cuda_hwaccel(self) -> bool:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-hwaccels",
+                self._ffmpeg_bin, "-hide_banner", "-hwaccels",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=WIN_NO_WINDOW
@@ -1352,7 +1355,7 @@ class VideoProcessor:
     async def _ffprobe_format_name(self, path: str) -> Optional[str]:
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-show_entries", "format=format_name",
                 "-of", "default=nk=1:nw=1",
                 path,
@@ -1371,7 +1374,7 @@ class VideoProcessor:
     async def _first_frame_is_keyframe(self, path: str) -> bool:
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-select_streams", "v:0",
                 "-skip_frame", "nokey",
                 "-show_entries", "frame=pkt_pts_time",
@@ -1400,7 +1403,7 @@ class VideoProcessor:
         """读取视频流的时长，优先于容器总时长，避免音频缺失或容器元数据不准导致总时长偏差"""
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=duration",
                 "-of", "default=nk=1:nw=1",
@@ -1423,7 +1426,7 @@ class VideoProcessor:
         """探测是否存在音频流"""
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-select_streams", "a:0",
                 "-show_entries", "stream=codec_type",
                 "-of", "default=nk=1:nw=1",
@@ -1447,7 +1450,7 @@ class VideoProcessor:
         try:
             if stream_type == "audio":
                 cmd_a = [
-                    "ffprobe", "-v", "error",
+                    self._ffprobe_bin, "-v", "error",
                     "-select_streams", "a:0",
                     "-show_entries", "stream=duration",
                     "-of", "default=nk=1:nw=1",
@@ -1466,7 +1469,7 @@ class VideoProcessor:
                     except Exception:
                         pass
                 cmd_f = [
-                    "ffprobe", "-v", "error",
+                    self._ffprobe_bin, "-v", "error",
                     "-show_entries", "format=duration",
                     "-of", "default=nk=1:nw=1",
                     path,
@@ -1486,7 +1489,7 @@ class VideoProcessor:
                 return None
             else:
                 cmd = [
-                    "ffprobe", "-v", "error",
+                    self._ffprobe_bin, "-v", "error",
                     "-show_entries", "format=duration",
                     "-of", "default=nk=1:nw=1",
                     path,
@@ -1532,7 +1535,7 @@ class VideoProcessor:
             tol = 0.05
             if abs(adur - vdur) <= tol:
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", video_path,
                     "-i", narr_used,
                     "-map", "0:v:0", "-map", "1:a:0",
@@ -1562,7 +1565,7 @@ class VideoProcessor:
                         return True
                     vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                     cmd_fb_direct = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                         "-i", video_path,
                         "-i", narr_used,
                         "-map", "0:v:0", "-map", "1:a:0",
@@ -1615,7 +1618,7 @@ class VideoProcessor:
             vcodec_args.extend(["-pix_fmt", self._preferred_pix_fmt(enc_name), "-movflags", "+faststart"])
 
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                 "-i", video_path,
                 "-i", narr_used,
                 "-filter_complex", filter_complex,
@@ -1646,7 +1649,7 @@ class VideoProcessor:
                     return True
                 vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                 cmd_fb = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", video_path,
                     "-i", narr_used,
                     "-filter_complex", filter_complex,
@@ -1680,7 +1683,7 @@ class VideoProcessor:
                 if ("Cannot load nvcuda.dll" in err) or ("Error while opening encoder" in err) or ("Could not open encoder" in err):
                     vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                     cmd_fb = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                         "-i", video_path,
                         "-i", narr_used,
                         "-filter_complex", filter_complex,
@@ -1719,9 +1722,24 @@ class VideoProcessor:
 
     async def extract_audio_mp3(self, input_video: str, output_mp3: str) -> bool:
         try:
-            Path(output_mp3).parent.mkdir(parents=True, exist_ok=True)
+            input_path = Path(input_video)
+            if not input_path.exists():
+                logger.error(f"输入视频文件不存在: {input_video}")
+                return False
+            if not input_path.is_file():
+                logger.error(f"输入路径不是文件: {input_video}")
+                return False
+
+            ffmpeg_path = Path(self._ffmpeg_bin)
+            if not ffmpeg_path.exists():
+                logger.error(f"ffmpeg可执行文件不存在: {self._ffmpeg_bin}")
+                return False
+
+            output_path = Path(output_mp3)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
             cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", input_video,
@@ -1730,21 +1748,66 @@ class VideoProcessor:
                 "-q:a", "2",
                 "-y", output_mp3,
             ]
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW
-            )
-            stdout, stderr = await process.communicate()
-            if process.returncode == 0:
-                return True
-            else:
-                err = stderr.decode(errors="ignore")
-                logger.error(f"提取音频失败: {err}")
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
+                stdout, stderr = await process.communicate()
+                if process.returncode == 0:
+                    if output_path.exists():
+                        return True
+                    else:
+                        logger.error(f"ffmpeg执行成功但输出文件未生成: {output_mp3}")
+                        return False
+                else:
+                    err = stderr.decode(errors="ignore")
+                    logger.error(f"提取音频失败: {err}")
+                    return False
+
+            except NotImplementedError:
+                logger.warning("当前事件循环不支持 asyncio 子进程，回退到线程池同步执行")
+                return await self._extract_audio_mp3_sync_fallback(cmd, output_path)
+
+            except FileNotFoundError as e:
+                logger.error(f"找不到ffmpeg可执行文件: {self._ffmpeg_bin}, 错误: {e}")
                 return False
+            except PermissionError as e:
+                logger.error(f"没有权限执行ffmpeg: {self._ffmpeg_bin}, 错误: {e}")
+                return False
+
         except Exception as e:
             logger.error(f"提取音频出错: {e}")
+            return False
+
+    async def _extract_audio_mp3_sync_fallback(self, cmd: list, output_path: Path) -> bool:
+        loop = asyncio.get_running_loop()
+
+        def _run_sync():
+            return subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+
+        try:
+            result = await loop.run_in_executor(None, _run_sync)
+            if result.returncode == 0:
+                if output_path.exists():
+                    return True
+                else:
+                    logger.error(f"ffmpeg执行成功但输出文件未生成: {output_path}")
+                    return False
+            else:
+                err = result.stderr.decode(errors="ignore")
+                logger.error(f"提取音频失败(同步回退): {err}")
+                return False
+        except Exception as e:
+            logger.error(f"同步回退执行ffmpeg出错: {e}")
             return False
 
 # 全局视频处理器实例

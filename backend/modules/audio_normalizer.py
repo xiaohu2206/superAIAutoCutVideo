@@ -6,14 +6,17 @@ import re
 from typing import Optional, Dict
 import subprocess
 
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
+from modules.task_cancel_store import task_cancel_store
+
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-from modules.task_cancel_store import task_cancel_store
 
 class AudioNormalizer:
     def __init__(self, target_lufs: float = -20.0, max_peak: float = -1.0):
         self.target_lufs = target_lufs
         self.max_peak = max_peak
+        self._ffmpeg_bin = resolve_ffmpeg_bin()
 
     async def _first_pass(
         self,
@@ -24,8 +27,11 @@ class AudioNormalizer:
         task_id: Optional[str] = None,
         cancel_event: Optional[asyncio.Event] = None,
     ) -> Optional[Dict[str, float]]:
+        if not self._ffmpeg_bin:
+            logger.error("ffmpeg 不可用")
+            return None
         cmd = [
-            "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "error",
+            self._ffmpeg_bin, "-hide_banner", "-nostats", "-loglevel", "error",
             "-i", input_path,
             "-af", f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7:print_format=json",
             "-f", "null", "-",
@@ -129,7 +135,7 @@ class AudioNormalizer:
             codec_args = ["-c:a", "aac", "-b:a", "192k"]
         if measured is None or ("target_offset" not in measured):
             cmd = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", input_path,
                 "-af", f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7",
                 "-ar", str(sample_rate),
@@ -144,7 +150,7 @@ class AudioNormalizer:
                 )
             )
             cmd = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
                 "-i", input_path,
                 "-af", (
                     f"loudnorm=I={self.target_lufs}:TP={self.max_peak}:LRA=7:"

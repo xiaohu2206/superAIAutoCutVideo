@@ -11,6 +11,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from modules.ffmpeg_utils import ffprobe_get_duration
+
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = (
     int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
@@ -181,74 +183,6 @@ def _resolve_api_key(secret_key: Optional[str]) -> Optional[str]:
 
 async def _ensure_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-
-
-async def _ffprobe_duration(path: str) -> Optional[float]:
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=duration",
-            "-of",
-            "default=nk=1:nw=1",
-            path,
-        ]
-        if os.name == "nt":
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        out, _ = await proc.communicate()
-        if proc.returncode == 0:
-            try:
-                return float(out.decode().strip())
-            except Exception:
-                pass
-
-        cmd2 = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nk=1:nw=1",
-            path,
-        ]
-        if os.name == "nt":
-            proc2 = await asyncio.create_subprocess_exec(
-                *cmd2,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW,
-            )
-        else:
-            proc2 = await asyncio.create_subprocess_exec(
-                *cmd2,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        out2, _ = await proc2.communicate()
-        if proc2.returncode == 0:
-            try:
-                return float(out2.decode().strip())
-            except Exception:
-                return None
-        return None
-    except Exception:
-        return None
 
 
 def _get_any(d: Any, keys: Tuple[str, ...], default: Any = None) -> Any:
@@ -629,7 +563,7 @@ class QwenOnlineTTSService:
                     "raw": _safe_resp_snapshot(resp),
                 }
 
-            dur = await _ffprobe_duration(str(out))
+            dur = await ffprobe_get_duration(str(out))
             return {
                 "success": True,
                 "path": str(out),

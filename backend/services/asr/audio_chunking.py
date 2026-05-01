@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
+
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -23,9 +25,12 @@ class AudioChunkPlan:
 
 
 async def get_audio_duration_ms(audio_path: Path) -> Optional[int]:
+    ffprobe_bin = resolve_ffprobe_bin()
+    if not ffprobe_bin:
+        return None
     try:
         cmd_a = [
-            "ffprobe", "-v", "error",
+            ffprobe_bin, "-v", "error",
             "-select_streams", "a:0",
             "-show_entries", "stream=duration",
             "-of", "default=nk=1:nw=1",
@@ -46,7 +51,7 @@ async def get_audio_duration_ms(audio_path: Path) -> Optional[int]:
             except Exception:
                 pass
         cmd_f = [
-            "ffprobe", "-v", "error",
+            ffprobe_bin, "-v", "error",
             "-show_entries", "format=duration",
             "-of", "default=nk=1:nw=1",
             str(audio_path),
@@ -142,6 +147,9 @@ async def cut_audio_mp3(
     start_ms: int,
     end_ms: int,
 ) -> bool:
+    ffmpeg_bin = resolve_ffmpeg_bin()
+    if not ffmpeg_bin:
+        return False
     try:
         if end_ms <= start_ms:
             return False
@@ -149,7 +157,7 @@ async def cut_audio_mp3(
         dur_sec = max(0.01, (end_ms - start_ms) / 1000.0)
         output_mp3.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel", "error",
             "-ss", str(start_sec),

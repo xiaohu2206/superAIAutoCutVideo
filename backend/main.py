@@ -85,6 +85,7 @@ from modules.app_paths import (
     ensure_defaults_migrated,
 )
 from modules.runtime_log_store import runtime_log_store
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
 
 # 配置日志
 logging.basicConfig(
@@ -967,6 +968,23 @@ async def startup_event():
                 await _async_setup_ffmpeg()
     except Exception:
         pass
+
+    ffmpeg_path = resolve_ffmpeg_bin()
+    ffprobe_path = resolve_ffprobe_bin()
+    missing = []
+    if not ffmpeg_path:
+        missing.append("ffmpeg")
+    if not ffprobe_path:
+        missing.append("ffprobe")
+    if missing:
+        msg = (
+            f"启动失败：未找到 {'/'.join(missing)}，"
+            "请将 ffmpeg.exe/ffprobe.exe 放到 src-tauri/resources/ 目录下或确保其在系统 PATH 中。"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
+    logger.info(f"ffmpeg 路径: {ffmpeg_path}")
+    logger.info(f"ffprobe 路径: {ffprobe_path}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

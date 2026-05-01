@@ -38,6 +38,7 @@ from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_pat
 from modules.auth.omni_project_license import require_valid_license_for_omni
 from modules.projects_store import projects_store
 from modules.video_processor import video_processor, _trim_log_tag, _trim_timeout_label
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from services.video_generation_service import video_generation_service
 from services.generate_script_service import generate_script_service
 from services.generate_copywriting_service import generate_copywriting_service
@@ -1112,6 +1113,9 @@ def _build_video_upload_path(project_id: str, suffix: str) -> Path:
 
 async def remux_faststart(path: Path) -> bool:
     try:
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        if not ffmpeg_bin:
+            return False
         WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
         if path.suffix.lower() not in FASTSTART_EXTS:
             return False
@@ -1122,7 +1126,7 @@ async def remux_faststart(path: Path) -> bool:
         except Exception:
             pass
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel", "error",
             "-i", str(path),

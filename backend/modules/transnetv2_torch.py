@@ -5,6 +5,8 @@ import threading
 import subprocess
 from typing import Callable, Optional
 
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
+
 import numpy as np
 
 
@@ -475,7 +477,8 @@ class TransNetV2Torch:
         if progress_callback:
             progress_callback(1.0)
 
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostdin"]
         if start_time is not None:
             cmd += ["-ss", f"{float(start_time):.6f}"]
         if duration is not None:

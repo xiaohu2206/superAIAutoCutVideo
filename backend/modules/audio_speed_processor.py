@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import subprocess
 
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
+from modules.task_cancel_store import task_cancel_store
+
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-from modules.task_cancel_store import task_cancel_store
 
 
 def _build_atempo_filters(speed_ratio: float) -> Optional[str]:
@@ -50,6 +52,9 @@ async def apply_audio_speed(
     filters = _build_atempo_filters(speed_ratio)
     if not filters:
         return {"success": True, "output_path": input_path, "applied": False}
+    ffmpeg_bin = resolve_ffmpeg_bin()
+    if not ffmpeg_bin:
+        return {"success": False, "error": "ffmpeg_not_found"}
     ip = Path(input_path)
     tmp_path = ip.with_name(f"{ip.stem}_speedtmp{ip.suffix}")
     ext = ip.suffix.lower()
@@ -60,7 +65,7 @@ async def apply_audio_speed(
     else:
         codec_args = ["-c:a", "aac", "-b:a", "192k"]
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(ip),
         "-filter:a", filters,
         "-vn",

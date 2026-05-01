@@ -3,21 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
-def _get_ffmpeg_bin() -> str:
-    try:
-        from imageio_ffmpeg import get_ffmpeg_exe
-
-        return get_ffmpeg_exe()
-    except ModuleNotFoundError:
-        import shutil
-
-        ffmpeg_bin = shutil.which("ffmpeg")
-        if ffmpeg_bin:
-            return ffmpeg_bin
-        raise ModuleNotFoundError(
-            "缺少 imageio_ffmpeg 且系统中未找到 ffmpeg。请执行 `pip install imageio-ffmpeg` 或安装系统 ffmpeg。"
-        )
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 
 
 def extract_quarter_frames(
@@ -53,7 +39,11 @@ def extract_quarter_frames(
         out_path_1 = os.path.join(out_dir, f"{filename_prefix}_{ts1:.3f}_q1{image_ext}")
         out_path_2 = os.path.join(out_dir, f"{filename_prefix}_{ts2:.3f}_q3{image_ext}")
 
-    ffmpeg_bin = _get_ffmpeg_bin()
+    ffmpeg_bin = resolve_ffmpeg_bin()
+    if not ffmpeg_bin:
+        raise RuntimeError(
+            "缺少 imageio_ffmpeg 且系统中未找到 ffmpeg。请执行 `pip install imageio-ffmpeg` 或安装系统 ffmpeg。"
+        )
 
     def _extract_one(ts: float, out_path: str) -> str:
         if (not overwrite) and os.path.exists(out_path):

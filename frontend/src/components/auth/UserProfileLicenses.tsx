@@ -194,27 +194,6 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
               绑定
             </button>
           </div>
-          {/* <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              <Smartphone className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              将写入的设备信息（自动生成）
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              <span className="text-slate-400">名称：</span>
-              {autoDeviceName}
-            </p>
-            <p
-              className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-slate-500"
-              title={clientDeviceId || "—"}
-            >
-              <span className="text-slate-400">ID：</span>
-              {clientDeviceLoading
-                ? "从本机后台拉取中…"
-                : clientDeviceId
-                  ? clientDeviceId
-                  : "本机设备 ID 不可用，请确保后台已运行"}
-            </p>
-          </div> */}
         </div>
       </div>
 
@@ -271,10 +250,6 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
                       <span className="ml-1 text-[11px]">({getExpireStatus(lic).text})</span>
                     </dd>
                   </div>
-                  {/* <div>
-                    <dt className="inline text-slate-400">激活：</dt>
-                    <dd className="inline text-slate-600">{formatDateTime(lic.activateAt)}</dd>
-                  </div> */}
                   <div className="sm:col-span-2">
                     <dt className="inline text-slate-400">设备：</dt>
                     <dd className="inline text-slate-600">

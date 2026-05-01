@@ -11,6 +11,7 @@ import subprocess
 from modules.config.generate_concurrency_config import generate_concurrency_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.audio_speed_processor import apply_audio_speed
+from modules.ffmpeg_utils import ffprobe_get_duration
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -110,66 +111,6 @@ async def _ensure_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-async def _ffprobe_duration(path: str) -> Optional[float]:
-    try:
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=duration",
-            "-of", "default=nk=1:nw=1",
-            path,
-        ]
-        if os.name == "nt":
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        out, _ = await proc.communicate()
-        if proc.returncode == 0:
-            try:
-                return float(out.decode().strip())
-            except Exception:
-                pass
-        cmd2 = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=nk=1:nw=1",
-            path,
-        ]
-        if os.name == "nt":
-            proc2 = await asyncio.create_subprocess_exec(
-                *cmd2,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW,
-            )
-        else:
-            proc2 = await asyncio.create_subprocess_exec(
-                *cmd2,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        out2, _ = await proc2.communicate()
-        if proc2.returncode == 0:
-            try:
-                return float(out2.decode().strip())
-            except Exception:
-                return None
-        return None
-    except Exception:
-        return None
-
-
 class TencentTtsService:
     async def _postprocess_qwen_audio(self, res: Dict[str, Any], out: Path, cfg) -> Dict[str, Any]:
         speed_ratio = getattr(cfg, "speed_ratio", None) if cfg else None
@@ -184,7 +125,7 @@ class TencentTtsService:
         sp = await apply_audio_speed(str(out), sr)
         if not sp.get("success"):
             return {"success": False, "error": sp.get("error") or "speed_process_failed"}
-        dur = await _ffprobe_duration(str(out))
+        dur = await ffprobe_get_duration(str(out))
         if dur:
             res["duration"] = dur
         return res
@@ -592,7 +533,7 @@ class TencentTtsService:
             await _ensure_dir(out)
             data = base64.b64decode(audio_b64)
             out.write_bytes(data)
-            dur = await _ffprobe_duration(str(out))
+            dur = await ffprobe_get_duration(str(out))
             return {
                 "success": True,
                 "path": str(out),

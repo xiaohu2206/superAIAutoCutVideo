@@ -5,6 +5,8 @@ import time
 import subprocess
 from typing import Callable, Optional
 
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
+
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -131,7 +133,8 @@ class TransNetV2:
         if progress_callback:
             progress_callback(1.0)
 
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostdin"]
         if start_time is not None:
             cmd += ["-ss", f"{float(start_time):.6f}"]
         if duration is not None:

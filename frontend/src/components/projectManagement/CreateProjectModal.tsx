@@ -8,6 +8,7 @@ import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import videoModelService from "../../services/videoModelService";
 import AppSelect from "../ui/AppSelect";
 import { useAuth } from "../auth/AuthContext";
+import { message } from "../../services/message";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -127,7 +128,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       if (projectType === "omni") {
         const isLicenseError = /license|401|403|登录|未授权|无权限|过期|校验|绑定/i.test(msg);
         if (isLicenseError) {
-          setError(msg);
+          message.error(msg, 5);
           onClose();
           if (!isAuthenticated) {
             onShowLogin?.();
@@ -138,6 +139,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         }
       }
       setError(msg);
+      return;
     } finally {
       setLoading(false);
     }
