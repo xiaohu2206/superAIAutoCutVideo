@@ -195,11 +195,11 @@ _FRAME_ANALYSIS_PROMPT_FILES: Dict[str, str] = {
 
 
 def _frame_analysis_prompts_dir() -> Path:
-    return Path(__file__).resolve().parent / "omni_internal" / "prompts"
+    return Path(__file__).resolve().parent.parent / "omni_internal" / "prompts"
 
 
 def load_frame_analysis_prompt(prompt_language: str, subtitle_text: str) -> str:
-    """与 aiSearchShot `_load_frame_analysis_prompt` 一致：从 omni_internal/prompts 读取模板并替换 `{subtitle_text}`。"""
+    """与 aiSearchShot `_load_frame_analysis_prompt` 一致：从 services/omni_internal/prompts 读取模板并替换 `{subtitle_text}`。"""
     language = str(prompt_language or "zh").strip().lower()
     prompt_name = _FRAME_ANALYSIS_PROMPT_FILES.get(language, _FRAME_ANALYSIS_PROMPT_FILES["zh"])
     prompt_path = _frame_analysis_prompts_dir() / prompt_name
@@ -399,7 +399,7 @@ class _MoondreamRunner:
         if revision is None and "moondream-2b-2025-04-14-4bit" not in model_id:
             revision = LATEST_REVISION
 
-        default_cache_dir = Path(__file__).resolve().parents[1] / "serviceData" / "models" / "moondream2"
+        default_cache_dir = Path(__file__).resolve().parents[2] / "serviceData" / "models" / "moondream2"
         cache_dir = os.environ.get("MOONDREAM_CACHE_DIR", str(default_cache_dir))
         local_only = os.environ.get("HF_HUB_OFFLINE", "0") == "1" or os.environ.get("MOONDREAM_LOCAL_ONLY", "0") == "1"
 

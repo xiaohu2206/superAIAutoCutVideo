@@ -1,11 +1,13 @@
+import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from modules.ffmpeg_utils import resolve_ffmpeg_bin
+from modules.ffmpeg_utils import get_ffmpeg_cuda_prefix, resolve_ffmpeg_bin
 
 
+logger = logging.getLogger(__name__)
 def extract_quarter_frames(
     video_path: str,
     shot: Dict[str, Any],
@@ -48,22 +50,41 @@ def extract_quarter_frames(
     def _extract_one(ts: float, out_path: str) -> str:
         if (not overwrite) and os.path.exists(out_path):
             return out_path
-        cmd = [
-            ffmpeg_bin,
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            f"{ts:.3f}",
-            "-i",
-            video_path,
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            out_path,
-        ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def _build_cmd(hwaccel_prefix: tuple[str, ...] = ()) -> List[str]:
+            return [
+                ffmpeg_bin,
+                "-loglevel",
+                "error",
+                "-y",
+                *hwaccel_prefix,
+                "-ss",
+                f"{ts:.3f}",
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                out_path,
+            ]
+
+        def _run_cmd(cmd: List[str]) -> subprocess.CompletedProcess[bytes]:
+            return subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+        cuda_prefix = get_ffmpeg_cuda_prefix()
+        if cuda_prefix:
+            logger.info("[Omni][frame_extract][GPU] ffmpeg hwaccel=cuda out=%s", out_path)
+            proc = _run_cmd(_build_cmd(cuda_prefix))
+            if proc.returncode == 0 and os.path.exists(out_path):
+                return out_path
+            msg = (proc.stderr or b"")[:500].decode("utf-8", errors="ignore").strip()
+            logger.warning("[Omni][frame_extract][GPU->CPU] CUDA hwaccel 失败，回退 CPU: %s", msg or f"rc={proc.returncode}")
+
+        logger.info("[Omni][frame_extract][CPU] ffmpeg hwaccel=off out=%s", out_path)
+        proc = _run_cmd(_build_cmd(()))
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise subprocess.CalledProcessError(proc.returncode, proc.args, stderr=proc.stderr)
         return out_path
 
     return [_extract_one(ts1, out_path_1), _extract_one(ts2, out_path_2)]

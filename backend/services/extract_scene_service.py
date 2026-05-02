@@ -201,7 +201,12 @@ class ExtractSceneService:
                     self._model = TransNetV2Torch(str(weights_dir))
                     try:
                         info = self._model.get_backend_info()
-                        logger.info(f"TransNetV2 backend: {info}")
+                        logger.info(
+                            "[TransNetV2][%s] backend=%s device=%s",
+                            "GPU" if str(info.get("device") or "").lower().startswith("cuda") else "CPU",
+                            info.get("backend"),
+                            info.get("device"),
+                        )
                     except Exception:
                         pass
                     return self._model
@@ -212,6 +217,7 @@ class ExtractSceneService:
 
         from modules.transnetv2 import TransNetV2
         self._model = TransNetV2(str(weights_dir))
+        logger.info("[TransNetV2][CPU] backend=tensorflow device=cpu")
         return self._model
 
     def _resolve_weights_dir(self) -> Path:

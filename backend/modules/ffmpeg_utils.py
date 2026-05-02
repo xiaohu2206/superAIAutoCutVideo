@@ -14,11 +14,15 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+_HWACCEL_MODE_VALUES = {"auto", "cpu", "cuda"}
+_ffmpeg_cuda_hwaccel_cache: Optional[bool] = None
+_ffmpeg_cuda_hwaccel_logged = False
 
 
 def _bin_name(base: str) -> str:
@@ -136,6 +140,66 @@ def _resolve_bin(base: str) -> Optional[str]:
             continue
 
     return None
+
+
+
+def get_ffmpeg_hwaccel_mode() -> str:
+    raw = str(os.environ.get("OMNI_FFMPEG_HWACCEL") or "auto").strip().lower()
+    if raw in _HWACCEL_MODE_VALUES:
+        return raw
+    return "auto"
+
+
+def ffmpeg_supports_cuda_hwaccel() -> bool:
+    global _ffmpeg_cuda_hwaccel_cache, _ffmpeg_cuda_hwaccel_logged
+    if _ffmpeg_cuda_hwaccel_cache is not None:
+        return bool(_ffmpeg_cuda_hwaccel_cache)
+
+    ffmpeg_bin = resolve_ffmpeg_bin()
+    if not ffmpeg_bin:
+        _ffmpeg_cuda_hwaccel_cache = False
+        return False
+
+    try:
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = WIN_NO_WINDOW
+        proc = subprocess.run(
+            [ffmpeg_bin, "-hide_banner", "-hwaccels"],
+            check=False,
+            **kwargs,
+        )
+        if proc.returncode == 0:
+            text = (proc.stdout or b"").decode(errors="ignore").lower()
+            _ffmpeg_cuda_hwaccel_cache = ("cuda" in text) or ("nvdec" in text) or ("cuvid" in text)
+        else:
+            _ffmpeg_cuda_hwaccel_cache = False
+    except Exception:
+        _ffmpeg_cuda_hwaccel_cache = False
+
+    if not _ffmpeg_cuda_hwaccel_logged:
+        if _ffmpeg_cuda_hwaccel_cache:
+            logger.info("ffmpeg 检测到 CUDA hwaccel，Omni 解码将优先尝试 GPU")
+        else:
+            logger.info("ffmpeg 未检测到 CUDA hwaccel，Omni 解码将使用 CPU")
+        _ffmpeg_cuda_hwaccel_logged = True
+
+    return bool(_ffmpeg_cuda_hwaccel_cache)
+
+
+def get_ffmpeg_cuda_prefix() -> Tuple[str, ...]:
+    mode = get_ffmpeg_hwaccel_mode()
+    if mode == "cpu":
+        return ()
+    if mode == "cuda":
+        return ("-hwaccel", "cuda")
+    if ffmpeg_supports_cuda_hwaccel():
+        return ("-hwaccel", "cuda")
+    return ()
 
 
 async def wav_to_mp3(wav_path: Path, mp3_path: Path) -> bool:

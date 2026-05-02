@@ -34,7 +34,7 @@ _encode_lock = threading.Lock()
 
 
 def _backend_dir() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def resolve_bge_model_dir() -> Path:

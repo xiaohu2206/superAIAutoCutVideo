@@ -56,6 +56,16 @@ def _get_model() -> Any:
                     use_torch = bool(w and Path(w).exists())
                 if use_torch:
                     _model = TransNetV2Torch(str(weights_dir))
+                    try:
+                        info = _model.get_backend_info()
+                        logger.info(
+                            "[Omni][TransNetV2][%s] backend=%s device=%s",
+                            "GPU" if str(info.get("device") or "").lower().startswith("cuda") else "CPU",
+                            info.get("backend"),
+                            info.get("device"),
+                        )
+                    except Exception:
+                        pass
                     return _model
             except Exception as e:
                 if backend == "torch":
@@ -64,6 +74,7 @@ def _get_model() -> Any:
         from modules.transnetv2 import TransNetV2
 
         _model = TransNetV2(str(weights_dir))
+        logger.info("[Omni][TransNetV2][CPU] backend=tensorflow device=cpu")
         return _model
 
 
