@@ -19,9 +19,6 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 _tts_semaphore: Optional[asyncio.Semaphore] = None
 _tts_semaphore_concurrency: int = 0
 _tts_semaphore_lock = asyncio.Lock()
-_voxcpm_tts_semaphore: Optional[asyncio.Semaphore] = None
-_voxcpm_tts_semaphore_concurrency: int = 0
-_voxcpm_tts_semaphore_lock = asyncio.Lock()
 
 
 async def _get_tts_semaphore() -> asyncio.Semaphore:
@@ -39,64 +36,10 @@ async def _get_tts_semaphore() -> asyncio.Semaphore:
         return _tts_semaphore
 
 
-async def _get_voxcpm_tts_semaphore(cfg) -> asyncio.Semaphore:
-    global _voxcpm_tts_semaphore, _voxcpm_tts_semaphore_concurrency
-    max_workers, _src = generate_concurrency_config_manager.get_effective("tts")
-    tts_target = max(1, int(max_workers or 1))
-
-    ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-    raw = ep.get("MaxConcurrency", None)
-    target = None
-    try:
-        if raw is not None and not isinstance(raw, bool):
-            target = int(str(raw).strip())
-    except Exception:
-        target = None
-    if target is None:
-        target = 2 if tts_target >= 2 else 1
-    target = max(1, min(int(target), int(tts_target)))
-
-    if _voxcpm_tts_semaphore is not None and _voxcpm_tts_semaphore_concurrency == target:
-        return _voxcpm_tts_semaphore
-
-    async with _voxcpm_tts_semaphore_lock:
-        max_workers2, _src2 = generate_concurrency_config_manager.get_effective("tts")
-        tts_target2 = max(1, int(max_workers2 or 1))
-
-        ep2 = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-        raw2 = ep2.get("MaxConcurrency", None)
-        target2 = None
-        try:
-            if raw2 is not None and not isinstance(raw2, bool):
-                target2 = int(str(raw2).strip())
-        except Exception:
-            target2 = None
-        if target2 is None:
-            target2 = 2 if tts_target2 >= 2 else 1
-        target2 = max(1, min(int(target2), int(tts_target2)))
-
-        if _voxcpm_tts_semaphore is None or _voxcpm_tts_semaphore_concurrency != target2:
-            _voxcpm_tts_semaphore = asyncio.Semaphore(target2)
-            _voxcpm_tts_semaphore_concurrency = target2
-        return _voxcpm_tts_semaphore
-
 
 @asynccontextmanager
 async def _tts_slot():
     sem = await _get_tts_semaphore()
-    await sem.acquire()
-    try:
-        yield
-    finally:
-        try:
-            sem.release()
-        except Exception:
-            pass
-
-
-@asynccontextmanager
-async def _voxcpm_tts_slot(cfg):
-    sem = await _get_voxcpm_tts_semaphore(cfg)
     await sem.acquire()
     try:
         yield
@@ -133,17 +76,6 @@ class TencentTtsService:
     async def synthesize(self, text: str, out_path: str, voice_id: Optional[str] = None) -> Dict[str, Any]:
         cfg = tts_engine_config_manager.get_active_config()
         provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
-
-        if provider == "voxcpm_tts":
-            async with _voxcpm_tts_slot(cfg):
-                async with _tts_slot():
-                    return await self._synthesize_with_provider(
-                        text=text,
-                        out_path=out_path,
-                        voice_id=voice_id,
-                        cfg=cfg,
-                        provider=provider,
-                    )
 
         async with _tts_slot():
             return await self._synthesize_with_provider(
@@ -282,65 +214,6 @@ class TencentTtsService:
                     max_concurrency=max_concurrency_i,
                     min_interval_sec=min_interval_sec,
                     max_retries=max_retries_i,
-                )
-                if res and res.get("success"):
-                    return await self._postprocess_qwen_audio(res, out, cfg)
-                return res
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-
-        if provider == "voxcpm_tts":
-            try:
-                from modules.voxcpm_tts_service import voxcpm_tts_service
-            except Exception as e:
-                return {"success": False, "error": f"voxcpm_tts_import_failed:{e}"}
-
-            out = Path(out_path)
-            ep = (getattr(cfg, "extra_params", None) or {}) if cfg else {}
-            device = ep.get("Device")
-            device_s = str(device).strip() if isinstance(device, str) else None
-
-            voxcpm_voice_id: Optional[str] = str(voice_id or (cfg.active_voice_id if cfg else "") or "").strip() or None
-
-            if voxcpm_voice_id:
-                try:
-                    from modules.voxcpm_tts_voice_store import voxcpm_tts_voice_store
-
-                    vv = voxcpm_tts_voice_store.get(voxcpm_voice_id)
-                    if vv:
-                        try:
-                            res = await voxcpm_tts_service.synthesize_by_voice_asset(
-                                text=text,
-                                out_path=out,
-                                voice_asset=vv,
-                                device=device_s,
-                            )
-                            if res and res.get("success"):
-                                return await self._postprocess_qwen_audio(res, out, cfg)
-                            return res
-                        except Exception as e:
-                            return {"success": False, "error": str(e)}
-                except Exception:
-                    pass
-
-            # Legacy / Config-only Fallback
-            model_key = str(ep.get("ModelKey") or "voxcpm_0_5b")
-            language = str(ep.get("Language") or "Auto")
-            ref_audio = str(ep.get("RefAudio") or "").strip() or None
-            ref_text = str(ep.get("RefText") or "").strip() or None
-
-            if not ref_audio:
-                return {"success": False, "error": "ref_audio_required_for_voice_clone"}
-
-            try:
-                res = await voxcpm_tts_service.synthesize_voice_clone_to_wav(
-                    text=text,
-                    out_path=out,
-                    model_key=model_key,
-                    language=language,
-                    ref_audio=ref_audio,
-                    ref_text=ref_text,
-                    device=device_s,
                 )
                 if res and res.get("success"):
                     return await self._postprocess_qwen_audio(res, out, cfg)

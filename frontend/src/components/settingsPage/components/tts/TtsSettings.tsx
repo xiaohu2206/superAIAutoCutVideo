@@ -18,7 +18,6 @@ import { getSpeedLabel, getTtsConfigIdByProvider } from "../../utils";
 import { LabeledChip } from "./LabeledGroup";
 import { getGenderLabel } from "./utils";
 import QwenOnlineVoiceSection from "@/features/qwenOnlineTts/components/QwenOnlineVoiceSection";
-import VoxcpmVoiceSection from "@/features/voxcpmTts/components/VoxcpmVoiceSection";
 import { IndexTtsSection } from "@/features/indextts";
 import { OmniVoiceTtsSection } from "@/features/omnivoiceTts";
 
@@ -405,12 +404,6 @@ export const TtsSettings: React.FC = () => {
               testResult={testResult}
               testDurationMs={testDurationMs}
             />
-          ) : provider === "voxcpm_tts" ? (
-            <VoxcpmVoiceSection
-              configId={currentConfigId}
-              activeVoiceId={currentConfig?.active_voice_id || ""}
-              onSetActive={handleSetActiveVoice}
-            />
           ) : provider === "qwen_online_tts" ? (
             <div className="space-y-4">
               <TtsCredentialFormQwenOnline
@@ -448,7 +441,6 @@ export const TtsSettings: React.FC = () => {
 
         {/* 音色库 */}
         {provider === "qwen_online_tts" ||
-        provider === "voxcpm_tts" ||
         provider === "indextts" ||
         provider === "omnivoice_tts" ? null : (
           <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">

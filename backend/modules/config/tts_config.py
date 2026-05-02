@@ -45,7 +45,7 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts', 'indextts', 'omnivoice_tts']
+        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'indextts', 'omnivoice_tts']
         if v.lower() not in allowed:
             raise ValueError(f'提供商必须是以下之一: {allowed}')
         return v.lower()
@@ -151,23 +151,6 @@ class TtsEngineConfigManager:
                         }
                     )
                     missing_defaults.append('qwen_online_tts_default')
-
-                if 'voxcpm_tts_default' not in self.configs:
-                    self.configs['voxcpm_tts_default'] = TtsEngineConfig(
-                        provider='voxcpm_tts',
-                        secret_id=None,
-                        secret_key=None,
-                        region=None,
-                        description='VoxCPM 默认配置（本地模型）',
-                        enabled=False,
-                        active_voice_id=None,
-                        speed_ratio=1.0,
-                        extra_params={
-                            "ModelKey": "voxcpm_0_5b",
-                            "Language": "Auto",
-                        }
-                    )
-                    missing_defaults.append('voxcpm_tts_default')
 
                 if 'indextts_default' not in self.configs:
                     self.configs['indextts_default'] = TtsEngineConfig(
@@ -290,23 +273,6 @@ class TtsEngineConfigManager:
                         "Instructions": "",
                         "OptimizeInstructions": False,
                         "BaseUrl": "",
-                    }
-                )
-            ),
-            (
-                'voxcpm_tts_default',
-                TtsEngineConfig(
-                    provider='voxcpm_tts',
-                    secret_id=None,
-                    secret_key=None,
-                    region=None,
-                    description='VoxCPM 默认配置（本地模型）',
-                    enabled=False,
-                    active_voice_id=None,
-                    speed_ratio=1.0,
-                    extra_params={
-                        "ModelKey": "voxcpm_0_5b",
-                        "Language": "Auto",
                     }
                 )
             ),

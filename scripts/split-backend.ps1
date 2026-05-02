@@ -169,7 +169,6 @@ $basePatterns = @(
     "modelscope",
     "whisper",
     "llama_cpp",
-    "voxcpm",
     "tiktoken",
     "dashscope",
     "qwen_tts",

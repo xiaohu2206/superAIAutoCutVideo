@@ -718,15 +718,6 @@ foreach ($variant in $variants) {
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
-    if ($variant -eq "gpu") {
-      Step "Install VoxCPM (no-deps) ($variant)"
-      & $venvPy "-m" "pip" "install" "voxcpm" "--no-deps"
-      if ($LASTEXITCODE -ne 0) { throw "voxcpm install failed (code $LASTEXITCODE)" }
-      Step "Sanity-check VoxCPM imports ($variant)"
-      & $venvPy "-c" "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
-      if ($LASTEXITCODE -ne 0) { throw "VoxCPM import check failed (code $LASTEXITCODE)" }
-    }
-
     $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
     $distExe = Join-Path $distRoot "superAutoCutVideoBackend.exe"
     $distVariantMarker = Join-Path $distRoot ".build_variant"

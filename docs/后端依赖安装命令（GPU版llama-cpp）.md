@@ -93,24 +93,6 @@ $py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
 - Qwen3‑TTS 的模型文件不随依赖安装自动下载；需要你把模型放到本地目录（应用内也有模型管理/下载/校验能力）。
 - 如果你改用 `requirements.txt`（非 runtime）安装依赖，请遵循项目的 numpy 约束（见 requirements 里的说明），避免与 numba 等库冲突。
 
-## 2.2 安装 VoxCPM（可选）
-
-说明：`requirements.runtime.txt` 里只包含 VoxCPM 的前置依赖（`simplejson`、`sortedcontainers`），主包需要你手动装，并且必须 `--no-deps` 以避免依赖冲突。
-如果你使用仓库的一键打包脚本 `scripts/build.ps1 -Variant gpu`，脚本会自动安装 `voxcpm` 并做导入自检。
-
-```powershell
-Set-Location C:\Users\Administrator\Documents\superAIAutoCutVideo
-
-# 方式一：使用 uv 安装（推荐）
-uv pip install --no-deps voxcpm
-python -c "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
-
-# 方式二：使用 pip 安装
-$py = Resolve-Path .\backend\.venv_pack_gpu\Scripts\python.exe
-& $py -m pip install --no-deps voxcpm
-& $py -c "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
-```
-
 ## 3. 安装 CUDA 构建的 llama-cpp-python（关键）
 
 直接运行仓库脚本（它会在 `backend\.venv_pack_gpu` 里强制用 `GGML_CUDA=on` 重新编译安装）：
