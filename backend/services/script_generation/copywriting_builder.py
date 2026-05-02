@@ -81,24 +81,14 @@ def _estimate_total_duration_seconds_from_timeline_text(timeline_text: str) -> O
 
 
 def _estimate_target_word_count_by_video_duration(total_duration_seconds: Optional[float]) -> Optional[int]:
-    """不分段时，根据总视频时长估算文案字数上限。"""
+    """不分段时，按视频时长的20%作为文案朗读时长，以240字/分钟估算字数，上限2500字。"""
     if total_duration_seconds is None or total_duration_seconds <= 0:
         return None
 
     total_minutes = total_duration_seconds / 60.0
-    if total_minutes > 30:
-        return None
-    if total_minutes >= 20:
-        return 3000
-    if total_minutes >= 15:
-        return 2000
-    if total_minutes >= 10:
-        return 1000
-    if total_minutes >= 5:
-        return 500
-    if total_minutes >= 3:
-        return 300
-    return 300
+    text_minutes = total_minutes * 0.15
+    word_count = int(text_minutes * 240)
+    return min(word_count, 2500)
 
 
 def _resolve_template_key(

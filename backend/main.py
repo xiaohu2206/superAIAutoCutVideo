@@ -855,7 +855,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # 接收客户端消息
             data = await websocket.receive_text()
             logger.info(f"收到WebSocket消息: {data}")
-            
+
             # 解析消息
             try:
                 message = json.loads(data)
@@ -869,10 +869,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     json.dumps({"type": "error", "message": "无效的JSON格式"}),
                     websocket
                 )
-    
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
         logger.info("WebSocket客户端断开连接")
+    except Exception as e:
+        logger.warning(f"WebSocket异常断开: {e}")
+    finally:
+        manager.disconnect(websocket)
 
 async def simulate_video_processing(task_id: str, request: VideoProcessRequest):
     """模拟视频处理过程"""
