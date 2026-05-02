@@ -87,6 +87,7 @@ interface ProjectEditUploadStepProps {
   onShowLogin?: () => void;
   onShowProfile?: () => void;
   onRunOmniPipeline: () => void;
+  onRunOmniPipelineWithSubtitle: () => void;
   onStopOmniPipeline: () => void;
   isStoppingOmniPipeline: boolean;
   extractingOmniPipeline: boolean;
@@ -160,9 +161,10 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onSubtitleOverwriteConfirm,
   onSubtitleOverwriteCancel,
   omniRunPipelineAuthReady,
-  onShowLogin,
-  onShowProfile,
-  onRunOmniPipeline,
+  onShowLogin: _onShowLogin,
+  onShowProfile: _onShowProfile,
+  onRunOmniPipeline: _onRunOmniPipeline,
+  onRunOmniPipelineWithSubtitle,
   onStopOmniPipeline,
   isStoppingOmniPipeline,
   extractingOmniPipeline,
@@ -184,19 +186,6 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
   const canReExtractScenes = Boolean(project.scenes_path);
   const canReRunOmniPipeline = Boolean(project.omni_multimodal_json_path);
-
-  /** 与 CreateProjectModal handleSubmit 一致：未登录 → 登录；已登录但无本地 token / 需绑 License → 个人中心 */
-  const handleRunOmniPipelineClick = () => {
-    if (!isAuthenticated) {
-      onShowLogin?.();
-      return;
-    }
-    if (!omniRunPipelineAuthReady) {
-      onShowProfile?.();
-      return;
-    }
-    onRunOmniPipeline();
-  };
 
   const [scenePlayState, setScenePlayState] = React.useState<{
     isOpen: boolean;
@@ -371,56 +360,37 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
               </button>
             </div>
           ) : project.project_type === "omni" ? (
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-              <button
-                onClick={onExtractSubtitle}
-                disabled={
-                  subtitleLoading ||
-                  extractingSubtitle ||
-                  extractingOmniPipeline ||
-                  (!project.video_path && !project.merged_video_path) ||
-                  (project.subtitle_source === "user" && Boolean(project.subtitle_path))
-                }
-                className="flex items-center justify-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {extractingSubtitle ? (
-                  <>
-                    <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    提取中...
-                  </>
-                ) : (
-                  <>{canReExtractSubtitle ? "重新提取字幕" : "提取字幕"}</>
-                )}
-              </button>
-              <button
-                onClick={handleRunOmniPipelineClick}
-                disabled={
-                  Boolean(subtitleLoading) ||
-                  extractingSubtitle ||
-                  extractingOmniPipeline ||
-                  (!project.video_path && !project.merged_video_path) ||
-                  !project.subtitle_path ||
-                  Boolean(project.subtitle_status && project.subtitle_status !== "ready")
-                }
-                title={
-                  !isAuthenticated
-                    ? "请先登录；点击可打开登录"
-                    : !omniRunPipelineAuthReady
-                      ? "登录后需带有效凭据；点击前往个人中心绑定 License"
-                      : undefined
-                }
-                className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {extractingOmniPipeline ? (
-                  <>
-                    <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    运行中...
-                  </>
-                ) : (
-                  <>{canReRunOmniPipeline ? "重新分析镜头" : "分析镜头"}</>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={onRunOmniPipelineWithSubtitle}
+              disabled={
+                subtitleLoading ||
+                extractingSubtitle ||
+                extractingOmniPipeline ||
+                (!project.video_path && !project.merged_video_path)
+              }
+              title={
+                !isAuthenticated
+                  ? "请先登录；点击可打开登录"
+                  : !omniRunPipelineAuthReady
+                    ? "登录后需带有效凭据；点击前往个人中心绑定 License"
+                    : undefined
+              }
+              className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {extractingOmniPipeline ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  运行中...
+                </>
+              ) : extractingSubtitle ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  提取中...
+                </>
+              ) : (
+                <>{canReRunOmniPipeline ? "重新分析镜头" : "分析镜头"}</>
+              )}
+            </button>
           ) : (
             <button
               onClick={onExtractSubtitle}

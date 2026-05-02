@@ -256,7 +256,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
               onClick={onGoToGenerateStep}
               className="flex items-center px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium shadow-sm hover:bg-blue-700 transition-all"
             >
-              下一步: 生成视频
+              生成视频
               <ArrowRight className="h-4 w-4 ml-2" />
             </button>
           </div>

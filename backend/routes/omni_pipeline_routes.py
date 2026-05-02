@@ -36,7 +36,14 @@ class OmniPipelineRunRequest(BaseModel):
 
 @router.post("/{project_id}/omni/run-pipeline")
 async def omni_run_pipeline(project_id: str, req: OmniPipelineRunRequest, request: Request):
-    await require_valid_license_for_omni(request.headers.get("Authorization"))
+    try:
+        await require_valid_license_for_omni(request.headers.get("Authorization"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Omni license check failed")
+        raise HTTPException(status_code=500, detail=f"License 校验异常，请稍后重试。")
+
     try:
         data = await omni_multimodal_pipeline_service.submit_pipeline(
             project_id=project_id,

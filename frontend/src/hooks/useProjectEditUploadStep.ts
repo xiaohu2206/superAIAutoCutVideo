@@ -133,6 +133,7 @@ export interface UseProjectEditUploadStepReturn {
   onSubtitleOverwriteConfirm: () => void;
   onSubtitleOverwriteCancel: () => void;
   onRunOmniPipeline: () => void;
+  onRunOmniPipelineWithSubtitle: () => void;
   onStopOmniPipeline: () => void;
   isStoppingOmniPipeline: boolean;
   extractingOmniPipeline: boolean;
@@ -718,6 +719,75 @@ export function useProjectEditUploadStep(
     }
   }, [options, isAuthenticated]);
 
+  const onRunOmniPipelineWithSubtitle = useCallback(async () => {
+    const p = options.project;
+    if (!p) return;
+    if (!readSacvAuthTokenTrimmed()) {
+      if (!isAuthenticated) options.onShowLogin?.();
+      else options.onShowProfile?.();
+      return;
+    }
+    if (!p.video_path && !p.merged_video_path) {
+      options.showErrorText("请先上传视频文件");
+      return;
+    }
+
+    if (!p.subtitle_path || (p.subtitle_status && p.subtitle_status !== "ready")) {
+      if (p.subtitle_source === "user" && Boolean(p.subtitle_path)) {
+        options.showErrorText("已上传字幕，需先删除才能提取");
+        return;
+      }
+      if (p.subtitle_updated_by_user) {
+        const ok = await askSubtitleOverwrite();
+        if (!ok) return;
+      }
+      setExtractingSubtitle(true);
+      setSubtitleExtractProgress(0);
+      setSubtitleExtractLogs([]);
+      try {
+        const isFun = subtitleAsr.provider === "fun_asr";
+        const taskId =
+          globalThis.crypto &&
+          "randomUUID" in globalThis.crypto &&
+          typeof (globalThis.crypto as any).randomUUID === "function"
+            ? (globalThis.crypto as any).randomUUID()
+            : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        await options.extractSubtitle({
+          task_id: taskId,
+          asr_provider: subtitleAsr.provider,
+          asr_model_key: isFun ? subtitleAsr.modelKey : null,
+          asr_language: isFun ? subtitleAsr.language : "中文",
+        });
+        setSubtitleExtractProgress(100);
+        setExtractingSubtitle(false);
+        void options.refreshProject();
+        void options.fetchSubtitle().catch(() => void 0);
+      } catch (err) {
+        options.showError(err, "提取字幕失败");
+        setExtractingSubtitle(false);
+        setSubtitleExtractProgress(0);
+        return;
+      }
+    }
+
+    if (p.omni_multimodal_json_path) {
+      setOmniMultimodalChoiceModalOpen(true);
+      return;
+    }
+
+    try {
+      await options.runOmniPipeline({ multimodal_action: "auto" });
+      options.showSuccess("Omni 管线任务已提交");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+        if (!isAuthenticated) options.onShowLogin?.();
+        else options.onShowProfile?.();
+      }
+      options.showError(err, "Omni 管线失败");
+    }
+  }, [options, subtitleAsr, askSubtitleOverwrite, isAuthenticated]);
+
   const onOmniMultimodalChoiceContinue = useCallback(() => {
     if (!readSacvAuthTokenTrimmed()) {
       options.showErrorText(OMNI_PIPELINE_LICENSE_GATE_MSG);
@@ -829,6 +899,7 @@ export function useProjectEditUploadStep(
     onSubtitleOverwriteConfirm,
     onSubtitleOverwriteCancel,
     onRunOmniPipeline,
+    onRunOmniPipelineWithSubtitle,
     onStopOmniPipeline,
     isStoppingOmniPipeline,
     extractingOmniPipeline: options.extractingOmniPipeline,
