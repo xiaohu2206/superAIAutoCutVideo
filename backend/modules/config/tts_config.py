@@ -413,20 +413,6 @@ class TtsEngineConfigManager:
                 'optional_fields': ['region']
             },
             {
-                'provider': 'qwen3_tts',
-                'display_name': 'Qwen3-TTS(本地)',
-                'description': '生成配音比较慢，离线语音合成与快速声音克隆（需先下载模型）',
-                'required_fields': [],
-                'optional_fields': []
-            },
-            # {
-            #     'provider': 'voxcpm_tts',
-            #     'display_name': 'VoxCPM(本地)',
-            #     'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
-            #     'required_fields': [],
-            #     'optional_fields': []
-            # },
-            {
                 'provider': 'tencent_tts',
                 'display_name': '腾讯云 TTS',
                 'description': '支持多种中文方言与风格，需配置SecretId与SecretKey',

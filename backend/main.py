@@ -61,7 +61,6 @@ from routes.omni_global_path_search_routes import router as omni_global_path_sea
 from routes.omni_generate_script_routes import router as omni_generate_script_router
 from routes.omni_full_narration_pipeline_routes import router as omni_full_narration_pipeline_router
 from routes.tts_routes import router as tts_router
-from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.qwen_online_tts_routes import router as qwen_online_tts_router
 from routes.voxcpm_tts_routes import router as voxcpm_tts_router
 from routes.indextts_routes import router as indextts_router
@@ -418,7 +417,6 @@ app.include_router(omni_global_path_search_router)
 app.include_router(omni_generate_script_router)
 app.include_router(omni_full_narration_pipeline_router)
 app.include_router(tts_router)
-app.include_router(qwen3_tts_router)
 app.include_router(qwen_online_tts_router)
 app.include_router(voxcpm_tts_router)
 app.include_router(indextts_router)

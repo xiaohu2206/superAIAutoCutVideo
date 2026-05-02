@@ -148,7 +148,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
       )}
 
       <div className="pt-2" role="tabpanel">
-        {loading ? (
+        {loading && !useCustom ? (
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
             加载整合模型配置…

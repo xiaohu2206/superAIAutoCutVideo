@@ -20,7 +20,6 @@ from modules.video_processor import WIN_NO_WINDOW, video_processor
 from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
-from modules.audio_normalizer import AudioNormalizer
 from modules.ws_manager import manager
 from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
@@ -444,7 +443,6 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                     return idx, (res if isinstance(res, dict) else {})
 
-                audio_norm = AudioNormalizer()
                 if _tts_provider == "omnivoice_tts":
                     completed = 0
                     for it in need_tts:
@@ -528,7 +526,7 @@ class VideoGenerationService:
                 try:
                     cfg = tts_engine_config_manager.get_active_config()
                     provider = (getattr(cfg, "provider", None) or "").lower()
-                    if provider in ("qwen3_tts", "indextts", "omnivoice_tts"):
+                    if provider in ("indextts", "omnivoice_tts"):
                         total_tts_dur = 0.0
                         missing = 0
                         for it in need_tts:
@@ -585,11 +583,6 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
                     narr_used = seg_audio
                     provider = (getattr(tts_engine_config_manager.get_active_config(), "provider", None) or "").lower()
-                    if provider == "qwen3_tts":
-                        norm_audio = aud_tmp_dir / f"seg_{idx:04d}_norm.mp3"
-                        ok_norm = await audio_norm.normalize_audio_loudness(str(seg_audio), str(norm_audio))
-                        if ok_norm:
-                            narr_used = norm_audio
                     trim_audio = aud_tmp_dir / f"seg_{idx:04d}_trim.mp3"
                     ok_trim = await _trim_audio_silence(narr_used, trim_audio)
                     if ok_trim:

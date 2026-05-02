@@ -13,9 +13,6 @@ datas = [
 # 例如 modules/prompts/common/sharp_roast/sharp_roast.md
 if os.path.isdir('modules/prompts'):
     datas.append(('modules/prompts', 'modules/prompts'))
-cache_dir = '../.trae/cache/Qwen3-TTS'
-if os.path.isdir(cache_dir):
-    datas.append((cache_dir, '.trae/cache/Qwen3-TTS'))
 binaries = []
 try:
     _tbb12 = os.path.join(sys.prefix, 'Library', 'bin', 'tbb12.dll')
@@ -41,7 +38,6 @@ hiddenimports = [
     'starlette',
     'multipart',
     'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
-    'qwen_tts',  # 动态导入的第三方包，确保打包后可用
     'llama_cpp',
     'llama_cpp.llama_cpp',
     'torch.distributed',

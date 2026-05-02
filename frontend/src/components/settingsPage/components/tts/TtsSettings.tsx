@@ -17,7 +17,6 @@ import { getSpeedLabel, getTtsConfigIdByProvider } from "../../utils";
 
 import { LabeledChip } from "./LabeledGroup";
 import { getGenderLabel } from "./utils";
-import Qwen3VoiceSection from "@/features/qwen3Tts/components/Qwen3VoiceSection";
 import QwenOnlineVoiceSection from "@/features/qwenOnlineTts/components/QwenOnlineVoiceSection";
 import VoxcpmVoiceSection from "@/features/voxcpmTts/components/VoxcpmVoiceSection";
 import { IndexTtsSection } from "@/features/indextts";
@@ -57,7 +56,6 @@ export const TtsSettings: React.FC = () => {
   const hasCredentials = useMemo(() => {
     // Edge TTS 免凭据：只要当前提供商为 edge_tts，则视为具备"连通性测试许可"
     if (provider === "edge_tts") return true;
-    if (provider === "qwen3_tts") return true;
     if (provider === "indextts") return indexttsConnected;
     if (provider === "omnivoice_tts") return omnivoiceTtsConnected;
     // 千问在线 TTS：仅需要 secret_key
@@ -317,10 +315,7 @@ export const TtsSettings: React.FC = () => {
           });
           return;
         }
-      } else if (
-        provider !== "edge_tts" &&
-        provider !== "qwen3_tts"
-      ) {
+      } else if (provider !== "edge_tts") {
         if (!hasCredentials || !currentConfigId) {
           setTestResult({
             success: false,
@@ -416,12 +411,6 @@ export const TtsSettings: React.FC = () => {
               activeVoiceId={currentConfig?.active_voice_id || ""}
               onSetActive={handleSetActiveVoice}
             />
-          ) : provider === "qwen3_tts" ? (
-            <Qwen3VoiceSection
-              configId={currentConfigId}
-              activeVoiceId={currentConfig?.active_voice_id || ""}
-              onSetActive={handleSetActiveVoice}
-            />
           ) : provider === "qwen_online_tts" ? (
             <div className="space-y-4">
               <TtsCredentialFormQwenOnline
@@ -458,8 +447,7 @@ export const TtsSettings: React.FC = () => {
         </section>
 
         {/* 音色库 */}
-        {provider === "qwen3_tts" ||
-        provider === "qwen_online_tts" ||
+        {provider === "qwen_online_tts" ||
         provider === "voxcpm_tts" ||
         provider === "indextts" ||
         provider === "omnivoice_tts" ? null : (
