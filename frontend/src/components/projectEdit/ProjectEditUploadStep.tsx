@@ -414,10 +414,10 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                 {extractingOmniPipeline ? (
                   <>
                     <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    Omni 管线运行中...
+                    运行中...
                   </>
                 ) : (
-                  <>{canReRunOmniPipeline ? "重新运行 Omni 管线" : "运行 Omni 管线（镜头+多模态）"}</>
+                  <>{canReRunOmniPipeline ? "重新分析镜头" : "分析镜头"}</>
                 )}
               </button>
             </div>

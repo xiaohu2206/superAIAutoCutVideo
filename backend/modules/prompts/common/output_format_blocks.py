@@ -19,28 +19,37 @@ def _safe_ratio(value: Optional[int]) -> Optional[int]:
     return v
 
 
-def short_drama(language: str = "zh", original_ratio: Optional[int] = None) -> str:
+def short_drama(language: str = "zh", original_ratio: Optional[int] = None, interleave_mode: Optional[str] = None) -> str:
     ratio = _safe_ratio(original_ratio)
     allow_ost_1 = ratio is None or ratio > 0
     allow_ost_0 = ratio is None or ratio < 100
 
-    items = []
-    if allow_ost_0 and allow_ost_1:
+    im = (interleave_mode or "").strip().lower()
+    if im == "original_interleave":
         items = [
             {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
-            {"_id": 2, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
-            {"_id": 3, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
+            {"_id": 2, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片1", "OST": 1},
+            {"_id": 3, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "xxx", "OST": 0},
+            {"_id": 4, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片2", "OST": 1},
         ]
-    elif allow_ost_0 and not allow_ost_1:
-        items = [
-            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
-            {"_id": 2, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
-        ]
-    elif allow_ost_1 and not allow_ost_0:
-        items = [
-            {"_id": 1, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
-            {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
-        ]
+    else:
+        items = []
+        if allow_ost_0 and allow_ost_1:
+            items = [
+                {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
+                {"_id": 2, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
+                {"_id": 3, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
+            ]
+        elif allow_ost_0 and not allow_ost_1:
+            items = [
+                {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": "...", "OST": 0},
+                {"_id": 2, "timestamp": "00:00:0x,000-00:00:xx,000", "narration": "...", "OST": 0},
+            ]
+        elif allow_ost_1 and not allow_ost_0:
+            items = [
+                {"_id": 1, "timestamp": "00:00:0x,x00-00:00:0x,000", "narration": "播放原片x", "OST": 1},
+                {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+            ]
 
     example = json.dumps({"items": items}, ensure_ascii=False, indent=2)
 
@@ -94,7 +103,7 @@ def short_drama(language: str = "zh", original_ratio: Optional[int] = None) -> s
     )
 
 
-def movie(language: str = "zh", original_ratio: Optional[int] = None) -> str:
+def movie(language: str = "zh", original_ratio: Optional[int] = None, interleave_mode: Optional[str] = None) -> str:
     ratio = _safe_ratio(original_ratio)
     allow_ost_1 = ratio is None or ratio > 0
     allow_ost_0 = ratio is None or ratio < 100
@@ -105,23 +114,32 @@ def movie(language: str = "zh", original_ratio: Optional[int] = None) -> str:
     def _n1() -> str:
         return "..." if language.lower() == "en" else "xxx"
 
-    items = []
-    if allow_ost_0 and allow_ost_1:
+    im = (interleave_mode or "").strip().lower()
+    if im == "original_interleave":
         items = [
             {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
-            {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+            {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片1", "OST": 1},
             {"_id": 3, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
+            {"_id": 4, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片2", "OST": 1},
         ]
-    elif allow_ost_0 and not allow_ost_1:
-        items = [
-            {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
-            {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
-        ]
-    elif allow_ost_1 and not allow_ost_0:
-        items = [
-            {"_id": 1, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
-            {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": "播放原片x", "OST": 1},
-        ]
+    else:
+        items = []
+        if allow_ost_0 and allow_ost_1:
+            items = [
+                {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
+                {"_id": 2, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+                {"_id": 3, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
+            ]
+        elif allow_ost_0 and not allow_ost_1:
+            items = [
+                {"_id": 1, "timestamp": "00:00:0x,000-00:00:0x,x00", "narration": _n0(), "OST": 0},
+                {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": _n1(), "OST": 0},
+            ]
+        elif allow_ost_1 and not allow_ost_0:
+            items = [
+                {"_id": 1, "timestamp": "00:00:xx,x00-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+                {"_id": 2, "timestamp": "00:00:xx,000-00:00:xx,000", "narration": "播放原片x", "OST": 1},
+            ]
 
     example = json.dumps({"items": items}, ensure_ascii=False, indent=2)
 

@@ -31,6 +31,9 @@ class TtsVoice(BaseModel):
     voice_human_style: Optional[str] = Field(None, description="风格描述原文")
 
 
+ALLOWED_TTS_PROVIDERS = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'indextts', 'omnivoice_tts']
+
+
 class TtsEngineConfig(BaseModel):
     """TTS引擎配置数据模型"""
     provider: str = Field(..., description="TTS提供商标识，如tencent_tts")
@@ -45,9 +48,8 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'indextts', 'omnivoice_tts']
-        if v.lower() not in allowed:
-            raise ValueError(f'提供商必须是以下之一: {allowed}')
+        if v.lower() not in ALLOWED_TTS_PROVIDERS:
+            raise ValueError(f'提供商必须是以下之一: {ALLOWED_TTS_PROVIDERS}')
         return v.lower()
 
 
@@ -75,11 +77,21 @@ class TtsEngineConfigManager:
                     data = json.load(f)
 
                 configs_data = data.get('configs', {})
+                cleaned = False
                 for config_id, config_data in configs_data.items():
                     try:
+                        provider = str(config_data.get('provider', '')).strip().lower()
+                        if provider not in ALLOWED_TTS_PROVIDERS:
+                            logger.warning(f"跳过不支持的TTS配置 {config_id}（provider={provider or 'unknown'}）")
+                            cleaned = True
+                            continue
                         self.configs[config_id] = TtsEngineConfig(**config_data)
                     except Exception as e:
                         logger.error(f"加载TTS引擎配置 {config_id} 失败: {e}")
+                        cleaned = True
+
+                if cleaned:
+                    self.save_configs()
 
                 logger.info(f"成功加载 {len(self.configs)} 个TTS引擎配置")
 

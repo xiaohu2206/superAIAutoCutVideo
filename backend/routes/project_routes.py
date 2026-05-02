@@ -310,6 +310,7 @@ class UpdateProjectRequest(BaseModel):
     narration_type: Optional[str] = None
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
+    interleave_mode: Optional[str] = None
     script_language: Optional[str] = None
     copywriting_word_count: Optional[int] = None
     status: Optional[str] = None

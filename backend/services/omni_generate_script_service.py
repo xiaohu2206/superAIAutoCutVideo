@@ -148,6 +148,7 @@ def _params_from_request_and_project(
     original_ratio: Optional[int] = None,
 ) -> OmniNarrationParams:
     project_ratio = getattr(project, "original_ratio", None)
+    project_interleave = getattr(project, "interleave_mode", None)
     effective_script_language = normalize_script_language(
         script_language if script_language is not None else getattr(project, "script_language", None)
     )
@@ -156,15 +157,18 @@ def _params_from_request_and_project(
         if original_ratio is not None
         else (normalize_original_ratio(project_ratio) if project_ratio is not None else None)
     )
+    effective_interleave = project_interleave or "smart_interleave"
     base = OmniNarrationParams(
         script_language=effective_script_language,
         original_ratio=effective_original_ratio,
+        interleave_mode=effective_interleave,
     )
     if not generation_params:
         return base
     g = generation_params
     gp_script_language = g.get("script_language") if g.get("script_language") is not None else base.script_language
     gp_original_ratio = g.get("original_ratio") if g.get("original_ratio") is not None else base.original_ratio
+    gp_interleave_mode = g.get("interleave_mode") if g.get("interleave_mode") is not None else base.interleave_mode
     effective_script_language = normalize_script_language(
         script_language if script_language is not None else gp_script_language
     )
@@ -173,6 +177,7 @@ def _params_from_request_and_project(
         if original_ratio is not None
         else (normalize_original_ratio(gp_original_ratio) if gp_original_ratio is not None else None)
     )
+    effective_interleave = gp_interleave_mode or "smart_interleave"
     return OmniNarrationParams(
         max_items_for_retrieval=int(g.get("max_items_for_retrieval", base.max_items_for_retrieval) or base.max_items_for_retrieval),
         chunk_target_size=max(1, int(g.get("chunk_target_size", base.chunk_target_size) or base.chunk_target_size)),
@@ -191,6 +196,7 @@ def _params_from_request_and_project(
         user_prompt_template=g.get("user_prompt_template") if isinstance(g.get("user_prompt_template"), str) else None,
         script_language=effective_script_language,
         original_ratio=effective_original_ratio,
+        interleave_mode=effective_interleave,
     )
 
 

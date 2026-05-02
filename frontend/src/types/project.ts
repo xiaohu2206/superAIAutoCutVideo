@@ -22,6 +22,8 @@ export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
 export type ScriptLanguage = "zh" | "en";
 
+export type InterleaveMode = "smart_interleave" | "original_interleave";
+
 /** 全感知（omni）生成档位：低/中/高消耗与效果 */
 export type OmniEffectTier = "low" | "medium" | "high";
 
@@ -107,6 +109,7 @@ export interface Project {
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number | null;
+  interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status: ProjectStatus; // 项目状态
@@ -208,6 +211,7 @@ export interface UpdateProjectRequest {
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number | null;
+  interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status?: ProjectStatus;

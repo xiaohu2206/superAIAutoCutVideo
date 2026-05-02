@@ -15,6 +15,7 @@ from ._runner_core import (
     CHUNK_TASK_SUFFIX,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_USER_PROMPT_TEMPLATE,
+    ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE,
     _build_copywriting_outline,
     _build_retrieval_candidates,
     _build_timeline_scenes,
@@ -52,6 +53,7 @@ class OmniNarrationParams:
     user_prompt_template: Optional[str] = None
     script_language: str = "zh"
     original_ratio: Optional[int] = None
+    interleave_mode: Optional[str] = None
 
 
 def parse_timestamp_pair_seconds(ts_range: str) -> Tuple[float, float]:
@@ -106,12 +108,17 @@ def build_chunk_metas_and_prompts(
         gap_min_seconds=params.timeline_gap_min_seconds,
     )
     total_chunks = len(chunk_metas)
-    tpl = params.user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE
+    im = params.interleave_mode or "smart_interleave"
+    if im == "original_interleave":
+        tpl = params.user_prompt_template or ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE
+    else:
+        tpl = params.user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE
     sys_base = params.system_prompt or DEFAULT_SYSTEM_PROMPT
     base_system_prompt = _build_system_prompt_with_options(
         sys_base,
         script_language=params.script_language,
         original_ratio=params.original_ratio,
+        interleave_mode=params.interleave_mode,
     )
 
     out: List[Dict[str, Any]] = []
@@ -140,11 +147,13 @@ def _build_system_prompt_with_options(
     *,
     script_language: Optional[str],
     original_ratio: Optional[int],
+    interleave_mode: Optional[str] = None,
 ) -> str:
     addons = [
         build_language_system_addon(normalize_script_language(script_language)),
         build_original_ratio_system_addon(
-            normalize_original_ratio(original_ratio) if original_ratio is not None else None
+            normalize_original_ratio(original_ratio) if original_ratio is not None else None,
+            interleave_mode=interleave_mode,
         ),
     ]
     parts = [x for x in addons if x]

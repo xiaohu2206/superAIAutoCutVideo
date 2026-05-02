@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { projectService } from "../../../services/projectService";
-import type { ScriptLengthOption } from "../../../types/project";
+import type { InterleaveMode, ScriptLengthOption } from "../../../types/project";
 import { normalizeOriginalRatio, normalizeOriginalRatioSelection, normalizeScriptLength } from "./utils";
 
 export function useProjectCopywritingWordCount(projectId: string): {
@@ -224,4 +224,64 @@ export function useProjectScriptLanguage(projectId: string): {
   );
 
   return { scriptLanguage, loading, saving, setScriptLanguageAndPersist };
+}
+
+export function useProjectInterleaveMode(projectId: string): {
+  interleaveMode: InterleaveMode;
+  loading: boolean;
+  saving: boolean;
+  setInterleaveModeAndPersist: (value: InterleaveMode) => Promise<void>;
+} {
+  const [interleaveMode, setInterleaveMode] = useState<InterleaveMode>("smart_interleave");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveSeqRef = useRef(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = await projectService.getProject(projectId);
+      const v = p?.interleave_mode as InterleaveMode;
+      if (v === "smart_interleave" || v === "original_interleave") {
+        setInterleaveMode(v);
+      } else {
+        setInterleaveMode("smart_interleave");
+        const seq = ++saveSeqRef.current;
+        setSaving(true);
+        try {
+          await projectService.updateProjectQueued(projectId, { interleave_mode: "smart_interleave" });
+        } catch {
+          void 0;
+        } finally {
+          if (saveSeqRef.current === seq) setSaving(false);
+        }
+      }
+    } catch {
+      void 0;
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const setInterleaveModeAndPersist = useCallback(
+    async (value: InterleaveMode) => {
+      setInterleaveMode(value);
+      const seq = ++saveSeqRef.current;
+      setSaving(true);
+      try {
+        await projectService.updateProjectQueued(projectId, { interleave_mode: value });
+      } catch {
+        void 0;
+      } finally {
+        if (saveSeqRef.current === seq) setSaving(false);
+      }
+    },
+    [projectId]
+  );
+
+  return { interleaveMode, loading, saving, setInterleaveModeAndPersist };
 }

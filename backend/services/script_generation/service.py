@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import bisect
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, cast
 
@@ -161,6 +162,7 @@ class ScriptGenerationService:
         sel_length: Optional[str] = None
         original_ratio: Optional[int] = None
         script_language: Optional[str] = None
+        interleave_mode: Optional[str] = None
         if project_id:
             try:
                 p = projects_store.get_project(project_id)
@@ -177,6 +179,8 @@ class ScriptGenerationService:
                             script_language = str(getattr(p, "script_language", None))
                         except Exception:
                             script_language = None
+                    if getattr(p, "interleave_mode", None):
+                        interleave_mode = str(getattr(p, "interleave_mode", None))
             except Exception:
                 sel_length = None
 
@@ -193,6 +197,8 @@ class ScriptGenerationService:
         except Exception:
             is_auto = False
         plan = estimate_auto_script_length_plan(copywriting_text) if is_auto else parse_script_length_selection(sel_length)
+        if interleave_mode == "original_interleave":
+            plan = replace(plan, final_target_count=max(2, int(plan.final_target_count * 0.8)))
         chunks = compute_subtitle_chunks(
             subtitles=subtitles,
             desired_calls=plan.preferred_calls,
@@ -222,6 +228,7 @@ class ScriptGenerationService:
                     per_call_caps[int(chunk["idx"])],
                     original_ratio,
                     script_language,
+                    interleave_mode=interleave_mode,
                 )
 
         tasks = [generate_one(c) for c in chunks]
@@ -272,6 +279,7 @@ class ScriptGenerationService:
         sel_length: Optional[str] = None
         original_ratio: Optional[int] = None
         script_language: Optional[str] = None
+        interleave_mode: Optional[str] = None
         if project_id:
             try:
                 p = projects_store.get_project(project_id)
@@ -288,6 +296,8 @@ class ScriptGenerationService:
                             script_language = str(getattr(p, "script_language", None))
                         except Exception:
                             script_language = None
+                    if getattr(p, "interleave_mode", None):
+                        interleave_mode = str(getattr(p, "interleave_mode", None))
             except Exception:
                 sel_length = None
 
@@ -304,6 +314,8 @@ class ScriptGenerationService:
         except Exception:
             is_auto = False
         plan = estimate_auto_script_length_plan(copywriting_text) if is_auto else parse_script_length_selection(sel_length)
+        if interleave_mode == "original_interleave":
+            plan = replace(plan, final_target_count=max(2, int(plan.final_target_count * 0.8)))
         chunks = compute_subtitle_chunks(
             subtitles=scene_items,
             desired_calls=plan.preferred_calls,
@@ -333,6 +345,7 @@ class ScriptGenerationService:
                     per_call_caps[int(chunk["idx"])],
                     original_ratio,
                     script_language,
+                    interleave_mode=interleave_mode,
                 )
 
         tasks = [generate_one(c) for c in chunks]

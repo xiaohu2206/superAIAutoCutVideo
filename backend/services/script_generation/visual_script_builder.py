@@ -84,7 +84,12 @@ def _normalize_original_ratio(value: Optional[int]) -> int:
     return num
 
 
-def _build_ost_system_hint(original_ratio: Optional[int]) -> str:
+def _build_ost_system_hint(original_ratio: Optional[int], interleave_mode: Optional[str] = None) -> str:
+    if interleave_mode == "original_interleave":
+        return (
+            "原片穿插模式：所有 OST=1 项 narration 使用\"播放原片N\"格式（N从1递增），且每段 OST=0 解说后必须紧跟 OST=1。"
+            "解说-原片-解说-原片严格交替。"
+        )
     if original_ratio is None:
         return "原声片段标识：OST=1表示原声，OST=0表示解说。"
     ratio_val = _normalize_original_ratio(original_ratio)
@@ -119,13 +124,22 @@ def _build_fixed_visual_script_prompt(
     scenes_text: str,
     script_language: Optional[str],
     original_ratio: Optional[int] = None,
+    interleave_mode: Optional[str] = None,
 ) -> str:
     lang = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
     ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
 
     requirements_extra = ""
     ost_rules = ""
-    if ratio_val is None:
+    if interleave_mode == "original_interleave":
+        requirements_extra = "- 原片穿插模式：解说（OST=0）与原片（OST=1）严格交替，不得连续两段同一类型\n"
+        ost_rules = (
+            "## 原片穿插规则\n"
+            "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
+            "- OST=1 表示原声，narration 使用\"播放原片N\"格式（N从1递增）\n"
+            "- 每段解说后必须紧跟一段原声，形成解说-原片-解说-原片的交替节奏\n"
+        )
+    elif ratio_val is None:
         requirements_extra = "- 原声片段（OST=1）占比约 40%，解说片段（OST=0）占比约 60%\n"
         ost_rules = (
             "## 原声片段规则（约 40%）\n"
@@ -201,6 +215,7 @@ async def _generate_visual_script_chunk(
     target_items_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
     script_language: Optional[str] = None,
+    interleave_mode: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     scenes_text_lines: List[str] = []
     for s in scenes:
@@ -216,6 +231,7 @@ async def _generate_visual_script_chunk(
         scenes_text=scenes_text,
         script_language=script_language,
         original_ratio=original_ratio,
+        interleave_mode=interleave_mode,
     )
 
     system_prompt = (
@@ -224,9 +240,9 @@ async def _generate_visual_script_chunk(
     )
     ratio_for_blocks = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
     if narration_type == "movie_narration":
-        system_prompt += movie(lang_key, ratio_for_blocks)
+        system_prompt += movie(lang_key, ratio_for_blocks, interleave_mode=interleave_mode)
     else:
-        system_prompt += short_drama(lang_key, ratio_for_blocks)
+        system_prompt += short_drama(lang_key, ratio_for_blocks, interleave_mode=interleave_mode)
 
     messages: List[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
@@ -306,7 +322,7 @@ async def _generate_visual_script_chunk(
         0,
         ChatMessage(
             role="system",
-            content=_build_ost_system_hint(original_ratio),
+            content=_build_ost_system_hint(original_ratio, interleave_mode=interleave_mode),
         ),
     )
 

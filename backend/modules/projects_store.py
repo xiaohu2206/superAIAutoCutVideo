@@ -30,6 +30,7 @@ class Project(BaseModel):
     narration_type: str = Field(default="短剧解说")
     script_length: Optional[str] = None
     original_ratio: Optional[int] = None
+    interleave_mode: Optional[str] = Field(default="smart_interleave")
     script_language: str = Field(default="zh")
     copywriting_word_count: Optional[int] = None
     status: str = Field(default="draft")
@@ -152,6 +153,8 @@ class ProjectsStore:
                                 p["asr_language"] = None
                             if "original_ratio" not in p:
                                 p["original_ratio"] = None
+                            if "interleave_mode" not in p:
+                                p["interleave_mode"] = "smart_interleave"
                             if "script_language" not in p:
                                 p["script_language"] = "zh"
                             if "chunk_audio_paths" not in p:
@@ -269,6 +272,7 @@ class ProjectsStore:
             narration_type=effective_narration_type,
             script_length="auto",
             script_language="zh",
+            interleave_mode="smart_interleave",
             status="draft",
             video_path=None,
             video_paths=[],
@@ -314,6 +318,7 @@ class ProjectsStore:
                 "narration_type",
                 "script_length",
                 "original_ratio",
+                "interleave_mode",
                 "script_language",
                 "copywriting_word_count",
                 "status",
@@ -376,6 +381,13 @@ class ProjectsStore:
                     else:
                         s = str(v).strip().lower()
                         data[key] = s if s in ("low", "medium", "high") else None
+                elif key == "interleave_mode":
+                    v = updates.get(key)
+                    if v is None or v == "":
+                        data[key] = None
+                    else:
+                        s = str(v).strip().lower()
+                        data[key] = s if s in ("smart_interleave", "original_interleave") else "smart_interleave"
                 elif updates[key] is not None:
                     data[key] = updates[key]
                 elif key in {"script_length", "original_ratio"}:
@@ -386,6 +398,8 @@ class ProjectsStore:
             else:
                 t = str(data.get("omni_effect_tier") or "high").strip().lower()
                 data["omni_effect_tier"] = t if t in ("low", "medium", "high") else "high"
+            im = str(data.get("interleave_mode") or "").strip().lower()
+            data["interleave_mode"] = im if im in ("smart_interleave", "original_interleave") else "smart_interleave"
             data["updated_at"] = datetime.now().isoformat()
             try:
                 project = Project(**data)

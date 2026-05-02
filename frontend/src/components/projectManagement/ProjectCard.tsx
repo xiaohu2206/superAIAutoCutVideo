@@ -229,7 +229,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
           </div>
         )} */}
 
-        <div className="mt-auto flex flex-wrap gap-2">
+        <div className="mt-auto flex items-center gap-2 overflow-hidden">
           <div
             className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${typeConfig.bg} ${typeConfig.color}`}
           >
