@@ -34,7 +34,7 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # 在线视觉大模型调用：失败后重试间隔（秒），共 3 次重试即最多 4 次请求
 _ONLINE_VISION_INFER_RETRY_DELAYS_SEC: Tuple[float, float, float] = (1.0, 2.0, 3.0)
 # 并发调用大模型：相邻两次发起请求的最小间隔（秒），减轻瞬时打满上游
-_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0.1
+_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0.25
 
 
 class _OnlineVisionRunner:
@@ -193,6 +193,10 @@ _FRAME_ANALYSIS_PROMPT_FILES: Dict[str, str] = {
     "en": "frame_analysis_en.md",
 }
 
+_FRAME_ANALYSIS_BATCH_PROMPT_FILES: Dict[str, str] = {
+    "zh": "frame_analysis_multi_zh.md",
+}
+
 
 def _frame_analysis_prompts_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "omni_internal" / "prompts"
@@ -206,6 +210,27 @@ def load_frame_analysis_prompt(prompt_language: str, subtitle_text: str) -> str:
     with open(prompt_path, "r", encoding="utf-8") as f:
         template = f.read()
     return template.replace("{subtitle_text}", subtitle_text or "")
+
+
+def load_frame_analysis_batch_prompt(prompt_language: str, subtitle_texts: List[str]) -> str:
+    """Omni Step2 批量视觉分析：一次请求多个镜头，模板占位 `{batch_size}`、`{shots_subtitle_block}`。"""
+    language = str(prompt_language or "zh").strip().lower()
+    prompt_name = _FRAME_ANALYSIS_BATCH_PROMPT_FILES.get(
+        language, _FRAME_ANALYSIS_BATCH_PROMPT_FILES["zh"]
+    )
+    prompt_path = _frame_analysis_prompts_dir() / prompt_name
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        template = f.read()
+    n = len(subtitle_texts)
+    blocks: List[str] = []
+    for i, sub in enumerate(subtitle_texts):
+        st = (sub or "").strip()
+        if language == "en":
+            blocks.append(f"[Shot {i + 1}] Subtitles:\n{st if st else '(none)'}")
+        else:
+            blocks.append(f"【镜头 {i + 1}】字幕：\n{st if st else '（无）'}")
+    block = "\n\n".join(blocks)
+    return template.replace("{batch_size}", str(n)).replace("{shots_subtitle_block}", block)
 
 
 def _try_parse_vision_json(raw: str) -> Optional[Dict[str, Any]]:
