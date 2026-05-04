@@ -520,13 +520,40 @@ class TransNetV2Torch:
                 raise ModuleNotFoundError("For `predict_video` function `ffmpeg` command line tool must be installed.") from exc
             return p.communicate() + (p.returncode,)
 
+        def _run_cmd_with_decode_progress(cmd):
+            """ffmpeg communicate 可能长时间阻塞（整段 rawvideo 灌内存），期间周期性回调 2–9.9 供上层展示心跳。"""
+            if not progress_callback:
+                return _run_cmd(cmd)
+            holder: list = []
+
+            def worker():
+                try:
+                    holder.append(_run_cmd(cmd))
+                except Exception as e:
+                    holder.append(e)
+
+            th = threading.Thread(target=worker, daemon=True)
+            th.start()
+            ping = 2.0
+            while th.is_alive():
+                th.join(timeout=2.0)
+                if th.is_alive():
+                    ping = min(9.85, ping + 0.4)
+                    progress_callback(ping)
+            if not holder:
+                raise RuntimeError("ffmpeg decode thread produced no result")
+            first = holder[0]
+            if isinstance(first, BaseException):
+                raise first
+            return first
+
         cuda_prefix = get_ffmpeg_cuda_prefix()
         out = None
         err = b""
         rc = 0
         if cuda_prefix:
             logger.info("[TransNetV2][decode][GPU] predict_video ffmpeg hwaccel=cuda")
-            out, err, rc = _run_cmd(_build_cmd(cuda_prefix))
+            out, err, rc = _run_cmd_with_decode_progress(_build_cmd(cuda_prefix))
             if rc != 0 or not out:
                 msg = (err or b"")[:500].decode("utf-8", errors="ignore").strip()
                 logger.warning("[TransNetV2][decode][GPU->CPU] CUDA hwaccel 解码失败，回退 CPU: %s", msg or f"rc={rc}")
@@ -534,7 +561,7 @@ class TransNetV2Torch:
 
         if out is None:
             logger.info("[TransNetV2][decode][CPU] predict_video ffmpeg hwaccel=off")
-            out, err, rc = _run_cmd(_build_cmd(()))
+            out, err, rc = _run_cmd_with_decode_progress(_build_cmd(()))
             if rc != 0 or not out:
                 msg = (err or b"")[:2000].decode("utf-8", errors="ignore")
                 raise RuntimeError(msg or "ffmpeg_extract_failed")

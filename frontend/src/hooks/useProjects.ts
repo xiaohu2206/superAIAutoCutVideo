@@ -1034,7 +1034,10 @@ export const useProjectDetail = (
       !omniMultimodalResult &&
       !extractingOmniPipeline
     ) {
-      projectService.getOmniMultimodalResult(project.id).then(setOmniMultimodalResult).catch(console.error);
+      projectService.getOmniMultimodalResult(project.id).then((res) => {
+        console.log("OmniMultimodalResult:", res);
+               setOmniMultimodalResult(res);
+      }).catch(console.error);
     }
   }, [project?.id, project?.project_type, project?.omni_multimodal_json_path, omniMultimodalResult, extractingOmniPipeline]);
 

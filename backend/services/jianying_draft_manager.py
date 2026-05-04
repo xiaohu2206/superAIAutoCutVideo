@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import os
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from modules.projects_store import Project, projects_store
 from modules.ws_manager import manager
@@ -19,6 +19,8 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+
+from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
 
@@ -1026,11 +1028,18 @@ class JianyingDraftManager:
                                 except Exception:
                                     pass
 
+            ost_skipped: Set[int] = set()
+            ost_start_override: Dict[int, float] = {}
+
             for idx, seg in enumerate(segments, start=1):
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
+                if idx in ost_skipped:
+                    continue
                 st = float(seg.get("start_time") or 0.0)
                 et = float(seg.get("end_time") or 0.0)
+                if idx in ost_start_override:
+                    st = float(ost_start_override[idx])
                 if et <= st:
                     continue
                 dur = max(0.0, et - st)
@@ -1079,6 +1088,19 @@ class JianyingDraftManager:
                             shortage = ext - fwd
                             new_start = max(0.0, st - shortage)
                             new_dur = max(0.0, video_dur - new_start)
+                        next_seg = segments[idx] if idx < len(segments) else None
+                        _ost_res = resolve_narration_extend_vs_following_play_original(
+                            narration_new_start=new_start,
+                            narration_new_dur=new_dur,
+                            next_segment=next_seg,
+                            video_duration=float(video_dur or 0.0),
+                        )
+                        new_start = float(_ost_res.narration_start)
+                        new_dur = float(_ost_res.narration_duration)
+                        if _ost_res.skip_next_segment:
+                            ost_skipped.add(idx + 1)
+                        elif _ost_res.next_ost_start_override is not None:
+                            ost_start_override[idx + 1] = float(_ost_res.next_ost_start_override)
                     elif (adur + 0.05) < dur:
                         new_start = st
                         new_dur = adur

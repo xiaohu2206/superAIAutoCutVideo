@@ -152,7 +152,7 @@ class OmniShotMatchService:
             task_id=task_id,
             status="pending",
             progress=0,
-            message="准备镜头粗筛与重排…",
+            message="准备步骤二…",
             phase="preparing",
         )
 
@@ -242,7 +242,7 @@ class OmniShotMatchService:
                         task_id=task_id,
                         status="processing",
                         progress=4,
-                        message=f"本地 BGE 补全向量（解说 {missing_items} 条、镜头 {missing_shots} 个）…",
+                        message=f"本地（解说 {missing_items} 条、镜头 {missing_shots} 个）…",
                         phase="embedding_backfill",
                     )
                     fill_sem = asyncio.Semaphore(min(8, max(sem_n, 4)))
@@ -286,7 +286,7 @@ class OmniShotMatchService:
                     task_id=task_id,
                     status="processing",
                     progress=8,
-                    message="向量粗筛（cosine TopK）…",
+                    message="正在匹配…",
                     phase="embedding_topk",
                 )
 
@@ -341,7 +341,7 @@ class OmniShotMatchService:
                     task_id=task_id,
                     status="processing",
                     progress=35,
-                    message="粗排 + 精排（每条解说）…",
+                    message="正在排序…",
                     phase="rerank_fine",
                 )
 
@@ -395,7 +395,7 @@ class OmniShotMatchService:
                             task_id=task_id,
                             status="processing",
                             progress=min(92.0, pct),
-                            message=f"重排进度 {done}/{total}",
+                            message=f"排序进度 {done}/{total}",
                             phase="rerank_fine",
                         )
 
@@ -447,7 +447,7 @@ class OmniShotMatchService:
                     task_id=task_id,
                     status="completed",
                     progress=100,
-                    message="镜头粗筛与重排完成",
+                    message="排序完成",
                     phase="done",
                 )
             except asyncio.CancelledError:

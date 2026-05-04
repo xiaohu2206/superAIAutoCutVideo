@@ -24,6 +24,8 @@ from modules.ws_manager import manager
 from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
+from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
+
 logger = logging.getLogger(__name__)
 
 
@@ -389,6 +391,9 @@ class VideoGenerationService:
                     "text": text,
                     "is_original": is_original,
                     "clip_abs": clip_abs,
+                    "OST": seg.get("OST", 0),
+                    "discard": False,
+                    "needs_recut": False,
                 })
                 try:
                     base = 15
@@ -572,7 +577,24 @@ class VideoGenerationService:
                 if cancel_event.is_set():
                     raise asyncio.CancelledError()
 
+                if it.get("discard"):
+                    continue
+
                 if is_original:
+                    if it.get("needs_recut"):
+                        ok_r = await video_processor.cut_video_segment(
+                            str(input_abs),
+                            str(clip_abs),
+                            float(it["start"]),
+                            float(it["duration"]),
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
+                        )
+                        if not ok_r:
+                            raise RuntimeError(f"片段重剪失败: {idx}")
+                        it["needs_recut"] = False
                     clip_final = await _ensure_clip_video_not_longer_than_audio(clip_abs)
                     clip_paths.append(str(clip_final))
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
@@ -609,6 +631,37 @@ class VideoGenerationService:
                             shortage = ext - fwd
                             new_start = max(0.0, start - shortage)
                             new_dur = input_dur - new_start
+                        next_it = None
+                        for cand in segment_items:
+                            if int(cand["idx"]) == idx + 1:
+                                next_it = cand
+                                break
+                        next_seg_dict = None
+                        if next_it is not None:
+                            next_seg_dict = {
+                                "start_time": float(next_it["start"]),
+                                "end_time": float(next_it["end"]),
+                                "text": str(next_it.get("text") or ""),
+                                "OST": next_it.get("OST", 0),
+                            }
+                        _ost_res = resolve_narration_extend_vs_following_play_original(
+                            narration_new_start=new_start,
+                            narration_new_dur=new_dur,
+                            next_segment=next_seg_dict,
+                            video_duration=float(input_dur or 0.0),
+                        )
+                        new_start = float(_ost_res.narration_start)
+                        new_dur = float(_ost_res.narration_duration)
+                        if next_it is not None:
+                            if _ost_res.skip_next_segment:
+                                next_it["discard"] = True
+                            elif _ost_res.next_ost_start_override is not None:
+                                ns = float(_ost_res.next_ost_start_override)
+                                ne = float(next_it["end"])
+                                if ne > ns:
+                                    next_it["start"] = ns
+                                    next_it["duration"] = ne - ns
+                                    next_it["needs_recut"] = True
                         logger.info(f"DEBUG segment_extend idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2 = await video_processor.cut_video_segment(
                             str(input_abs),

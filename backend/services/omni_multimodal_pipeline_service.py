@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 项目专用：镜头拆分（TransNet + 字幕语义段）与多模态特征（在线视觉 + 本地 BGE 句向量）。
-与 extract_scene / visual 流程完全隔离；产出写入 uploads/omni_multimodal/{project_id}/。
+Omni 项目专用：镜头拆分（与 extract_scenes 同款分块 TransNetV2 + 字幕语义段）与多模态特征（在线视觉 + 本地 BGE 句向量）。
+与 extract_scene_service 共用 TransNet 模型与分块 predict_video 逻辑；产出仍写入 uploads/omni_multimodal/{project_id}/。
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
+import numpy as np
 from PIL import Image
 
 from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
@@ -32,14 +32,16 @@ from services.omni_internal.frame_extract import extract_quarter_frames
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json, write_encrypted_multimodal_json
 from services.omni_internal.shot_subtitle_mapper import ShotSubtitleMapper
 from services.ai_models.omni_local_bge_embedding import LOCAL_BGE_MODEL_DISPLAY_NAME, assert_local_bge_model_available, encode_text_async
-from services.omni_internal.transnet_omni import detect_shots_from_video
+from services.extract_scene_service import extract_scene_service
+from services.transnet_chunked_split import transnet_chunked_single_frame_predictions
 from services.omni_internal.types import Shot, Subtitle
 from services.ai_models.vision_frame_analysis_service import (
     _ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC,
     _ONLINE_VISION_INFER_RETRY_DELAYS_SEC,
     _OnlineVisionRunner,
     _try_parse_vision_json,
-    load_frame_analysis_batch_prompt,
+    load_frame_analysis_prompt,
+    optimize_image_for_online_vision,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,44 +198,6 @@ def _parse_visual_json(raw: str) -> Dict[str, Any]:
     return {"brief": text[:200], "desc": text, "action": "", "emotion": "", "scene": "", "objects": []}
 
 
-def _normalize_visual_from_parsed_dict(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    objs = parsed.get("objects")
-    if isinstance(objs, list):
-        objects = [str(x).strip() for x in objs if str(x).strip()]
-    else:
-        objects = []
-    return {
-        "brief": str(parsed.get("brief", "") or ""),
-        "desc": str(parsed.get("desc", "") or ""),
-        "action": str(parsed.get("action", "") or ""),
-        "emotion": str(parsed.get("emotion", "") or ""),
-        "scene": str(parsed.get("scene", "") or ""),
-        "objects": objects,
-    }
-
-
-def _parse_batch_visual_json(raw: str, n_expected: int) -> Optional[List[Dict[str, Any]]]:
-    parsed = _try_parse_vision_json(raw)
-    if not isinstance(parsed, dict):
-        return None
-    shots = parsed.get("shots")
-    if not isinstance(shots, list):
-        return None
-    out: List[Dict[str, Any]] = []
-    for i in range(n_expected):
-        if i < len(shots) and isinstance(shots[i], dict):
-            out.append(_normalize_visual_from_parsed_dict(shots[i]))
-        else:
-            out.append(_parse_visual_json(""))
-    if len(shots) != n_expected:
-        logger.warning(
-            "[omni-pipeline] Step2 批量视觉 JSON shots 长度=%s 与预期=%s 不一致",
-            len(shots),
-            n_expected,
-        )
-    return out
-
-
 def _visual_missing_core_fields(v: Dict[str, Any]) -> bool:
     return not (str(v.get("desc") or "").strip() or str(v.get("brief") or "").strip())
 
@@ -295,71 +259,17 @@ def _step1_task_progress_hook(scope: str, project_id: str, task_id: str) -> Call
     return hook
 
 
-def _video_frame_count_hint(video_abs: Path) -> int:
-    try:
-        cap = cv2.VideoCapture(str(video_abs))
-        if not cap.isOpened():
-            return 0
-        try:
-            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        finally:
-            cap.release()
-        return max(n, 0)
-    except Exception:
-        return 0
-
-
-def _make_transnet_progress_logger(
-    video_abs: Path,
-    *,
-    progress_hook: Optional[Callable[[str, float], None]] = None,
-) -> Callable[[float], None]:
-    """TransNet predict_video 回调：先约 1% 表示开始，随后约 10–100 为推理进度。"""
-    total = _video_frame_count_hint(video_abs)
-    last_mono = 0.0
-    last_bucket = -1
-    logged_init = False
-
-    def _transnet_progress_pct(inner_pct: float) -> float:
-        inner = max(0.0, min(100.0, float(inner_pct)))
-        return 6.0 + inner * 22.0 / 100.0
-
-    def cb(pct: float) -> None:
-        nonlocal last_mono, last_bucket, logged_init
-        p = float(pct)
-        now = time.monotonic()
-        if p <= 1.5:
-            if not logged_init:
-                init_msg = (
-                    f"Step1: TransNet 镜头分割已启动，总帧数约 {total}，准备抽帧/推理…"
-                    if total > 0
-                    else "Step1: TransNet 镜头分割已启动，准备抽帧/推理…"
-                )
-                logger.info(
-                    "[omni-pipeline] Step1 TransNet：已提交视频，总帧数约 %s，开始抽帧/推理…",
-                    total if total > 0 else "未知",
-                )
-                if progress_hook:
-                    progress_hook(init_msg, 5.5)
-                logged_init = True
-            return
-        inner = max(0.0, min(100.0, (p - 10.0) / 0.9)) if p >= 10.0 else 0.0
-        bucket = int(inner // 5)
-        if total > 0:
-            cur_frames = min(total, max(0, int(total * inner / 100.0)))
-            msg = f"Step1: TransNet 分割进度 {cur_frames}/{total} 帧（{inner:.1f}%）"
-            log_msg = f"TransNet 推理进度 约 {cur_frames}/{total} 帧 ({inner:.1f}%)"
-        else:
-            msg = f"Step1: TransNet 分割进度 {inner:.1f}%（总帧数未知）"
-            log_msg = f"TransNet 推理进度 {inner:.1f}%"
-        if bucket != last_bucket or (now - last_mono) >= 3.0:
-            last_mono = now
-            last_bucket = bucket
-            logger.info("[omni-pipeline] Step1 %s", log_msg)
-            if progress_hook:
-                progress_hook(msg, _transnet_progress_pct(inner))
-
-    return cb
+def _predictions_to_raw_shots(model: Any, single_frame_predictions: np.ndarray, fps: float) -> List[Shot]:
+    """与 extract_scenes 一致：帧级概率 -> scenes -> 秒级 Shot 列表。"""
+    if fps <= 0:
+        fps = 25.0
+    scenes_np = model.predictions_to_scenes(single_frame_predictions)
+    shots: List[Shot] = []
+    for idx, (start_f, end_f) in enumerate(scenes_np, start=1):
+        s_t = float(start_f) / fps
+        e_t = float(end_f) / fps
+        shots.append(Shot(start=s_t, end=e_t, shot_id=idx, subtitles=[]))
+    return shots
 
 
 def _build_step1_export(
@@ -416,35 +326,15 @@ def _build_step1_export(
     }
 
 
-def _step1_sync(
+def _step1_subtitles_and_export_sync(
     video_abs: Path,
     srt_abs: Path,
+    shots_raw: List[Shot],
+    fps: float,
     *,
     progress_hook: Optional[Callable[[str, float], None]] = None,
 ) -> Dict[str, Any]:
-    logger.info(
-        "[omni-pipeline] Step1 开始镜头检测 video=%s srt=%s",
-        video_abs,
-        srt_abs,
-    )
-    if progress_hook:
-        progress_hook("Step1: TransNet 镜头分割与字幕对齐，正在加载模型/读取视频…", 5.0)
-    shots_raw, _fps = detect_shots_from_video(
-        str(video_abs),
-        progress_callback=_make_transnet_progress_logger(video_abs, progress_hook=progress_hook),
-    )
-    if not shots_raw:
-        raise ValueError("未能检测到任何镜头边界")
-    logger.info(
-        "[omni-pipeline] Step1 TransNet 完成：原始镜头 %s 个，fps=%.3f",
-        len(shots_raw),
-        float(_fps or 0.0),
-    )
-    if progress_hook:
-        progress_hook(
-            f"Step1: TransNet 完成，原始镜头 {len(shots_raw)} 个（fps={float(_fps or 0.0):.2f}）",
-            28.0,
-        )
+    """TransNet 已得到 shots_raw 后：解析字幕、语义段、合并、导出（在工作线程运行）。"""
     segments = parse_srt(srt_abs)
     subtitles: List[Subtitle] = []
     for i, seg in enumerate(segments, start=1):
@@ -505,6 +395,173 @@ def _step1_sync(
         nshots = len(out.get("shots") or [])
         progress_hook(f"Step1: 分割完成，共 {nshots} 个语义段", 34.0)
     return out
+
+
+async def _step1_run_async(
+    *,
+    scope: str,
+    project_id: str,
+    task_id: str,
+    video_abs: Path,
+    srt_abs: Path,
+    progress_hook: Optional[Callable[[str, float], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Step1：镜头分割与 extract_scenes 一致（分块 predict_video + 重叠），模型与镜头提取服务共用
+    extract_scene_service._get_model()（CUDA 可用时走 TransNetV2Torch GPU）；字幕语义段仍在工作线程处理。
+    """
+    logger.info(
+        "[omni-pipeline] Step1 开始镜头检测 video=%s srt=%s",
+        video_abs,
+        srt_abs,
+    )
+    task_progress_store.set_state(
+        scope=scope,
+        project_id=project_id,
+        task_id=task_id,
+        status="processing",
+        progress=5.0,
+        message="Step1: 正在加载镜头模型…",
+        phase="step1",
+    )
+    if progress_hook:
+        progress_hook("Step1: 正在加载镜头模型…", 5.0)
+
+    model = extract_scene_service._get_model()
+    loop = asyncio.get_running_loop()
+    pred, fps, _total_frames = await transnet_chunked_single_frame_predictions(
+        video_abs,
+        model,
+        loop=loop,
+        scope=scope,
+        project_id=project_id,
+        task_id=task_id,
+        progress_lo=6.0,
+        progress_hi=27.0,
+        message_prefix="Step1: 镜头分割",
+        phase="step1",
+    )
+    if task_cancel_store.is_cancelled(scope, project_id, task_id):
+        raise asyncio.CancelledError()
+    shots_raw = _predictions_to_raw_shots(model, pred, fps)
+    if not shots_raw:
+        raise ValueError("未能检测到任何镜头边界")
+    logger.info(
+        "[omni-pipeline] Step1 TransNet 完成：原始镜头 %s 个，fps=%.3f",
+        len(shots_raw),
+        float(fps or 0.0),
+    )
+    if progress_hook:
+        progress_hook(
+            f"Step1: TransNet 完成，原始镜头 {len(shots_raw)} 个（fps={float(fps or 0.0):.2f}）",
+            28.0,
+        )
+
+    return await asyncio.to_thread(
+        _step1_subtitles_and_export_sync,
+        video_abs,
+        srt_abs,
+        shots_raw,
+        fps,
+        progress_hook=progress_hook,
+    )
+
+
+async def _ensure_step1_shot_segmentation(
+    *,
+    project_id: str,
+    task_id: str,
+    scope: str,
+    video_abs: Path,
+    subtitle_abs: Path,
+    work: Path,
+    mma: str,
+) -> Dict[str, Any]:
+    """
+    Omni Step1：镜头分割（TransNet + 字幕语义段）。复用 shots_step1.json 缓存或全量重跑，
+    落盘并同步项目的 omni_step1_json_path。
+    """
+    step1_path = work / "shots_step1.json"
+    step1: Optional[Dict[str, Any]] = None
+
+    if mma == "restart":
+        logger.info(
+            "[omni-pipeline] Step1 multimodal_action=restart，跳过历史分割缓存 project_id=%s task_id=%s",
+            project_id,
+            task_id,
+        )
+
+    if mma != "restart" and step1_path.exists():
+        prev_step1: Optional[Dict[str, Any]] = None
+        try:
+            prev_step1 = json.loads(step1_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(
+                "[omni-pipeline] Step1 读取历史 shots_step1.json 失败，将重新分割 project_id=%s err=%s",
+                project_id,
+                e,
+            )
+        if isinstance(prev_step1, dict) and _step1_snapshot_matches_sources(
+            prev_step1, video_abs, subtitle_abs
+        ):
+            step1 = prev_step1
+            nshots = len(step1.get("shots") or [])
+            logger.info(
+                "[omni-pipeline] Step1 复用已有镜头分割 project_id=%s task_id=%s 语义段=%s（视频/字幕指纹未变）",
+                project_id,
+                task_id,
+                nshots,
+            )
+            task_progress_store.set_state(
+                scope=scope,
+                project_id=project_id,
+                task_id=task_id,
+                status="processing",
+                progress=28,
+                message=f"Step1: 已复用历史分割（{nshots} 段），视频与字幕未修改",
+                phase="step1",
+            )
+        elif isinstance(prev_step1, dict):
+            logger.info(
+                "[omni-pipeline] Step1 历史分割与当前文件不一致，重新运行 TransNet project_id=%s task_id=%s",
+                project_id,
+                task_id,
+            )
+
+    if step1 is None:
+        step1 = await _step1_run_async(
+            scope=scope,
+            project_id=project_id,
+            task_id=task_id,
+            video_abs=video_abs,
+            srt_abs=subtitle_abs,
+            progress_hook=_step1_task_progress_hook(scope, project_id, task_id),
+        )
+        if task_cancel_store.is_cancelled(scope, project_id, task_id):
+            raise asyncio.CancelledError()
+        step1_path.write_text(json.dumps(step1, ensure_ascii=False, indent=2), encoding="utf-8")
+        step1_web = _to_web_path(step1_path)
+        projects_store.update_project(
+            project_id,
+            {
+                "omni_step1_json_path": step1_web,
+                "omni_pipeline_updated_at": datetime.now().isoformat(),
+            },
+        )
+    else:
+        step1_web = _to_web_path(step1_path)
+        cur = projects_store.get_project(project_id)
+        cur_web = str(getattr(cur, "omni_step1_json_path", "") or "") if cur else ""
+        if cur_web != step1_web:
+            projects_store.update_project(
+                project_id,
+                {
+                    "omni_step1_json_path": step1_web,
+                    "omni_pipeline_updated_at": datetime.now().isoformat(),
+                },
+            )
+
+    return step1
 
 
 class OmniMultimodalPipelineService:
@@ -595,84 +652,16 @@ class OmniMultimodalPipelineService:
 
                 work = _omni_project_dir(project_id)
                 work.mkdir(parents=True, exist_ok=True)
-                step1_path = work / "shots_step1.json"
 
-                step1: Optional[Dict[str, Any]] = None
-                if mma == "restart":
-                    logger.info(
-                        "[omni-pipeline] Step1 multimodal_action=restart，跳过历史分割缓存 project_id=%s task_id=%s",
-                        project_id,
-                        task_id,
-                    )
-                if mma != "restart" and step1_path.exists():
-                    try:
-                        prev_step1 = json.loads(step1_path.read_text(encoding="utf-8"))
-                    except Exception as e:
-                        logger.warning(
-                            "[omni-pipeline] Step1 读取历史 shots_step1.json 失败，将重新分割 project_id=%s err=%s",
-                            project_id,
-                            e,
-                        )
-                        prev_step1 = None
-                    if isinstance(prev_step1, dict) and _step1_snapshot_matches_sources(
-                        prev_step1, video_abs, subtitle_abs
-                    ):
-                        step1 = prev_step1
-                        nshots = len(step1.get("shots") or [])
-                        logger.info(
-                            "[omni-pipeline] Step1 复用已有镜头分割 project_id=%s task_id=%s 语义段=%s（视频/字幕指纹未变）",
-                            project_id,
-                            task_id,
-                            nshots,
-                        )
-                        task_progress_store.set_state(
-                            scope=self.SCOPE,
-                            project_id=project_id,
-                            task_id=task_id,
-                            status="processing",
-                            progress=28,
-                            message=f"Step1: 已复用历史分割（{nshots} 段），视频与字幕未修改",
-                            phase="step1",
-                        )
-                    elif isinstance(prev_step1, dict):
-                        logger.info(
-                            "[omni-pipeline] Step1 历史分割与当前文件不一致，重新运行 TransNet project_id=%s task_id=%s",
-                            project_id,
-                            task_id,
-                        )
-
-                if step1 is None:
-                    step1 = await asyncio.to_thread(
-                        partial(
-                            _step1_sync,
-                            video_abs,
-                            subtitle_abs,
-                            progress_hook=_step1_task_progress_hook(self.SCOPE, project_id, task_id),
-                        )
-                    )
-                    if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
-                        raise asyncio.CancelledError()
-                    step1_path.write_text(json.dumps(step1, ensure_ascii=False, indent=2), encoding="utf-8")
-                    step1_web = _to_web_path(step1_path)
-                    projects_store.update_project(
-                        project_id,
-                        {
-                            "omni_step1_json_path": step1_web,
-                            "omni_pipeline_updated_at": datetime.now().isoformat(),
-                        },
-                    )
-                else:
-                    step1_web = _to_web_path(step1_path)
-                    cur = projects_store.get_project(project_id)
-                    cur_web = str(getattr(cur, "omni_step1_json_path", "") or "") if cur else ""
-                    if cur_web != step1_web:
-                        projects_store.update_project(
-                            project_id,
-                            {
-                                "omni_step1_json_path": step1_web,
-                                "omni_pipeline_updated_at": datetime.now().isoformat(),
-                            },
-                        )
+                step1 = await _ensure_step1_shot_segmentation(
+                    project_id=project_id,
+                    task_id=task_id,
+                    scope=self.SCOPE,
+                    video_abs=video_abs,
+                    subtitle_abs=subtitle_abs,
+                    work=work,
+                    mma=mma,
+                )
 
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -797,6 +786,7 @@ class OmniMultimodalPipelineService:
                     message=prog_msg,
                     phase="step2",
                 )
+                last_reported_progress = float(min(94.0, pct0))
 
                 await _persist_snapshot(partial=True)
 
@@ -812,7 +802,7 @@ class OmniMultimodalPipelineService:
                 max_concurrency = 64
                 concurrency_cap = max(1, int(max_concurrency or 1))
                 extract_concurrency = min(8, concurrency_cap)
-                api_concurrency = min(32, concurrency_cap)
+                api_concurrency = min(64, concurrency_cap)
                 logger.info(
                     "[omni-pipeline] Step2 视觉模型调用入口 project_id=%s task_id=%s runner_id=%s provider=%s model=%s shots=%s pending=%s mma=%s extract_concurrency=%s api_concurrency=%s",
                     project_id,
@@ -840,8 +830,6 @@ class OmniMultimodalPipelineService:
                         infer_last_start_mono = time.monotonic()
 
                 vl_prompt_language = "zh"
-              
-                vl_batch_shots = 8
 
                 async def _embed_one(text: str) -> List[float]:
                     return await encode_text_async(text)
@@ -868,6 +856,37 @@ class OmniMultimodalPipelineService:
                         images.append(Image.open(fp).convert("RGB"))
                     return (idx, shot, frame_paths, images)
 
+                extract_total = len(pending_idx)
+                extract_prog_lock = asyncio.Lock()
+                extract_finished = 0
+
+                async def _extract_shot_with_frame_progress(
+                    idx: int, shot: Dict[str, Any]
+                ) -> Tuple[int, Dict[str, Any], List[str], List[Image.Image]]:
+                    nonlocal extract_finished, last_reported_progress
+                    bundle = await _extract_shot_for_step2(idx, shot)
+                    async with extract_prog_lock:
+                        extract_finished += 1
+                        k = extract_finished
+                        span_to_fill = max(0.0, min(94.0, 95.0) - pct0)
+                        bump = span_to_fill * 0.18 * (k / max(1, extract_total))
+                        last_reported_progress = max(
+                            last_reported_progress,
+                            min(94.0, pct0 + bump),
+                        )
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=last_reported_progress,
+                            message=(
+                                f"Step2: 正在抽帧 {k}/{extract_total}（语义段），随后视觉理解…"
+                            ),
+                            phase="step2",
+                        )
+                    return bundle
+
                 try:
                     logger.info(
                         "[omni-pipeline] Step2 阶段一抽帧开始 project_id=%s task_id=%s pending=%s extract_concurrency=%s",
@@ -876,7 +895,18 @@ class OmniMultimodalPipelineService:
                         len(pending_idx),
                         extract_concurrency,
                     )
-                    bundles = await asyncio.gather(*(_extract_shot_for_step2(i, shots[i]) for i in pending_idx))
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=last_reported_progress,
+                        message=f"Step2: 开始抽帧（共 {extract_total} 段）…",
+                        phase="step2",
+                    )
+                    bundles = await asyncio.gather(
+                        *(_extract_shot_with_frame_progress(i, shots[i]) for i in pending_idx)
+                    )
                 finally:
                     try:
                         extract_executor.shutdown(wait=True, cancel_futures=True)
@@ -894,7 +924,7 @@ class OmniMultimodalPipelineService:
                     *,
                     progress_note: str = "",
                 ) -> None:
-                    nonlocal done_count
+                    nonlocal done_count, last_reported_progress
                     sub_text = str(shot.get("subtitle_full_text") or "")
                     summary = _build_shot_embedding_summary(visual, sub_text, vl_prompt_language)
                     embedding = await _embed_one(summary)
@@ -910,7 +940,8 @@ class OmniMultimodalPipelineService:
                     async with lock:
                         enriched[idx] = item
                         done_count += 1
-                        pct = 35.0 + 60.0 * (done_count / max(1, len(shots)))
+                        vision_pct = min(95.0, 35.0 + 60.0 * (done_count / max(1, len(shots))))
+                        last_reported_progress = max(last_reported_progress, vision_pct)
                         msg = f"Step2: 多模态处理 {done_count}/{len(shots)}"
                         if progress_note:
                             msg += progress_note
@@ -919,7 +950,7 @@ class OmniMultimodalPipelineService:
                             project_id=project_id,
                             task_id=task_id,
                             status="processing",
-                            progress=min(95.0, pct),
+                            progress=last_reported_progress,
                             message=msg,
                             phase="step2",
                         )
@@ -931,7 +962,7 @@ class OmniMultimodalPipelineService:
                     frame_paths: List[str],
                     last_fail: BaseException,
                 ) -> None:
-                    nonlocal done_count, vl_policy_blocked_count
+                    nonlocal done_count, vl_policy_blocked_count, last_reported_progress
                     sub_text = str(shot.get("subtitle_full_text") or "")
                     visual = _parse_visual_json("")
                     summary = _build_shot_embedding_summary(visual, sub_text, vl_prompt_language)
@@ -961,13 +992,14 @@ class OmniMultimodalPipelineService:
                         enriched[idx] = item
                         vl_policy_blocked_count += 1
                         done_count += 1
-                        pct = 35.0 + 60.0 * (done_count / max(1, len(shots)))
+                        vision_pct = min(95.0, 35.0 + 60.0 * (done_count / max(1, len(shots))))
+                        last_reported_progress = max(last_reported_progress, vision_pct)
                         task_progress_store.set_state(
                             scope=self.SCOPE,
                             project_id=project_id,
                             task_id=task_id,
                             status="processing",
-                            progress=min(95.0, pct),
+                            progress=last_reported_progress,
                             message=f"Step2: 多模态处理 {done_count}/{len(shots)}（含策略降级）",
                             phase="step2",
                         )
@@ -1042,156 +1074,106 @@ class OmniMultimodalPipelineService:
                     *,
                     allow_split_fallback: bool = True,
                 ) -> None:
+                    """每镜头一次 infer_multi：与 analyze_scenes_online.infer_single_scene_online 一致（缩图 + 单镜头 prompt + infer_wall_sec 超时）。"""
                     if not chunk:
                         return
-                    n_shots = len(chunk)
-                    idxs = [c[0] for c in chunk]
-                    subs = [str(c[1].get("subtitle_full_text") or "") for c in chunk]
-                    flat_images: List[Image.Image] = []
-                    for _i, _sh, _fps, imgs in chunk:
-                        flat_images.extend(imgs)
-                    prompt = load_frame_analysis_batch_prompt(vl_prompt_language, subs)
-                    chunk_timeout = float(infer_wall_sec) * max(1.0, 1.0 + (n_shots - 1) * 0.45)
-                    log_kind = "批量" if n_shots > 1 else "单镜头"
+                    if len(chunk) > 1:
+                        for bundle in chunk:
+                            await _infer_embed_chunk([bundle], allow_split_fallback=allow_split_fallback)
+                        return
+
+                    idx, shot, frame_paths, imgs = chunk[0]
+                    sub_text = str(shot.get("subtitle_full_text") or "")
+                    optimized_imgs = [optimize_image_for_online_vision(im, max_edge=1024) for im in imgs]
+                    prompt = load_frame_analysis_prompt(vl_prompt_language, sub_text)
+                    chunk_timeout = float(infer_wall_sec)
                     n_retry_rounds = len(_ONLINE_VISION_INFER_RETRY_DELAYS_SEC)
 
                     logger.info(
-                        "[omni-pipeline] Step2 %s VL 请求开始 project_id=%s task_id=%s runner_id=%s n_shots=%s n_images=%s idxs=%s timeout=%.1fs vl_batch_shots=%s",
-                        log_kind,
+                        "[omni-pipeline] Step2 单镜头 VL 请求开始 project_id=%s task_id=%s runner_id=%s shot_idx=%s n_images=%s timeout=%.1fs",
                         project_id,
                         task_id,
                         id(runner),
-                        n_shots,
-                        len(flat_images),
-                        idxs,
+                        idx,
+                        len(optimized_imgs),
                         chunk_timeout,
-                        vl_batch_shots,
                     )
 
                     raw, last_fail, last_was_timeout = await _run_step2_infer_multi_retries(
-                        flat_images,
+                        optimized_imgs,
                         prompt,
                         chunk_timeout,
-                        log_kind=log_kind,
-                        idxs=idxs,
+                        log_kind="单镜头",
+                        idxs=[idx],
                     )
-
-                    async def _split_per_shot(reason: str) -> None:
-                        logger.warning(
-                            "[omni-pipeline] Step2 %sVL %s，改为逐镜头重试 project_id=%s idxs=%s",
-                            log_kind,
-                            reason,
-                            project_id,
-                            idxs,
-                        )
-                        for bundle in chunk:
-                            await _infer_embed_chunk([bundle], allow_split_fallback=False)
 
                     if raw is None:
                         if last_fail is not None and (not last_was_timeout) and _is_upstream_vision_policy_block(last_fail):
-                            if n_shots == 1:
-                                bx, bshot, bfps, _bim = chunk[0]
-                                logger.warning(
-                                    "[omni-pipeline] Step2 上游视觉内容策略拦截，改为仅字幕/占位语义向量: project_id=%s task_id=%s shot_idx=%s err=%s",
-                                    project_id,
-                                    task_id,
-                                    bx,
-                                    last_fail,
-                                )
-                                await _finalize_step2_policy_blocked(bx, bshot, bfps, last_fail)
-                                return
-                            if allow_split_fallback:
-                                await _split_per_shot("上游内容策略拦截")
-                                return
-                            for bx, bshot, bfps, _bim in chunk:
-                                await _finalize_step2_policy_blocked(bx, bshot, bfps, last_fail)
+                            logger.warning(
+                                "[omni-pipeline] Step2 上游视觉内容策略拦截，改为仅字幕/占位语义向量: project_id=%s task_id=%s shot_idx=%s err=%s",
+                                project_id,
+                                task_id,
+                                idx,
+                                last_fail,
+                            )
+                            await _finalize_step2_policy_blocked(idx, shot, frame_paths, last_fail)
                             return
                         if last_was_timeout:
-                            if n_shots == 1:
-                                msg = f"单次模型调用超过{int(chunk_timeout)}秒未返回（已重试{n_retry_rounds}次）"
-                                logger.error(
-                                    "[omni-pipeline] Step2 单镜头在线视觉超时：project_id=%s task_id=%s shot_idx=%s %s",
-                                    project_id,
-                                    task_id,
-                                    idxs[0],
-                                    msg,
-                                )
-                                raise TimeoutError(msg) from last_fail
-                            if allow_split_fallback:
-                                await _split_per_shot(
-                                    f"超时（已按批量阈值 {chunk_timeout:.0f}s 重试 {n_retry_rounds} 次）"
-                                )
-                                return
-                            msg = (
-                                f"批量模型调用超过{int(chunk_timeout)}秒未返回（已重试{n_retry_rounds}次），"
-                                f"idxs={idxs}"
+                            msg = f"单次模型调用超过{int(chunk_timeout)}秒未返回（已重试{n_retry_rounds}次）"
+                            logger.error(
+                                "[omni-pipeline] Step2 单镜头在线视觉超时：project_id=%s task_id=%s shot_idx=%s %s",
+                                project_id,
+                                task_id,
+                                idx,
+                                msg,
                             )
                             raise TimeoutError(msg) from last_fail
                         if last_fail is not None:
                             logger.error(
-                                "[omni-pipeline] Step2 %s在线视觉失败：project_id=%s task_id=%s idxs=%s 错误=%s",
-                                log_kind,
+                                "[omni-pipeline] Step2 单镜头在线视觉失败：project_id=%s task_id=%s shot_idx=%s 错误=%s",
                                 project_id,
                                 task_id,
-                                idxs,
+                                idx,
                                 last_fail,
                             )
                             raise last_fail
                         raise RuntimeError("在线视觉调用未返回结果且无异常信息")
 
-                    parsed_list = _parse_batch_visual_json(raw, n_shots)
-                    if parsed_list is None:
-                        if allow_split_fallback and n_shots > 1:
-                            await _split_per_shot("JSON 解析失败或非预期结构")
+                    visual = _parse_visual_json(raw)
+                    if _visual_missing_core_fields(visual):
+                        if allow_split_fallback:
+                            await _infer_embed_chunk(
+                                [(idx, shot, frame_paths, imgs)],
+                                allow_split_fallback=False,
+                            )
                             return
-                        if n_shots == 1:
-                            ox, oshot, ofps, _oim = chunk[0]
-                            visual = _parse_visual_json(raw)
-                            await _finalize_step2_success(ox, oshot, ofps, visual)
-                            return
-                        for ox, oshot, ofps, _oim in chunk:
-                            await _finalize_step2_success(ox, oshot, ofps, _parse_visual_json(""))
+                        await _finalize_step2_success(idx, shot, frame_paths, _parse_visual_json(""))
                         return
 
-                    for slot, (idx, shot, fps, imgs) in enumerate(chunk):
-                        vis = parsed_list[slot]
-                        if _visual_missing_core_fields(vis):
-                            if allow_split_fallback:
-                                await _infer_embed_chunk([(idx, shot, fps, imgs)], allow_split_fallback=False)
-                            else:
-                                await _finalize_step2_success(idx, shot, fps, _parse_visual_json(""))
-                        else:
-                            await _finalize_step2_success(idx, shot, fps, vis)
+                    await _finalize_step2_success(idx, shot, frame_paths, visual)
 
                     logger.info(
-                        "[omni-pipeline] Step2 %s VL 请求结束 project_id=%s task_id=%s runner_id=%s idxs=%s",
-                        log_kind,
+                        "[omni-pipeline] Step2 单镜头 VL 请求结束 project_id=%s task_id=%s runner_id=%s shot_idx=%s",
                         project_id,
                         task_id,
                         id(runner),
-                        idxs,
+                        idx,
                     )
-
-                batch_chunks: List[List[Tuple[int, Dict[str, Any], List[str], List[Image.Image]]]] = [
-                    bundles[i : i + vl_batch_shots] for i in range(0, len(bundles), vl_batch_shots)
-                ]
 
                 try:
                     logger.info(
-                        "[omni-pipeline] Step2 阶段二推理 gather 开始 project_id=%s task_id=%s runner_id=%s n_batches=%s n_shots_pending=%s api_concurrency=%s vl_batch_shots=%s",
+                        "[omni-pipeline] Step2 阶段二推理 gather 开始 project_id=%s task_id=%s runner_id=%s n_infer_tasks=%s（每镜头一次 VL）api_concurrency=%s",
                         project_id,
                         task_id,
                         id(runner),
-                        len(batch_chunks),
                         len(bundles),
                         api_concurrency,
-                        vl_batch_shots,
                     )
                     # 必须用 return_exceptions=True：默认 gather 在首个子任务抛错时会立刻返回，
                     # 但 finally 仍会关闭 runner，其余仍在跑的推理会打到已关闭的 httpx 客户端，
                     # 从而刷屏「Cannot send a request, as the client has been closed」。
                     step2_results = await asyncio.gather(
-                        *(_infer_embed_chunk(ch) for ch in batch_chunks),
+                        *(_infer_embed_chunk([b]) for b in bundles),
                         return_exceptions=True,
                     )
                     for res in step2_results:

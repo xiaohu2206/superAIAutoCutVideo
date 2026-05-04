@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+import threading
 import time
 import subprocess
 from typing import Callable, Optional
@@ -167,7 +168,32 @@ class TransNetV2:
             p = subprocess.Popen(cmd, **kwargs)
         except FileNotFoundError as exc:
             raise ModuleNotFoundError("For `predict_video` function `ffmpeg` command line tool must be installed.") from exc
-        out, err = p.communicate()
+
+        if progress_callback:
+            holder: list = []
+
+            def worker():
+                try:
+                    holder.append(p.communicate())
+                except Exception as e:
+                    holder.append(e)
+
+            th = threading.Thread(target=worker, daemon=True)
+            th.start()
+            ping = 2.0
+            while th.is_alive():
+                th.join(timeout=2.0)
+                if th.is_alive():
+                    ping = min(9.85, ping + 0.4)
+                    progress_callback(ping)
+            if not holder:
+                raise RuntimeError("ffmpeg decode thread produced no result")
+            first = holder[0]
+            if isinstance(first, BaseException):
+                raise first
+            out, err = first
+        else:
+            out, err = p.communicate()
         if p.returncode != 0 or not out:
             msg = (err or b"")[:2000].decode("utf-8", errors="ignore")
             raise RuntimeError(msg or "ffmpeg_extract_failed")

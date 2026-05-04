@@ -15,10 +15,7 @@ function shotSubtitle(s: OmniMultimodalShot): string {
 function formatVisual(v: OmniMultimodalShot["visual"]): string {
   if (!v) return "";
   const parts = [
-    v.brief && `摘要：${v.brief}`,
-    v.desc && `画面：${v.desc}`,
-    v.action && `动作：${v.action}`,
-    v.emotion && `情绪：${v.emotion}`,
+    v.brief && `${v.brief}`,
   ].filter(Boolean);
   return parts.join("\n");
 }

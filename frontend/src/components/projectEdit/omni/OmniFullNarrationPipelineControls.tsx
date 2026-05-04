@@ -84,7 +84,7 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
         {busy && omniPipelineBusy ? (
           <>
             <Loader className="h-5 w-5 mr-2 animate-spin" />
-            全链路生成中…
+            生成中…
           </>
         ) : (
           <>生成解说脚本</>

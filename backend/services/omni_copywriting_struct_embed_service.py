@@ -207,7 +207,7 @@ class OmniCopywritingStructEmbedService:
             task_id=task_id,
             status="pending",
             progress=0,
-            message="准备文案结构化与向量化…",
+            message="正在解析内容…",
             phase="preparing",
         )
 
@@ -378,7 +378,7 @@ class OmniCopywritingStructEmbedService:
                     task_id=task_id,
                     status="completed",
                     progress=100,
-                    message="文案结构化与向量化完成",
+                    message="任务已完成",
                     phase="done",
                 )
             except asyncio.CancelledError:

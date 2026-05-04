@@ -52,7 +52,7 @@ def build_original_ratio_system_addon(original_ratio: Optional[int], interleave_
             "穿插模式为原片穿插：按解说文案顺序生成脚本，在每段解说后穿插标注'播放原片N'的原声片段（N为序号递增）。"
             "OST=0表示解说，narration填写对应的解说文案内容；"
             "OST=1表示原声，narration使用'播放原片N'格式（N从1递增）。"
-            "各条解说文案之间必须间隔原声片段，形成解说-原片-解说-原片的交替节奏。"
+            "各条解说文案之间一般间隔原声片段，形成解说-原片-解说-原片的交替节奏，但是解说片段之间需要合并还是可以进行合并的，避免解说片段太分散问题，因为解说片段本身的拆分可能不合理"
         )
 
     if original_ratio is None:

@@ -8,7 +8,7 @@ import threading
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Dict, List, Optional, Tuple, Union
 import base64
 from io import BytesIO
 
@@ -16,7 +16,7 @@ import cv2
 from PIL import Image
 
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from modules.ffmpeg_utils import resolve_ffmpeg_bin
+from modules.ffmpeg_utils import get_ffmpeg_cuda_prefix, resolve_ffmpeg_bin
 from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
 from modules.task_progress_store import task_progress_store
@@ -34,7 +34,32 @@ WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # 在线视觉大模型调用：失败后重试间隔（秒），共 3 次重试即最多 4 次请求
 _ONLINE_VISION_INFER_RETRY_DELAYS_SEC: Tuple[float, float, float] = (1.0, 2.0, 3.0)
 # 并发调用大模型：相邻两次发起请求的最小间隔（秒），减轻瞬时打满上游
-_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0.25
+_ONLINE_VISION_INFER_CONCURRENT_INTERVAL_SEC = 0
+
+
+def optimize_image_for_online_vision(image_input: Union[str, Image.Image], max_edge: int = 1024) -> Image.Image:
+    """缩放到最长边不超过 max_edge（默认与在线视觉分析一致），用于减小上传与推理开销。"""
+    if isinstance(image_input, str):
+        try:
+            img = Image.open(image_input)
+        except OSError as e:
+            raise ValueError(f"Unable to load image from {image_input}: {e}") from e
+    elif isinstance(image_input, Image.Image):
+        img = image_input
+    else:
+        raise ValueError("Input must be a file path string or a PIL Image object")
+
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    width, height = img.size
+    if max(width, height) > max_edge:
+        ratio = max_edge / max(width, height)
+        new_width = int(width * ratio)
+        new_height = int(height * ratio)
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    return img
 
 
 class _OnlineVisionRunner:
@@ -596,31 +621,8 @@ class VisionFrameAnalyzer:
             self._online_runner = None
 
     def _optimize_image(self, image_input: Union[str, Image.Image], max_edge: int = 1024) -> Image.Image:
-        """
-        Optimizes an image for Moondream model inference by resizing it.
-        """
-        if isinstance(image_input, str):
-            try:
-                img = Image.open(image_input)
-            except IOError as e:
-                raise ValueError(f"Unable to load image from {image_input}: {e}")
-        elif isinstance(image_input, Image.Image):
-            img = image_input
-        else:
-            raise ValueError("Input must be a file path string or a PIL Image object")
-
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-
-        width, height = img.size
-        
-        if max(width, height) > max_edge:
-            ratio = max_edge / max(width, height)
-            new_width = int(width * ratio)
-            new_height = int(height * ratio)
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-        return img
+        """Optimizes an image for Moondream model inference by resizing it."""
+        return optimize_image_for_online_vision(image_input, max_edge=max_edge)
 
     def _read_frame_from_capture(
         self,
@@ -739,32 +741,30 @@ class VisionFrameAnalyzer:
                 return None, {"code": "ffmpeg_exception", "message": str(e)}
 
         ts = f"{float(seek_t):.3f}"
-        cmd_fast = [
-            ffmpeg_bin,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-ss",
-            ts,
-            "-i",
-            video_path,
-            "-frames:v",
-            "1",
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "pipe:1",
-        ]
-        out, err = run_one(cmd_fast)
-        if out is None:
-            cmd_acc = [
-                ffmpeg_bin,
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-nostdin",
+        head = [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostdin"]
+        cuda_prefix = get_ffmpeg_cuda_prefix()
+
+        def cmd_fast(hw: Tuple[str, ...]) -> List[str]:
+            return [
+                *head,
+                *hw,
+                "-ss",
+                ts,
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "mjpeg",
+                "pipe:1",
+            ]
+
+        def cmd_acc(hw: Tuple[str, ...]) -> List[str]:
+            return [
+                *head,
+                *hw,
                 "-i",
                 video_path,
                 "-ss",
@@ -777,8 +777,33 @@ class VisionFrameAnalyzer:
                 "mjpeg",
                 "pipe:1",
             ]
-            out, err2 = run_one(cmd_acc)
-            err = err2 if err2 else err
+
+        attempt_seq: List[Tuple[str, List[str]]] = []
+        if cuda_prefix:
+            attempt_seq.append(("fast_cuda", cmd_fast(cuda_prefix)))
+        attempt_seq.append(("fast_cpu", cmd_fast(())))
+        if cuda_prefix:
+            attempt_seq.append(("acc_cuda", cmd_acc(cuda_prefix)))
+        attempt_seq.append(("acc_cpu", cmd_acc(())))
+
+        out: Optional[bytes] = None
+        err: Optional[Dict[str, Any]] = None
+        last_cuda_fail_logged = False
+        for tag, args in attempt_seq:
+            out, err = run_one(args)
+            if out is not None:
+                break
+            if cuda_prefix and tag.endswith("_cuda") and not last_cuda_fail_logged:
+                stderr_hint = ""
+                if isinstance(err, dict):
+                    stderr_hint = str(err.get("stderr") or "")[:400]
+                logger.warning(
+                    "[vision][ffmpeg][GPU->CPU] %s 抽帧失败，尝试后续回退: seek=%s err=%s",
+                    tag,
+                    ts,
+                    stderr_hint or err,
+                )
+                last_cuda_fail_logged = True
         if out is None:
             return None, err
         try:
@@ -925,22 +950,63 @@ class VisionFrameAnalyzer:
         loop = asyncio.get_running_loop()
         total_to_analyze = len(to_analyze_indices)
         extract_done_count = 0
+        extract_progress_lock = asyncio.Lock()
+        last_extract_reported: List[float] = [90.0]
 
         def _update_extract_progress_state() -> None:
             if not task_id or total_to_analyze <= 0:
                 return
             progress = 90 + (extract_done_count / total_to_analyze) * 5
+            last_extract_reported[0] = max(last_extract_reported[0], progress)
             task_progress_store.set_state(
                 scope=self.SCOPE,
                 project_id=project_id,
                 task_id=task_id,
                 status="processing",
-                progress=progress,
+                progress=last_extract_reported[0],
                 message=f"在线视觉抽帧中: {extract_done_count}/{total_to_analyze}",
                 phase="analyze_vision_online_extract",
             )
 
         extract_executor = ThreadPoolExecutor(max_workers=extract_concurrency, thread_name_prefix="online_vision_extract")
+
+        async def _await_executor_with_extract_heartbeat(
+            fut: Awaitable[Any],
+            idx: int,
+            seg_idx: int,
+            n_seg: int,
+        ) -> Any:
+            """与 Omni TransNet predict_video 一致：底层 ffmpeg/opencv 可能长时间阻塞，此处每约 2s 心跳上报进度。"""
+            if not task_id:
+                return await fut
+            ping_raw = 2.0
+            while True:
+                try:
+                    return await asyncio.wait_for(asyncio.shield(fut), timeout=2.0)
+                except asyncio.TimeoutError:
+                    if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                        raise asyncio.CancelledError("任务已取消")
+                    ping_raw = min(9.85, ping_raw + 0.4)
+                    frac = max(0.0, min(1.0, (ping_raw - 2.0) / 7.85)) if ping_raw >= 2.0 else 0.0
+                    sub_frac = min(0.92, frac)
+                    async with extract_progress_lock:
+                        edc = extract_done_count
+                        seg_weight = (seg_idx - 1 + sub_frac) / max(1, n_seg)
+                        overall = (edc + seg_weight) / max(1, total_to_analyze)
+                        prog = min(94.9, 90.0 + overall * 5.0)
+                        last_extract_reported[0] = max(last_extract_reported[0], prog)
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=last_extract_reported[0],
+                            message=(
+                                f"在线视觉：镜头 {idx} 分段 {seg_idx}/{n_seg} "
+                                f"正在解码抽帧（ffmpeg），随后模型推理…"
+                            ),
+                            phase="analyze_vision_online_extract",
+                        )
 
         def _extract_segment_sync(
             v_path: str, t_s: float, t_e: float, scene_idx: int, scheduled_at: float
@@ -998,7 +1064,7 @@ class VisionFrameAnalyzer:
                     float(t_start),
                     float(t_end),
                 )
-                extract_res = await loop.run_in_executor(
+                fut = loop.run_in_executor(
                     extract_executor,
                     _extract_segment_sync,
                     video_path,
@@ -1006,6 +1072,9 @@ class VisionFrameAnalyzer:
                     t_end,
                     idx,
                     t0,
+                )
+                extract_res = await _await_executor_with_extract_heartbeat(
+                    fut, idx, seg_idx, len(segments)
                 )
                 t1 = time.time()
                 extract_elapsed = t1 - t0
