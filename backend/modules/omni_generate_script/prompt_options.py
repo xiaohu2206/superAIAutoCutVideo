@@ -56,7 +56,7 @@ def build_original_ratio_system_addon(original_ratio: Optional[int], interleave_
         )
 
     if original_ratio is None:
-        return "原声片段（OST=1）占比约 40%，解说片段（OST=0）占比约 60%\n"
+        return "原声片段（OST=1），解说片段（OST=0）\n"
 
     ratio_val = normalize_original_ratio(original_ratio)
     if ratio_val <= 0:

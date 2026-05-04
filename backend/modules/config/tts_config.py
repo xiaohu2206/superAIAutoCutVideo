@@ -369,17 +369,17 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
-             {
-                'provider': 'indextts',
-                'display_name': 'IndexTTS(本地)',
-                'description': '本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
-                'required_fields': [],
-                'optional_fields': []
-            },
             {
                 'provider': 'omnivoice_tts',
                 'display_name': 'OmniVoice(本地)',
                 'description': '局域网 OmniVoice HTTP 服务，需先在「连接 OmniVoice」中连接成功',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'indextts',
+                'display_name': 'IndexTTS(本地)',
+                'description': '（要求8G显存以上）本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
                 'required_fields': [],
                 'optional_fields': []
             },

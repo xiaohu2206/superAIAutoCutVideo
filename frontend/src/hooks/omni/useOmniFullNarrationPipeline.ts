@@ -333,6 +333,7 @@ export function useOmniFullNarrationPipeline(
       return;
     }
     if (omniStepTestBusy) return;
+    if (omniPipelineBusy) return;
 
     const apiToken = (token?.trim() || readSacvAuthTokenTrimmed());
     if (!apiToken) {
@@ -340,12 +341,15 @@ export function useOmniFullNarrationPipeline(
       onShowLogin?.();
       return;
     }
+
+    setOmniPipelineBusy(true);
     try {
       const deviceId = await fetchLicenseClientDeviceId();
       const licenses = await fetchMyLicenses(apiToken);
       if (!hasActiveLicenseForThisDevice(licenses, deviceId)) {
         message.error("请先在个人中心绑定处于生效中且包含本机的 License。");
         onShowProfile?.();
+        setOmniPipelineBusy(false);
         return;
       }
     } catch (e) {
@@ -355,10 +359,10 @@ export function useOmniFullNarrationPipeline(
         else onShowProfile?.();
       }
       message.error(msg);
+      setOmniPipelineBusy(false);
       return;
     }
 
-    setOmniPipelineBusy(true);
     setOmniPipelineProgress(0);
     setOmniPipelineLogs([]);
     setOmniPipelineTaskId(null);
@@ -384,6 +388,7 @@ export function useOmniFullNarrationPipeline(
     }
   }, [
     isAuthenticated,
+    omniPipelineBusy,
     omniPipelineDisabled,
     omniPipelineDisabledReason,
     omniStepTestBusy,

@@ -276,7 +276,7 @@ class OmniFullNarrationPipelineService:
                     task_id=tid1,
                     master_task_id=task_id,
                     step_index=0,
-                    step_label="文案结构化+向量",
+                    step_label="文案处理",
                 )
 
                 # 2) 镜头匹配

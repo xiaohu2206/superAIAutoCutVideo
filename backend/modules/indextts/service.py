@@ -57,7 +57,7 @@ class IndexTTSService:
                     await download_task_audio(base, prefix, task_id, wav_tmp)
                     ok = await wav_to_mp3_with_ffmpeg(wav_tmp, out)
                     if not ok:
-                        logger.warning("ffmpeg 不可用，回退为直接输出 wav 数据")
+                        logger.warning("wav 转 mp3 失败，回退为直接输出 wav 数据")
                         out.write_bytes(wav_tmp.read_bytes())
             else:
                 await download_task_audio(base, prefix, task_id, out)

@@ -239,7 +239,7 @@ class OmniCopywritingStructEmbedService:
                     task_id=task_id,
                     status="processing",
                     progress=5,
-                    message=f"结构化中（共 {len(chunks)} 段）…",
+                    message=f"文案处理中（共 {len(chunks)} 段）…",
                     phase="structuring",
                 )
 

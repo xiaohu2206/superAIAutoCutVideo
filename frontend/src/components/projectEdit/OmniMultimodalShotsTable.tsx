@@ -16,14 +16,15 @@ function formatVisual(v: OmniMultimodalShot["visual"]): string {
   if (!v) return "";
   const parts = [
     v.brief && `${v.brief}`,
+    // v.desc && `画面：${v.desc}`,
   ].filter(Boolean);
   return parts.join("\n");
 }
 
-/** 与后端 Step2 完成判定一致：有非空向量 + visual 对象，且非 pending/error */
+/** 与后端 Step2 完成判定一致：有非空向量 + visual 对象，且非 pending/error/vl_error */
 function isOmniStep2Ok(s: OmniMultimodalShot): boolean {
   const st = String(s.omni_step2_status || "").trim().toLowerCase();
-  if (st === "pending" || st === "error") return false;
+  if (st === "pending" || st === "error" || st === "vl_error") return false;
   const emb = s.embedding;
   if (!Array.isArray(emb) || emb.length === 0) return false;
   const vis = s.visual;
@@ -31,7 +32,8 @@ function isOmniStep2Ok(s: OmniMultimodalShot): boolean {
 }
 
 function isOmniStep2Error(s: OmniMultimodalShot): boolean {
-  return String(s.omni_step2_status || "").trim().toLowerCase() === "error";
+  const st = String(s.omni_step2_status || "").trim().toLowerCase();
+  return st === "error" || st === "vl_error";
 }
 
 const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ result, onPlayShot }) => {

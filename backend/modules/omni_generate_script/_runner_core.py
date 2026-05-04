@@ -82,6 +82,7 @@ DEFAULT_USER_PROMPT_TEMPLATE = """OST=0 为解说（narration 为解说文案）
 
 ## 重要约束
 - 不允许连续长时间纯解说或纯原声（需要节奏变化）；节奏调整仅通过 timestamp 与 OST 切换实现，**不得**以删改解说文案为代价。
+- 非常重要的约束，不允许长时间的纯原声，绝对不允许
 
 {dynamic_sections}
 """
@@ -175,6 +176,7 @@ ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE = """OST=0 为解说（narration 为解
 
 ## 重要约束
 - 必须严格遵循解说-原片-解说-原片的交替节奏；节奏调整仅通过 timestamp 与 OST 切换实现，**不得**以删改解说文案为代价。
+- 非常重要的约束，不允许长时间的纯原声，绝对不允许
 
 {dynamic_sections}
 """

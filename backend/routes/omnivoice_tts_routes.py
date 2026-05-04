@@ -98,6 +98,16 @@ async def omnivoice_status() -> Dict[str, Any]:
         ok, e = await probe_omnivoice(st.base_url, st.api_prefix)
         alive = ok
         err = e
+        if not ok:
+            # 持久化层仍为「已连接」但远端已不可达时，同步为失败，避免 UI / is_connected 与真实不一致
+            omnivoice_tts_connection_store.set_failed(
+                (e or "").strip() or "OmniVoice 不可达"
+            )
+            try:
+                tts_engine_config_manager._voices_cache.pop("omnivoice_tts", None)
+            except Exception:
+                pass
+            st = omnivoice_tts_connection_store.get_state()
     return {
         "success": True,
         "data": {

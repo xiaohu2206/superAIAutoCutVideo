@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from modules.subprocess_no_console import run_no_console
+
 logger = logging.getLogger(__name__)
 
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -221,7 +223,8 @@ async def wav_to_mp3(wav_path: Path, mp3_path: Path) -> bool:
         "3",
         str(mp3_path),
     ]
-    try:
+
+    async def _run_ffmpeg_async() -> tuple[int, bytes]:
         kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -230,21 +233,41 @@ async def wav_to_mp3(wav_path: Path, mp3_path: Path) -> bool:
             **kwargs,
         )
         _stdout, stderr = await proc.communicate()
-        rc = proc.returncode
-        if rc == 0 and mp3_path.exists():
-            return True
-        err_text = (stderr or b"").decode("utf-8", errors="replace").strip()
-        if err_text:
-            logger.warning("wav_to_mp3 失败 (rc=%s): %s", rc, err_text[:500])
-        else:
-            logger.warning("wav_to_mp3 失败 (rc=%s)", rc)
-        return False
+        return proc.returncode or 0, stderr or b""
+
+    def _run_ffmpeg_sync() -> tuple[int, bytes]:
+        proc = run_no_console(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return proc.returncode or 0, (proc.stderr or b"")
+
+    try:
+        try:
+            rc, stderr = await _run_ffmpeg_async()
+        except NotImplementedError:
+            # Windows 上 SelectorEventLoop 不支持 asyncio 子进程，与是否安装 ffmpeg 无关
+            logger.info(
+                "wav_to_mp3: 当前事件循环不支持异步子进程，已改用同步 ffmpeg 调用"
+            )
+            rc, stderr = await asyncio.to_thread(_run_ffmpeg_sync)
     except FileNotFoundError:
         logger.warning("wav_to_mp3: ffmpeg 命令未找到 (%s)", ffmpeg_bin)
         return False
     except Exception as e:
         logger.warning("wav_to_mp3 异常 (%s): %s", type(e).__name__, e)
         return False
+
+    if rc == 0 and mp3_path.exists():
+        return True
+    err_text = (stderr or b"").decode("utf-8", errors="replace").strip()
+    if err_text:
+        logger.warning("wav_to_mp3 失败 (rc=%s): %s", rc, err_text[:500])
+    else:
+        logger.warning("wav_to_mp3 失败 (rc=%s)", rc)
+    return False
 
 
 async def ffprobe_get_duration(path: str) -> Optional[float]:

@@ -73,7 +73,10 @@ export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
   const syncStatus = useCallback(async () => {
     try {
       const res = await ttsService.getOmniVoiceTtsStatus();
-      const ok = Boolean(res?.data?.connected);
+      const cfgOn = Boolean(res?.data?.connected);
+      const reachable = res?.data?.reachable as boolean | null | undefined;
+      // 后端会持久化「已连接」；若 OmniVoice 已关闭，reachable 为 false，不能仍显示已连接
+      const ok = cfgOn && reachable !== false;
       setConnected(ok);
       setBaseUrl(res?.data?.base_url || null);
       onConnectionChange?.(ok);

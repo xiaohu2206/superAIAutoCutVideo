@@ -17,8 +17,8 @@ from typing import Any, Optional
 import httpx
 from fastapi.responses import JSONResponse, Response
 
-_AUTH_UPSTREAM_DEV = "http://127.0.0.1:3000"
-_AUTH_UPSTREAM_PROD = "http://47.92.113.170"
+_AUTH_UPSTREAM_DEV = "http://47.92.113.170:8176" # "http://127.0.0.1:3000"
+_AUTH_UPSTREAM_PROD = "http://47.92.113.170:8176"
 
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=8.0, read=45.0, write=20.0, pool=8.0)
 

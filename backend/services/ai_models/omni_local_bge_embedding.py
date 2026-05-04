@@ -30,7 +30,6 @@ LOCAL_BGE_MODEL_DISPLAY_NAME = "BAAI/bge-base-zh-v1.5 (local)"
 
 _bundle: Optional["_BgeBundle"] = None
 _init_lock = threading.Lock()
-_encode_lock = threading.Lock()
 
 
 def _backend_dir() -> Path:
@@ -162,33 +161,32 @@ def encode_text_sync(text: str) -> List[float]:
     import torch
 
     b = _get_bundle()
-    with _encode_lock:
-        inputs = b.tokenizer(
-            s,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=b.max_length,
-        )
-        inputs = {k: v.to(b.device) for k, v in inputs.items()}
-        with torch.no_grad():
-            out = b.torch_model(**inputs)
-            last_hidden = out.last_hidden_state
-            if b.use_cls:
-                emb = last_hidden[:, 0, :]
-            elif b.use_mean:
-                mask = inputs.get("attention_mask")
-                if mask is None:
-                    emb = last_hidden.mean(dim=1)
-                else:
-                    mask_exp = mask.unsqueeze(-1).type_as(last_hidden)
-                    summed = (last_hidden * mask_exp).sum(dim=1)
-                    counts = mask_exp.sum(dim=1).clamp(min=1e-9)
-                    emb = summed / counts
+    inputs = b.tokenizer(
+        s,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=b.max_length,
+    )
+    inputs = {k: v.to(b.device) for k, v in inputs.items()}
+    with torch.no_grad():
+        out = b.torch_model(**inputs)
+        last_hidden = out.last_hidden_state
+        if b.use_cls:
+            emb = last_hidden[:, 0, :]
+        elif b.use_mean:
+            mask = inputs.get("attention_mask")
+            if mask is None:
+                emb = last_hidden.mean(dim=1)
             else:
-                emb = last_hidden[:, 0, :]
-            emb = torch.nn.functional.normalize(emb, p=2, dim=1)
-            vec = emb[0].detach().float().cpu()
+                mask_exp = mask.unsqueeze(-1).type_as(last_hidden)
+                summed = (last_hidden * mask_exp).sum(dim=1)
+                counts = mask_exp.sum(dim=1).clamp(min=1e-9)
+                emb = summed / counts
+        else:
+            emb = last_hidden[:, 0, :]
+        emb = torch.nn.functional.normalize(emb, p=2, dim=1)
+        vec = emb[0].detach().float().cpu()
 
     out_list = vec.tolist() if hasattr(vec, "tolist") else [float(x) for x in vec]
     if not out_list:
