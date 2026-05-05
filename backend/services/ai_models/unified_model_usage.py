@@ -35,6 +35,28 @@ def unified_mode_enabled() -> bool:
     return not unified_yunwu_models_config_manager.get_root().use_custom_models
 
 
+def omni_effect_tier_for_project(project_id: Optional[str]) -> Optional[str]:
+    """
+    从项目读取 Omni 效果档位（low / medium / high），供整合平台下 resolve_content_model_for_llm 选档。
+    无项目或字段为空时返回 None，由 tier_or_default 回落到默认档位。
+    """
+    if not project_id:
+        return None
+    try:
+        from modules.projects_store import projects_store
+
+        p = projects_store.get_project(project_id)
+        if not p:
+            return None
+        t = getattr(p, "omni_effect_tier", None)
+        if t is None:
+            return None
+        s = str(t).strip().lower()
+        return s or None
+    except Exception:
+        return None
+
+
 def _unified_api_key_valid(key: str) -> bool:
     s = (key or "").strip()
     if not s or s.lower() == "xxx":

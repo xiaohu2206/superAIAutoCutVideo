@@ -39,6 +39,7 @@ async def call_llm_text(
     *,
     cancel_event: Optional[asyncio.Event] = None,
     max_retries: int = LLM_CALL_MAX_RETRIES,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     total_attempts = max_retries + 1
     for attempt in range(total_attempts):
@@ -47,7 +48,12 @@ async def call_llm_text(
         try:
             if cancel_event:
                 llm_task = asyncio.create_task(
-                    ai_service.send_chat(messages, usage=LlmModelUsage.COPYWRITING, timeout=400)
+                    ai_service.send_chat(
+                        messages,
+                        usage=LlmModelUsage.COPYWRITING,
+                        omni_effect_tier=omni_effect_tier,
+                        timeout=400,
+                    )
                 )
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 done, _ = await asyncio.wait({llm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -63,7 +69,12 @@ async def call_llm_text(
                     pass
                 resp = await llm_task
             else:
-                resp = await ai_service.send_chat(messages, usage=LlmModelUsage.COPYWRITING, timeout=400)
+                resp = await ai_service.send_chat(
+                    messages,
+                    usage=LlmModelUsage.COPYWRITING,
+                    omni_effect_tier=omni_effect_tier,
+                    timeout=400,
+                )
             return _strip_code_fences(str(resp.content or "").strip())
         except asyncio.CancelledError:
             raise

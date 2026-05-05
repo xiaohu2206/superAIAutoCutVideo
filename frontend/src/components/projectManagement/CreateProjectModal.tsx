@@ -230,22 +230,22 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   onClick={() => !loading && setProjectType("subtitle")}
                   className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
                     projectType === "subtitle"
-                      ? "border-green-500 bg-green-50"
-                      : "border-gray-200 bg-white hover:border-green-300"
+                      ? "border-green-500 bg-green-50 dark:border-green-600 dark:bg-green-900/20"
+                      : "border-gray-200 bg-white hover:border-green-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-green-600"
                   }`}
                 >
                   {projectType === "subtitle" && (
-                    <div className="absolute top-3 right-3 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"></div>
                   )}
                   <h4
                     className={`text-lg font-bold mb-2 ${
-                      projectType === "subtitle" ? "text-green-700" : "text-gray-700"
+                      projectType === "subtitle" ? "text-green-700 dark:text-green-400" : "text-gray-700 dark:text-gray-300"
                     }`}
                   >
                     字幕推理
                   </h4>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500">适用：适用于普通话视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：适用于普通话视频</p>
                   </div>
                 </div>
 
@@ -254,24 +254,24 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   onClick={() => !loading && setProjectType("visual")}
                   className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
                     projectType === "visual"
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 bg-white hover:border-blue-300"
+                      ? "border-blue-500 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20"
+                      : "border-gray-200 bg-white hover:border-blue-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-600"
                   }`}
                 >
                   {projectType === "visual" && (
-                    <div className="absolute top-3 right-3 w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-sm"></div>
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-blue-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"></div>
                   )}
                   <div className="flex items-center justify-between mb-2">
                     <h4
                       className={`text-lg font-bold ${
-                        projectType === "visual" ? "text-blue-700" : "text-gray-700"
+                        projectType === "visual" ? "text-blue-700 dark:text-blue-400" : "text-gray-700 dark:text-gray-300"
                       }`}
                     >
                       视觉推理
                     </h4>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500">适用：适用所有类型的视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：适用所有类型的视频</p>
                   </div>
                 </div>
 
@@ -287,28 +287,28 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   }}
                   className={`relative p-4 border-2 rounded-lg transition-all ${
                     isMoondreamEnabled
-                      ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50"
+                      ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50 dark:border-gray-700 dark:bg-gray-800"
                       : projectType === "omni"
-                        ? "border-purple-500 bg-purple-50 cursor-pointer"
-                        : "border-gray-200 bg-white hover:border-purple-300 cursor-pointer"
+                        ? "border-purple-500 bg-purple-50 cursor-pointer dark:border-purple-600 dark:bg-purple-900/20"
+                        : "border-gray-200 bg-white hover:border-purple-300 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:hover:border-purple-600"
                   }`}
                 >
                   {projectType === "omni" && !isMoondreamEnabled && (
-                    <div className="absolute top-3 right-3 w-4 h-4 bg-purple-500 rounded-full border-2 border-white shadow-sm"></div>
+                    <div className="absolute top-3 right-3 w-4 h-4 bg-purple-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"></div>
                   )}
                   <div className="flex items-center justify-between mb-2">
                     <h4
                       className={`text-lg font-bold ${
                         projectType === "omni" && !isMoondreamEnabled
-                          ? "text-purple-700"
-                          : "text-gray-700"
+                          ? "text-purple-700 dark:text-purple-400"
+                          : "text-gray-700 dark:text-gray-300"
                       }`}
                     >
                       全感知推理
                     </h4>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500">适用：字幕与视觉信息联合分析的视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：字幕与视觉信息联合分析的视频</p>
                   </div>
                 </div>
               </div>
@@ -316,10 +316,10 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
             {showOmniEffectTier && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2 dark:text-gray-200">
                   全感知生成效果 <span className="text-red-500">*</span>
                 </label>
-                <p className="text-xs text-gray-500 mb-3">
+                <p className="text-xs text-gray-500 mb-3 dark:text-gray-400">
                   档位越高，模型调用与计算越多，效果通常越好；默认高消耗。
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -328,31 +328,31 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       {
                         tier: "low" as const,
                         title: "低消耗",
-                        sub: "低效果",
-                        activeBorder: "border-amber-500",
-                        activeBg: "bg-amber-50",
-                        hoverBorder: "hover:border-amber-300",
-                        titleActive: "text-amber-800",
+                        sub: "token消耗500字大约0.49毛",
+                        activeBorder: "border-amber-500 dark:border-amber-600",
+                        activeBg: "bg-amber-50 dark:bg-amber-900/20",
+                        hoverBorder: "hover:border-amber-300 dark:hover:border-amber-600",
+                        titleActive: "text-amber-800 dark:text-amber-400",
                         dot: "bg-amber-500",
                       },
                       {
                         tier: "medium" as const,
                         title: "中消耗",
-                        sub: "均衡",
-                        activeBorder: "border-purple-500",
-                        activeBg: "bg-purple-50",
-                        hoverBorder: "hover:border-purple-300",
-                        titleActive: "text-purple-800",
+                        sub: "token消耗500字大约0.29毛",
+                        activeBorder: "border-purple-500 dark:border-purple-600",
+                        activeBg: "bg-purple-50 dark:bg-purple-900/20",
+                        hoverBorder: "hover:border-purple-300 dark:hover:border-purple-600",
+                        titleActive: "text-purple-800 dark:text-purple-400",
                         dot: "bg-purple-500",
                       },
                       {
                         tier: "high" as const,
                         title: "高消耗",
-                        sub: "高效果",
-                        activeBorder: "border-violet-600",
-                        activeBg: "bg-violet-50",
-                        hoverBorder: "hover:border-violet-400",
-                        titleActive: "text-violet-900",
+                        sub: "token消耗500字大约0.49毛",
+                        activeBorder: "border-violet-600 dark:border-violet-600",
+                        activeBg: "bg-violet-50 dark:bg-violet-900/20",
+                        hoverBorder: "hover:border-violet-400 dark:hover:border-violet-600",
+                        titleActive: "text-violet-900 dark:text-violet-300",
                         dot: "bg-violet-600",
                       },
                     ] as const
@@ -363,25 +363,28 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       className={`relative p-3 border-2 rounded-lg cursor-pointer transition-all ${
                         omniEffectTier === opt.tier
                           ? `${opt.activeBorder} ${opt.activeBg}`
-                          : `border-gray-200 bg-white ${opt.hoverBorder}`
+                          : `border-gray-200 bg-white ${opt.hoverBorder} dark:border-gray-700 dark:bg-gray-900`
                       }`}
                     >
                       {omniEffectTier === opt.tier && (
                         <div
-                          className={`absolute top-2 right-2 w-3.5 h-3.5 ${opt.dot} rounded-full border-2 border-white shadow-sm`}
+                          className={`absolute top-2 right-2 w-3.5 h-3.5 ${opt.dot} rounded-full border-2 border-white dark:border-gray-900 shadow-sm`}
                         />
                       )}
                       <h4
                         className={`text-sm font-bold ${
-                          omniEffectTier === opt.tier ? opt.titleActive : "text-gray-700"
+                          omniEffectTier === opt.tier ? opt.titleActive : "text-gray-700 dark:text-gray-300"
                         }`}
                       >
                         {opt.title}
                       </h4>
-                      <p className="text-xs text-gray-500 mt-0.5">{opt.sub}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{opt.sub}</p>
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-gray-500 mt-2 dark:text-gray-400">
+                预估价格<span className="font-bold text-red-500">仅供参考，影响价格主要是文案字数</span>，比如1000字需要 2 倍价格 
+                </p>
               </div>
             )}
 

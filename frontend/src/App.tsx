@@ -313,7 +313,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 dark:border-slate-700 dark:bg-gray-900 shadow-[0_24px_80px_rgba(15,23,42,0.28)] dark:shadow-[0_24px_80px_rgba(0,0,0,0.5)] ring-1 ring-slate-900/5 dark:ring-slate-700/50">
       <Navigation
         activeTab={showProfile ? "profile" : activeTab}
         onTabChange={(tab) => {
@@ -324,16 +324,16 @@ const App: React.FC = () => {
         onProfileClick={() => setShowProfile(true)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))]">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-gray-900">
         {isTauri && (
-          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl">
+          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-slate-700/80 dark:bg-gray-900/88">
             <div
               className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
               onPointerDown={handleTitlebarPointerDown}
             >
               <div className="min-w-0 flex-1 select-none">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 sm:text-[15px]">
+                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 dark:text-gray-100 sm:text-[15px]">
                     SuperAI 影视剪辑
                   </h1>
                   {!!appVersion && (
@@ -347,7 +347,7 @@ const App: React.FC = () => {
               <div className="titlebar-no-drag hidden shrink-0 items-center gap-1 sm:flex">
                 <button
                   onClick={() => void TauriCommands.minimizeWindow()}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title="最小化"
                   aria-label="最小化窗口"
                 >
@@ -355,7 +355,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={handleToggleMaximize}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title={isMaximized ? "还原" : "最大化"}
                   aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
                 >
@@ -388,8 +388,8 @@ const App: React.FC = () => {
           <div
             className={
               activeTab === "settings"
-                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0"
-                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 "
+                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 dark:bg-gray-900"
+                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 dark:bg-gray-900"
             }
           >
       

@@ -166,7 +166,7 @@ export const SubtitleAsrSettings: React.FC = () => {
   return (
     <div className="space-y-6">
 
-      <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+      <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-gray-700" />
           <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
@@ -176,7 +176,7 @@ export const SubtitleAsrSettings: React.FC = () => {
           <button
             type="button"
             onClick={() => setAccDebugOpen((prev) => !prev)}
-            className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView?.className || "bg-gray-50 text-gray-600 border-gray-200"}`}
+            className={`text-xs px-2 py-0.5 rounded-full border ${accelerationView?.className || "bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600"}`}
             title={accelerationView?.title || ""}
             aria-expanded={accDebugOpen}
           >
@@ -217,7 +217,7 @@ export const SubtitleAsrSettings: React.FC = () => {
         />
       </section>
 
-      <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+      <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h4 className="text-md font-semibold text-gray-900">默认音频测试</h4>
           <button

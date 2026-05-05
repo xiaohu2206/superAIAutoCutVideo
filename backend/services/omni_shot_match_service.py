@@ -36,7 +36,7 @@ from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
 from services.ai_models.ai_service import ai_service
-from services.ai_models.unified_model_usage import LlmModelUsage
+from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 from services.ai_models.omni_local_bge_embedding import (
@@ -334,7 +334,8 @@ class OmniShotMatchService:
                 stage1_model = LOCAL_BGE_MODEL_DISPLAY_NAME
 
                 fine_template = load_fine_prompt_template(prompt_language)
-                llm_info = ai_service.get_provider_info(LlmModelUsage.LLM_RERANK)
+                omni_tier = omni_effect_tier_for_project(project_id)
+                llm_info = ai_service.get_provider_info(LlmModelUsage.LLM_RERANK, omni_effect_tier=omni_tier)
                 llm_label = f"{llm_info.get('active_provider') or ''}/{llm_info.get('active_model') or ''}".strip("/")
 
                 task_progress_store.set_state(
@@ -378,6 +379,7 @@ class OmniShotMatchService:
                             project_id=project_id,
                             task_id=task_id,
                             rerank_work_dir=work,
+                            omni_effect_tier=omni_tier,
                         )
 
                 async def _wrapped(pos: int, r: Dict[str, Any]) -> None:
@@ -498,6 +500,7 @@ async def _process_row(
     project_id: str,
     task_id: str,
     rerank_work_dir: Path,
+    omni_effect_tier: Optional[str] = None,
 ) -> Tuple[int, Dict[str, Any]]:
     import time as _time
 
@@ -585,6 +588,7 @@ async def _process_row(
             [ChatMessage(role="user", content=user_full)],
             temperature=float(temperature),
             usage=LlmModelUsage.LLM_RERANK,
+            omni_effect_tier=omni_effect_tier,
             timeout=300,
         )
     except Exception as e:

@@ -216,6 +216,7 @@ async def _generate_visual_script_chunk(
     original_ratio: Optional[int] = None,
     script_language: Optional[str] = None,
     interleave_mode: Optional[str] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     scenes_text_lines: List[str] = []
     for s in scenes:
@@ -368,6 +369,7 @@ async def _generate_visual_script_chunk(
                 messages,
                 response_format={"type": "json_object"},
                 usage=LlmModelUsage.SCRIPT_GENERATION,
+                omni_effect_tier=omni_effect_tier,
                 timeout=600,
             )
             _write_visual_script_chat_cache_md(

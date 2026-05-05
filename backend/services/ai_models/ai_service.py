@@ -55,8 +55,12 @@ class AIService:
         self._active_provider_name: Optional[str] = None
         self._active_model_name: Optional[str] = None
 
-    def _get_model_config_for_llm(self, usage: LlmModelUsage) -> ContentModelConfig:
-        return resolve_content_model_for_llm(usage)
+    def _get_model_config_for_llm(
+        self,
+        usage: LlmModelUsage,
+        omni_effect_tier: Optional[str] = None,
+    ) -> ContentModelConfig:
+        return resolve_content_model_for_llm(usage, omni_effect_tier=omni_effect_tier)
 
     def _to_ai_model_config(self, cfg: ContentModelConfig) -> AIModelConfig:
         return AIModelConfig(
@@ -69,10 +73,14 @@ class AIService:
             extra_params=cfg.extra_params or {},
         )
 
-    def get_provider_info(self, usage: LlmModelUsage = LlmModelUsage.COPYWRITING) -> Dict[str, Any]:
+    def get_provider_info(
+        self,
+        usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
+        omni_effect_tier: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """返回指定 LLM 场景下实际使用的提供商与模型（尊重云雾整合总控）。"""
         try:
-            cfg = self._get_model_config_for_llm(usage)
+            cfg = self._get_model_config_for_llm(usage, omni_effect_tier=omni_effect_tier)
         except Exception:
             return {"active_provider": None, "active_model": None}
         return {
@@ -153,6 +161,7 @@ class AIService:
         *,
         temperature: Optional[float] = None,
         usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
+        omni_effect_tier: Optional[str] = None,
         http_max_attempts: Optional[int] = None,
         timeout: Optional[int] = None,
     ) -> ChatResponse:
@@ -161,7 +170,7 @@ class AIService:
         http_max_attempts: 单次调用的 HTTP 层最大尝试次数（含首次）；默认 LLM_MAX_ATTEMPTS。
         业务侧若已有自己的退避重试（如分块脚本生成），可传 1 以避免与 send_chat 内层双重重试。
         """
-        cfg = self._get_model_config_for_llm(usage)
+        cfg = self._get_model_config_for_llm(usage, omni_effect_tier=omni_effect_tier)
 
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:
@@ -221,9 +230,10 @@ class AIService:
         messages: List[ChatMessage],
         *,
         usage: LlmModelUsage = LlmModelUsage.COPYWRITING,
+        omni_effect_tier: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """流式聊天；usage 与 send_chat 一致。"""
-        cfg = self._get_model_config_for_llm(usage)
+        cfg = self._get_model_config_for_llm(usage, omni_effect_tier=omni_effect_tier)
 
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:

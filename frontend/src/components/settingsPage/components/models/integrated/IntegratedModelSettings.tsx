@@ -101,11 +101,11 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-slate-900">
+            <span className="text-sm font-medium text-slate-900 dark:text-gray-100">
               使用自定义模型
             </span>
             {togglingCustom && (
-              <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-gray-400">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                 切换中…
               </span>
@@ -113,7 +113,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
           </div>
           <p
             id="integrated-custom-models-hint"
-            className="mt-1 text-xs text-slate-500"
+            className="mt-1 text-xs text-slate-500 dark:text-gray-400"
           >
             (小白不建议开启)
             开启后将显示「文案模型」「视频分析模型」配置页，并隐藏聚合整合默认项；关闭后仅保留聚合整合。
@@ -125,7 +125,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         <div
           role="tablist"
           aria-label="整合模型子页"
-          className="inline-flex rounded-xl bg-slate-100 p-1"
+          className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-gray-800"
         >
           <button
             type="button"
@@ -133,8 +133,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             aria-selected={subTab === "content"}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
               subTab === "content"
-                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60"
-                : "text-slate-500 hover:text-slate-800"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-gray-700 dark:text-blue-400 dark:ring-gray-600"
+                : "text-slate-500 hover:text-slate-800 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
             onClick={() => setSubTab("content")}
           >
@@ -146,8 +146,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             aria-selected={subTab === "video"}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
               subTab === "video"
-                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60"
-                : "text-slate-500 hover:text-slate-800"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-gray-700 dark:text-blue-400 dark:ring-gray-600"
+                : "text-slate-500 hover:text-slate-800 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
             onClick={() => setSubTab("video")}
           >
@@ -230,32 +230,32 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 
             {/* 模型信息展示（只读） */}
             {activePlatform && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-gray-900/60">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-gray-400">
                   当前平台模型配置（high 档）
                 </h4>
                 <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <div>
-                    <span className="text-slate-500">模型1：</span>
-                    <span className="font-medium text-slate-800">
+                    <span className="text-slate-500 dark:text-gray-400">模型1：</span>
+                    <span className="font-medium text-slate-800 dark:text-gray-200">
                       {activePlatform.tiers.high.copywriting_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">模型2：</span>
-                    <span className="font-medium text-slate-800">
+                    <span className="text-slate-500 dark:text-gray-400">模型2：</span>
+                    <span className="font-medium text-slate-800 dark:text-gray-200">
                       {activePlatform.tiers.high.video_analysis_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">模型3：</span>
-                    <span className="font-medium text-slate-800">
+                    <span className="text-slate-500 dark:text-gray-400">模型3：</span>
+                    <span className="font-medium text-slate-800 dark:text-gray-200">
                       {activePlatform.tiers.high.llm_rerank_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">模型4：</span>
-                    <span className="font-medium text-slate-800">
+                    <span className="text-slate-500 dark:text-gray-400">模型4：</span>
+                    <span className="font-medium text-slate-800 dark:text-gray-200">
                       {activePlatform.tiers.high.script_generation_model_name}
                     </span>
                   </div>

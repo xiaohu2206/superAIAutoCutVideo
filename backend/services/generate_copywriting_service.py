@@ -20,6 +20,7 @@ from services.reference_copywriting_wash import (
     wash_reference_copywriting_pipeline,
 )
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from services.ai_models.unified_model_usage import omni_effect_tier_for_project
 
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,7 @@ class GenerateCopywritingService:
                 drama_name=drama_name,
                 script_language=str(script_language) if script_language else None,
                 cancel_event=cancel_event,
+                omni_effect_tier=omni_effect_tier_for_project(project_id),
             )
             if (copywriting_text or "").strip():
                 wash_applied = True

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from modules.ai import ChatMessage
 from modules.prompts.prompt_manager import prompt_manager
 from services.ai_models.ai_service import ai_service
-from services.ai_models.unified_model_usage import LlmModelUsage
+from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .prompt_resolver import _default_prompt_key_for_project, _resolve_prompt_key
@@ -313,6 +313,7 @@ async def _call_llm_text(
     *,
     cancel_event: Optional[asyncio.Event] = None,
     max_retries: int = LLM_CALL_MAX_RETRIES,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     merged = _merge_system_messages(messages)
     total_attempts = max_retries + 1
@@ -322,7 +323,12 @@ async def _call_llm_text(
         try:
             if cancel_event:
                 llm_task = asyncio.create_task(
-                    ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING, timeout=600)
+                    ai_service.send_chat(
+                        merged,
+                        usage=LlmModelUsage.COPYWRITING,
+                        omni_effect_tier=omni_effect_tier,
+                        timeout=600,
+                    )
                 )
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 done, _ = await asyncio.wait({llm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -338,7 +344,12 @@ async def _call_llm_text(
                     pass
                 resp = await llm_task
             else:
-                resp = await ai_service.send_chat(merged, usage=LlmModelUsage.COPYWRITING, timeout=600)
+                resp = await ai_service.send_chat(
+                    merged,
+                    usage=LlmModelUsage.COPYWRITING,
+                    omni_effect_tier=omni_effect_tier,
+                    timeout=600,
+                )
             return _strip_code_fences(str(resp.content or "").strip())
         except asyncio.CancelledError:
             raise
@@ -379,6 +390,7 @@ async def _generate_outline(
     film_context: Optional[str] = None,
     reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> List[str]:
     """让模型生成一个分段大纲，返回各段的标题/摘要列表。"""
     lang_hint = "English" if _is_english(script_language) else "中文"
@@ -397,7 +409,11 @@ async def _generate_outline(
     messages = _append_film_context_user_message(messages, film_context)
     messages.append(ChatMessage(role="user", content=user))
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
-    text = await _call_llm_text(messages, cancel_event=cancel_event)
+    text = await _call_llm_text(
+        messages,
+        cancel_event=cancel_event,
+        omni_effect_tier=omni_effect_tier,
+    )
     lines = [ln.strip() for ln in text.strip().split("\n") if ln.strip()]
     if len(lines) < num_sections:
         chunks_per = max(1, len(subs_text.split("\n")) // num_sections)
@@ -424,6 +440,7 @@ async def _generate_section(
     film_context: Optional[str] = None,
     reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     """根据大纲中某一段的描述，生成对应段落的文案。"""
     messages = _build_template_messages(template_key, default_key, drama_name)
@@ -456,7 +473,11 @@ async def _generate_section(
     messages = _append_film_context_user_message(messages, film_context)
     messages = _append_subtitles_context_message(messages, subs_text)
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
-    text = await _call_llm_text(messages, cancel_event=cancel_event)
+    text = await _call_llm_text(
+        messages,
+        cancel_event=cancel_event,
+        omni_effect_tier=omni_effect_tier,
+    )
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"分段文案 {section_idx + 1}/{total_sections} 生成完成, 字数: {len(text)}")
     return text
@@ -495,6 +516,7 @@ async def generate_copywriting_from_subtitles(
 
     template_key = _resolve_template_key(project_id, script_language)
     default_key = _default_prompt_key_for_project(project_id)
+    omni_tier = omni_effect_tier_for_project(project_id)
 
     need_segmented = target_chars is not None and target_chars > SINGLE_CALL_MAX_CHARS
 
@@ -509,6 +531,7 @@ async def generate_copywriting_from_subtitles(
             film_context=film_context,
             reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
+            omni_effect_tier=omni_tier,
         )
 
     return await _generate_single(
@@ -521,6 +544,7 @@ async def generate_copywriting_from_subtitles(
         film_context=film_context,
         reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
+        omni_effect_tier=omni_tier,
     )
 
 
@@ -565,6 +589,7 @@ async def generate_copywriting_from_scenes(
 
     template_key = _resolve_template_key(project_id, script_language)
     default_key = _default_prompt_key_for_project(project_id)
+    omni_tier = omni_effect_tier_for_project(project_id)
 
     need_segmented = target_chars is not None and target_chars > SINGLE_CALL_MAX_CHARS
 
@@ -579,6 +604,7 @@ async def generate_copywriting_from_scenes(
             film_context=film_context,
             reference_copywriting=reference_copywriting,
             cancel_event=cancel_event,
+            omni_effect_tier=omni_tier,
         )
 
     return await _generate_single(
@@ -591,6 +617,7 @@ async def generate_copywriting_from_scenes(
         film_context=film_context,
         reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
+        omni_effect_tier=omni_tier,
     )
 
 
@@ -605,13 +632,18 @@ async def _generate_single(
     film_context: Optional[str] = None,
     reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     messages = _build_template_messages(template_key, default_key, drama_name)
     messages = _add_language_and_count_messages(messages, script_language, target_chars)
     messages = _append_film_context_user_message(messages, film_context)
     messages = _append_subtitles_context_message(messages, subs_text)
     messages = _append_reference_copywriting_user_message(messages, reference_copywriting)
-    text = await _call_llm_text(messages, cancel_event=cancel_event)
+    text = await _call_llm_text(
+        messages,
+        cancel_event=cancel_event,
+        omni_effect_tier=omni_effect_tier,
+    )
     text = _remove_leading_quoted_subtitle_lines(text)
     logger.info(f"解说文案生成完成 (单次), 字数: {len(text)}")
     return text
@@ -628,6 +660,7 @@ async def _generate_segmented(
     film_context: Optional[str] = None,
     reference_copywriting: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     per_call_max = 2500
     num_sections = max(2, math.ceil(target_chars / per_call_max))
@@ -645,6 +678,7 @@ async def _generate_segmented(
         film_context=film_context,
         reference_copywriting=reference_copywriting,
         cancel_event=cancel_event,
+        omni_effect_tier=omni_effect_tier,
     )
     logger.info(f"大纲生成完成, 共{len(outline_items)}段")
 
@@ -668,6 +702,7 @@ async def _generate_segmented(
                 film_context=film_context,
                 reference_copywriting=reference_copywriting,
                 cancel_event=cancel_event,
+                omni_effect_tier=omni_effect_tier,
             )
 
     tasks = [gen_one(i) for i in range(len(outline_items))]

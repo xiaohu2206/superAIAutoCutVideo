@@ -3,7 +3,7 @@ import logging
 import time
 from typing import Optional, List
 
-import requests
+from modules.requests_tls import requests_session_with_os_trust
 
 from .asr_data import ASRDataSeg
 from .asr_base import BaseASR
@@ -35,7 +35,7 @@ class BcutASR(BaseASR):
 
     def __init__(self, audio_path: [str, bytes], use_cache: bool = False):
         super().__init__(audio_path, use_cache=use_cache)
-        self.session = requests.Session()
+        self.session = requests_session_with_os_trust()
         self.task_id: Optional[str] = None
         self.__etags: List[str] = []
 
@@ -51,7 +51,8 @@ class BcutASR(BaseASR):
     @staticmethod
     def test_connection(timeout: int = 6) -> dict:
         try:
-            resp = requests.get(API_BASE_URL, timeout=timeout)
+            session = requests_session_with_os_trust()
+            resp = session.get(API_BASE_URL, timeout=timeout)
             ok = int(resp.status_code) < 500
             if ok:
                 return {"success": True, "status_code": int(resp.status_code)}
@@ -71,7 +72,7 @@ class BcutASR(BaseASR):
             "model_id": "8",
         })
 
-        resp = requests.post(
+        resp = self.session.post(
             API_REQ_UPLOAD,
             data=payload,
             headers=self.headers
@@ -99,7 +100,7 @@ class BcutASR(BaseASR):
             start_range = clip * (self.__per_size or 0)
             end_range = (clip + 1) * (self.__per_size or 0)
             logging.info(f"开始上传分片{clip}: {start_range}-{end_range}")
-            resp = requests.put(
+            resp = self.session.put(
                 self.__upload_urls[clip],
                 data=self.file_binary[start_range:end_range],
                 headers=self.headers
@@ -119,7 +120,7 @@ class BcutASR(BaseASR):
             "UploadId": self.__upload_id,
             "model_id": "8",
         })
-        resp = requests.post(
+        resp = self.session.post(
             API_COMMIT_UPLOAD,
             data=data,
             headers=self.headers
@@ -131,7 +132,7 @@ class BcutASR(BaseASR):
 
     def create_task(self) -> str:
         """开始创建转换任务"""
-        resp = requests.post(
+        resp = self.session.post(
             API_CREATE_TASK, json={"resource": self.__download_url, "model_id": "8"}, headers=self.headers
         )
         resp.raise_for_status()
@@ -142,7 +143,7 @@ class BcutASR(BaseASR):
 
     def result(self, task_id: Optional[str] = None):
         """查询转换结果"""
-        resp = requests.get(API_QUERY_RESULT, params={"model_id": 7, "task_id": task_id or self.task_id}, headers=self.headers)
+        resp = self.session.get(API_QUERY_RESULT, params={"model_id": 7, "task_id": task_id or self.task_id}, headers=self.headers)
         resp.raise_for_status()
         resp = resp.json()
         return resp["data"]

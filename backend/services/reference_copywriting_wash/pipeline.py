@@ -22,6 +22,7 @@ async def wash_reference_copywriting_pipeline(
     drama_name: str = "",
     script_language: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> str:
     """
     参考稿洗稿：规则预清洗 → 按约 2500 字拆参考稿 → 按同片数比例拆字幕 → 分片并发调用模型 → 合并后再规则清洗。
@@ -50,7 +51,11 @@ async def wash_reference_copywriting_pipeline(
                 total_sections=total,
                 script_language=script_language,
             )
-            out = await call_llm_text(msgs, cancel_event=cancel_event)
+            out = await call_llm_text(
+                msgs,
+                cancel_event=cancel_event,
+                omni_effect_tier=omni_effect_tier,
+            )
             out = remove_leading_quoted_subtitle_lines(out)
             section_texts[idx] = out
             logger.info("reference_copywriting_wash 分段 %s/%s 完成, 字数约 %s", idx + 1, total, len(out or ""))

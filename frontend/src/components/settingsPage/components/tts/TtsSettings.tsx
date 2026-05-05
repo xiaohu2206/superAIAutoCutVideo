@@ -368,7 +368,7 @@ export const TtsSettings: React.FC = () => {
     <div className="grid grid-cols-1 gap-6">
       <div className="space-y-8">
         {/* 引擎选择 */}
-        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm dark:bg-gray-900/80 dark:border-slate-700">
           <TtsEngineSelect
             engines={engines}
             provider={provider}
@@ -377,7 +377,7 @@ export const TtsSettings: React.FC = () => {
         </section>
 
         {/* 凭据设置 */}
-        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm dark:bg-gray-900/80 dark:border-slate-700">
           {provider === "indextts" ? (
             <IndexTtsSection
               configId={currentConfigId}
@@ -443,19 +443,19 @@ export const TtsSettings: React.FC = () => {
         {provider === "qwen_online_tts" ||
         provider === "indextts" ||
         provider === "omnivoice_tts" ? null : (
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-md font-semibold text-gray-900">音色库</h4>
+              <h4 className="text-md font-semibold text-gray-900 dark:text-gray-100">音色库</h4>
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索音色..."
-                className="px-3 py-2 border border-gray-300 rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="px-3 py-2 border border-gray-300 rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder:text-gray-500"
               />
             </div>
             {activeVoiceDetail.id && (
-              <div className="mb-3 border border-blue-100 bg-blue-50 rounded-lg p-3 text-xs text-gray-800">
+              <div className="mb-3 border border-blue-100 bg-blue-50 rounded-lg p-3 text-xs text-gray-800 dark:border-blue-900 dark:bg-blue-900/20 dark:text-gray-200">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">当前激活：</span>
                   {activeVoiceDetail.name && (
@@ -506,7 +506,7 @@ export const TtsSettings: React.FC = () => {
                           variant="white"
                         />
                         {typeof testDurationMs === "number" && (
-                          <span className="text-[11px] text-gray-500">
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">
                             响应 {testDurationMs}ms
                           </span>
                         )}
@@ -536,7 +536,7 @@ export const TtsSettings: React.FC = () => {
         )}
 
         {/* 语速 */}
-        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm">
+        <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm dark:bg-gray-900/80 dark:border-slate-700">
           <TtsSpeedSlider
             speedRatio={currentConfig?.speed_ratio ?? 1.0}
             onChange={handleSpeedChangeDebounced}

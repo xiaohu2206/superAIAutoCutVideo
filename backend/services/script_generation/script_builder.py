@@ -155,6 +155,7 @@ async def _generate_script_chunk(
     original_ratio: Optional[int] = None,
     script_language: Optional[str] = None,
     interleave_mode: Optional[str] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     subs_text_lines = []
     for s in subtitles:
@@ -309,6 +310,7 @@ async def _generate_script_chunk(
                 messages,
                 response_format={"type": "json_object"},
                 usage=LlmModelUsage.SCRIPT_GENERATION,
+                omni_effect_tier=omni_effect_tier,
                 timeout=600,
             )
             data, _ = sanitize_json_text_to_dict(resp.content)
@@ -402,6 +404,7 @@ async def _refine_full_script(
     target_count: Optional[int] = None,
     original_ratio: Optional[int] = None,
     script_language: Optional[str] = None,
+    omni_effect_tier: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     items = segments
     if not items:
@@ -469,6 +472,7 @@ async def _refine_full_script(
                 messages,
                 response_format={"type": "json_object"},
                 usage=LlmModelUsage.SCRIPT_GENERATION,
+                omni_effect_tier=omni_effect_tier,
                 timeout=600,
             )
             data, _ = sanitize_json_text_to_dict(resp.content)

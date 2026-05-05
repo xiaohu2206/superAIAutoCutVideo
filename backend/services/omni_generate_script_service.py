@@ -32,7 +32,7 @@ from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
 from services.ai_models.ai_service import ai_service
-from services.ai_models.unified_model_usage import LlmModelUsage
+from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 
@@ -331,6 +331,7 @@ class OmniGenerateScriptService:
 
                 temp = float(temperature) if temperature is not None else None
                 conc = max(1, int(chunk_llm_concurrency or 32))
+                omni_tier = omni_effect_tier_for_project(project_id)
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -379,6 +380,7 @@ class OmniGenerateScriptService:
                                     response_format={"type": "json_object"},
                                     temperature=temp,
                                     usage=LlmModelUsage.SCRIPT_GENERATION,
+                                    omni_effect_tier=omni_tier,
                                     http_max_attempts=1,
                                     timeout=600,
                                 )

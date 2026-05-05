@@ -48,6 +48,11 @@ if getattr(sys, 'frozen', False):
 
 print("Backend initializing...")  # Debug marker
 
+# 企业代理环境：在加载路由/发起 HTTPS 之前注入系统证书库（truststore）
+from modules.requests_tls import ensure_os_trust_injected
+
+ensure_os_trust_injected()
+
 # 导入AI路由
 from routes import health_router
 from routes.video_model_routes import router as video_model_router

@@ -213,7 +213,7 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
 
       {isLocalModel ? (
         <div className="space-y-6">
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-gray-700" />
               <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
@@ -417,7 +417,7 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
             </div>
           </section>
 
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h4 className="text-md font-semibold text-gray-900">模型测试</h4>
               <button

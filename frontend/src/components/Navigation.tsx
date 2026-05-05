@@ -61,7 +61,7 @@ const Navigation: React.FC<NavigationProps> = ({
   return (
     <>
       <aside
-        className={`flex h-full w-[40px] shrink-0 flex-col items-center border-r border-slate-200/80 bg-white/90 py-3 shadow-[10px_0_30px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl ${className}`}
+        className={`flex h-full w-[40px] shrink-0 flex-col items-center border-r border-slate-200/80 bg-white/90 py-3 shadow-[10px_0_30px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-700/80 dark:bg-gray-900/90 ${className}`}
       >
         <div className="flex items-center justify-center">
           <img src={Logo} alt="SuperAI" className="h-6 w-6 object-contain" />
