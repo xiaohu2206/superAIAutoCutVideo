@@ -17,6 +17,7 @@ interface TaskQueueData {
     message?: string;
     phase?: string;
     timestamp?: string;
+    project_name?: string;
   }>;
   waiting_projects: Array<{
     project_id: string;
@@ -35,6 +36,8 @@ interface TaskQueueData {
 }
 
 const POLL_INTERVAL_MS = 3000;
+/** 提交任务后队列 API 可能晚一拍才有数据；在此期间继续拉取，避免浮窗永远不出现 */
+const CATCH_UP_MAX_TICKS = 40;
 
 const SCOPE_LABELS: Record<string, string> = {
   generate_copywriting: "文案生成",
@@ -42,6 +45,7 @@ const SCOPE_LABELS: Record<string, string> = {
   generate_video: "视频生成",
   generate_jianying_draft: "剪映草稿",
   extract_scene: "镜头提取",
+  extract_subtitle: "提取字幕",
   omni_multimodal: "Omni 多模态",
   omni_copywriting_embed: "文案结构化",
   omni_shot_match: "镜头匹配",
@@ -97,7 +101,8 @@ function statusText(status: string): string {
 
 function hasActive(queueData: TaskQueueData | null): boolean {
   if (!queueData) return false;
-  return queueData.active_project !== null || queueData.waiting_projects.length > 0;
+  if (queueData.active_project !== null || queueData.waiting_projects.length > 0) return true;
+  return (queueData.active_tasks?.length ?? 0) > 0;
 }
 
 const TaskQueueFloatingBall: React.FC = () => {
@@ -106,26 +111,54 @@ const TaskQueueFloatingBall: React.FC = () => {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const queueDataRef = useRef<TaskQueueData | null>(null);
+  const catchUpRef = useRef(false);
+  const catchUpTicksRef = useRef(0);
+
+  const stopPolling = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    catchUpRef.current = false;
+    catchUpTicksRef.current = 0;
+  }, []);
+
+  const pollTick = useCallback(async () => {
+    try {
+      const data = await projectService.getTaskQueue();
+      if (!mountedRef.current) return;
+      queueDataRef.current = data;
+      setQueueData(data);
+
+      if (hasActive(data)) {
+        catchUpRef.current = false;
+        catchUpTicksRef.current = 0;
+        return;
+      }
+
+      if (catchUpRef.current) {
+        catchUpTicksRef.current += 1;
+        if (catchUpTicksRef.current >= CATCH_UP_MAX_TICKS) {
+          stopPolling();
+        }
+        return;
+      }
+
+      stopPolling();
+    } catch {
+      // 静默失败
+    }
+  }, [stopPolling]);
 
   const startPolling = useCallback(() => {
     if (timerRef.current) return;
-    timerRef.current = setInterval(async () => {
-      try {
-        const data = await projectService.getTaskQueue();
-        if (!mountedRef.current) return;
-        queueDataRef.current = data;
-        setQueueData(data);
-        if (!hasActive(data) && timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-      } catch {
-        // 静默失败
-      }
-    }, POLL_INTERVAL_MS);
-  }, []);
+    timerRef.current = setInterval(() => void pollTick(), POLL_INTERVAL_MS);
+  }, [pollTick]);
 
-  const fetchOnce = useCallback(async () => {
+  /** 冷启动：仅一次请求；有任务才进入轮询 */
+  const fetchInitial = useCallback(async () => {
+    catchUpRef.current = false;
+    catchUpTicksRef.current = 0;
     try {
       const data = await projectService.getTaskQueue();
       if (!mountedRef.current) return;
@@ -139,33 +172,40 @@ const TaskQueueFloatingBall: React.FC = () => {
     }
   }, [startPolling]);
 
-  // 初始检查
+  /** 用户在本页提交了任务：允许队列 API 延迟出现数据，短时间持续拉取 */
+  const fetchAfterTaskSubmitted = useCallback(async () => {
+    catchUpRef.current = true;
+    catchUpTicksRef.current = 0;
+    await pollTick();
+    if (hasActive(queueDataRef.current) || catchUpRef.current) {
+      startPolling();
+    }
+  }, [pollTick, startPolling]);
+
+  // 初始检查（无任务不轮询）
   useEffect(() => {
     mountedRef.current = true;
-    fetchOnce();
+    void fetchInitial();
     return () => {
       mountedRef.current = false;
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      stopPolling();
     };
-  }, [fetchOnce]);
+  }, [fetchInitial, stopPolling]);
 
-  // 监听全局任务提交通知，唤醒轮询
+  // 监听全局任务提交通知
   useEffect(() => {
     const handler = () => {
-      fetchOnce();
+      void fetchAfterTaskSubmitted();
     };
     window.addEventListener(TASK_SUBMITTED_EVENT, handler);
     return () => {
       window.removeEventListener(TASK_SUBMITTED_EVENT, handler);
     };
-  }, [fetchOnce]);
+  }, [fetchAfterTaskSubmitted]);
 
   const activeCount = queueData?.active_task_count ?? 0;
 
-  if (!hasActive(queueData)) return null;
+  if (queueData == null || !hasActive(queueData)) return null;
 
   return (
     <>
@@ -209,31 +249,41 @@ const TaskQueueFloatingBall: React.FC = () => {
               </div>
 
               <div className="overflow-y-auto px-5 py-4 space-y-4">
-                {/* 当前活跃项目 */}
-                {queueData?.active_project && activeCount > 0 && (
+                {(queueData.active_tasks?.length ?? 0) > 0 && (
                   <div>
                     <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-blue-600">
                       <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                      正在执行
+                      {queueData.active_project ? "正在执行" : "进行中"}
                     </div>
                     <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3">
-                      <div className="mb-2 text-sm font-medium text-slate-800">
-                        项目: {queueData.active_project_name || queueData.active_project}
-                      </div>
+                      {queueData.active_project ? (
+                        <div className="mb-2 text-sm font-medium text-slate-800">
+                          项目: {queueData.active_project_name || queueData.active_project}
+                        </div>
+                      ) : (
+                        <div className="mb-2 text-xs text-slate-500">
+                          当前未占用全局项目队列；以下为后台运行中的任务。
+                        </div>
+                      )}
                       <div className="space-y-1.5">
                         {queueData.active_tasks.map((t, i) => (
                           <div
-                            key={t.task_id || i}
-                            className="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-xs shadow-sm"
+                            key={`${t.scope}-${t.task_id || i}`}
+                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-white px-3 py-2 text-xs shadow-sm"
                           >
                             {statusIcon(t.status)}
+                            {!queueData.active_project && (
+                              <span className="font-medium text-slate-600 max-w-[140px] truncate" title={t.project_name || t.project_id}>
+                                {t.project_name || t.project_id}
+                              </span>
+                            )}
                             <span className="font-medium text-slate-700">{scopeLabel(t.scope)}</span>
                             <span className="text-slate-400">{statusText(t.status)}</span>
                             {t.progress != null && t.progress > 0 && t.progress < 100 && (
                               <span className="ml-auto text-slate-500">{Math.round(t.progress)}%</span>
                             )}
                             {t.message && (
-                              <span className="truncate text-slate-400 max-w-[120px]" title={t.message}>
+                              <span className="truncate text-slate-400 max-w-[140px] basis-full sm:basis-auto" title={t.message}>
                                 - {t.message}
                               </span>
                             )}
@@ -272,7 +322,9 @@ const TaskQueueFloatingBall: React.FC = () => {
                 ))}
 
                 {/* 空队列状态 */}
-                {!queueData?.active_project && queueData?.waiting_projects.length === 0 && (
+                {!queueData?.active_project &&
+                  queueData?.waiting_projects.length === 0 &&
+                  (queueData.active_tasks?.length ?? 0) === 0 && (
                   <div className="py-8 text-center text-sm text-slate-400">
                     <Layers className="mx-auto mb-2 h-8 w-8 opacity-40" />
                     当前没有排队的任务

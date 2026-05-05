@@ -43,7 +43,7 @@ from modules.project_task_queue import project_task_queue
 from modules.subtitle_utils import parse_srt, format_ts_srt
 from services.generate_script_service import generate_script_service
 from services.generate_copywriting_service import generate_copywriting_service
-from services.asr.extract_subtitle_service import extract_subtitle_service
+from services.asr.extract_subtitle_service import extract_subtitle_service, EXTRACT_SUBTITLE_SCOPE
 from services.extract_scene_service import extract_scene_service
 from services.video_generation_service import video_generation_service
 from services.jianying_draft_manager import JianyingDraftManager
@@ -344,6 +344,29 @@ async def get_scene_status(project_id: str, task_id: str):
     }
 
 
+def _attach_project_name(st: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(st)
+    pid = str(row.get("project_id") or "").strip()
+    if pid and not row.get("project_name"):
+        pr = projects_store.get_project(pid)
+        if pr and getattr(pr, "name", None):
+            row["project_name"] = str(pr.name)
+    return row
+
+
+def _task_row_still_active(st: Optional[Dict[str, Any]]) -> bool:
+    """用于队列浮窗：是否仍视为进行中（终端状态不占用展示）。"""
+    if not st:
+        return False
+    status = str(st.get("status") or "").strip().lower()
+    if status in ("completed", "failed", "cancelled"):
+        return False
+    msg_type = str(st.get("type") or "").strip().lower()
+    if msg_type in ("completed", "error", "cancelled"):
+        return False
+    return True
+
+
 @router.get("/tasks/queue")
 async def get_project_task_queue():
     """查看当前项目级任务队列状态。
@@ -383,21 +406,39 @@ async def get_project_task_queue():
         scopes = [
             "generate_copywriting", "generate_script", "generate_video",
             JianyingDraftManager.SCOPE, extract_scene_service.SCOPE,
+            EXTRACT_SUBTITLE_SCOPE,
             omni_multimodal_pipeline_service.SCOPE, omni_copywriting_struct_embed_service.SCOPE,
             omni_shot_match_service.SCOPE, omni_global_path_search_service.SCOPE,
             omni_generate_script_service.SCOPE, omni_full_narration_pipeline_service.SCOPE,
         ]
         for s in scopes:
             st = task_progress_store.get_state(s, ap)
-            if st:
-                active_tasks.append(st)
+            if st and _task_row_still_active(st):
+                active_tasks.append(_attach_project_name(st))
+
+    ap_id = queue_status.get("active_project")
+    for st in task_progress_store.iter_states_for_scope(EXTRACT_SUBTITLE_SCOPE):
+        if not _task_row_still_active(st):
+            continue
+        pid = str(st.get("project_id") or "").strip()
+        if ap_id and pid == ap_id:
+            continue
+        if any(
+            x.get("scope") == st.get("scope") and x.get("task_id") == st.get("task_id")
+            for x in active_tasks
+        ):
+            continue
+        active_tasks.append(_attach_project_name(st))
+
+    base_q = int(queue_status.get("active_task_count") or 0)
+    display_task_count = max(base_q, len(active_tasks))
 
     return {
         "message": "获取任务队列状态",
         "data": {
             "active_project": queue_status.get("active_project"),
             "active_project_name": queue_status.get("active_project_name"),
-            "active_task_count": queue_status.get("active_task_count"),
+            "active_task_count": display_task_count,
             "active_tasks": active_tasks,
             "waiting_projects": enriched_waiting,
             "total_waiting_projects": queue_status.get("total_waiting_projects"),

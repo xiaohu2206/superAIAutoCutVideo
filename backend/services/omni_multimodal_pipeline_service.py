@@ -645,6 +645,8 @@ class OmniMultimodalPipelineService:
         force: bool = False,
         task_id: Optional[str] = None,
         multimodal_action: Optional[str] = None,
+        *,
+        queue_slot_preacquired: bool = False,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -670,6 +672,8 @@ class OmniMultimodalPipelineService:
             r_task_id = running.get("task_id")
             if not effective_force:
                 if r_status in ("pending", "processing", "running"):
+                    if queue_slot_preacquired:
+                        await project_task_queue.release(project_id)
                     return {"task_id": r_task_id, "status": r_status, "message": "已有任务在运行"}
             else:
                 if r_task_id and r_status in ("pending", "processing", "running"):
@@ -699,7 +703,8 @@ class OmniMultimodalPipelineService:
         )
 
         async def _run() -> None:
-            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
+            if not queue_slot_preacquired:
+                await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -1655,8 +1660,8 @@ class OmniMultimodalPipelineService:
         multimodal_action: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        同一请求内顺序执行：先获取队列锁，必要时同步提取字幕后提交 Omni 管线。
-        字幕提取完成即返回，队列锁最终由 submit_pipeline 的 _run() 释放。
+        同一请求内顺序执行：先获取项目级队列槽（占用期间其它项目排队），必要时同步提取字幕后提交 Omni 管线。
+        HTTP 在 submit_pipeline 提交后台任务后即返回；槽位由 submit_pipeline 的后台 _run 结束时 release（仅计数一次，不再二次 acquire）。
         """
         p0 = projects_store.get_project(project_id)
         if not p0:
@@ -1693,6 +1698,7 @@ class OmniMultimodalPipelineService:
                 force=eff_pipeline_force,
                 task_id=pipeline_task_id,
                 multimodal_action=mma,
+                queue_slot_preacquired=True,
             )
             pipeline_submitted = True
         finally:

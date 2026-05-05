@@ -38,6 +38,7 @@ from services.omni_generate_script_service import omni_generate_script_service
 from omni_full_narration_pipeline import omni_full_narration_pipeline_service
 from services.jianying_draft_manager import JianyingDraftManager
 from services.script_generation_service import normalize_script_length_selection
+from services.asr.extract_subtitle_service import EXTRACT_SUBTITLE_SCOPE
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
 logger = logging.getLogger(__name__)
@@ -486,7 +487,27 @@ def _is_project_processing(project_id: str) -> bool:
     return False
 
 
+def _reconcile_stale_subtitle_extract_status(data: dict, project_id: str) -> dict:
+    """若磁盘上仍是 extracting，但内存中无运行中的字幕任务（客户端崩溃、后端重启等），纠正 subtitle_status。"""
+    st = str(data.get("subtitle_status") or "").strip().lower()
+    if st != "extracting":
+        return data
+    if task_progress_store.get_latest_running(EXTRACT_SUBTITLE_SCOPE, project_id):
+        return data
+    sp = data.get("subtitle_path")
+    path_ok = bool((str(sp).strip() if isinstance(sp, str) else sp))
+    updates: Dict[str, Any] = {"subtitle_status": "ready" if path_ok else "failed"}
+    try:
+        projects_store.update_project(project_id, updates)
+        merged = {**data, **updates}
+        return merged
+    except Exception:
+        logger.warning("纠正陈旧字幕提取状态失败: project_id=%s", project_id, exc_info=True)
+        return data
+
+
 def _enrich_project_status(data: dict, project_id: str) -> dict:
+    data = _reconcile_stale_subtitle_extract_status(data, project_id)
     if _is_project_processing(project_id):
         data["status"] = "processing"
     return data

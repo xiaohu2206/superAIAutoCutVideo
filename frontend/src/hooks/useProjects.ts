@@ -717,6 +717,7 @@ export const useProjectDetail = (
       setError(null);
       setSubtitleLoading(true);
       try {
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         const res = await projectService.extractSubtitle(project.id, options);
         setSubtitleSegments(res.segments || []);
         setSubtitleMeta(res.subtitle_meta || null);
@@ -1138,13 +1139,13 @@ export const useProjectDetail = (
       stopOmniPolling();
       setSubtitleLoading(true);
       try {
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         const mma = options?.multimodal_action ?? "auto";
         const res = await projectService.runOmniPipelineWithSubtitle(project.id, {
           ...options,
           multimodal_action: mma,
           pipeline_force: Boolean(options?.pipeline_force) || mma === "restart",
         });
-        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         if (res.subtitle && Array.isArray(res.subtitle.segments)) {
           setSubtitleSegments(res.subtitle.segments || []);
           setSubtitleMeta(res.subtitle.subtitle_meta || null);

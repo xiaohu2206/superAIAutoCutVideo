@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from modules.projects_store import projects_store, Project
+from modules.task_progress_store import task_progress_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 from modules.video_processor import video_processor
 from modules.ws_manager import manager
@@ -24,6 +25,8 @@ from .asr_utils import utterances_to_srt
 
 
 logger = logging.getLogger(__name__)
+
+EXTRACT_SUBTITLE_SCOPE = "extract_subtitle"
 
 
 def _subtitle_executor_max_workers() -> int:
@@ -141,7 +144,7 @@ async def _ws(
 ) -> None:
     payload: Dict[str, Any] = {
         "type": type_,
-        "scope": "extract_subtitle",
+        "scope": EXTRACT_SUBTITLE_SCOPE,
         "project_id": project_id,
         "task_id": task_id,
         "phase": phase,
@@ -152,6 +155,11 @@ async def _ws(
         payload["progress"] = progress
     elif type_ == "completed" and progress is not None:
         payload["progress"] = progress
+    if task_id:
+        try:
+            task_progress_store.update_from_payload(payload)
+        except Exception:
+            logger.warning("task_progress_store 同步字幕进度失败", exc_info=True)
     try:
         await manager.broadcast(json.dumps(payload, ensure_ascii=False))
     except Exception as e:
@@ -298,6 +306,19 @@ class ExtractSubtitleService:
             "chunk_audio_paths": [],
             "chunk_results": [],
         })
+        # 与 DB 同步写入进度存储，避免「已 extracting、尚未发出第一条 WS」的窗口期被误判为陈旧任务；亦是崩溃恢复对照依据
+        try:
+            task_progress_store.set_state(
+                EXTRACT_SUBTITLE_SCOPE,
+                project_id,
+                run_id,
+                "running",
+                1.0,
+                "字幕提取已启动",
+                phase="starting",
+            )
+        except Exception:
+            logger.warning("task_progress_store 初始化字幕提取任务失败", exc_info=True)
 
         old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
         if isinstance(old_chunk_paths, list):
@@ -337,13 +358,13 @@ class ExtractSubtitleService:
                     old_f = _resolve_path(old_audio_path)
                     if old_f.exists():
                         old_f.unlink()
-                        await _ws(project_id, "progress", "cleanup_old_audio", "清理旧音频", 25)
+                        await _ws(project_id, "progress", "cleanup_old_audio", "清理旧音频", 25, task_id=run_id)
                 except Exception:
                     pass
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             audio_out = _ensure_parent_dir(_uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3")
-            await _ws(project_id, "progress", "extract_audio", "提取音频中", 30)
+            await _ws(project_id, "progress", "extract_audio", "提取音频中", 30, task_id=run_id)
             ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
             if not ok_audio:
                 _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
