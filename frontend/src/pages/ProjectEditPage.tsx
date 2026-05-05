@@ -57,6 +57,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     sceneExtractMessage,
     sceneExtractPhase,
     runOmniPipeline,
+    runOmniPipelineWithSubtitle,
     cancelOmniPipeline,
     extractingOmniPipeline,
     omniPipelineProgress,
@@ -153,6 +154,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     sceneExtractMessage,
     sceneExtractPhase,
     runOmniPipeline,
+    runOmniPipelineWithSubtitle,
     cancelOmniPipeline,
     extractingOmniPipeline,
     omniPipelineProgress,
@@ -358,6 +360,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           {...generateStep}
         />
       )}
+
     </div>
   );
 };

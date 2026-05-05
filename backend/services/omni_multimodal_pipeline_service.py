@@ -28,7 +28,8 @@ from modules.projects_store import projects_store
 from modules.subtitle_utils import parse_srt
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from modules.project_task_queue import project_task_queue
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir, extract_subtitle_service
 from services.omni_internal.frame_extract import extract_middle_frame
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json, write_encrypted_multimodal_json
 from services.omni_internal.shot_subtitle_mapper import ShotSubtitleMapper
@@ -59,6 +60,17 @@ _ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_op
 def _normalize_multimodal_action(raw: Optional[str]) -> str:
     m = str(raw or "auto").strip().lower()
     return m if m in ("auto", "continue", "restart") else "auto"
+
+
+def _needs_subtitle_extract_for_omni(p: Any) -> bool:
+    """与前端「无字幕路径，或 subtitle_status 存在且非 ready」对齐。"""
+    sp = getattr(p, "subtitle_path", None)
+    if not sp or not str(sp).strip():
+        return True
+    st = getattr(p, "subtitle_status", None)
+    if st is None or str(st).strip() == "":
+        return False
+    return str(st).strip().lower() != "ready"
 
 
 def _omni_shot_identity(shot: Dict[str, Any]) -> Tuple[str, str, str]:
@@ -687,6 +699,7 @@ class OmniMultimodalPipelineService:
         )
 
         async def _run() -> None:
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -1619,9 +1632,78 @@ class OmniMultimodalPipelineService:
                     message=f"Omni 管线失败: {e}",
                     phase="failed",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         return {"task_id": task_id, "status": "pending", "message": "Omni 管线已提交"}
+
+    async def extract_subtitle_if_needed_then_submit_pipeline(
+        self,
+        project_id: str,
+        *,
+        subtitle_task_id: Optional[str] = None,
+        force_subtitle: bool = False,
+        asr_provider: Optional[str] = None,
+        asr_model_key: Optional[str] = None,
+        asr_language: Optional[str] = None,
+        itn: bool = True,
+        hotwords: Optional[List[str]] = None,
+        funasr_max_concurrency: Optional[int] = None,
+        pipeline_force: bool = False,
+        pipeline_task_id: Optional[str] = None,
+        multimodal_action: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        同一请求内顺序执行：先获取队列锁，必要时同步提取字幕后提交 Omni 管线。
+        字幕提取完成即返回，队列锁最终由 submit_pipeline 的 _run() 释放。
+        """
+        p0 = projects_store.get_project(project_id)
+        if not p0:
+            raise ValueError("项目不存在")
+        if str(getattr(p0, "project_type", "") or "").strip().lower() != "omni":
+            raise ValueError("仅 omni 类型项目可运行此管线")
+
+        mma = _normalize_multimodal_action(multimodal_action)
+        candidate_id = pipeline_task_id or f"omni_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        await project_task_queue.acquire(project_id, self.SCOPE, candidate_id)
+
+        subtitle_payload: Optional[Dict[str, Any]] = None
+        subtitle_extracted = False
+        pipeline_submitted = False
+        try:
+            cur = p0
+            if _needs_subtitle_extract_for_omni(cur):
+                subtitle_payload = await extract_subtitle_service.extract_subtitle(
+                    project_id,
+                    force=bool(force_subtitle),
+                    task_id=subtitle_task_id,
+                    asr_provider=asr_provider,
+                    asr_model_key=asr_model_key,
+                    asr_language=asr_language,
+                    itn=bool(itn),
+                    hotwords=hotwords,
+                    funasr_max_concurrency=funasr_max_concurrency,
+                )
+                subtitle_extracted = True
+
+            eff_pipeline_force = bool(pipeline_force) or (mma == "restart")
+            pipeline_payload = await self.submit_pipeline(
+                project_id=project_id,
+                force=eff_pipeline_force,
+                task_id=pipeline_task_id,
+                multimodal_action=mma,
+            )
+            pipeline_submitted = True
+        finally:
+            if not pipeline_submitted:
+                await project_task_queue.release(project_id)
+
+        return {
+            "subtitle_extracted": subtitle_extracted,
+            "subtitle": subtitle_payload,
+            "pipeline": pipeline_payload,
+        }
 
 
 omni_multimodal_pipeline_service = OmniMultimodalPipelineService()

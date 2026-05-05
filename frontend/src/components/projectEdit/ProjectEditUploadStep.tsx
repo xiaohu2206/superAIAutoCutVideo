@@ -547,7 +547,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
               }
             `}
           >
-            <span>生成脚本</span>
+            <span>生成文案</span>
             <ArrowRight
               className={`ml-2 h-5 w-5 transition-transform duration-300 ${
                 (project.project_type === "subtitle"

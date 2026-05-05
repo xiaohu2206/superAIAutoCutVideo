@@ -73,12 +73,17 @@ class ConnectionManager:
         except Exception:
             pass
 
+        # 无订阅者时常见（例如页面刷新刚断开），不必走发送与报错
+        if not self.active_connections:
+            return
+
         disconnected = []
         for connection in list(self.active_connections):
             try:
                 await asyncio.wait_for(connection.send_text(message), timeout=self.WS_SEND_TIMEOUT)
             except Exception as e:
-                logger.error(f"广播消息失败: {e}")
+                # 刷新瞬间连接已关闭、竞态下仍在列表中 — 属预期，避免刷 ERROR
+                logger.debug("广播到已断开或失效的 WebSocket，将移除: %s", e)
                 disconnected.append(connection)
 
         # 清理断开的连接

@@ -96,6 +96,13 @@ export interface SubtitleResult {
   subtitle_meta: SubtitleMeta;
 }
 
+/** POST /omni/extract-subtitle-and-run-pipeline 返回 data 形状 */
+export interface OmniExtractSubtitleAndRunPipelineResult {
+  subtitle_extracted: boolean;
+  subtitle: SubtitleResult | null;
+  pipeline: { task_id: string; status: string; message: string };
+}
+
 /**
  * 项目接口
  */
@@ -122,6 +129,8 @@ export interface Project {
   subtitle_path?: string; // 字幕文件路径
   subtitle_source?: SubtitleSource;
   subtitle_status?: SubtitleStatus;
+  /** 字幕提取任务 id（WS 进度），刷新后可据此恢复订阅 */
+  subtitle_extract_run_id?: string | null;
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;

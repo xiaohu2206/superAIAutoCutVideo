@@ -8,6 +8,7 @@ import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
 import UserProfile from "./components/auth/UserProfile";
 import { useAppVersion } from "./hooks/useAppVersion";
+import TaskQueueFloatingBall from "./components/projectEdit/TaskQueueFloatingBall";
 import {
   TauriCommands,
   WebSocketMessage,
@@ -441,6 +442,7 @@ const App: React.FC = () => {
             </div>
           </div>
         </main>
+        <TaskQueueFloatingBall />
       </div>
     </div>
   );

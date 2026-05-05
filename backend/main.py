@@ -54,6 +54,10 @@ from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.unified_yunwu_models_routes import router as unified_yunwu_models_router
 from routes.project_routes import router as project_router
+from routes.project_upload_routes import router as project_upload_router
+from routes.project_edit_routes import router as project_edit_router
+from routes.project_ai_routes import router as project_ai_router
+from routes.project_jianying_routes import router as project_jianying_router
 from routes.omni_pipeline_routes import router as omni_pipeline_router
 from routes.omni_copywriting_embed_routes import router as omni_copywriting_embed_router
 from routes.omni_shot_match_routes import router as omni_shot_match_router
@@ -408,7 +412,13 @@ app.include_router(health_router)
 app.include_router(video_model_router)
 app.include_router(content_model_router)
 app.include_router(unified_yunwu_models_router)
+# 必须在 project_router 之前：project_routes 含 GET/POST /{project_id}，否则会吞掉
+# /generate-copywriting、/generate-script 等单段静态路径（误把 segment 当成 UUID）。
+app.include_router(project_ai_router)
 app.include_router(project_router)
+app.include_router(project_upload_router)
+app.include_router(project_edit_router)
+app.include_router(project_jianying_router)
 app.include_router(omni_pipeline_router)
 app.include_router(omni_copywriting_embed_router)
 app.include_router(omni_shot_match_router)

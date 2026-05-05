@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
+from modules.project_task_queue import project_task_queue
 from modules.ws_manager import manager
 from services.asr.extract_subtitle_service import _resolve_path
 from services.omni_copywriting_struct_embed_service import omni_copywriting_struct_embed_service
@@ -242,6 +243,7 @@ class OmniFullNarrationPipelineService:
 
         async def _run() -> None:
             nonlocal generate_script_gp_web_override
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -458,6 +460,8 @@ class OmniFullNarrationPipelineService:
                         "timestamp": _now_ts(),
                     }
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         return {"task_id": task_id, "status": "pending", "message": "全链路任务已提交"}

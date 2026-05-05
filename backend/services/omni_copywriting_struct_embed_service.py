@@ -28,6 +28,7 @@ from modules.omni_copywriting_struct_embed import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
+from modules.project_task_queue import project_task_queue
 from services.ai_models.ai_service import LLM_HTTP_TIMEOUT_SEC
 from services.asr.extract_subtitle_service import _to_web_path, _uploads_dir
 from services.ai_models.omni_local_bge_embedding import (
@@ -218,6 +219,7 @@ class OmniCopywritingStructEmbedService:
         plang = str(prompt_language or "zh").strip().lower()
 
         async def _run() -> None:
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -400,6 +402,8 @@ class OmniCopywritingStructEmbedService:
                     message=f"失败: {e}",
                     phase="failed",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         return {"task_id": task_id, "status": "pending", "message": "任务已提交"}

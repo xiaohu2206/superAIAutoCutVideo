@@ -15,6 +15,8 @@ import type {
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
+import { ProjectStatus } from "../types/project";
+import { TASK_SUBMITTED_EVENT } from "../components/projectEdit/TaskQueueFloatingBall";
 
 import { message as uiMessage } from "../services/message";
 
@@ -130,6 +132,62 @@ export const useProjects = (): UseProjectsReturn => {
     await fetchProjects();
   }, [fetchProjects]);
 
+  // 所有会改变项目运行状态的任务 scope 集合
+  const TASK_SCOPES = useMemo(() => new Set([
+    "generate_copywriting",
+    "generate_script",
+    "generate_video",
+    "generate_jianying_draft",
+    "extract_scene",
+    "omni_multimodal",
+    "omni_copywriting_embed",
+    "omni_shot_match",
+    "omni_global_path_search",
+    "omni_generate_script",
+    "omni_full_narration_pipeline",
+  ]), []);
+
+  useEffect(() => {
+    const handler = (message: WebSocketMessage & { [key: string]: any }) => {
+      if (!message) return;
+      const scope = (message as any).scope;
+      const projectId = (message as any).project_id;
+      if (!scope || !projectId || !TASK_SCOPES.has(String(scope))) return;
+
+      const msgType = message.type;
+      if (msgType === "completed") {
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === projectId && p.status !== ProjectStatus.COMPLETED
+              ? { ...p, status: ProjectStatus.COMPLETED }
+              : p
+          )
+        );
+      } else if (msgType === "error" || msgType === "failed") {
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === projectId && p.status !== ProjectStatus.FAILED
+              ? { ...p, status: ProjectStatus.FAILED }
+              : p
+          )
+        );
+      } else if (msgType === "progress") {
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === projectId && p.status !== ProjectStatus.PROCESSING
+              ? { ...p, status: ProjectStatus.PROCESSING }
+              : p
+          )
+        );
+      }
+    };
+
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [TASK_SCOPES]);
+
   return {
     projects,
     loading,
@@ -157,6 +215,7 @@ export interface UseProjectDetailReturn {
   extractSubtitle: (
     options?: {
       task_id?: string | null;
+      force?: boolean;
       asr_provider?: "bcut" | "fun_asr";
       asr_model_key?: string | null;
       asr_language?: string | null;
@@ -192,6 +251,19 @@ export interface UseProjectDetailReturn {
   runOmniPipeline: (options?: {
     force?: boolean;
     task_id?: string | null;
+    multimodal_action?: "auto" | "continue" | "restart";
+  }) => Promise<void>;
+  /** 后端编排：按需提取字幕后提交 Omni 管线（单请求） */
+  runOmniPipelineWithSubtitle: (options?: {
+    task_id?: string | null;
+    force?: boolean;
+    asr_provider?: "bcut" | "fun_asr";
+    asr_model_key?: string | null;
+    asr_language?: string | null;
+    itn?: boolean;
+    hotwords?: string[];
+    pipeline_task_id?: string | null;
+    pipeline_force?: boolean;
     multimodal_action?: "auto" | "continue" | "restart";
   }) => Promise<void>;
   cancelOmniPipeline: () => Promise<void>;
@@ -237,6 +309,8 @@ export const useProjectDetail = (
   const omniPollingTimeoutRef = useRef<number | null>(null);
   /** 递增以作废上一轮 Omni 轮询（避免 await 返回后再次 setTimeout） */
   const omniPollSessionRef = useRef(0);
+  /** 避免刷新/StrictMode/visibility 在短时间内重复打 tasks/running */
+  const omniResumeInFlightRef = useRef(false);
   const [omniMultimodalResult, setOmniMultimodalResult] = useState<OmniMultimodalResult | null>(null);
 
   const syncSceneTaskState = useCallback((task: { task_id?: string | null; status?: string; progress?: number; message?: string; phase?: string } | null | undefined) => {
@@ -431,6 +505,37 @@ export const useProjectDetail = (
     }
   }, []);
 
+  /** 从 task_progress_store 恢复 Omni 轮询（刷新、切回标签页时调用） */
+  const resumeOmniProgressFromServer = useCallback(async () => {
+    if (omniResumeInFlightRef.current) {
+      return;
+    }
+    omniResumeInFlightRef.current = true;
+    try {
+      if (!project?.id) {
+        stopOmniPolling();
+        syncOmniTaskState(null);
+        return;
+      }
+      try {
+        const running = await projectService.getProjectRunningTasks(project.id);
+        if (!running) return;
+        const task = running.omni_multimodal;
+        syncOmniTaskState(task);
+        if (task?.task_id) {
+          setOmniMultimodalResult(null);
+          startOmniPolling(project.id, String(task.task_id), fetchProject);
+        } else {
+          stopOmniPolling();
+        }
+      } catch (err) {
+        console.error("同步 Omni 任务状态失败:", err);
+      }
+    } finally {
+      omniResumeInFlightRef.current = false;
+    }
+  }, [project?.id, startOmniPolling, stopOmniPolling, syncOmniTaskState, fetchProject]);
+
   /**
    * 更新项目
    */
@@ -600,6 +705,7 @@ export const useProjectDetail = (
     async (
       options?: {
         task_id?: string | null;
+        force?: boolean;
         asr_provider?: "bcut" | "fun_asr";
         asr_model_key?: string | null;
         asr_language?: string | null;
@@ -701,6 +807,7 @@ export const useProjectDetail = (
       try {
         const copywriting = await projectService.generateCopywriting(data);
         setProject((prev) => (prev ? { ...prev, narration_copywriting: copywriting } : null));
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         return copywriting;
       } catch (err) {
         setError(getErrorMessage(err, "生成解说文案失败"));
@@ -745,6 +852,7 @@ export const useProjectDetail = (
       try {
         const script = await projectService.generateScript(data);
         setProject((prev) => (prev ? { ...prev, script } : null));
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         return script;
       } catch (err) {
         setError(getErrorMessage(err, "生成解说脚本失败"));
@@ -783,6 +891,7 @@ export const useProjectDetail = (
     setLoading(true);
     try {
       const result = await projectService.startGenerateVideo(project.id);
+      window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
       return result ?? null;
     } catch (err) {
       setError(getErrorMessage(err, "生成视频失败"));
@@ -930,6 +1039,7 @@ export const useProjectDetail = (
     try {
         const res = await projectService.extractScenes(project.id, options);
         const taskId = res.task_id;
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         setSceneTaskId(taskId || null);
 
         if (taskId) {
@@ -975,9 +1085,9 @@ export const useProjectDetail = (
         const res = await projectService.runOmniPipeline(project.id, {
           ...options,
           multimodal_action: mma,
-          // 与后端一致：restart 需抢占进行中的任务，否则会继续轮询旧 task_id
           force: Boolean(options?.force) || mma === "restart",
         });
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         const taskId = res.task_id;
         setOmniTaskId(taskId || null);
         if (taskId) {
@@ -990,6 +1100,71 @@ export const useProjectDetail = (
         setOmniPipelineMessage(getErrorMessage(err, "Omni 管线失败"));
         setOmniPipelinePhase(null);
         throw err;
+      }
+    },
+    [project, startOmniPolling, stopOmniPolling, fetchProject]
+  );
+
+  const runOmniPipelineWithSubtitle = useCallback(
+    async (options?: {
+      task_id?: string | null;
+      force?: boolean;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+      pipeline_task_id?: string | null;
+      pipeline_force?: boolean;
+      multimodal_action?: "auto" | "continue" | "restart";
+    }) => {
+      if (!project) return;
+      const authTrim =
+        typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token")?.trim() : "";
+      if (!authTrim) {
+        const msg = "运行 Omni 管线需要先登录，并在个人中心绑定处于生效中的 License。";
+        setError(msg);
+        setOmniPipelineMessage(msg);
+        setOmniPipelinePhase(null);
+        stopOmniPolling();
+        throw new Error(msg);
+      }
+      setError(null);
+      setOmniMultimodalResult(null);
+      setExtractingOmniPipeline(false);
+      setOmniPipelineProgress(0);
+      setOmniPipelineMessage("");
+      setOmniPipelinePhase(null);
+      stopOmniPolling();
+      setSubtitleLoading(true);
+      try {
+        const mma = options?.multimodal_action ?? "auto";
+        const res = await projectService.runOmniPipelineWithSubtitle(project.id, {
+          ...options,
+          multimodal_action: mma,
+          pipeline_force: Boolean(options?.pipeline_force) || mma === "restart",
+        });
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
+        if (res.subtitle && Array.isArray(res.subtitle.segments)) {
+          setSubtitleSegments(res.subtitle.segments || []);
+          setSubtitleMeta(res.subtitle.subtitle_meta || null);
+        }
+        await fetchProject(project.id);
+        const taskId = res.pipeline?.task_id;
+        setOmniTaskId(taskId || null);
+        setExtractingOmniPipeline(true);
+        if (taskId) {
+          startOmniPolling(project.id, taskId, fetchProject);
+        }
+      } catch (err) {
+        setError(getErrorMessage(err, "Omni 管线失败"));
+        setExtractingOmniPipeline(false);
+        setOmniTaskId(null);
+        setOmniPipelineMessage(getErrorMessage(err, "Omni 管线失败"));
+        setOmniPipelinePhase(null);
+        throw err;
+      } finally {
+        setSubtitleLoading(false);
       }
     },
     [project, startOmniPolling, stopOmniPolling, fetchProject]
@@ -1075,35 +1250,18 @@ export const useProjectDetail = (
   }, [project?.id, startScenePolling, stopScenePolling, syncSceneTaskState]);
 
   useEffect(() => {
-    let cancelled = false;
-    const syncOmniTask = async () => {
-      if (!project?.id) {
-        if (!cancelled) {
-          stopOmniPolling();
-          syncOmniTaskState(null);
-        }
-        return;
-      }
-      try {
-        const running = await projectService.getProjectRunningTasks(project.id);
-        if (cancelled || !running) return;
-        const task = running.omni_multimodal;
-        syncOmniTaskState(task);
-        if (task?.task_id) {
-          setOmniMultimodalResult(null);
-          startOmniPolling(project.id, String(task.task_id), fetchProject);
-        } else {
-          stopOmniPolling();
-        }
-      } catch (err) {
-        console.error("同步 Omni 任务状态失败:", err);
-      }
+    void resumeOmniProgressFromServer();
+  }, [project?.id, resumeOmniProgressFromServer]);
+
+  /** 刷新 / 切回标签页后向服务端拉一次运行中任务，恢复 Omni 轮询（进度存于 task_progress_store） */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible" || !project?.id) return;
+      void resumeOmniProgressFromServer();
     };
-    void syncOmniTask();
-    return () => {
-      cancelled = true;
-    };
-  }, [project?.id, startOmniPolling, stopOmniPolling, syncOmniTaskState, fetchProject]);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [project?.id, resumeOmniProgressFromServer]);
 
   useEffect(() => {
     return () => {
@@ -1175,6 +1333,7 @@ export const useProjectDetail = (
     sceneExtractMessage,
     sceneExtractPhase,
     runOmniPipeline,
+    runOmniPipelineWithSubtitle,
     cancelOmniPipeline,
     extractingOmniPipeline,
     omniPipelineProgress,

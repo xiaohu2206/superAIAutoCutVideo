@@ -18,6 +18,7 @@ import numpy as np
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
+from modules.project_task_queue import project_task_queue
 from services.asr.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
 from services.ai_models.vision_scene_status import scene_vision_success_ok
 from services.ai_models.vision_frame_analysis_service import vision_frame_analyzer
@@ -541,6 +542,7 @@ class ExtractSceneService:
         )
 
         async def _run():
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 current_p = projects_store.get_project(project_id)
                 video_abs_path = _resolve_path(current_p.video_path)
@@ -1051,6 +1053,8 @@ class ExtractSceneService:
                     status="failed",
                     message=f"镜头提取失败: {str(e)}",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         

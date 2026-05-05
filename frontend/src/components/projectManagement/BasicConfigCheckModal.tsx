@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, X, XCircle } from "lucide-react";
 import contentModelService from "../../services/contentModelService";
 import videoModelService from "../../services/videoModelService";
+import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import ttsService from "../../services/ttsService";
 import healthService from "../../services/healthService";
 import jianyingService from "../../services/jianyingService";
@@ -21,32 +22,43 @@ interface BasicConfigCheckModalProps {
 
 const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, onClose }) => {
   const [running, setRunning] = useState(false);
+  /** null：本轮尚未拉取配置；false：使用聚合模型（不测独立文案/视频）；true：独立模型 */
+  const [useCustomModelsDeck, setUseCustomModelsDeck] = useState<boolean | null>(null);
+  const [unifiedModelsResult, setUnifiedModelsResult] = useState<StepResult>({ status: "pending" });
   const [contentResult, setContentResult] = useState<StepResult>({ status: "pending" });
   const [videoResult, setVideoResult] = useState<StepResult>({ status: "pending" });
   const [ttsResult, setTtsResult] = useState<StepResult>({ status: "pending" });
   const [asrResult, setAsrResult] = useState<StepResult>({ status: "pending" });
   const [jianyingResult, setJianyingResult] = useState<StepResult>({ status: "pending" });
 
-  const totalSteps = 5;
+  const unifiedYunwuDeck = useCustomModelsDeck === false;
+  const totalSteps = unifiedYunwuDeck ? 4 : 5;
   const doneSteps = useMemo(() => {
-    const s = [
-      contentResult.status,
-      videoResult.status,
-      ttsResult.status,
-      asrResult.status,
-      jianyingResult.status,
-    ];
+    const s = unifiedYunwuDeck
+      ? [
+          unifiedModelsResult.status,
+          ttsResult.status,
+          asrResult.status,
+          jianyingResult.status,
+        ]
+      : [
+          contentResult.status,
+          videoResult.status,
+          ttsResult.status,
+          asrResult.status,
+          jianyingResult.status,
+        ];
     return s.filter((x) => x === "success" || x === "failed").length;
-  }, [contentResult.status, videoResult.status, ttsResult.status, asrResult.status, jianyingResult.status]);
-  const progress = Math.round((doneSteps / totalSteps) * 100);
-
-  const reset = () => {
-    setContentResult({ status: "pending" });
-    setVideoResult({ status: "pending" });
-    setTtsResult({ status: "pending" });
-    setAsrResult({ status: "pending" });
-    setJianyingResult({ status: "pending" });
-  };
+  }, [
+    unifiedYunwuDeck,
+    unifiedModelsResult.status,
+    contentResult.status,
+    videoResult.status,
+    ttsResult.status,
+    asrResult.status,
+    jianyingResult.status,
+  ]);
+  const progress = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0;
 
   const getRespMessage = (resp: any, fallback: string) => {
     const m1 = resp?.message;
@@ -61,29 +73,63 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
   const runChecks = async () => {
     if (running) return;
     setRunning(true);
-    reset();
 
-    let phase: "content" | "video" | "tts" | "asr" | "jianying" = "content";
+    let useCustomModels = false;
     try {
-      phase = "content";
-      setContentResult({ status: "running" });
-      const contentResp: any = await contentModelService.testActiveConnection();
-      const contentOk = !!contentResp?.success;
-      setContentResult({
-        status: contentOk ? "success" : "failed",
-        message: getRespMessage(contentResp, contentOk ? "可用" : "不可用"),
-        detail: contentResp?.data,
-      });
+      const cfgRes: any = await unifiedYunwuModelService.get();
+      const cfgData = cfgRes?.data;
+      if (cfgRes?.success && cfgData && typeof cfgData === "object") {
+        useCustomModels = Boolean(cfgData.use_custom_models);
+      }
+    } catch {
+      useCustomModels = false;
+    }
+    setUseCustomModelsDeck(useCustomModels);
+    const unifiedYunwuMode = !useCustomModels;
 
-      phase = "video";
-      setVideoResult({ status: "running" });
-      const videoResp: any = await videoModelService.testActiveConnection();
-      const videoOk = !!videoResp?.success;
-      setVideoResult({
-        status: videoOk ? "success" : "failed",
-        message: getRespMessage(videoResp, videoOk ? "可用" : "不可用"),
-        detail: videoResp?.data,
-      });
+    setUnifiedModelsResult({ status: "pending" });
+    setContentResult({ status: "pending" });
+    setVideoResult({ status: "pending" });
+    setTtsResult({ status: "pending" });
+    setAsrResult({ status: "pending" });
+    setJianyingResult({ status: "pending" });
+
+    let phase: "unified" | "content" | "video" | "tts" | "asr" | "jianying" = unifiedYunwuMode ? "unified" : "content";
+    try {
+      if (unifiedYunwuMode) {
+        phase = "unified";
+        setUnifiedModelsResult({ status: "running" });
+        const unifiedResp: any = await unifiedYunwuModelService.test();
+        const inner = unifiedResp?.data;
+        const unifiedOk = !!unifiedResp?.success && !!inner?.success;
+        setUnifiedModelsResult({
+          status: unifiedOk ? "success" : "failed",
+          message: unifiedOk
+            ? getRespMessage(unifiedResp, inner?.message || "聚合模型可用")
+            : String(inner?.error || inner?.message || getRespMessage(unifiedResp, "不可用")),
+          detail: inner,
+        });
+      } else {
+        phase = "content";
+        setContentResult({ status: "running" });
+        const contentResp: any = await contentModelService.testActiveConnection();
+        const contentOk = !!contentResp?.success;
+        setContentResult({
+          status: contentOk ? "success" : "failed",
+          message: getRespMessage(contentResp, contentOk ? "可用" : "不可用"),
+          detail: contentResp?.data,
+        });
+
+        phase = "video";
+        setVideoResult({ status: "running" });
+        const videoResp: any = await videoModelService.testActiveConnection();
+        const videoOk = !!videoResp?.success;
+        setVideoResult({
+          status: videoOk ? "success" : "failed",
+          message: getRespMessage(videoResp, videoOk ? "可用" : "不可用"),
+          detail: videoResp?.data,
+        });
+      }
 
       phase = "tts";
       setTtsResult({ status: "running" });
@@ -129,7 +175,12 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
       });
     } catch (e: any) {
       const msg = typeof e?.message === "string" ? e.message : "请求失败";
-      if (phase === "content") {
+      if (phase === "unified") {
+        setUnifiedModelsResult({ status: "failed", message: msg, detail: e });
+        setTtsResult({ status: "pending" });
+        setAsrResult({ status: "pending" });
+        setJianyingResult({ status: "pending" });
+      } else if (phase === "content") {
         setContentResult({ status: "failed", message: msg, detail: e });
         setVideoResult({ status: "pending" });
         setTtsResult({ status: "pending" });
@@ -217,19 +268,27 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
     );
   };
 
-  const allDone =
-    (contentResult.status === "success" || contentResult.status === "failed") &&
-    (videoResult.status === "success" || videoResult.status === "failed") &&
-    (ttsResult.status === "success" || ttsResult.status === "failed") &&
-    (asrResult.status === "success" || asrResult.status === "failed") &&
-    (jianyingResult.status === "success" || jianyingResult.status === "failed");
+  const allDone = unifiedYunwuDeck
+    ? (unifiedModelsResult.status === "success" || unifiedModelsResult.status === "failed") &&
+      (ttsResult.status === "success" || ttsResult.status === "failed") &&
+      (asrResult.status === "success" || asrResult.status === "failed") &&
+      (jianyingResult.status === "success" || jianyingResult.status === "failed")
+    : (contentResult.status === "success" || contentResult.status === "failed") &&
+      (videoResult.status === "success" || videoResult.status === "failed") &&
+      (ttsResult.status === "success" || ttsResult.status === "failed") &&
+      (asrResult.status === "success" || asrResult.status === "failed") &&
+      (jianyingResult.status === "success" || jianyingResult.status === "failed");
 
-  const overallOk =
-    contentResult.status === "success" &&
-    videoResult.status === "success" &&
-    ttsResult.status === "success" &&
-    asrResult.status === "success" &&
-    jianyingResult.status === "success";
+  const overallOk = unifiedYunwuDeck
+    ? unifiedModelsResult.status === "success" &&
+      ttsResult.status === "success" &&
+      asrResult.status === "success" &&
+      jianyingResult.status === "success"
+    : contentResult.status === "success" &&
+      videoResult.status === "success" &&
+      ttsResult.status === "success" &&
+      asrResult.status === "success" &&
+      jianyingResult.status === "success";
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -245,7 +304,9 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
               <div>
                 <h3 className="text-xl font-semibold text-gray-900">基础连通检测</h3>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  依次检测：文案生成模型、视频模型、配音、内置字幕识别、剪映草稿路径
+                  {unifiedYunwuDeck
+                    ? "依次检测：聚合模型、配音、内置字幕识别、剪映草稿路径"
+                    : "依次检测：文案生成模型、视频模型、配音、内置字幕识别、剪映草稿路径"}
                 </div>
               </div>
             </div>
@@ -270,11 +331,22 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
             </div>
 
             <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg px-4">
-              <StepRow title="1) 测试文案生成模型" result={contentResult} />
-              <StepRow title="2) 测试视频生成模型" result={videoResult} />
-              <StepRow title="3) 测试配音" result={ttsResult} />
-              <StepRow title="4) 测试字幕识别（只测内置API）" result={asrResult} />
-              <StepRow title="5) 剪映草稿路径" result={jianyingResult} />
+              {unifiedYunwuDeck ? (
+                <>
+                  <StepRow title="1) 测试聚合模型" result={unifiedModelsResult} />
+                  <StepRow title="2) 测试配音" result={ttsResult} />
+                  <StepRow title="3) 测试字幕识别（只测内置API）" result={asrResult} />
+                  <StepRow title="4) 剪映草稿路径" result={jianyingResult} />
+                </>
+              ) : (
+                <>
+                  <StepRow title="1) 测试文案生成模型" result={contentResult} />
+                  <StepRow title="2) 测试视频生成模型" result={videoResult} />
+                  <StepRow title="3) 测试配音" result={ttsResult} />
+                  <StepRow title="4) 测试字幕识别（只测内置API）" result={asrResult} />
+                  <StepRow title="5) 剪映草稿路径" result={jianyingResult} />
+                </>
+              )}
             </div>
 
             {allDone && (

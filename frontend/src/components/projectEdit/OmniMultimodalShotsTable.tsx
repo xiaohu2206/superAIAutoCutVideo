@@ -85,7 +85,6 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
               </span>
             )}
           </span>
-          {metaLine ? <span className="text-gray-500 text-xs truncate max-w-[50%]">{metaLine}</span> : null}
         </div>
 
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-5 flex items-center justify-center transition-all rounded-lg pointer-events-none">

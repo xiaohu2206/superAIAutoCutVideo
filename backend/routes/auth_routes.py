@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter, Request
 
-from modules.auth.auth_upstream import forward_upstream_get, forward_upstream_post
+from modules.auth.auth_upstream import AUTH_ME_HTTP_TIMEOUT, forward_upstream_get, forward_upstream_post
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -42,6 +42,7 @@ async def get_me(request: Request):
     return await forward_upstream_get(
         "/api/auth/me",
         request.headers.get("Authorization"),
+        timeout=AUTH_ME_HTTP_TIMEOUT,
     )
 
 

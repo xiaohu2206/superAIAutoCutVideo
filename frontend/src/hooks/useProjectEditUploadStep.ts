@@ -39,6 +39,7 @@ export interface UseProjectEditUploadStepOptions {
   deleteSubtitle: () => Promise<void>;
   extractSubtitle: (options?: {
     task_id?: string | null;
+    force?: boolean;
     asr_provider?: "bcut" | "fun_asr";
     asr_model_key?: string | null;
     asr_language?: string | null;
@@ -61,6 +62,18 @@ export interface UseProjectEditUploadStepOptions {
   runOmniPipeline: (options?: {
     force?: boolean;
     task_id?: string | null;
+    multimodal_action?: "auto" | "continue" | "restart";
+  }) => Promise<void>;
+  runOmniPipelineWithSubtitle: (options?: {
+    task_id?: string | null;
+    force?: boolean;
+    asr_provider?: "bcut" | "fun_asr";
+    asr_model_key?: string | null;
+    asr_language?: string | null;
+    itn?: boolean;
+    hotwords?: string[];
+    pipeline_task_id?: string | null;
+    pipeline_force?: boolean;
     multimodal_action?: "auto" | "continue" | "restart";
   }) => Promise<void>;
   cancelOmniPipeline: () => Promise<void>;
@@ -468,10 +481,11 @@ export function useProjectEditUploadStep(
       options.showErrorText("已上传字幕，需先删除才能提取");
       return;
     }
-    // 每次都强制重新提取，不使用缓存的音频
+    let forceOverwrite = false;
     if (project.subtitle_updated_by_user) {
       const ok = await askSubtitleOverwrite();
       if (!ok) return;
+      forceOverwrite = true;
     }
 
     setExtractingSubtitle(true);
@@ -487,6 +501,7 @@ export function useProjectEditUploadStep(
           : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
       await options.extractSubtitle({
         task_id: taskId,
+        force: forceOverwrite,
         asr_provider: subtitleAsr.provider,
         asr_model_key: isFun ? subtitleAsr.modelKey : null,
         asr_language: isFun ? subtitleAsr.language : "中文",
@@ -507,6 +522,7 @@ export function useProjectEditUploadStep(
   useWsTaskProgress({
     scope: "extract_subtitle",
     projectId: options.project?.id,
+    taskId: options.project?.subtitle_extract_run_id ?? undefined,
     onProgress: setSubtitleExtractProgress,
     onLog: (log) => setSubtitleExtractLogs((prev) => [...prev, log]),
     onCompleted: () => {
@@ -522,6 +538,25 @@ export function useProjectEditUploadStep(
       options.showErrorText(m.message || "字幕提取失败");
     },
   });
+
+  /** 刷新后根据服务端状态恢复「正在提取字幕」与 WS 进度（编排接口长时间阻塞时同理） */
+  useEffect(() => {
+    const st = options.project?.subtitle_status;
+    if (st === "extracting") {
+      setExtractingSubtitle(true);
+      return;
+    }
+    if (
+      st === "ready" ||
+      st === "failed" ||
+      st === "none" ||
+      st === undefined
+    ) {
+      if (!options.subtitleLoading) {
+        setExtractingSubtitle(false);
+      }
+    }
+  }, [options.project?.subtitle_status, options.subtitleLoading]);
 
   useEffect(() => {
     if (options.project?.subtitle_path) {
@@ -579,8 +614,10 @@ export function useProjectEditUploadStep(
           !options.subtitleLoading;
         if (canStartSubtitle) {
           let shouldStartSubtitle = true;
+          let subtitleForce = false;
           if (p.subtitle_updated_by_user) {
             shouldStartSubtitle = await askSubtitleOverwrite();
+            if (shouldStartSubtitle) subtitleForce = true;
           }
           if (shouldStartSubtitle) {
             setExtractingSubtitle(true);
@@ -596,6 +633,7 @@ export function useProjectEditUploadStep(
             try {
               await options.extractSubtitle({
                 task_id: subTaskId,
+                force: subtitleForce,
                 asr_provider: subtitleAsr.provider,
                 asr_model_key: isFun ? subtitleAsr.modelKey : null,
                 asr_language: isFun ? subtitleAsr.language : "中文",
@@ -732,59 +770,89 @@ export function useProjectEditUploadStep(
       return;
     }
 
-    if (!p.subtitle_path || (p.subtitle_status && p.subtitle_status !== "ready")) {
-      if (p.subtitle_source === "user" && Boolean(p.subtitle_path)) {
-        options.showErrorText("已上传字幕，需先删除才能提取");
-        return;
-      }
-      if (p.subtitle_updated_by_user) {
-        const ok = await askSubtitleOverwrite();
-        if (!ok) return;
-      }
+    const needSubtitlePhase =
+      !p.subtitle_path || (Boolean(p.subtitle_status) && p.subtitle_status !== "ready");
+    if (needSubtitlePhase && p.subtitle_source === "user" && Boolean(p.subtitle_path)) {
+      options.showErrorText("已上传字幕，需先删除才能提取");
+      return;
+    }
+
+    let subtitleForce = false;
+    if (needSubtitlePhase && p.subtitle_updated_by_user) {
+      const ok = await askSubtitleOverwrite();
+      if (!ok) return;
+      subtitleForce = true;
+    }
+
+    if (needSubtitlePhase) {
       setExtractingSubtitle(true);
       setSubtitleExtractProgress(0);
       setSubtitleExtractLogs([]);
-      try {
-        const isFun = subtitleAsr.provider === "fun_asr";
-        const taskId =
-          globalThis.crypto &&
-          "randomUUID" in globalThis.crypto &&
-          typeof (globalThis.crypto as any).randomUUID === "function"
-            ? (globalThis.crypto as any).randomUUID()
-            : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        await options.extractSubtitle({
-          task_id: taskId,
-          asr_provider: subtitleAsr.provider,
-          asr_model_key: isFun ? subtitleAsr.modelKey : null,
-          asr_language: isFun ? subtitleAsr.language : "中文",
-        });
-        setSubtitleExtractProgress(100);
-        setExtractingSubtitle(false);
-        void options.refreshProject();
-        void options.fetchSubtitle().catch(() => void 0);
-      } catch (err) {
-        options.showError(err, "提取字幕失败");
-        setExtractingSubtitle(false);
-        setSubtitleExtractProgress(0);
-        return;
-      }
     }
 
+    const isFun = subtitleAsr.provider === "fun_asr";
+    const subtitleTaskId =
+      globalThis.crypto &&
+      "randomUUID" in globalThis.crypto &&
+      typeof (globalThis.crypto as any).randomUUID === "function"
+        ? (globalThis.crypto as any).randomUUID()
+        : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    // 已有 Omni 多模态结果时：只按需补字幕，再由弹窗里 continue/restart 单独提交管线（与原先顺序一致）
     if (p.omni_multimodal_json_path) {
+      if (needSubtitlePhase) {
+        try {
+          await options.extractSubtitle({
+            task_id: subtitleTaskId,
+            force: subtitleForce,
+            asr_provider: subtitleAsr.provider,
+            asr_model_key: isFun ? subtitleAsr.modelKey : null,
+            asr_language: isFun ? subtitleAsr.language : "中文",
+          });
+          setSubtitleExtractProgress(100);
+          setExtractingSubtitle(false);
+          void options.refreshProject();
+          void options.fetchSubtitle().catch(() => void 0);
+        } catch (err) {
+          options.showError(err, "提取字幕失败");
+          setExtractingSubtitle(false);
+          setSubtitleExtractProgress(0);
+          return;
+        }
+      }
       setOmniMultimodalChoiceModalOpen(true);
       return;
     }
 
     try {
-      await options.runOmniPipeline({ multimodal_action: "auto" });
+      await options.runOmniPipelineWithSubtitle({
+        task_id: subtitleTaskId,
+        force: subtitleForce,
+        asr_provider: subtitleAsr.provider,
+        asr_model_key: isFun ? subtitleAsr.modelKey : null,
+        asr_language: isFun ? subtitleAsr.language : "中文",
+        multimodal_action: "auto",
+      });
+      if (needSubtitlePhase) {
+        setSubtitleExtractProgress(100);
+        setExtractingSubtitle(false);
+      }
+      void options.refreshProject();
+      void options.fetchSubtitle().catch(() => void 0);
       options.showSuccess("Omni 管线任务已提交");
     } catch (err) {
+      if (needSubtitlePhase) {
+        setExtractingSubtitle(false);
+        setSubtitleExtractProgress(0);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       if (OMNI_LICENSE_ERROR_RE.test(msg)) {
         if (!isAuthenticated) options.onShowLogin?.();
         else options.onShowProfile?.();
       }
-      options.showError(err, "Omni 管线失败");
+      const fallback =
+        needSubtitlePhase && !/Omni|管线|license|401|403|登录/i.test(msg) ? "提取字幕或 Omni 管线失败" : "Omni 管线失败";
+      options.showError(err, fallback);
     }
   }, [options, subtitleAsr, askSubtitleOverwrite, isAuthenticated]);
 

@@ -21,6 +21,8 @@ _AUTH_UPSTREAM_DEV = "http://47.92.113.170:8176" # "http://127.0.0.1:3000"
 _AUTH_UPSTREAM_PROD = "http://47.92.113.170:8176"
 
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=8.0, read=45.0, write=20.0, pool=8.0)
+# 刷新页时常见串行请求 /me，上游慢会拖住首屏；单独收紧读超时（仍足够拉用户信息）
+AUTH_ME_HTTP_TIMEOUT = httpx.Timeout(connect=4.0, read=10.0, write=8.0, pool=4.0)
 
 _UPSTREAM_UNREACHABLE_MSG = "认证服务暂时不可用，请稍后重试"
 
@@ -121,14 +123,20 @@ async def fetch_upstream_json(path: str, authorization: Optional[str] = None) ->
         return None
 
 
-async def forward_upstream_get(path: str, authorization: Optional[str]) -> Response:
+async def forward_upstream_get(
+    path: str,
+    authorization: Optional[str],
+    *,
+    timeout: Optional[httpx.Timeout] = None,
+) -> Response:
     url = f"{get_auth_upstream_base()}{path}"
     headers = {"Accept": "application/json, text/plain, */*"}
     if authorization:
         headers["Authorization"] = authorization
+    eff_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
     try:
         async with httpx.AsyncClient(
-            timeout=_DEFAULT_TIMEOUT,
+            timeout=eff_timeout,
             trust_env=False,
         ) as client:
             r = await client.get(url, headers=headers)
@@ -136,5 +144,10 @@ async def forward_upstream_get(path: str, authorization: Optional[str]) -> Respo
         return JSONResponse(
             status_code=502,
             content={"detail": _UPSTREAM_UNREACHABLE_MSG},
+        )
+    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout):
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "认证服务响应超时，请稍后重试"},
         )
     return _passthrough_response(r)

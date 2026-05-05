@@ -28,9 +28,6 @@ interface IntegratedModelSettingsProps {
   testModelConnection: () => void;
 }
 
-const tabBtn =
-  "rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60";
-
 /**
  * 整合模型：选择聚合平台 + API Key + 测试；开启「自定义模型」后横向切换文案 / 视频分析。
  */
@@ -90,60 +87,72 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3">
+      <div
+        className={`flex items-start gap-3 ${togglingCustom ? "opacity-90" : ""}`}
+        aria-busy={togglingCustom}
+      >
         <input
           type="checkbox"
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-wait"
           checked={useCustom}
           disabled={togglingCustom}
           onChange={(e) => void setUseCustomModelsPersist(e.target.checked)}
+          aria-describedby="integrated-custom-models-hint"
         />
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-900">
-            使用自定义模型
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-slate-900">
+              使用自定义模型
+            </span>
+            {togglingCustom && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                切换中…
+              </span>
+            )}
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p
+            id="integrated-custom-models-hint"
+            className="mt-1 text-xs text-slate-500"
+          >
             (小白不建议开启)
             开启后将显示「文案模型」「视频分析模型」配置页，并隐藏聚合整合默认项；关闭后仅保留聚合整合。
           </p>
         </div>
       </div>
 
-      {/* 横向子 Tab（自定义模式） */}
       {useCustom && (
         <div
           role="tablist"
           aria-label="整合模型子页"
-          className="flex flex-wrap gap-1 border-b border-slate-200 pb-0.5"
+          className="inline-flex rounded-xl bg-slate-100 p-1"
         >
-          <>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={subTab === "content"}
-              className={`${tabBtn} ${
-                subTab === "content"
-                  ? "border-b-2 border-blue-600 text-blue-800"
-                  : "text-slate-600 hover:bg-slate-100/80"
-              }`}
-              onClick={() => setSubTab("content")}
-            >
-              文案模型
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={subTab === "video"}
-              className={`${tabBtn} ${
-                subTab === "video"
-                  ? "border-b-2 border-blue-600 text-blue-800"
-                  : "text-slate-600 hover:bg-slate-100/80"
-              }`}
-              onClick={() => setSubTab("video")}
-            >
-              视频分析模型
-            </button>
-          </>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={subTab === "content"}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
+              subTab === "content"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+            onClick={() => setSubTab("content")}
+          >
+            文案模型
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={subTab === "video"}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
+              subTab === "video"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+            onClick={() => setSubTab("video")}
+          >
+            视频分析模型
+          </button>
         </div>
       )}
 
@@ -227,25 +236,25 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
                 </h4>
                 <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <div>
-                    <span className="text-slate-500">文案生成：</span>
+                    <span className="text-slate-500">模型1：</span>
                     <span className="font-medium text-slate-800">
                       {activePlatform.tiers.high.copywriting_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">视频分析：</span>
+                    <span className="text-slate-500">模型2：</span>
                     <span className="font-medium text-slate-800">
                       {activePlatform.tiers.high.video_analysis_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">LLM 精排：</span>
+                    <span className="text-slate-500">模型3：</span>
                     <span className="font-medium text-slate-800">
                       {activePlatform.tiers.high.llm_rerank_model_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500">脚本生成：</span>
+                    <span className="text-slate-500">模型4：</span>
                     <span className="font-medium text-slate-800">
                       {activePlatform.tiers.high.script_generation_model_name}
                     </span>
