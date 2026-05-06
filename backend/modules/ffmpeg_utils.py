@@ -62,7 +62,16 @@ def _resolve_bin(base: str) -> Optional[str]:
         try:
             p = Path(env_path)
             if p.exists():
-                return str(p)
+                # ffprobe 不能与 ffmpeg 混用：FFMPEG_PATH 常指向 ffmpeg.exe，不能原样当作 ffprobe。
+                if base == "ffprobe":
+                    pl = p.name.lower()
+                    if "ffprobe" in pl:
+                        return str(p)
+                    sibling = p.parent / name
+                    if sibling.exists():
+                        return str(sibling)
+                else:
+                    return str(p)
         except Exception:
             pass
 
@@ -82,11 +91,17 @@ def _resolve_bin(base: str) -> Optional[str]:
     try:
         import imageio_ffmpeg
 
-        p = imageio_ffmpeg.get_ffmpeg_exe()
-        if p:
-            pp = Path(p)
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        if ff:
+            pp = Path(ff)
             if pp.exists():
-                return str(pp)
+                # imageio 仅捆绑 ffmpeg：取同目录下的 ffprobe，不能把 ffmpeg 当作 ffprobe。
+                if base == "ffprobe":
+                    probe = pp.parent / name
+                    if probe.exists():
+                        return str(probe)
+                else:
+                    return str(pp)
     except Exception:
         pass
 

@@ -13,6 +13,8 @@ datas = [
 # 例如 modules/prompts/common/sharp_roast/sharp_roast.md
 if os.path.isdir('modules/prompts'):
     datas.append(('modules/prompts', 'modules/prompts'))
+if os.path.isdir('services/omni_internal/prompts'):
+    datas.append(('services/omni_internal/prompts', 'services/omni_internal/prompts'))
 binaries = []
 try:
     _tbb12 = os.path.join(sys.prefix, 'Library', 'bin', 'tbb12.dll')

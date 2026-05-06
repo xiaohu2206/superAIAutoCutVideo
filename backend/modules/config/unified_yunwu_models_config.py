@@ -185,7 +185,7 @@ class UnifiedYunwuModelsRoot(BaseModel):
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 
     use_custom_models: bool = Field(
-        True,
+        False,
         description="为 True 时文案/视频等仍走原 content_model / video_model；为 False 时走聚合按档位",
     )
     active_platform: str = Field(

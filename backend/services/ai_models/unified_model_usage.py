@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Tuple
 
 from modules.config.content_model_config import ContentModelConfig, content_model_config_manager
 from modules.config.unified_yunwu_models_config import (
@@ -88,10 +88,12 @@ def _unified_yunwu_content_cfg(*, model_name: str, tier_settings: YunwuTierSetti
 
 def resolve_unified_yunwu_for_integration_connection_test(
     omni_effect_tier: Optional[str] = None,
-) -> ContentModelConfig:
+) -> Tuple[ContentModelConfig, YunwuTierSettings]:
     """
     「整合模型设置」里「测试连接」专用：始终读取 unified_yunwu_models 的整合平台 Key / base_url /
     copywriting_model_name，与 use_custom_models 以及当前激活的文案自定义模型无关。
+
+    同时返回当前档位 YunwuTierSettings，便于探测失败时按同 Key/url 回退到视频分析模型再试（与视频分析测试路径对齐）。
     """
     root = unified_yunwu_models_config_manager.get_root()
     ts = root.tier_or_default(omni_effect_tier)
@@ -99,7 +101,7 @@ def resolve_unified_yunwu_for_integration_connection_test(
         raise RuntimeError(
             "请先在整合模型设置中填写有效的整合平台 API Key（占位符 xxx 或空值无效）。"
         )
-    return _unified_yunwu_content_cfg(model_name=ts.copywriting_model_name, tier_settings=ts)
+    return _unified_yunwu_content_cfg(model_name=ts.copywriting_model_name, tier_settings=ts), ts
 
 
 def resolve_content_model_for_llm(

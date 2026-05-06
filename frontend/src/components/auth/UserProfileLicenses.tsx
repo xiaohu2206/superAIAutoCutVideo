@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, Monitor, Plus, RefreshCw, Smartphone } from "lucide-react";
+import { HelpCircle, KeyRound, Loader2, Monitor, Plus, RefreshCw, Smartphone } from "lucide-react";
+import { TauriCommands } from "@/services/clients";
 import {
   bindLicense,
   fetchLicenseClientDeviceId,
@@ -153,7 +154,18 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/80 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
-        <h3 className="text-sm font-semibold text-slate-900">我的 License</h3>
+        <h3 className="flex items-center text-sm font-semibold text-slate-900">
+          <span>我的 License</span>
+          <button
+            onClick={() =>
+              TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc?from=from_copylink")
+            }
+            className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700"
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            查看教程
+          </button>
+        </h3>
         <button
           type="button"
           onClick={() => void load()}

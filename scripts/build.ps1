@@ -682,6 +682,11 @@ foreach ($variant in $variants) {
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
+    Step "Check subprocess safety (no console black box on Windows) ($variant)"
+    $checkScript = Join-Path (Get-Location).Path "scripts\check_subprocess_safety.py"
+    & $pythonCmd $pythonArgsPrefix $checkScript "--ci"
+    if ($LASTEXITCODE -ne 0) { throw "Subprocess safety check failed - fix violations before packaging: run `python backend/scripts/check_subprocess_safety.py`" }
+
     $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
     $distExe = Join-Path $distRoot "superAutoCutVideoBackend.exe"
     $distVariantMarker = Join-Path $distRoot ".build_variant"

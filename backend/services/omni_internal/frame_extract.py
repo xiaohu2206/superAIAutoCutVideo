@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.ffmpeg_utils import get_ffmpeg_cuda_prefix, resolve_ffmpeg_bin
+from modules.subprocess_no_console import run_no_console
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def extract_quarter_frames(
             ]
 
         def _run_cmd(cmd: List[str]) -> subprocess.CompletedProcess[bytes]:
-            return subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            return run_no_console(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
         cuda_prefix = get_ffmpeg_cuda_prefix()
         if cuda_prefix:
@@ -147,7 +148,7 @@ def extract_middle_frame(
         ]
 
     def _run_cmd(cmd: List[str]) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        return run_no_console(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     cuda_prefix = get_ffmpeg_cuda_prefix()
     if cuda_prefix:

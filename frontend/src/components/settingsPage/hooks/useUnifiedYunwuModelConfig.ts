@@ -69,7 +69,7 @@ function normalizePayload(data: Record<string, unknown>): UnifiedYunwuModelsPayl
 }
 
 const emptyRoot = (): UnifiedYunwuModelsPayload => ({
-  use_custom_models: true,
+  use_custom_models: false,
   active_platform: "yunwu",
   platforms: {},
 });

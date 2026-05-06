@@ -90,7 +90,7 @@ def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)  # noqa: subprocess-window
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
     data = json.loads(result)
@@ -129,7 +129,7 @@ def _probe_audio_duration(audio_path: Path) -> float:
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            out_a = subprocess.check_output(cmd_a, stderr=subprocess.STDOUT)
+            out_a = subprocess.check_output(cmd_a, stderr=subprocess.STDOUT)  # noqa: subprocess-window
         d_a = _try_parse_float(out_a.decode(errors="ignore"))
         if d_a > 0.0:
             return d_a
@@ -151,7 +151,7 @@ def _probe_audio_duration(audio_path: Path) -> float:
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            out_f = subprocess.check_output(cmd_f, stderr=subprocess.STDOUT)
+            out_f = subprocess.check_output(cmd_f, stderr=subprocess.STDOUT)  # noqa: subprocess-window
         return _try_parse_float(out_f.decode(errors="ignore"))
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc

@@ -20,6 +20,7 @@ from modules.config.unified_yunwu_models_config import (
     YunwuTierSettings,
     unified_yunwu_models_config_manager,
 )
+from modules.config.content_model_config import ContentModelConfig
 from services.ai_models.unified_model_usage import (
     LlmModelUsage,
     resolve_unified_yunwu_for_integration_connection_test,
@@ -28,6 +29,29 @@ from services.ai_models.unified_model_usage import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/models", tags=["模型配置"])
+
+
+def _is_transport_disconnect_error(text: str) -> bool:
+    s = (text or "").lower()
+    return any(
+        frag in s
+        for frag in (
+            "disconnected without sending",
+            "remoteprotocolerror",
+            "connection reset",
+            "eof occurred",
+            "broken pipe",
+            "connection aborted",
+        )
+    )
+
+
+async def _yunwu_connection_probe(ai_cfg: AIModelConfig, provider_cls: type) -> Dict[str, Any]:
+    provider = provider_cls(ai_cfg)
+    try:
+        return await provider.test_connection()
+    finally:
+        await provider.close()
 
 
 def _mask_key(api_key: str) -> str:
@@ -228,24 +252,56 @@ async def test_unified_yunwu_models(request: Request):
     """使用整合配置中「文案生成」模型名做一次连通性探测。"""
     try:
         await unified_yunwu_models_config_manager.ensure_remote_synced(request.headers.get("Authorization"))
-        cfg = resolve_unified_yunwu_for_integration_connection_test()
+        cfg, tier = resolve_unified_yunwu_for_integration_connection_test()
         provider_cls = get_provider_class(cfg.provider)
         if not provider_cls:
             return {"success": False, "data": {"error": f"不支持的提供商: {cfg.provider}"}}
+        # 与视频分析默认超时对齐：部分网关/高阶模型首包较慢，过短易与传输层断开混淆。
+        probe_timeout = max(int(cfg.timeout or 180), 600)
         ai_cfg = AIModelConfig(
             provider=cfg.provider,
             api_key=cfg.api_key,
             base_url=cfg.base_url,
             model_name=cfg.model_name,
             temperature=cfg.temperature,
-            timeout=cfg.timeout,
+            timeout=probe_timeout,
             extra_params={**(cfg.extra_params or {}), "stream_output": bool(cfg.stream_output)},
         )
-        provider = provider_cls(ai_cfg)
-        try:
-            result = await provider.test_connection()
-        finally:
-            await provider.close()
+        result = await _yunwu_connection_probe(ai_cfg, provider_cls)
+
+        # 云雾同档位下文案模型常为高阶 Gemini，上游偶发掐断连接；视频分析多为 flash，与「视频分析测试」路径一致。
+        copy_name = (cfg.model_name or "").strip()
+        video_name = (tier.video_analysis_model_name or "").strip()
+        err_text = f"{result.get('error', '')} {result.get('message', '')}"
+        if (
+            not result.get("success")
+            and cfg.provider == "yunwu"
+            and video_name
+            and copy_name != video_name
+            and _is_transport_disconnect_error(err_text)
+        ):
+            alt_cfg: ContentModelConfig = cfg.model_copy(update={"model_name": video_name})
+            alt_ai = AIModelConfig(
+                provider=alt_cfg.provider,
+                api_key=alt_cfg.api_key,
+                base_url=alt_cfg.base_url,
+                model_name=alt_cfg.model_name,
+                temperature=alt_cfg.temperature,
+                timeout=probe_timeout,
+                extra_params={**(alt_cfg.extra_params or {}), "stream_output": bool(alt_cfg.stream_output)},
+            )
+            fb = await _yunwu_connection_probe(alt_ai, provider_cls)
+            if fb.get("success"):
+                fb["usage"] = LlmModelUsage.COPYWRITING.value
+                fb["model_name"] = copy_name
+                fb["probe_model_used"] = video_name
+                fb["warning"] = (
+                    f"文案模型「{copy_name}」探测时出现连接中断，已改用同档位视频分析模型「{video_name}」"
+                    "验证 API Key 与网关；若文案生成仍失败，请检查该文案模型在上游路由或更换为较轻模型。"
+                )
+                fb["copywriting_probe_error"] = result.get("error") or result.get("message")
+                return {"success": True, "data": fb}
+
         result["usage"] = LlmModelUsage.COPYWRITING.value
         result["model_name"] = cfg.model_name
         return {"success": bool(result.get("success")), "data": result}

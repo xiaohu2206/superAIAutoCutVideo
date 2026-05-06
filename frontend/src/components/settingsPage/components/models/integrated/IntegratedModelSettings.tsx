@@ -207,7 +207,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
                 title="强制从远程同步最新模型平台配置"
               >
                 {syncing && <Loader2 className="mr-1 h-3 w-3 animate-spin text-sm" />}
-                {syncing ? "（同步中…）" : "（强制同步）"}
+                {syncing ? "（同步中…）" : "（同步）"}
               </button>
             </div>
 

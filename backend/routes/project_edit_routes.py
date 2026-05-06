@@ -387,8 +387,9 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                     cancel_event=trim_cancel_event,
                 )
                 if not ok:
-                    logger.error("%s clip %d/%d failed output_exists=%s output=%s", trim_tag, idx + 1, total_segments, seg_out.exists(), seg_out)
-                    raise RuntimeError(f"剪切第 {idx + 1} 段失败")
+                    last_err = getattr(video_processor, "last_cut_error", "") or ""
+                    logger.error("%s clip %d/%d failed output_exists=%s output=%s reason=%s", trim_tag, idx + 1, total_segments, seg_out.exists(), seg_out, last_err)
+                    raise RuntimeError(f"剪切第 {idx + 1} 段失败" + (f" reason={last_err}" if last_err else ""))
                 pct = 10.0 + (40.0 * float(idx + 1) / float(max(total_segments, 1)))
                 TRIM_TASKS[task_id].progress = float(f"{pct:.2f}")
                 TRIM_TASKS[task_id].message = f"已剪切 {idx + 1}/{total_segments} 段"

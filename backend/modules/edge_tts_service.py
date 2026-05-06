@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import subprocess
 
-from modules.ffmpeg_utils import ffprobe_get_duration
+from modules.ffmpeg_utils import ffprobe_get_duration, resolve_ffmpeg_bin
+from modules.subprocess_no_console import acreate_subprocess_exec
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +285,7 @@ async def _mac_say_to_mp3(text: str, voice: Optional[str], mp3_path: Path) -> bo
         if isinstance(voice, str) and voice.strip():
             args += ["-v", voice.strip()]
         args += ["-o", str(tmp_aiff), text]
-        p1 = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        p1 = await acreate_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         _, _ = await p1.communicate()
         if p1.returncode != 0:
             try:
@@ -293,8 +294,9 @@ async def _mac_say_to_mp3(text: str, voice: Optional[str], mp3_path: Path) -> bo
             except Exception:
                 pass
             return False
-        p2 = await asyncio.create_subprocess_exec(
-            "ffmpeg",
+        ffmpeg_bin = resolve_ffmpeg_bin() or "ffmpeg"
+        p2 = await acreate_subprocess_exec(
+            ffmpeg_bin,
             "-y",
             "-i",
             str(tmp_aiff),

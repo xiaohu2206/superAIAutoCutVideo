@@ -135,6 +135,9 @@ class YunwuProvider(AIProviderBase):
             )
             thinking = payload.pop("thinking", None)
             _ = thinking
+            # 应用内参数勿传给 OpenAI 兼容网关；部分上游对未知字段或 stream 语义处理异常会直接掐断连接。
+            payload.pop("stream_output", None)
+            payload.pop("stream", None)
 
             extra_headers = {}
             eh = payload.pop("extra_headers", None)

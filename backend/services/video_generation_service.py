@@ -347,6 +347,14 @@ class VideoGenerationService:
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
                     raise ValueError(f"无效片段: idx={idx} start={start} end={end}")
+                if input_dur and end > input_dur + 0.5:
+                    logger.warning(
+                        "segment end_time exceeds video duration: idx=%s end=%.3f video_dur=%.3f clamping",
+                        idx,
+                        end,
+                        input_dur,
+                    )
+                    end = min(end, float(input_dur))
                 duration = max(0.0, end - start)
                 clip_name = f"clip_{idx:04d}.mp4"
                 clip_abs = tmp_dir / clip_name
@@ -375,7 +383,11 @@ class VideoGenerationService:
                     cancel_event=cancel_event,
                 )
                 if not ok:
-                    raise RuntimeError(f"剪切片段失败: {idx}")
+                    last_err = getattr(video_processor, "last_cut_error", "") or ""
+                    raise RuntimeError(
+                        f"剪切片段失败: idx={idx} start={start:.3f} end={end:.3f} duration={duration:.3f}"
+                        + (f" reason={last_err}" if last_err else "")
+                    )
 
                 try:
                     clip_size = clip_abs.stat().st_size
@@ -593,7 +605,11 @@ class VideoGenerationService:
                             cancel_event=cancel_event,
                         )
                         if not ok_r:
-                            raise RuntimeError(f"片段重剪失败: {idx}")
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段重剪失败: idx={idx} start={float(it['start']):.3f} dur={float(it['duration']):.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
                         it["needs_recut"] = False
                     clip_final = await _ensure_clip_video_not_longer_than_audio(clip_abs)
                     clip_paths.append(str(clip_final))
@@ -674,7 +690,11 @@ class VideoGenerationService:
                             cancel_event=cancel_event,
                         )
                         if not ok2:
-                            raise RuntimeError(f"片段延长失败: {idx}")
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段延长失败: idx={idx} new_start={new_start:.3f} new_dur={new_dur:.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
                     elif adur > 0.0 and (adur + 0.05) < duration:
                         new_start = start
                         new_dur = adur
@@ -690,7 +710,11 @@ class VideoGenerationService:
                             cancel_event=cancel_event,
                         )
                         if not ok2s:
-                            raise RuntimeError(f"片段缩短失败: {idx}")
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段缩短失败: idx={idx} new_start={new_start:.3f} new_dur={new_dur:.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
                     clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
                     rep_ok = await video_processor.replace_audio_with_narration(
                         str(clip_abs),
