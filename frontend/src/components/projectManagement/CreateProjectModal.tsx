@@ -1,7 +1,7 @@
 // 创建项目模态框组件
 
 import React, { useEffect, useState } from "react";
-import { X, Folder } from "lucide-react";
+import { X, Folder, Sparkles } from "lucide-react";
 import type { CreateProjectRequest, OmniEffectTier } from "../../types/project";
 import { NarrationType } from "../../types/project";
 import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
@@ -245,7 +245,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                     字幕推理
                   </h4>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：适用于普通话视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">基础字幕分析</p>
                   </div>
                 </div>
 
@@ -271,11 +271,11 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                     </h4>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：适用所有类型的视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">基础字幕与视觉分析</p>
                   </div>
                 </div>
 
-                {/* 全感知推理 */}
+                {/* 全感知推理（付费档位视觉） */}
                 <div
                   onClick={() => {
                     if (loading) return;
@@ -285,30 +285,40 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                     }
                     setProjectType("omni");
                   }}
-                  className={`relative p-4 border-2 rounded-lg transition-all ${
+                  className={`relative overflow-hidden p-4 pt-5 border-2 rounded-lg transition-all ${
                     isMoondreamEnabled
                       ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50 dark:border-gray-700 dark:bg-gray-800"
                       : projectType === "omni"
-                        ? "border-purple-500 bg-purple-50 cursor-pointer dark:border-purple-600 dark:bg-purple-900/20"
-                        : "border-gray-200 bg-white hover:border-purple-300 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:hover:border-purple-600"
+                        ? "cursor-pointer border-purple-500 bg-gradient-to-br from-purple-50 via-amber-50/60 to-fuchsia-50 ring-1 ring-purple-400/40 dark:border-purple-500 dark:from-purple-950/50 dark:via-amber-950/35 dark:to-fuchsia-950/25 dark:ring-purple-500/30"
+                        : "cursor-pointer border-gray-200 bg-gradient-to-br from-white via-amber-50/25 to-purple-50/40 hover:border-amber-400/55 hover:ring-1 hover:ring-amber-300/40 dark:border-gray-700 dark:from-gray-900 dark:via-amber-950/20 dark:to-purple-950/25 dark:hover:border-amber-600/60"
                   }`}
                 >
                   {projectType === "omni" && !isMoondreamEnabled && (
-                    <div className="absolute top-3 right-3 w-4 h-4 bg-purple-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"></div>
+                    <div className="absolute top-3 right-3 w-4 h-4 rounded-full border-2 border-white bg-gradient-to-br from-amber-500 to-purple-600 shadow-sm dark:border-gray-900"></div>
                   )}
-                  <div className="flex items-center justify-between mb-2">
-                    <h4
-                      className={`text-lg font-bold ${
-                        projectType === "omni" && !isMoondreamEnabled
-                          ? "text-purple-700 dark:text-purple-400"
-                          : "text-gray-700 dark:text-gray-300"
-                      }`}
-                    >
-                      全感知推理
-                    </h4>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <h4
+                        className={`text-lg font-bold ${
+                          projectType === "omni" && !isMoondreamEnabled
+                            ? "bg-gradient-to-r from-purple-700 via-amber-700 to-purple-700 bg-clip-text text-transparent dark:from-purple-300 dark:via-amber-300 dark:to-fuchsia-300"
+                            : "text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
+                        全感知推理
+                      </h4>
+                      <span
+                        className={`inline-flex shrink-0 items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm ring-1 ring-amber-400/60 ${
+                          isMoondreamEnabled ? "opacity-70" : ""
+                        }`}
+                      >
+                        <Sparkles className="h-3 w-3" aria-hidden />
+                        付费
+                      </span>
+                    </div>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">适用：字幕与视觉信息联合分析的视频</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">高级字幕与视觉分析</p>
                   </div>
                 </div>
               </div>
@@ -328,7 +338,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       {
                         tier: "low" as const,
                         title: "低消耗",
-                        sub: "token消耗500字大约0.49毛",
+                        sub: "token消耗500字大约0.19毛",
                         activeBorder: "border-amber-500 dark:border-amber-600",
                         activeBg: "bg-amber-50 dark:bg-amber-900/20",
                         hoverBorder: "hover:border-amber-300 dark:hover:border-amber-600",

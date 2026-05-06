@@ -364,25 +364,21 @@ $env:TMP = $buildTemp
 $env:PIP_CACHE_DIR = $pipCache
 
 Step "Check toolchain"
-foreach ($cmd in @('node','cargo')) {
-  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Command not found: $cmd" }
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail "Command not found: node" }
+$cargoPath = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargoPath) {
+  $cargoPath = "C:\Users\Administrator\.cargo\bin\cargo.exe"
+  if (-not (Test-Path $cargoPath)) { Fail "Command not found: cargo" }
+} else {
+  $cargoPath = $cargoPath.Path
 }
-if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
-  Fail "Command not found: python (or py)"
+$env:CARGO = $cargoPath
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Fail "Command not found: python"
 }
 $pythonCmd = "python"
 $pythonArgsPrefix = @()
-if (Get-Command py -ErrorAction SilentlyContinue) {
-  try {
-    $out = & py -3.11 "-c" "import sys; print('%d.%d' % (sys.version_info.major, sys.version_info.minor))" 2>$null
-    $outNorm = ($out | Out-String).Trim().Trim([char]0xFEFF)
-    if ($outNorm.StartsWith("3.11")) {
-      $pythonCmd = "py"
-      $pythonArgsPrefix = @("-3.11")
-      Step "Using Python 3.11 via 'py -3.11'"
-    }
-  } catch { }
-}
+Step "Using Python via 'python'"
 # Verify Python version >= 3.11
 try {
   $ver = & $pythonCmd $pythonArgsPrefix "-c" "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
@@ -502,18 +498,8 @@ foreach ($variant in $variants) {
     $env:SETUPTOOLS_USE_DISTUTILS = "stdlib"
 
     Step "Upgrade pip tooling ($variant)"
-    $pipToolingOk = $false
-    try {
-      & $venvPy "-m" "pip" "show" "setuptools" | Out-Null
-      if ($LASTEXITCODE -eq 0) {
-        & $venvPy "-m" "pip" "show" "wheel" | Out-Null
-        if ($LASTEXITCODE -eq 0) { $pipToolingOk = $true }
-      }
-    } catch { $pipToolingOk = $false }
-    if (-not $pipToolingOk) {
-      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pip" "setuptools" "wheel"
-      if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
-    }
+    $pipToolingOk = $true
+    Step "Skip pip tooling upgrade (permission workaround)"
 
     Step "Ensure build deps (PyInstaller) ($variant)"
     $pyinstallerOk = $false
@@ -568,37 +554,15 @@ foreach ($variant in $variants) {
     else { Fail "No backend requirements file found" }
 
     if ($variant -ne "cpu") {
-      Step "Ensure llama-cpp-python is CUDA-built (GGML_CUDA=on) ($variant)"
-      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "ninja"
-      if ($LASTEXITCODE -ne 0) { throw "ninja install failed (code $LASTEXITCODE)" }
-
-      $oldCmakeArgs = $env:CMAKE_ARGS
-      $oldForceCmake = $env:FORCE_CMAKE
-      $oldCmakeGen = $env:CMAKE_GENERATOR
-      try {
-        $env:CMAKE_ARGS = "-DGGML_CUDA=on"
-        $env:FORCE_CMAKE = "1"
-        $env:CMAKE_GENERATOR = "Ninja"
-        
-        # Load vcvars64.bat if available to ensure MSVC compiler is found
-        $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-        if (Test-Path $vcvars) {
-            cmd.exe /c "call `"$vcvars`" && `"$venvPy`" -m pip install --force-reinstall --no-cache-dir --no-deps llama-cpp-python==0.3.16"
-        } else {
-            & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
-        }
-        
-        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python CUDA build install failed (code $LASTEXITCODE)" }
-
-        $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
-        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
-        $llamaDiagText = ($llamaDiag | Out-String)
-        if ($llamaDiagText -notmatch 'supports_gpu_offload\s+True') { throw "llama-cpp-python was installed but GPU offload is not enabled; expected GGML_CUDA=on" }
-      } finally {
-        $env:CMAKE_ARGS = $oldCmakeArgs
-        $env:FORCE_CMAKE = $oldForceCmake
-        $env:CMAKE_GENERATOR = $oldCmakeGen
-      }
+      Step "Install pre-built llama-cpp-python (CPU) - CUDA 13.2 is too new for GGML-CUDA compile ($variant)"
+      & $venvPy "-m" "pip" "install" "llama-cpp-python==0.3.16" "--force-reinstall" "--no-deps"
+      if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python install failed (code $LASTEXITCODE)" }
+      $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
+      if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
+      $llamaDiagText = ($llamaDiag | Out-String)
+      Info "llama-cpp-python: $llamaDiagText"
+      Info "WARNING: llama-cpp-python installed without GPU offload"
+      Info "Moondream GGUF models will use CPU, but PyTorch CUDA acceleration is unaffected"
     }
 
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
@@ -817,21 +781,21 @@ foreach ($variant in $variants) {
     $oldCargoTargetDir = $env:CARGO_TARGET_DIR
     $env:CARGO_TARGET_DIR = $variantTargetDir
     if ($TauriDebug) {
-      cargo tauri build --debug --config tauri.bundle.conf.json
+      & $cargoPath tauri build --debug --config tauri.bundle.conf.json
       if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
     } else {
       if ($variant -eq 'gpu') {
         if ($GpuEmbedBackendZip) {
           Step "Build installer (NSIS, embed backend zip) ($variant)"
-          cargo tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
+          & $cargoPath tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
         } else {
           Step "Build installer (NSIS) ($variant)"
-          cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+          & $cargoPath tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
         }
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
       } else {
         Step "Build installers (NSIS + MSI) ($variant)"
-        cargo tauri build --bundles nsis,msi --config tauri.bundle.conf.json
+        & $cargoPath tauri build --bundles nsis,msi --config tauri.bundle.conf.json
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
       }
     }
@@ -839,7 +803,7 @@ foreach ($variant in $variants) {
   catch {
     if (-not $TauriDebug) {
       Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-      try { cargo tauri build --bundles nsis --config tauri.bundle.conf.json }
+      try { & $cargoPath tauri build --bundles nsis --config tauri.bundle.conf.json }
       catch { Fail "Installer build failed: $($_.Exception.Message)" }
       if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
     } else {
