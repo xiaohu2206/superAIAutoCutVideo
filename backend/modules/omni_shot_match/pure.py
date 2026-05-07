@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -347,8 +348,11 @@ def fine_rerank_json_schema() -> Dict[str, Any]:
 def load_fine_prompt_template(prompt_language: str) -> str:
     lang = str(prompt_language or "zh").strip().lower()
     name = "fine_prompt_en.md" if lang == "en" else "fine_prompt_zh.md"
-    base = Path(__file__).resolve().parents[1] / "reRank" / name
-    return base.read_text(encoding="utf-8")
+    if getattr(sys, 'frozen', False):
+        base = Path(sys._MEIPASS) / "modules" / "reRank"
+    else:
+        base = Path(__file__).resolve().parents[1] / "reRank"
+    return (base / name).read_text(encoding="utf-8")
 
 
 def build_embedding_search_results(

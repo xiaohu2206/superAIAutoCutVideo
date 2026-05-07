@@ -1654,7 +1654,6 @@ class OmniMultimodalPipelineService:
         asr_language: Optional[str] = None,
         itn: bool = True,
         hotwords: Optional[List[str]] = None,
-        funasr_max_concurrency: Optional[int] = None,
         pipeline_force: bool = False,
         pipeline_task_id: Optional[str] = None,
         multimodal_action: Optional[str] = None,
@@ -1688,7 +1687,6 @@ class OmniMultimodalPipelineService:
                     asr_language=asr_language,
                     itn=bool(itn),
                     hotwords=hotwords,
-                    funasr_max_concurrency=funasr_max_concurrency,
                 )
                 subtitle_extracted = True
 

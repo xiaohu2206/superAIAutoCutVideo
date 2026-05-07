@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   将 PyInstaller --onedir 产物拆分为三个分块 zip，并生成 runtime-manifest.json。
 

@@ -45,7 +45,6 @@ class OmniExtractSubtitleAndRunPipelineRequest(BaseModel):
     asr_language: Optional[str] = None
     itn: bool = True
     hotwords: Optional[List[str]] = None
-    funasrMaxConcurrency: Optional[int] = None
 
     pipeline_task_id: Optional[str] = Field(default=None, description="Omni 管线任务 id；不传则服务端生成")
     pipeline_force: bool = Field(default=False)
@@ -76,7 +75,6 @@ async def omni_extract_subtitle_and_run_pipeline(
             asr_language=req.asr_language,
             itn=bool(getattr(req, "itn", True)),
             hotwords=req.hotwords,
-            funasr_max_concurrency=getattr(req, "funasrMaxConcurrency", None),
             pipeline_force=bool(req.pipeline_force),
             pipeline_task_id=req.pipeline_task_id,
             multimodal_action=req.multimodal_action,

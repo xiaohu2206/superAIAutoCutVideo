@@ -12,7 +12,9 @@ param(
   [switch]$RecreateBackendVenv,
   [switch]$TauriDebug,
   [switch]$SkipClean,
-  [switch]$SkipPortable
+  [switch]$SkipPortable,
+  # 使用 Cython 将 .py 编译为 .pyd 加密（需安装 Visual Studio 2022 Build Tools）
+  [switch]$EncryptPy
 )
 
 Set-StrictMode -Version Latest
@@ -205,7 +207,7 @@ function Add-NsisClearAppDataBackendHook([string]$installerNsiPath) {
   $marker = 'SACV_CLEAR_APPDATA_BACKEND'
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
   if ($content -match [regex]::Escape($marker)) { return $false }
-  $inject = "`r`n    ; $marker`r`n    DetailPrint `"Clear cached backend extract (AppData)`"`r`n    RMDir /r `"`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend`"`r`n"
+  $inject = "`r`n    ; $marker`r`n    DetailPrint `"Clear cached backend extract (install resources)`"`r`n    RMDir /r `"`$INSTDIR\resources\superAutoCutVideoBackend`"`r`n"
   $patched = $false
   if ($content -match '(?m)^(Section\s+"Install"\s*)$') {
     $content = $content -replace '(?m)^(Section\s+"Install"\s*)$', ('$1' + $inject)
@@ -291,10 +293,10 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       StrCpy `$R1 "superAutoCutVideoBackend.zip"
     `${EndIf}
 
-    ; 同目录有 zip：复制进 resources，并清理 AppData 解压目录以便首次解压与 zip 一致
+    ; 同目录有 zip：复制进 resources，并清理安装目录内解压缓存以便与 zip 一致
     `${If} `${FileExists} "`$R0"
-      DetailPrint "Clear AppData backend extract (new sidecar zip)"
-      RMDir /r "`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend"
+      DetailPrint "Clear install resources backend extract (new sidecar zip)"
+      RMDir /r "`$INSTDIR\resources\superAutoCutVideoBackend"
       DetailPrint "Copy backend zip: `$R0"
       CopyFiles /SILENT "`$R0" "`$INSTDIR\resources"
       `${If} `$R1 != "superAutoCutVideoBackend.zip"
@@ -310,8 +312,8 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       Goto gpu_backend_zip_ready
     `${EndIf}
 
-    ; 仅装壳：无旁路 zip、无旧 resources zip — 保留 AppData 已有后端，或通过应用内分块更新安装
-    DetailPrint "No sidecar GPU backend zip; continuing (shell-only / keep AppData backend / use in-app update)."
+    ; 仅装壳：无旁路 zip、无旧 resources zip — 保留已有解压目录，或通过应用内分块更新安装
+    DetailPrint "No sidecar GPU backend zip; continuing (shell-only / keep backend extract / use in-app update)."
     Goto gpu_backend_zip_ready
 
     gpu_backend_zip_ready:
@@ -347,6 +349,125 @@ function Get-TauriMakensisPath() {
   $cmd = Get-Command makensis -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Path }
   Fail "NSIS makensis not found"
+}
+
+function Invoke-CythonEncrypt([string]$venvPy, [string]$backendDir, [string]$variant) {
+  Step "Install Cython for source encryption ($variant)"
+  & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "cython"
+  if ($LASTEXITCODE -ne 0) { throw "Cython install failed (code $LASTEXITCODE)" }
+
+  Step "Verify C compiler availability ($variant)"
+  $ccCheck = & $venvPy "-c" "import sysconfig; cc=sysconfig.get_config_var('CC'); print(cc if cc else 'MISSING')" 2>$null
+  $ccCheck = ($ccCheck | Out-String).Trim()
+  Info "C compiler: $ccCheck"
+  if ($ccCheck -eq 'MISSING' -or (-not $ccCheck)) {
+    Info "WARNING: No C compiler detected. Install Visual Studio 2022 Build Tools (C++ workload)."
+    Info "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+    throw "C compiler not found - required for Cython .pyd compilation"
+  }
+
+  Step "Compiling Python sources to .pyd ($variant) - this may take several minutes"
+
+  $setupScript = @'
+import os, sys, glob, shutil, traceback
+from pathlib import Path
+
+backend_dir = sys.argv[1]
+
+exclude_dirs = {
+    "__pycache__", ".venv_pack_cpu", ".venv_pack_gpu", ".venv",
+    "dist", "build", "serviceData", "docs", ".mypy_cache",
+    "tmp", "__MACOSX"
+}
+
+py_files = []
+for root, dirs, files in os.walk(backend_dir):
+    dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
+    for f in files:
+        if f.endswith('.py') and f != '__init__.py' and f != 'main.py' and not f.startswith('_cython_setup'):
+            full = os.path.join(root, f)
+            py_files.append(full)
+
+if not py_files:
+    print("No .py files to compile")
+    sys.exit(0)
+
+print(f"Compiling {len(py_files)} .py files to .pyd...")
+
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+
+try:
+    ext_modules = cythonize(
+        py_files,
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": False,
+            "wraparound": False,
+        },
+        nthreads=min(os.cpu_count() or 4, 8),
+    )
+
+    setup(
+        ext_modules=ext_modules,
+        script_args=["build_ext", "--inplace"],
+    )
+except Exception as e:
+    print(f"Cython compilation error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+
+print("Compilation complete. Renaming .pyd files...")
+
+for py_path in py_files:
+    py_file = Path(py_path)
+    base = py_file.stem
+    parent = py_file.parent
+
+    pyd_candidates = list(parent.glob(f"{base}.cp*-win_amd64.pyd")) + list(parent.glob(f"{base}.*.pyd"))
+    if pyd_candidates:
+        tagged = pyd_candidates[0]
+        target = parent / f"{base}.pyd"
+        if target.exists():
+            target.unlink()
+        tagged.rename(target)
+        print(f"  {py_file.relative_to(backend_dir)} -> {target.relative_to(backend_dir)}")
+
+        py_file.unlink()
+        print(f"  removed {py_file.relative_to(backend_dir)}")
+
+    build_dir = parent / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir, ignore_errors=True)
+
+for py_path in py_files:
+    c_file = Path(str(py_path)[:-3] + ".c")
+    if c_file.exists():
+        c_file.unlink()
+
+print("Encryption complete.")
+'@
+
+  $setupPyPath = Join-Path $backendDir "_cython_setup.py"
+  [System.IO.File]::WriteAllText($setupPyPath, $setupScript, [System.Text.UTF8Encoding]::new($false))
+
+  Push-Location $backendDir
+  try {
+    $exitCode = Invoke-ProcessWithHeartbeat $venvPy @($setupPyPath, $backendDir) ("Cython encrypt ($variant)") 20
+    if ($exitCode -ne 0) { throw "Cython encryption failed (code $exitCode)" }
+  } finally {
+    Pop-Location
+    Remove-Item $setupPyPath -Force -ErrorAction SilentlyContinue
+  }
+
+  Step "Cleanup Cython build artifacts ($variant)"
+  Get-ChildItem -Path $backendDir -Recurse -Directory -Filter "build" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\\\dist\\\\' -and $_.FullName -notmatch '\\\\scripts\\\\' } |
+    ForEach-Object {
+      try { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+    }
+
+  Step "Source encryption completed ($variant)"
 }
 
 Step "Check project root"
@@ -685,7 +806,13 @@ foreach ($variant in $variants) {
     Step "Check subprocess safety (no console black box on Windows) ($variant)"
     $checkScript = Join-Path (Get-Location).Path "scripts\check_subprocess_safety.py"
     & $pythonCmd $pythonArgsPrefix $checkScript "--ci"
-    if ($LASTEXITCODE -ne 0) { throw "Subprocess safety check failed - fix violations before packaging: run `python backend/scripts/check_subprocess_safety.py`" }
+    if ($LASTEXITCODE -ne 0) { throw "Subprocess safety check failed - fix violations before packaging: run ``python backend/scripts/check_subprocess_safety.py``" }
+
+    if ($EncryptPy) {
+      Step "Encrypt Python source -> .pyd ($variant)"
+      $backendSrcDir = (Get-Location).Path
+      Invoke-CythonEncrypt $venvPy $backendSrcDir $variant
+    }
 
     $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
     $distExe = Join-Path $distRoot "superAutoCutVideoBackend.exe"
@@ -713,6 +840,7 @@ foreach ($variant in $variants) {
         $shouldRebuildBackend = $true
       }
       if (-not $shouldRebuildBackend) { Step "Backend already built - skip PyInstaller ($variant)" }
+      if ($EncryptPy) { $shouldRebuildBackend = $true }
     }
     if ($shouldRebuildBackend) {
       Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue

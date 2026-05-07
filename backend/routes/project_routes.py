@@ -380,7 +380,6 @@ class ExtractSubtitleRequest(BaseModel):
     asr_language: Optional[str] = None
     itn: bool = True
     hotwords: Optional[List[str]] = None
-    funasrMaxConcurrency: Optional[int] = None
     analyzeVision: bool = False
     visionMode: str = "all"
     visionKeyFrames: int = 1

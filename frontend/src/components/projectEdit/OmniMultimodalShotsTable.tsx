@@ -108,9 +108,9 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
                 <div className="flex items-center gap-4 flex-wrap">
                   <h3 className="text-xl font-semibold text-gray-900">Omni 多模态详情</h3>
                   <div className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">共 {shots.length} 段</div>
-                  {metaLine ? (
+                  {/* {metaLine ? (
                     <div className="text-xs text-gray-500 bg-fuchsia-50 px-2 py-1 rounded border border-fuchsia-100">{metaLine}</div>
-                  ) : null}
+                  ) : null} */}
                 </div>
                 <button
                   type="button"

@@ -67,6 +67,39 @@ pub struct DownloadProgress {
 
 // ── 路径工具 ──────────────────────────────────────────────────────
 
+/// 与 `main.rs` 中启动后端逻辑一致：解析包含 `superAutoCutVideoBackend.zip` 的 `resources` 根目录。
+pub fn resolve_resource_root(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    let resource_dir = match app_handle.path().resource_dir() {
+        Ok(p) => p,
+        Err(_) => {
+            let exe_dir_fallback = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            if let Some(dir) = exe_dir_fallback {
+                dir.join("resources")
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join("resources")
+            }
+        }
+    };
+    let resource_root = {
+        let sub = resource_dir.join("resources");
+        if sub.is_dir() {
+            sub
+        } else {
+            resource_dir
+        }
+    };
+    Ok(resource_root)
+}
+
+/// 后端解压目录：`<安装目录>/resources/superAutoCutVideoBackend`（及开发模式下等价路径）
+pub fn backend_extract_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_resource_root(app_handle)?.join("superAutoCutVideoBackend"))
+}
+
 pub fn state_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
     let dir = app_handle
         .path()
@@ -166,11 +199,7 @@ pub fn apply_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result
         return Ok(plan);
     }
 
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
-    let backend_dir = app_data_dir.join("superAutoCutVideoBackend");
+    let backend_dir = backend_extract_dir(app_handle)?;
     let _ = std::fs::create_dir_all(&backend_dir);
 
     let mut new_state = local.clone();
@@ -476,7 +505,7 @@ pub async fn download_and_apply(app_handle: &AppHandle) -> Result<RuntimeUpdateI
         .path()
         .app_data_dir()
         .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
-    let backend_dir = app_data_dir.join("superAutoCutVideoBackend");
+    let backend_dir = backend_extract_dir(app_handle)?;
     let chunks_cache = app_data_dir.join("runtime_chunks_cache");
     let _ = std::fs::create_dir_all(&chunks_cache);
     let _ = std::fs::create_dir_all(&backend_dir);

@@ -15,6 +15,10 @@ if os.path.isdir('modules/prompts'):
     datas.append(('modules/prompts', 'modules/prompts'))
 if os.path.isdir('services/omni_internal/prompts'):
     datas.append(('services/omni_internal/prompts', 'services/omni_internal/prompts'))
+if os.path.isdir('modules/copywriting_structuring_embedding/prompt'):
+    datas.append(('modules/copywriting_structuring_embedding/prompt', 'modules/copywriting_structuring_embedding/prompt'))
+if os.path.isdir('modules/reRank'):
+    datas.append(('modules/reRank', 'modules/reRank'))
 binaries = []
 try:
     _tbb12 = os.path.join(sys.prefix, 'Library', 'bin', 'tbb12.dll')
