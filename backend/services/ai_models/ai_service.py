@@ -23,7 +23,7 @@ from services.ai_models.unified_model_usage import LlmModelUsage, resolve_conten
 logger = logging.getLogger(__name__)
 
 # 文案/结构化等大模型 HTTP 调用：统一读超时与失败重试（避免单行 ReadTimeout 直接失败）
-LLM_HTTP_TIMEOUT_SEC = 600
+LLM_HTTP_TIMEOUT_SEC = 180
 LLM_MAX_ATTEMPTS = 3  # 首次 + 最多 5 次重试
 LLM_RETRY_BASE_DELAY_SEC = 1.0
 _CHAT_FAILURE_LLM_RAW_MAX = 200_000
