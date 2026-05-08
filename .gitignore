@@ -5,6 +5,7 @@
 # ========================================
 # 通用文件
 # ========================================
+.claude/
 .env
 .env.local
 .env.production
@@ -320,6 +321,9 @@ vs_buildtools.exe
 # 后端数据目录
 backend/data/
 backend/.venv/
+
+# 本地 BGE 等嵌入模型权重（体积大，不纳入版本库）
+backend/serviceData/models/bge-base-zh-v1.5/
 
 # 后端配置目录（包含敏感信息，整体忽略）
 backend/config/
