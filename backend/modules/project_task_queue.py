@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from modules.projects_store import projects_store
@@ -54,6 +54,7 @@ class ProjectTaskQueue:
             task_id: 任务ID
             cancel_event: 可选的取消事件，等待期间会周期性检查
         """
+        event: Optional[asyncio.Event] = None
         async with self._lock:
             if self._active_project is None:
                 self._active_project = project_id
@@ -84,11 +85,14 @@ class ProjectTaskQueue:
             if project_id not in self._project_queue:
                 self._project_queue.append(project_id)
                 self._ready_events[project_id] = asyncio.Event()
+            elif project_id not in self._ready_events:
+                self._ready_events[project_id] = asyncio.Event()
             if project_id not in self._project_tasks:
                 self._project_tasks[project_id] = []
             self._project_tasks[project_id].append(
                 QueuedTaskInfo(project_id=project_id, scope=scope, task_id=task_id, status="waiting")
             )
+            event = self._ready_events[project_id]
             project_name = self._resolve_project_name(project_id)
             logger.info(
                 "ProjectTaskQueue: 项目 %s（%s）排队等待 (当前活跃项目=%s 排队位置=%s)",
@@ -98,20 +102,40 @@ class ProjectTaskQueue:
                 self._project_queue.index(project_id) + 1,
             )
 
-        event = self._ready_events[project_id]
-        while not event.is_set():
-            if cancel_event is not None and cancel_event.is_set():
-                await self._cancel_queued(project_id, scope, task_id)
-                project_name = self._resolve_project_name(project_id)
-                raise asyncio.CancelledError(
-                    f"项目 {project_name}（{project_id}）在排队等待期间被取消 (scope={scope} task_id={task_id})"
-                )
-            try:
-                await asyncio.wait_for(event.wait(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
+        try:
+            while event is not None and not event.is_set():
+                if cancel_event is not None and cancel_event.is_set():
+                    project_name = self._resolve_project_name(project_id)
+                    raise asyncio.CancelledError(
+                        f"项目 {project_name}（{project_id}）在排队等待期间被取消 (scope={scope} task_id={task_id})"
+                    )
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            # HTTP 请求断开、前端重复提交作废等普通 coroutine cancellation 也必须清理等待记录；
+            # 否则当前任务 release 后可能推进到一个已经没有真实任务的项目，队列会卡在 active_project/count=0。
+            await self._cancel_queued(project_id, scope, task_id)
+            raise
 
         async with self._lock:
+            if not self._has_queued_task_locked(project_id, scope, task_id):
+                project_name = self._resolve_project_name(project_id)
+                if self._active_project == project_id and self._active_task_count <= 0:
+                    self._active_project = None
+                    self._active_task_count = 0
+                    await self._advance_queue()
+                raise asyncio.CancelledError(
+                    f"项目 {project_name}（{project_id}）的排队记录已被清理 (scope={scope} task_id={task_id})"
+                )
+            self._remove_queued_task_locked(project_id, scope, task_id)
+            if self._active_project is None:
+                self._active_project = project_id
+            elif self._active_project != project_id:
+                raise RuntimeError(
+                    f"ProjectTaskQueue 状态异常：准备执行项目 {project_id}，但当前活跃项目为 {self._active_project}"
+                )
             self._active_task_count += 1
             project_name = self._resolve_project_name(project_id)
             logger.info(
@@ -142,9 +166,23 @@ class ProjectTaskQueue:
                 await self._advance_queue()
 
     async def _advance_queue(self) -> None:
-        """推进到队列中的下一个项目。"""
+        """推进到队列中的下一个项目。
+
+        调用方必须已持有 self._lock。
+        """
         while self._project_queue:
             next_project = self._project_queue.pop(0)
+            event = self._ready_events.get(next_project)
+            tasks = self._project_tasks.get(next_project) or []
+            if event is None or not tasks:
+                self._ready_events.pop(next_project, None)
+                self._project_tasks.pop(next_project, None)
+                logger.info(
+                    "ProjectTaskQueue: 跳过空排队项目 %s（%s）",
+                    self._resolve_project_name(next_project),
+                    next_project,
+                )
+                continue
             if next_project in self._ready_events:
                 self._active_project = next_project
                 self._active_task_count = 0
@@ -152,26 +190,28 @@ class ProjectTaskQueue:
                     for task_info in self._project_tasks[next_project]:
                         task_info.status = "ready"
                 logger.info("ProjectTaskQueue: 推进到下一个排队项目 %s（%s）", self._resolve_project_name(next_project), next_project)
-                self._ready_events[next_project].set()
+                event.set()
                 del self._ready_events[next_project]
                 return
 
     async def _cancel_queued(self, project_id: str, scope: str, task_id: str) -> None:
         """清理被取消的排队项目记录。"""
         async with self._lock:
-            if project_id in self._project_tasks:
-                self._project_tasks[project_id] = [
-                    t for t in self._project_tasks[project_id] if t.task_id != task_id
-                ]
-                if not self._project_tasks[project_id]:
-                    del self._project_tasks[project_id]
-            if project_id in self._project_queue:
+            self._remove_queued_task_locked(project_id, scope, task_id)
+            has_project_tasks = bool(self._project_tasks.get(project_id))
+            if not has_project_tasks and project_id in self._project_queue:
                 try:
                     self._project_queue.remove(project_id)
                 except ValueError:
                     pass
-            if project_id in self._ready_events:
-                del self._ready_events[project_id]
+            if not has_project_tasks:
+                event = self._ready_events.pop(project_id, None)
+                if event is not None and not event.is_set():
+                    event.set()
+            if self._active_project == project_id and self._active_task_count <= 0 and not has_project_tasks:
+                self._active_project = None
+                self._active_task_count = 0
+                await self._advance_queue()
             logger.info(
                 "ProjectTaskQueue: 排队项目 %s（%s）已被取消 (scope=%s task_id=%s)",
                 self._resolve_project_name(project_id),
@@ -179,6 +219,25 @@ class ProjectTaskQueue:
                 scope,
                 task_id,
             )
+
+    def _has_queued_task_locked(self, project_id: str, scope: str, task_id: str) -> bool:
+        for task_info in self._project_tasks.get(project_id) or []:
+            if task_info.scope == scope and task_info.task_id == task_id:
+                return True
+        return False
+
+    def _remove_queued_task_locked(self, project_id: str, scope: str, task_id: str) -> None:
+        tasks = self._project_tasks.get(project_id)
+        if not tasks:
+            return
+        remaining = [
+            t for t in tasks
+            if not (t.scope == scope and t.task_id == task_id)
+        ]
+        if remaining:
+            self._project_tasks[project_id] = remaining
+        else:
+            del self._project_tasks[project_id]
 
     def _resolve_project_name(self, project_id: str) -> str:
         """根据 project_id 解析项目名称，如果找不到则返回 project_id。"""
