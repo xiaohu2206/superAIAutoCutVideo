@@ -10,6 +10,56 @@ const API_BASE_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const WS_BASE_URL = `ws://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 export const EXPECTED_BACKEND_IDENTIFIER = "super-auto-cut-video-backend";
 
+/** 将 FastAPI/Pydantic 的 detail（字符串、对象数组等）规范为可读的报错文案 */
+function formatApiErrorDetail(detail: unknown): string {
+  if (detail == null) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts: string[] = [];
+    for (const item of detail) {
+      if (typeof item === "string") {
+        parts.push(item);
+        continue;
+      }
+      if (item && typeof item === "object" && "msg" in (item as object)) {
+        const m = (item as { msg?: unknown }).msg;
+        if (typeof m === "string" && m) {
+          parts.push(m);
+        }
+        continue;
+      }
+    }
+    if (parts.length) return parts.join("；");
+    return JSON.stringify(detail);
+  }
+  if (typeof detail === "object") {
+    return JSON.stringify(detail);
+  }
+  return String(detail);
+}
+
+function headersInitToRecord(h: HeadersInit | undefined): Record<string, string> {
+  if (!h) return {};
+  if (typeof h === "object" && !Array.isArray(h) && !(h instanceof Headers)) {
+    return { ...(h as Record<string, string>) };
+  }
+  if (h instanceof Headers) {
+    const o: Record<string, string> = {};
+    h.forEach((v, k) => {
+      o[k] = v;
+    });
+    return o;
+  }
+  if (Array.isArray(h)) {
+    const o: Record<string, string> = {};
+    for (const pair of h) {
+      if (Array.isArray(pair) && pair.length >= 2) o[String(pair[0])] = String(pair[1]);
+    }
+    return o;
+  }
+  return {};
+}
+
 // 类型定义
 export interface BackendStatus {
   running: boolean;
@@ -126,16 +176,13 @@ export class ApiClient {
     const isFormDataBody =
       typeof FormData !== "undefined" && options.body instanceof FormData;
 
+    const { headers: optHeaders, ...optionsRest } = options;
+
     const defaultOptions: RequestInit = {
+      ...optionsRest,
       headers: isFormDataBody
-        ? {
-            ...options.headers,
-          }
-        : {
-            "Content-Type": "application/json",
-            ...options.headers,
-          },
-      ...options,
+        ? (optHeaders as HeadersInit | undefined)
+        : { "Content-Type": "application/json", ...headersInitToRecord(optHeaders) },
     };
 
     try {
@@ -169,10 +216,11 @@ export class ApiClient {
             const errJson = await response.json();
             if (typeof errJson === "string") {
               errorMessage = errJson;
-            } else if (errJson?.detail) {
-              errorMessage = errJson.detail;
+            } else if (errJson?.detail != null) {
+              errorMessage = formatApiErrorDetail(errJson.detail) || String(errJson.message ?? "");
             } else if (errJson?.message) {
-              errorMessage = errJson.message;
+              const m = errJson.message;
+              errorMessage = Array.isArray(m) ? m.filter((x) => typeof x === "string").join("；") : String(m);
             }
           } else {
             const text = await response.text();
@@ -197,17 +245,23 @@ export class ApiClient {
     return this.request<T>(endpoint, { method: "GET" });
   }
 
-  // POST请求
-  async post<T>(endpoint: string, data?: any, timeoutMs?: number): Promise<T> {
+  // POST请求（extraHeaders 会与默认 JSON Content-Type 合并，如传入 Authorization）
+  async post<T>(
+    endpoint: string,
+    data?: any,
+    timeoutMs?: number,
+    extraHeaders?: Record<string, string>
+  ): Promise<T> {
+    const base: RequestInit = {
+      method: "POST",
+      body: data ? JSON.stringify(data) : undefined,
+      ...(extraHeaders ? { headers: extraHeaders } : {}),
+    };
     if (typeof timeoutMs === "number" && timeoutMs > 0) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        return await this.request<T>(endpoint, {
-          method: "POST",
-          body: data ? JSON.stringify(data) : undefined,
-          signal: controller.signal,
-        });
+        return await this.request<T>(endpoint, { ...base, signal: controller.signal });
       } catch (e: any) {
         if (e && e.name === "AbortError") {
           throw new Error("请求超时");
@@ -217,10 +271,7 @@ export class ApiClient {
         clearTimeout(timeoutId);
       }
     }
-    return this.request<T>(endpoint, {
-      method: "POST",
-      body: data ? JSON.stringify(data) : undefined,
-    });
+    return this.request<T>(endpoint, base);
   }
 
   // POST multipart/form-data
@@ -375,6 +426,49 @@ export class ApiClient {
   // 测试当前激活的文案生成模型配置
   async testActiveContentGenerationConfig(): Promise<any> {
     return this.post(`/api/models/content-generation/test`);
+  }
+
+  private _authHeaders(): Record<string, string> | undefined {
+    if (typeof localStorage === "undefined") return undefined;
+    const token = localStorage.getItem("sacv_auth_token")?.trim();
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+  }
+
+  /** 聚合模型（与自定义文案/视频模型二选一总控） */
+  async getUnifiedYunwuModels(): Promise<any> {
+    return this.request("/api/models/unified-yunwu", {
+      method: "GET",
+      headers: this._authHeaders(),
+    });
+  }
+
+  async updateUnifiedYunwuModels(body: Record<string, unknown>): Promise<any> {
+    return this.request("/api/models/unified-yunwu", {
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: this._authHeaders(),
+    });
+  }
+
+  async getUnifiedYunwuPlatforms(): Promise<any> {
+    return this.request("/api/models/unified-yunwu/platforms", {
+      method: "GET",
+      headers: this._authHeaders(),
+    });
+  }
+
+  async testUnifiedYunwuModels(): Promise<any> {
+    return this.request("/api/models/unified-yunwu/test", {
+      method: "POST",
+      headers: this._authHeaders(),
+    });
+  }
+
+  async forceSyncUnifiedYunwuModels(): Promise<any> {
+    return this.request("/api/models/unified-yunwu/force-sync", {
+      method: "POST",
+      headers: this._authHeaders(),
+    });
   }
 
   // ===== 向量模型 设置相关 API =====
@@ -874,12 +968,20 @@ export class TauriCommands {
 export const apiClient = new ApiClient();
 export const wsClient = new WebSocketClient();
 
+/** 后端 baseUrl 已就绪，供认证等在正确端口上请求 /api（需在 configureBackend 之后） */
+export const BACKEND_CONFIGURED_EVENT = "sacv-backend-configured";
+
 // 运行时配置：根据端口动态更新 API 与 WS 端点
 export function configureBackend(port: number, host: string = DEFAULT_HOST) {
   const httpBase = `http://${host}:${port}`;
   const wsBase = `ws://${host}:${port}/ws`;
   apiClient.setBaseUrl(httpBase);
   wsClient.setUrl(wsBase);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(BACKEND_CONFIGURED_EVENT, { detail: { baseUrl: httpBase } })
+    );
+  }
 }
 
 export async function fetchServerInfo(

@@ -12,6 +12,8 @@ import { message } from "../services/message";
 
 interface ProjectManagementPageProps {
   onEditProject: (projectId: string) => void;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
 }
 
 /**
@@ -19,6 +21,8 @@ interface ProjectManagementPageProps {
  */
 const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   onEditProject,
+  onShowLogin,
+  onShowProfile,
 }) => {
   const {
     projects,
@@ -100,7 +104,6 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       message.success("项目创建成功！");
       onEditProject(newProject.id);
     } catch (err) {
-      await showError(err, "创建项目失败");
       throw err;
     }
   };
@@ -236,6 +239,8 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
           setIsCreateModalOpen(false);
         }}
         onCreate={handleCreateProject}
+        onShowLogin={onShowLogin}
+        onShowProfile={onShowProfile}
       />
 
       {/* 删除确认模态框 */}

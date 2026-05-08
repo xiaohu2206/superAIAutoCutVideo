@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Omni 项目：解说向量 ↔ 多模态镜头 粗筛 / 精筛 / 重排（与 visual 隔离）。"""
+"""Omni 项目：解说向量 ↔ 多模态镜头 粗筛 / 精筛 / 重排（与 visual 隔离；粗筛向量与本地 BGE 一致）。"""
 
 from .pure import (
     build_embedding_search_results,
     build_narration_block,
     build_rerank_documents,
+    build_shot_embedding_text,
     continuity_score,
     cosine_similarity,
     fine_rerank_json_schema,
@@ -21,6 +22,7 @@ __all__ = [
     "build_embedding_search_results",
     "build_narration_block",
     "build_rerank_documents",
+    "build_shot_embedding_text",
     "continuity_score",
     "cosine_similarity",
     "fine_rerank_json_schema",

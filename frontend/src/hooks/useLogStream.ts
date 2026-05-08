@@ -130,7 +130,6 @@ export function useLogStream(options?: UseLogStreamOptions): UseLogStreamReturn 
     } catch (e) {
       setStatus("error")
       setError(getErrorMessage(e, "加载日志失败"))
-      throw e
     }
   }, [closeSource, loadHistory, startStream])
 

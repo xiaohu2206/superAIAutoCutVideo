@@ -48,11 +48,21 @@ if getattr(sys, 'frozen', False):
 
 print("Backend initializing...")  # Debug marker
 
+# 企业代理环境：在加载路由/发起 HTTPS 之前注入系统证书库（truststore）
+from modules.requests_tls import ensure_os_trust_injected
+
+ensure_os_trust_injected()
+
 # 导入AI路由
 from routes import health_router
 from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
+from routes.unified_yunwu_models_routes import router as unified_yunwu_models_router
 from routes.project_routes import router as project_router
+from routes.project_upload_routes import router as project_upload_router
+from routes.project_edit_routes import router as project_edit_router
+from routes.project_ai_routes import router as project_ai_router
+from routes.project_jianying_routes import router as project_jianying_router
 from routes.omni_pipeline_routes import router as omni_pipeline_router
 from routes.omni_copywriting_embed_routes import router as omni_copywriting_embed_router
 from routes.omni_shot_match_routes import router as omni_shot_match_router
@@ -60,9 +70,7 @@ from routes.omni_global_path_search_routes import router as omni_global_path_sea
 from routes.omni_generate_script_routes import router as omni_generate_script_router
 from routes.omni_full_narration_pipeline_routes import router as omni_full_narration_pipeline_router
 from routes.tts_routes import router as tts_router
-from routes.qwen3_tts_routes import router as qwen3_tts_router
 from routes.qwen_online_tts_routes import router as qwen_online_tts_router
-from routes.voxcpm_tts_routes import router as voxcpm_tts_router
 from routes.indextts_routes import router as indextts_router
 from routes.omnivoice_tts_routes import router as omnivoice_tts_router
 from routes.fun_asr_routes import router as fun_asr_router
@@ -73,6 +81,8 @@ from routes.storage_routes import router as settings_router
 from routes.ai_search_shot_settings_routes import router as ai_search_shot_settings_router
 from routes.moondream_routes import router as moondream_router
 from routes.log_routes import router as log_router
+from routes.auth_routes import router as auth_router
+from routes.license_routes import license_public_router, licenses_router
 from modules.ws_manager import manager
 from modules.config.jianying_config import jianying_config_manager
 from modules.app_paths import (
@@ -82,6 +92,7 @@ from modules.app_paths import (
     ensure_defaults_migrated,
 )
 from modules.runtime_log_store import runtime_log_store
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
 
 # 配置日志
 logging.basicConfig(
@@ -375,10 +386,27 @@ app = FastAPI(
 logger.info(f"Python 解释器: {sys.executable}")
 _inject_ffmpeg_into_path()
 
-# 配置CORS - 允许Tauri前端访问
+
+def _cors_allow_origins() -> List[str]:
+    """浏览器访问 API 时的允许来源。设置环境变量 CORS_ORIGINS 为逗号分隔列表可完全覆盖默认值。"""
+    raw = (os.getenv("CORS_ORIGINS") or "").strip()
+    if raw:
+        return [x.strip() for x in raw.split(",") if x.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "http://47.92.113.170",
+        "tauri://localhost",
+        "http://tauri.localhost",
+    ]
+
+
+# 配置 CORS（含浏览器直连后端时的跨域；Tauri 使用 tauri:// / tauri.localhost）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -388,7 +416,14 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(video_model_router)
 app.include_router(content_model_router)
+app.include_router(unified_yunwu_models_router)
+# 必须在 project_router 之前：project_routes 含 GET/POST /{project_id}，否则会吞掉
+# /generate-copywriting、/generate-script 等单段静态路径（误把 segment 当成 UUID）。
+app.include_router(project_ai_router)
 app.include_router(project_router)
+app.include_router(project_upload_router)
+app.include_router(project_edit_router)
+app.include_router(project_jianying_router)
 app.include_router(omni_pipeline_router)
 app.include_router(omni_copywriting_embed_router)
 app.include_router(omni_shot_match_router)
@@ -396,9 +431,7 @@ app.include_router(omni_global_path_search_router)
 app.include_router(omni_generate_script_router)
 app.include_router(omni_full_narration_pipeline_router)
 app.include_router(tts_router)
-app.include_router(qwen3_tts_router)
 app.include_router(qwen_online_tts_router)
-app.include_router(voxcpm_tts_router)
 app.include_router(indextts_router)
 app.include_router(omnivoice_tts_router)
 app.include_router(fun_asr_router)
@@ -409,75 +442,93 @@ app.include_router(settings_router)
 app.include_router(ai_search_shot_settings_router)
 app.include_router(moondream_router)
 app.include_router(log_router)
+app.include_router(auth_router)
+app.include_router(licenses_router)
+app.include_router(license_public_router)
+
+
+def _extract_project_id_from_request(request: Request) -> Optional[str]:
+    """从 URL 路径或查询参数中安全提取 project_id，不读取 body。"""
+    try:
+        path = str(request.url.path or "")
+        m = re.match(r"^/api/projects/([^/]+)", path)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    try:
+        return request.query_params.get("project_id") or request.query_params.get("projectId")
+    except Exception:
+        pass
+    return None
+
+
+async def _bg_log_and_broadcast(
+    scope: str,
+    method: str,
+    path: str,
+    project_id: Optional[str],
+    status_code: int,
+    detail: str,
+):
+    """后台任务：在线程池执行同步日志写盘，再异步广播；任何异常都不抛。"""
+    loop = asyncio.get_running_loop()
+    try:
+        payload = await loop.run_in_executor(
+            None,
+            lambda: runtime_log_store.append(
+                {
+                    "type": "error",
+                    "scope": scope,
+                    "method": method,
+                    "path": path,
+                    "status_code": int(status_code),
+                    "detail": str(detail),
+                    "_stored": True,
+                },
+                project_id=project_id,
+            ),
+        )
+    except Exception:
+        return
+    try:
+        await asyncio.wait_for(
+            manager.broadcast(json.dumps(payload, ensure_ascii=False)),
+            timeout=3.0,
+        )
+    except Exception:
+        pass
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    try:
-        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
-        project_id = m.group(1) if m else None
-    except Exception:
-        project_id = None
-    if not project_id:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                pid = body.get("project_id") or body.get("projectId")
-                if pid:
-                    project_id = str(pid)
-        except Exception:
-            pass
-    payload = runtime_log_store.append(
-        {
-            "type": "error",
-            "scope": "http_exception",
-            "method": request.method,
-            "path": str(request.url.path),
-            "status_code": int(exc.status_code),
-            "detail": str(exc.detail),
-            "_stored": True,
-        },
-        project_id=project_id,
+    project_id = _extract_project_id_from_request(request)
+    asyncio.create_task(
+        _bg_log_and_broadcast(
+            scope="http_exception",
+            method=request.method,
+            path=str(request.url.path),
+            project_id=project_id,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
     )
-    try:
-        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    try:
-        m = re.match(r"^/api/projects/([^/]+)", str(request.url.path or ""))
-        project_id = m.group(1) if m else None
-    except Exception:
-        project_id = None
-    if not project_id:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                pid = body.get("project_id") or body.get("projectId")
-                if pid:
-                    project_id = str(pid)
-        except Exception:
-            pass
-    payload = runtime_log_store.append(
-        {
-            "type": "error",
-            "scope": "unhandled_exception",
-            "method": request.method,
-            "path": str(request.url.path),
-            "status_code": 500,
-            "error": str(exc),
-            "_stored": True,
-        },
-        project_id=project_id,
+    project_id = _extract_project_id_from_request(request)
+    asyncio.create_task(
+        _bg_log_and_broadcast(
+            scope="unhandled_exception",
+            method=request.method,
+            path=str(request.url.path),
+            project_id=project_id,
+            status_code=500,
+            detail=str(exc),
+        )
     )
-    try:
-        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
-    except Exception:
-        pass
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 def get_app_paths():
@@ -815,7 +866,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # 接收客户端消息
             data = await websocket.receive_text()
             logger.info(f"收到WebSocket消息: {data}")
-            
+
             # 解析消息
             try:
                 message = json.loads(data)
@@ -829,10 +880,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     json.dumps({"type": "error", "message": "无效的JSON格式"}),
                     websocket
                 )
-    
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
         logger.info("WebSocket客户端断开连接")
+    except Exception as e:
+        logger.warning(f"WebSocket异常断开: {e}")
+    finally:
+        manager.disconnect(websocket)
 
 async def simulate_video_processing(task_id: str, request: VideoProcessRequest):
     """模拟视频处理过程"""
@@ -928,6 +981,23 @@ async def startup_event():
                 await _async_setup_ffmpeg()
     except Exception:
         pass
+
+    ffmpeg_path = resolve_ffmpeg_bin()
+    ffprobe_path = resolve_ffprobe_bin()
+    missing = []
+    if not ffmpeg_path:
+        missing.append("ffmpeg")
+    if not ffprobe_path:
+        missing.append("ffprobe")
+    if missing:
+        msg = (
+            f"启动失败：未找到 {'/'.join(missing)}，"
+            "请将 ffmpeg.exe/ffprobe.exe 放到 src-tauri/resources/ 目录下或确保其在系统 PATH 中。"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
+    logger.info(f"ffmpeg 路径: {ffmpeg_path}")
+    logger.info(f"ffprobe 路径: {ffprobe_path}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

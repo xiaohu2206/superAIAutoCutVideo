@@ -203,19 +203,17 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
         </AppSelect>
         <p className="text-xs text-gray-500 mt-1">
           {isLocalModel
-            ? "选择本地视觉分析模型"
+            ? "选择本地视觉分析模型（不支持全感知推理）"
             : selectedProvider === "custom_openai_vision"
               ? "自定义端点需支持 OpenAI 格式图文消息（image_url + text），用于抽帧后的画面描述"
-              : "选择用于视频生成的AI模型提供商"}
-        </p>
-        <p className="text-xs text-red-600 mt-1">
-          视频模型可能消耗巨大，请谨慎使用
+              : "选择用于视频生成的AI模型提供商 （视频模型可能消耗巨大，请谨慎使用）"}
+             
         </p>
       </div>
 
       {isLocalModel ? (
         <div className="space-y-6">
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-gray-700" />
               <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
@@ -419,7 +417,7 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
             </div>
           </section>
 
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h4 className="text-md font-semibold text-gray-900">模型测试</h4>
               <button

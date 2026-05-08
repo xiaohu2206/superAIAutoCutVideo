@@ -15,18 +15,16 @@ function shotSubtitle(s: OmniMultimodalShot): string {
 function formatVisual(v: OmniMultimodalShot["visual"]): string {
   if (!v) return "";
   const parts = [
-    v.brief && `摘要：${v.brief}`,
-    v.desc && `画面：${v.desc}`,
-    v.action && `动作：${v.action}`,
-    v.emotion && `情绪：${v.emotion}`,
+    v.brief && `${v.brief}`,
+    // v.desc && `画面：${v.desc}`,
   ].filter(Boolean);
   return parts.join("\n");
 }
 
-/** 与后端 Step2 完成判定一致：有非空向量 + visual 对象，且非 pending/error */
+/** 与后端 Step2 完成判定一致：有非空向量 + visual 对象，且非 pending/error/vl_error */
 function isOmniStep2Ok(s: OmniMultimodalShot): boolean {
   const st = String(s.omni_step2_status || "").trim().toLowerCase();
-  if (st === "pending" || st === "error") return false;
+  if (st === "pending" || st === "error" || st === "vl_error") return false;
   const emb = s.embedding;
   if (!Array.isArray(emb) || emb.length === 0) return false;
   const vis = s.visual;
@@ -34,7 +32,8 @@ function isOmniStep2Ok(s: OmniMultimodalShot): boolean {
 }
 
 function isOmniStep2Error(s: OmniMultimodalShot): boolean {
-  return String(s.omni_step2_status || "").trim().toLowerCase() === "error";
+  const st = String(s.omni_step2_status || "").trim().toLowerCase();
+  return st === "error" || st === "vl_error";
 }
 
 const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ result, onPlayShot }) => {
@@ -86,7 +85,6 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
               </span>
             )}
           </span>
-          {metaLine ? <span className="text-gray-500 text-xs truncate max-w-[50%]">{metaLine}</span> : null}
         </div>
 
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-5 flex items-center justify-center transition-all rounded-lg pointer-events-none">
@@ -110,9 +108,9 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
                 <div className="flex items-center gap-4 flex-wrap">
                   <h3 className="text-xl font-semibold text-gray-900">Omni 多模态详情</h3>
                   <div className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">共 {shots.length} 段</div>
-                  {metaLine ? (
+                  {/* {metaLine ? (
                     <div className="text-xs text-gray-500 bg-fuchsia-50 px-2 py-1 rounded border border-fuchsia-100">{metaLine}</div>
-                  ) : null}
+                  ) : null} */}
                 </div>
                 <button
                   type="button"

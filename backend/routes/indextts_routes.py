@@ -97,6 +97,15 @@ async def indextts_status() -> Dict[str, Any]:
         ok, e = await probe_indextts(st.base_url, st.api_prefix)
         alive = ok
         err = e
+        if not ok:
+            indextts_connection_store.set_failed(
+                (e or "").strip() or "IndexTTS 不可达"
+            )
+            try:
+                tts_engine_config_manager._voices_cache.pop("indextts", None)
+            except Exception:
+                pass
+            st = indextts_connection_store.get_state()
     return {
         "success": True,
         "data": {

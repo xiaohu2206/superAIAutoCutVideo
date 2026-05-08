@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import bisect
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, cast
 
@@ -9,7 +10,8 @@ from fastapi import HTTPException
 
 from modules.json_sanitizer import validate_script_items
 from modules.projects_store import projects_store
-from services.ai_service import ai_service
+from services.ai_models.ai_service import ai_service
+from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 
 from .constants import MAX_SUBTITLE_ITEMS_PER_CALL, SOFT_INPUT_FACTOR
 from .length_planner import parse_script_length_selection, allocate_output_counts, estimate_auto_script_length_plan
@@ -160,6 +162,8 @@ class ScriptGenerationService:
         sel_length: Optional[str] = None
         original_ratio: Optional[int] = None
         script_language: Optional[str] = None
+        interleave_mode: Optional[str] = None
+        omni_tier: Optional[str] = omni_effect_tier_for_project(project_id)
         if project_id:
             try:
                 p = projects_store.get_project(project_id)
@@ -176,11 +180,16 @@ class ScriptGenerationService:
                             script_language = str(getattr(p, "script_language", None))
                         except Exception:
                             script_language = None
+                    if getattr(p, "interleave_mode", None):
+                        interleave_mode = str(getattr(p, "interleave_mode", None))
             except Exception:
                 sel_length = None
 
         try:
-            model_info = ai_service.get_provider_info()
+            model_info = ai_service.get_provider_info(
+                LlmModelUsage.SCRIPT_GENERATION,
+                omni_effect_tier=omni_tier,
+            )
             m_name = model_info.get("active_model", "Unknown")
             m_prov = model_info.get("active_provider", "Unknown")
             logger.info(f"🚀 开始生成脚本 | 剧名: {drama_name} | 模型: {m_name} ({m_prov})")
@@ -192,6 +201,8 @@ class ScriptGenerationService:
         except Exception:
             is_auto = False
         plan = estimate_auto_script_length_plan(copywriting_text) if is_auto else parse_script_length_selection(sel_length)
+        if interleave_mode == "original_interleave":
+            plan = replace(plan, final_target_count=max(2, int(plan.final_target_count * 0.8)))
         chunks = compute_subtitle_chunks(
             subtitles=subtitles,
             desired_calls=plan.preferred_calls,
@@ -221,6 +232,8 @@ class ScriptGenerationService:
                     per_call_caps[int(chunk["idx"])],
                     original_ratio,
                     script_language,
+                    interleave_mode=interleave_mode,
+                    omni_effect_tier=omni_tier,
                 )
 
         tasks = [generate_one(c) for c in chunks]
@@ -238,6 +251,7 @@ class ScriptGenerationService:
                 target_count=int(target),
                 original_ratio=original_ratio,
                 script_language=script_language,
+                omni_effect_tier=omni_tier,
             )
         else:
             final_items = merged_items
@@ -271,6 +285,8 @@ class ScriptGenerationService:
         sel_length: Optional[str] = None
         original_ratio: Optional[int] = None
         script_language: Optional[str] = None
+        interleave_mode: Optional[str] = None
+        omni_tier: Optional[str] = omni_effect_tier_for_project(project_id)
         if project_id:
             try:
                 p = projects_store.get_project(project_id)
@@ -287,11 +303,16 @@ class ScriptGenerationService:
                             script_language = str(getattr(p, "script_language", None))
                         except Exception:
                             script_language = None
+                    if getattr(p, "interleave_mode", None):
+                        interleave_mode = str(getattr(p, "interleave_mode", None))
             except Exception:
                 sel_length = None
 
         try:
-            model_info = ai_service.get_provider_info()
+            model_info = ai_service.get_provider_info(
+                LlmModelUsage.SCRIPT_GENERATION,
+                omni_effect_tier=omni_tier,
+            )
             m_name = model_info.get("active_model", "Unknown")
             m_prov = model_info.get("active_provider", "Unknown")
             logger.info(f"🚀 开始生成脚本(visual) | 剧名: {drama_name} | 模型: {m_name} ({m_prov})")
@@ -303,6 +324,8 @@ class ScriptGenerationService:
         except Exception:
             is_auto = False
         plan = estimate_auto_script_length_plan(copywriting_text) if is_auto else parse_script_length_selection(sel_length)
+        if interleave_mode == "original_interleave":
+            plan = replace(plan, final_target_count=max(2, int(plan.final_target_count * 0.8)))
         chunks = compute_subtitle_chunks(
             subtitles=scene_items,
             desired_calls=plan.preferred_calls,
@@ -332,6 +355,8 @@ class ScriptGenerationService:
                     per_call_caps[int(chunk["idx"])],
                     original_ratio,
                     script_language,
+                    interleave_mode=interleave_mode,
+                    omni_effect_tier=omni_tier,
                 )
 
         tasks = [generate_one(c) for c in chunks]
@@ -349,6 +374,7 @@ class ScriptGenerationService:
                 target_count=int(target),
                 original_ratio=original_ratio,
                 script_language=script_language,
+                omni_effect_tier=omni_tier,
             )
         else:
             final_items = merged_items

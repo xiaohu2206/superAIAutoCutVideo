@@ -1,13 +1,4 @@
-import {
-  FileText,
-  Info,
-  Mic,
-  FolderOpen,
-  HardDrive,
-  Subtitles,
-  Cpu,
-  Search,
-} from "lucide-react";
+import { Info, Mic, FolderOpen, HardDrive, Subtitles, Layers } from "lucide-react";
 import type { AppSettings, SettingsSection } from "./types";
 
 /**
@@ -31,9 +22,7 @@ export const defaultSettings: AppSettings = {
  * 设置页面栏目配置
  */
 export const sections: SettingsSection[] = [
-  { id: "contentModel", label: "文案生成模型", icon: FileText },
-  { id: "videoModel", label: "视频生成模型", icon: Cpu },
-  { id: "aiSearchShotModel", label: "向量模型", icon: Search },
+  { id: "integratedModel", label: "整合模型", icon: Layers },
   { id: "tts", label: "音色设置（TTS）", icon: Mic },
   { id: "subtitleAsr", label: "字幕识别", icon: Subtitles },
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },

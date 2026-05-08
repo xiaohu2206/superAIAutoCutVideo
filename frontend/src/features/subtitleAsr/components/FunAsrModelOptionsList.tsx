@@ -65,11 +65,11 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
   }, [options]);
   return (
     <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2">
-        <Info className="w-5 h-5 flex-shrink-0 text-blue-600" />
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300">
+        <Info className="w-5 h-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
         <div className="space-y-1">
           <p className="font-medium">模型下载说明：</p>
-          <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
+          <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1 dark:text-blue-300">
             <li>每个选项包含 ASR 模型 + VAD 模型；两者都可用才算“就绪”。</li>
             <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\FunASR)。</li>
             <li>
@@ -77,7 +77,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
               <button
                 type="button"
                 onClick={() => TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc")}
-                className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900"
+                className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-200"
               >
                 网盘下载
               </button>
@@ -107,15 +107,15 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
           const canStop = currentDownload?.status === "running";
 
           return (
-            <div key={option.id} className="bg-white border rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
+            <div key={option.id} className="bg-white border rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow dark:bg-gray-900 dark:border-slate-700">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start gap-3">
-                  <div className={`p-2 rounded-lg ${status.existsAll ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"}`}>
+                  <div className={`p-2 rounded-lg ${status.existsAll ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400" : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"}`}>
                     <Box className="w-5 h-5" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h5 className="text-sm font-medium text-gray-900">{option.label}</h5>
+                      <h5 className="text-sm font-medium text-gray-900 dark:text-gray-100">{option.label}</h5>
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded-full border ${badge.className}`}
                         title={status.missing.length ? `缺失: ${status.missing.join(", ")}` : ""}
@@ -123,7 +123,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                         {badge.text}
                       </span>
                     </div>
-                    {option.description ? <div className="mt-1 text-xs text-gray-500">{option.description}</div> : null}
+                    {option.description ? <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{option.description}</div> : null}
                   </div>
                 </div>
 
@@ -132,7 +132,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                     <AppSelect
                       value={getProvider(option.id)}
                       onChange={(e) => onChangeProvider(option.id, e.target.value as FunAsrDownloadProvider)}
-                      className="select-sm bg-gray-50 text-gray-600"
+                      className="select-sm bg-gray-50 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
                       disabled={modelsLoading || isDownloading}
                       title="下载源"
                       iconClassName="right-2 h-3.5 w-3.5"
@@ -142,12 +142,12 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                     </AppSelect>
                   )}
 
-                  <div className="flex items-center border rounded-md overflow-hidden bg-white">
+                  <div className="flex items-center border rounded-md overflow-hidden bg-white dark:border-slate-600 dark:bg-gray-800">
                     {!status.validAll && (
                       <button
                         onClick={() => onDownload(option)}
                         disabled={modelsLoading || isDownloading}
-                        className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-blue-600 font-medium disabled:bg-gray-50 disabled:text-gray-400"
+                        className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-blue-600 font-medium disabled:bg-gray-50 disabled:text-gray-400 dark:border-slate-600 dark:hover:bg-gray-700 dark:text-blue-400 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
                         title="下载模型"
                       >
                         <Download className="h-3.5 w-3.5" />
@@ -158,7 +158,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                       <button
                         onClick={() => onStop(option)}
                         disabled={modelsLoading || !canStop}
-                        className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-red-600 font-medium disabled:bg-gray-50 disabled:text-gray-400"
+                        className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 flex items-center gap-1.5 h-7 transition-colors text-red-600 font-medium disabled:bg-gray-50 disabled:text-gray-400 dark:border-slate-600 dark:hover:bg-gray-700 dark:text-red-400 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
                         title="停止下载"
                       >
                         <Square className="h-3.5 w-3.5" />
@@ -168,7 +168,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                     <button
                       onClick={() => onValidate(option)}
                       disabled={modelsLoading || isDownloading}
-                      className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
+                      className="px-2.5 py-1 text-xs border-r hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400 dark:border-slate-600 dark:hover:bg-gray-700 dark:text-gray-300 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
                       title="校验完整性"
                     >
                       校验
@@ -177,7 +177,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
                     <button
                       onClick={() => onOpenDir(option)}
                       disabled={modelsLoading || isDownloading}
-                      className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400"
+                      className="px-2.5 py-1 text-xs hover:bg-gray-50 text-gray-700 h-7 disabled:bg-gray-50 disabled:text-gray-400 dark:hover:bg-gray-700 dark:text-gray-300 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
                       title="打开模型目录"
                     >
                       {copiedOptionId === option.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : "目录"}

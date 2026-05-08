@@ -31,6 +31,9 @@ class TtsVoice(BaseModel):
     voice_human_style: Optional[str] = Field(None, description="风格描述原文")
 
 
+ALLOWED_TTS_PROVIDERS = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'indextts', 'omnivoice_tts']
+
+
 class TtsEngineConfig(BaseModel):
     """TTS引擎配置数据模型"""
     provider: str = Field(..., description="TTS提供商标识，如tencent_tts")
@@ -45,9 +48,8 @@ class TtsEngineConfig(BaseModel):
 
     @validator('provider')
     def validate_provider(cls, v):
-        allowed = ['tencent_tts', 'edge_tts', 'qwen3_tts', 'qwen_online_tts', 'voxcpm_tts', 'indextts', 'omnivoice_tts']
-        if v.lower() not in allowed:
-            raise ValueError(f'提供商必须是以下之一: {allowed}')
+        if v.lower() not in ALLOWED_TTS_PROVIDERS:
+            raise ValueError(f'提供商必须是以下之一: {ALLOWED_TTS_PROVIDERS}')
         return v.lower()
 
 
@@ -75,11 +77,21 @@ class TtsEngineConfigManager:
                     data = json.load(f)
 
                 configs_data = data.get('configs', {})
+                cleaned = False
                 for config_id, config_data in configs_data.items():
                     try:
+                        provider = str(config_data.get('provider', '')).strip().lower()
+                        if provider not in ALLOWED_TTS_PROVIDERS:
+                            logger.warning(f"跳过不支持的TTS配置 {config_id}（provider={provider or 'unknown'}）")
+                            cleaned = True
+                            continue
                         self.configs[config_id] = TtsEngineConfig(**config_data)
                     except Exception as e:
                         logger.error(f"加载TTS引擎配置 {config_id} 失败: {e}")
+                        cleaned = True
+
+                if cleaned:
+                    self.save_configs()
 
                 logger.info(f"成功加载 {len(self.configs)} 个TTS引擎配置")
 
@@ -151,23 +163,6 @@ class TtsEngineConfigManager:
                         }
                     )
                     missing_defaults.append('qwen_online_tts_default')
-
-                if 'voxcpm_tts_default' not in self.configs:
-                    self.configs['voxcpm_tts_default'] = TtsEngineConfig(
-                        provider='voxcpm_tts',
-                        secret_id=None,
-                        secret_key=None,
-                        region=None,
-                        description='VoxCPM 默认配置（本地模型）',
-                        enabled=False,
-                        active_voice_id=None,
-                        speed_ratio=1.0,
-                        extra_params={
-                            "ModelKey": "voxcpm_0_5b",
-                            "Language": "Auto",
-                        }
-                    )
-                    missing_defaults.append('voxcpm_tts_default')
 
                 if 'indextts_default' not in self.configs:
                     self.configs['indextts_default'] = TtsEngineConfig(
@@ -294,23 +289,6 @@ class TtsEngineConfigManager:
                 )
             ),
             (
-                'voxcpm_tts_default',
-                TtsEngineConfig(
-                    provider='voxcpm_tts',
-                    secret_id=None,
-                    secret_key=None,
-                    region=None,
-                    description='VoxCPM 默认配置（本地模型）',
-                    enabled=False,
-                    active_voice_id=None,
-                    speed_ratio=1.0,
-                    extra_params={
-                        "ModelKey": "voxcpm_0_5b",
-                        "Language": "Auto",
-                    }
-                )
-            ),
-            (
                 'indextts_default',
                 TtsEngineConfig(
                     provider='indextts',
@@ -391,17 +369,17 @@ class TtsEngineConfigManager:
                 'required_fields': [],
                 'optional_fields': []
             },
-             {
-                'provider': 'indextts',
-                'display_name': 'IndexTTS(本地)',
-                'description': '本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
-                'required_fields': [],
-                'optional_fields': []
-            },
             {
                 'provider': 'omnivoice_tts',
                 'display_name': 'OmniVoice(本地)',
                 'description': '局域网 OmniVoice HTTP 服务，需先在「连接 OmniVoice」中连接成功',
+                'required_fields': [],
+                'optional_fields': []
+            },
+            {
+                'provider': 'indextts',
+                'display_name': 'IndexTTS(本地)',
+                'description': '（要求8G显存以上）本地 IndexTTS2 HTTP 服务，需先在「连接 IndexTTS」中连接成功',
                 'required_fields': [],
                 'optional_fields': []
             },
@@ -412,20 +390,6 @@ class TtsEngineConfigManager:
                 'required_fields': ['secret_key'],
                 'optional_fields': ['region']
             },
-            {
-                'provider': 'qwen3_tts',
-                'display_name': 'Qwen3-TTS(本地)',
-                'description': '生成配音比较慢，离线语音合成与快速声音克隆（需先下载模型）',
-                'required_fields': [],
-                'optional_fields': []
-            },
-            # {
-            #     'provider': 'voxcpm_tts',
-            #     'display_name': 'VoxCPM(本地)',
-            #     'description': 'VoxCPM 离线语音合成与声音复刻（需先下载模型）',
-            #     'required_fields': [],
-            #     'optional_fields': []
-            # },
             {
                 'provider': 'tencent_tts',
                 'display_name': '腾讯云 TTS',

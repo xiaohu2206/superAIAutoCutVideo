@@ -282,38 +282,7 @@ async def download_task_audio(
                 await asyncio.sleep(wait)
 
 
-async def wav_to_mp3_with_ffmpeg(wav_path: Path, mp3_path: Path) -> bool:
-    mp3_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(wav_path),
-        "-codec:a",
-        "libmp3lame",
-        "-q:a",
-        "3",
-        str(mp3_path),
-    ]
-    try:
-        if os.name == "nt":
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                creationflags=WIN_NO_WINDOW,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-        rc = await proc.wait()
-        return rc == 0 and mp3_path.exists()
-    except Exception as e:
-        logger.warning("ffmpeg wav->mp3 失败: %s", e)
-        return False
+from modules.ffmpeg_utils import wav_to_mp3 as wav_to_mp3_with_ffmpeg
 
 
 async def upload_clone_voice(

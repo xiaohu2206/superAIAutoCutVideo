@@ -13,9 +13,12 @@ datas = [
 # 例如 modules/prompts/common/sharp_roast/sharp_roast.md
 if os.path.isdir('modules/prompts'):
     datas.append(('modules/prompts', 'modules/prompts'))
-cache_dir = '../.trae/cache/Qwen3-TTS'
-if os.path.isdir(cache_dir):
-    datas.append((cache_dir, '.trae/cache/Qwen3-TTS'))
+if os.path.isdir('services/omni_internal/prompts'):
+    datas.append(('services/omni_internal/prompts', 'services/omni_internal/prompts'))
+if os.path.isdir('modules/copywriting_structuring_embedding/prompt'):
+    datas.append(('modules/copywriting_structuring_embedding/prompt', 'modules/copywriting_structuring_embedding/prompt'))
+if os.path.isdir('modules/reRank'):
+    datas.append(('modules/reRank', 'modules/reRank'))
 binaries = []
 try:
     _tbb12 = os.path.join(sys.prefix, 'Library', 'bin', 'tbb12.dll')
@@ -33,6 +36,7 @@ hiddenimports = [
     'uvicorn.protocols.http.auto',
     'uvicorn.protocols.websockets',
     'uvicorn.protocols.websockets.auto',
+    'websockets',
     'uvicorn.lifespan',
     'uvicorn.lifespan.on',
     'fastapi',
@@ -40,15 +44,12 @@ hiddenimports = [
     'starlette',
     'multipart',
     'engineio.async_drivers.aiohttp', # 常见遗漏：Socket.IO 异步驱动
-    'qwen_tts',  # 动态导入的第三方包，确保打包后可用
     'llama_cpp',
     'llama_cpp.llama_cpp',
     'torch.distributed',
     'torch.distributed.rpc',
     'funasr.register',
     'funasr.register.tables',
-    'modules.vendor.voxcpm_tts',
-    'modules.vendor.voxcpm_tts.voxcpm_tts',
 ]
 
 # 轻量收集：避免对 transformers/torch 等超大库做 collect_all() 触发超长扫描
@@ -75,7 +76,6 @@ _maybe_packages = [
     'torch',
     'torchvision',
     'torchaudio',
-    'voxcpm',
 ]
 for package in _maybe_packages:
     hiddenimports.append(package)
@@ -87,12 +87,6 @@ for package in ['onnxruntime', 'librosa', 'modelscope']:
         datas += collect_data_files(package)
     except Exception as e:
         print(f"Warning: Failed to collect data files for {package}: {e}")
-
-try:
-    if importlib.util.find_spec("voxcpm") is not None:
-        datas += collect_data_files("voxcpm", include_py_files=True)
-except Exception as e:
-    print(f"Warning: Failed to collect voxcpm py files: {e}")
 
 try:
     if importlib.util.find_spec("pandas") is not None:

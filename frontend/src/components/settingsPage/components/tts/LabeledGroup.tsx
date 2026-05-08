@@ -10,10 +10,10 @@ export const LabeledChip: React.FC<LabeledChipProps> = ({ label, value, variant 
   const base = "px-2 py-0.5 rounded border text-[11px] inline-flex items-center gap-1";
   const cls =
     variant === "blue"
-      ? `${base} bg-white border-blue-200 text-blue-700`
+      ? `${base} bg-white border-blue-200 text-blue-700 dark:bg-gray-800 dark:border-blue-800 dark:text-blue-300`
       : variant === "white"
-      ? `${base} bg-white border-gray-200 text-gray-700`
-      : `${base} bg-gray-100 border-gray-200 text-gray-700`;
+      ? `${base} bg-white border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300`
+      : `${base} bg-gray-100 border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300`;
   return (
     <span className={cls}>
       <span>{label}：</span>

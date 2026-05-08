@@ -17,7 +17,7 @@ const OmniFullNarrationPipelineProgress: React.FC<OmniFullNarrationPipelineProgr
   busy,
   progress,
   logs,
-  title = "Omni 全链路进度（结构化 → 镜头 → 路径 → 脚本）",
+  title = "Omni 全链路进度",
 }) => {
   if (!busy && !(progress > 0 && progress < 100)) return null;
 

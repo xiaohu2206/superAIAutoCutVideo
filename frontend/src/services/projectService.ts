@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectLatestTasks,
   ProjectRunningTasks,
+  OmniExtractSubtitleAndRunPipelineResult,
   SubtitleResult,
   SubtitleSegment,
   UpdateProjectRequest,
@@ -58,12 +59,22 @@ export class ProjectService {
 
   /**
    * 创建项目
+   * omni 类型需后端校验 License，故在已登录时附带与「我的 License」相同的 Bearer Token。
    */
   async createProject(data: CreateProjectRequest): Promise<Project> {
+    const token =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("sacv_auth_token")
+        : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed
+      ? { Authorization: `Bearer ${trimmed}` }
+      : undefined;
     const response = await apiClient.post<{ data: Project }>(
       "/api/projects",
       data,
-      10000
+      30000,
+      authHeaders
     );
     return response.data;
   }
@@ -415,6 +426,7 @@ export class ProjectService {
     projectId: string,
     options?: {
       task_id?: string | null;
+      force?: boolean;
       asr_provider?: "bcut" | "fun_asr";
       asr_model_key?: string | null;
       asr_language?: string | null;
@@ -425,6 +437,7 @@ export class ProjectService {
     const payload = options
       ? {
           task_id: options.task_id ?? undefined,
+          force: typeof options.force === "boolean" ? options.force : undefined,
           asr_provider: options.asr_provider,
           asr_model_key: options.asr_model_key ?? undefined,
           asr_language: options.asr_language ?? undefined,
@@ -487,10 +500,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/full-narration-pipeline/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -500,10 +518,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/copywriting-struct-embed/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -513,10 +536,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/shot-match/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -526,10 +554,15 @@ export class ProjectService {
     projectId: string,
     body?: Record<string, unknown>
   ): Promise<{ task_id?: string; status?: string; message?: string }> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id?: string; status?: string; message?: string }>>(
       `/api/projects/${projectId}/omni/generate-script/run`,
       body ?? {},
-      120000
+      120000,
+      authHeaders
     );
     return response.data ?? {};
   }
@@ -736,6 +769,9 @@ export class ProjectService {
     return response.data;
   }
 
+  /**
+   * 提交 Omni 管线：后端会校验 License，需与「我的 License」一致附带 Bearer Token。
+   */
   async runOmniPipeline(
     projectId: string,
     options?: {
@@ -749,12 +785,65 @@ export class ProjectService {
       task_id: options?.task_id ?? undefined,
       multimodal_action: options?.multimodal_action ?? "auto",
     };
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
     const response = await apiClient.post<ApiResponse<{ task_id: string; status: string; message: string }>>(
       `/api/projects/${projectId}/omni/run-pipeline`,
-      payload
+      payload,
+      undefined,
+      authHeaders
     );
     if (!response.data) {
       throw new Error("Omni 管线提交失败：响应为空");
+    }
+    return response.data;
+  }
+
+  /**
+   * 编排：按需同步提取字幕后提交 Omni 管线（单请求），需 Bearer License。
+   */
+  async runOmniPipelineWithSubtitle(
+    projectId: string,
+    options?: {
+      task_id?: string | null;
+      force?: boolean;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+      pipeline_task_id?: string | null;
+      pipeline_force?: boolean;
+      multimodal_action?: "auto" | "continue" | "restart";
+    }
+  ): Promise<OmniExtractSubtitleAndRunPipelineResult> {
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
+    const o = options || {};
+    const payload = {
+      task_id: o.task_id ?? undefined,
+      force: Boolean(o.force),
+      asr_provider: o.asr_provider,
+      asr_model_key: o.asr_model_key ?? undefined,
+      asr_language: o.asr_language ?? undefined,
+      itn: typeof o.itn === "boolean" ? o.itn : undefined,
+      hotwords: Array.isArray(o.hotwords) ? o.hotwords : undefined,
+      pipeline_task_id: o.pipeline_task_id ?? undefined,
+      pipeline_force: Boolean(o.pipeline_force),
+      multimodal_action: o.multimodal_action ?? "auto",
+    };
+    const response = await apiClient.post<ApiResponse<OmniExtractSubtitleAndRunPipelineResult>>(
+      `/api/projects/${projectId}/omni/extract-subtitle-and-run-pipeline`,
+      payload,
+      undefined,
+      authHeaders
+    );
+    if (!response.data) {
+      throw new Error("Omni 编排失败：响应为空");
     }
     return response.data;
   }
@@ -774,6 +863,20 @@ export class ProjectService {
       throw new Error("Omni 多模态结果为空");
     }
     return response.data;
+  }
+
+  async getTaskQueue(): Promise<{
+    active_project: string | null;
+    active_project_name: string | null;
+    active_task_count: number;
+    active_tasks: any[];
+    waiting_projects: any[];
+    total_waiting_projects: number;
+  }> {
+    const response = await apiClient.get<ApiResponse<any>>(
+      "/api/projects/tasks/queue"
+    );
+    return response.data ?? { active_project: null, active_project_name: null, active_task_count: 0, active_tasks: [], waiting_projects: [], total_waiting_projects: 0 };
   }
 }
 

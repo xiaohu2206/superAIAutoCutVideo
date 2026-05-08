@@ -27,7 +27,7 @@ class OmniGenerateScriptRunRequest(BaseModel):
     task_id: Optional[str] = None
     input_global_path_web_path: Optional[str] = Field(
         default=None,
-        description="覆盖项目上的 omni_global_path_search_path；默认使用已保存的 global_path.json",
+        description="可选。显式指定段落-镜头候选 JSON；省略时依次使用项目 omni_global_path_search_path、omni_shot_match_rerank_path",
     )
     input_multimodal_web_path: Optional[str] = Field(
         default=None,
@@ -37,6 +37,8 @@ class OmniGenerateScriptRunRequest(BaseModel):
         default=None,
         description="分块/时间窗等参数，语义对齐 Step4.9（chunk_target_size、timeline_window_mode 等）",
     )
+    script_language: Optional[str] = Field(default=None, description="解说语言：zh/en；默认使用项目配置")
+    original_ratio: Optional[int] = Field(default=None, ge=0, le=100, description="原片占比 0-100；默认使用项目配置")
     temperature: Optional[float] = Field(default=None, description="覆盖当前文案模型温度")
     chunk_llm_concurrency: int = Field(default=4, ge=1, le=16, description="分块 LLM 并发数")
 
@@ -54,6 +56,8 @@ async def omni_generate_script_run(
             input_global_path_web_path=req.input_global_path_web_path,
             input_multimodal_web_path=req.input_multimodal_web_path,
             generation_params=req.generation_params,
+            script_language=req.script_language,
+            original_ratio=req.original_ratio,
             temperature=req.temperature,
             chunk_llm_concurrency=req.chunk_llm_concurrency,
         )

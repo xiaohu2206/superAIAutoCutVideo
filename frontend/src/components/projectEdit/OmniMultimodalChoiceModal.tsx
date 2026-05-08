@@ -6,6 +6,8 @@ export interface OmniMultimodalChoiceModalProps {
   onClose: () => void;
   onContinueIncomplete: () => void;
   onRestartAll: () => void;
+  /** 未登录或无 token 时为 false，禁用继续/重新按钮 */
+  actionsEnabled?: boolean;
 }
 
 const OmniMultimodalChoiceModal: React.FC<OmniMultimodalChoiceModalProps> = ({
@@ -13,6 +15,7 @@ const OmniMultimodalChoiceModal: React.FC<OmniMultimodalChoiceModalProps> = ({
   onClose,
   onContinueIncomplete,
   onRestartAll,
+  actionsEnabled = true,
 }) => {
   if (!isOpen) return null;
 
@@ -52,6 +55,11 @@ const OmniMultimodalChoiceModal: React.FC<OmniMultimodalChoiceModalProps> = ({
               <li>继续补全：仅对尚未完成多模态/向量化的语义段调用模型</li>
               <li>全部重新：保留本次镜头拆分，重新对所有语义段做视觉与向量化</li>
             </ul>
+            {!actionsEnabled ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                请先登录账号，并在个人中心绑定处于生效中的 License，再运行 Omni 管线。
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-5 py-4 sm:flex-row sm:justify-end sm:gap-3">
@@ -65,16 +73,18 @@ const OmniMultimodalChoiceModal: React.FC<OmniMultimodalChoiceModalProps> = ({
             <button
               type="button"
               onClick={onRestartAll}
-              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-100"
+              disabled={!actionsEnabled}
+              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              全部重新多模态分析
+              全部重新分析
             </button>
             <button
               type="button"
               onClick={onContinueIncomplete}
-              className="rounded-lg bg-fuchsia-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-fuchsia-800"
+              disabled={!actionsEnabled}
+              className="rounded-lg bg-fuchsia-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-fuchsia-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              继续补全未完成段落
+              补全未完成段落
             </button>
           </div>
         </div>

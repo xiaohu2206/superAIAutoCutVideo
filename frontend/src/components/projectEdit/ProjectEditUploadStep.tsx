@@ -13,6 +13,7 @@ import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
 import OmniMultimodalChoiceModal from "./OmniMultimodalChoiceModal";
 import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
+import { useAuth } from "../auth/AuthContext";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
 import { videoModelService } from "@/services/videoModelService";
 
@@ -81,7 +82,12 @@ interface ProjectEditUploadStepProps {
   subtitleOverwriteModalOpen: boolean;
   onSubtitleOverwriteConfirm: () => void;
   onSubtitleOverwriteCancel: () => void;
+  /** 本地已登录（有 token）；License 有效性由后端在提交时校验 */
+  omniRunPipelineAuthReady: boolean;
+  onShowLogin?: () => void;
+  onShowProfile?: () => void;
   onRunOmniPipeline: () => void;
+  onRunOmniPipelineWithSubtitle: () => void;
   onStopOmniPipeline: () => void;
   isStoppingOmniPipeline: boolean;
   extractingOmniPipeline: boolean;
@@ -154,7 +160,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   subtitleOverwriteModalOpen,
   onSubtitleOverwriteConfirm,
   onSubtitleOverwriteCancel,
-  onRunOmniPipeline,
+  omniRunPipelineAuthReady,
+  onShowLogin: _onShowLogin,
+  onShowProfile: _onShowProfile,
+  onRunOmniPipeline: _onRunOmniPipeline,
+  onRunOmniPipelineWithSubtitle,
   onStopOmniPipeline,
   isStoppingOmniPipeline,
   extractingOmniPipeline,
@@ -168,6 +178,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onOmniMultimodalChoiceRestart,
   onOmniMultimodalChoiceCancel,
 }) => {
+  const { isAuthenticated } = useAuth();
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
     Boolean(project.subtitle_path) &&
@@ -349,49 +360,37 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
               </button>
             </div>
           ) : project.project_type === "omni" ? (
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-              <button
-                onClick={onExtractSubtitle}
-                disabled={
-                  subtitleLoading ||
-                  extractingSubtitle ||
-                  extractingOmniPipeline ||
-                  (!project.video_path && !project.merged_video_path) ||
-                  (project.subtitle_source === "user" && Boolean(project.subtitle_path))
-                }
-                className="flex items-center justify-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {extractingSubtitle ? (
-                  <>
-                    <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    提取中...
-                  </>
-                ) : (
-                  <>{canReExtractSubtitle ? "重新提取字幕" : "提取字幕"}</>
-                )}
-              </button>
-              <button
-                onClick={onRunOmniPipeline}
-                disabled={
-                  Boolean(subtitleLoading) ||
-                  extractingSubtitle ||
-                  extractingOmniPipeline ||
-                  (!project.video_path && !project.merged_video_path) ||
-                  !project.subtitle_path ||
-                  Boolean(project.subtitle_status && project.subtitle_status !== "ready")
-                }
-                className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {extractingOmniPipeline ? (
-                  <>
-                    <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    Omni 管线运行中...
-                  </>
-                ) : (
-                  <>{canReRunOmniPipeline ? "重新运行 Omni 管线" : "运行 Omni 管线（镜头+多模态）"}</>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={onRunOmniPipelineWithSubtitle}
+              disabled={
+                subtitleLoading ||
+                extractingSubtitle ||
+                extractingOmniPipeline ||
+                (!project.video_path && !project.merged_video_path)
+              }
+              title={
+                !isAuthenticated
+                  ? "请先登录；点击可打开登录"
+                  : !omniRunPipelineAuthReady
+                    ? "登录后需带有效凭据；点击前往个人中心绑定 License"
+                    : undefined
+              }
+              className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {extractingOmniPipeline ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  运行中...
+                </>
+              ) : extractingSubtitle ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  提取中...
+                </>
+              ) : (
+                <>{canReRunOmniPipeline ? "重新分析镜头" : "分析镜头"}</>
+              )}
+            </button>
           ) : (
             <button
               onClick={onExtractSubtitle}
@@ -548,7 +547,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
               }
             `}
           >
-            <span>生成脚本</span>
+            <span>生成文案</span>
             <ArrowRight
               className={`ml-2 h-5 w-5 transition-transform duration-300 ${
                 (project.project_type === "subtitle"
@@ -601,6 +600,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         onClose={onOmniMultimodalChoiceCancel}
         onContinueIncomplete={onOmniMultimodalChoiceContinue}
         onRestartAll={onOmniMultimodalChoiceRestart}
+        actionsEnabled={omniRunPipelineAuthReady}
       />
       <OverwriteConfirmModal
         isOpen={subtitleOverwriteModalOpen}

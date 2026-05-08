@@ -4,7 +4,7 @@ import { NarrationType } from "../../types/project";
 import type { CreatePromptPayload } from "../../types/prompts";
 import CustomScriptLengthModal from "./advancedConfig/CustomScriptLengthModal";
 import DeleteConfirmModal from "./advancedConfig/DeleteConfirmModal";
-import { useProjectOriginalRatio, useProjectScriptLength, useProjectScriptLanguage, useProjectCopywritingWordCount } from "./advancedConfig/hooks";
+import { useProjectOriginalRatio, useProjectScriptLength, useProjectScriptLanguage, useProjectCopywritingWordCount, useProjectInterleaveMode } from "./advancedConfig/hooks";
 import CopywritingWordCountSelector from "./advancedConfig/CopywritingWordCountSelector";
 import OriginalRatioSlider from "./advancedConfig/OriginalRatioSlider";
 import PreviewModal from "./advancedConfig/PreviewModal";
@@ -73,6 +73,12 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
     saving: copywritingWordCountSaving,
     setCopywritingWordCountAndPersist,
   } = useProjectCopywritingWordCount(projectId);
+  const {
+    interleaveMode,
+    loading: interleaveModeLoading,
+    saving: interleaveModeSaving,
+    setInterleaveModeAndPersist,
+  } = useProjectInterleaveMode(projectId);
 
   const currentSel = selection?.[featureKey];
   const selectedIdOrKey = lastSelectedKey || currentSel?.key_or_id || featureKey;
@@ -222,14 +228,18 @@ const GenerateAdvancedConfigSection: React.FC<GenerateAdvancedConfigSectionProps
           setCopywritingWordCountAndPersist={setCopywritingWordCountAndPersist}
         />
       )}
-      <ScriptLengthSelector
+      {/* <ScriptLengthSelector
         scriptLength={scriptLength}
         loading={scriptLengthLoading}
         saving={scriptLengthSaving}
         setScriptLengthAndPersist={setScriptLengthAndPersist}
         onOpenCustomModal={openCustomModal}
-      />
+      /> */}
       <OriginalRatioSlider
+        interleaveMode={interleaveMode}
+        interleaveModeLoading={interleaveModeLoading}
+        interleaveModeSaving={interleaveModeSaving}
+        setInterleaveModeAndPersist={setInterleaveModeAndPersist}
         originalRatio={originalRatio}
         loading={originalRatioLoading}
         saving={originalRatioSaving}

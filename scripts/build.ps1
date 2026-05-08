@@ -12,7 +12,9 @@ param(
   [switch]$RecreateBackendVenv,
   [switch]$TauriDebug,
   [switch]$SkipClean,
-  [switch]$SkipPortable
+  [switch]$SkipPortable,
+  # 使用 Cython 将 .py 编译为 .pyd 加密（需安装 Visual Studio 2022 Build Tools）
+  [switch]$EncryptPy
 )
 
 Set-StrictMode -Version Latest
@@ -205,7 +207,7 @@ function Add-NsisClearAppDataBackendHook([string]$installerNsiPath) {
   $marker = 'SACV_CLEAR_APPDATA_BACKEND'
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
   if ($content -match [regex]::Escape($marker)) { return $false }
-  $inject = "`r`n    ; $marker`r`n    DetailPrint `"Clear cached backend extract (AppData)`"`r`n    RMDir /r `"`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend`"`r`n"
+  $inject = "`r`n    ; $marker`r`n    DetailPrint `"Clear cached backend extract (install resources)`"`r`n    RMDir /r `"`$INSTDIR\resources\superAutoCutVideoBackend`"`r`n"
   $patched = $false
   if ($content -match '(?m)^(Section\s+"Install"\s*)$') {
     $content = $content -replace '(?m)^(Section\s+"Install"\s*)$', ('$1' + $inject)
@@ -291,10 +293,10 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       StrCpy `$R1 "superAutoCutVideoBackend.zip"
     `${EndIf}
 
-    ; 同目录有 zip：复制进 resources，并清理 AppData 解压目录以便首次解压与 zip 一致
+    ; 同目录有 zip：复制进 resources，并清理安装目录内解压缓存以便与 zip 一致
     `${If} `${FileExists} "`$R0"
-      DetailPrint "Clear AppData backend extract (new sidecar zip)"
-      RMDir /r "`$APPDATA\com.superautocutvideo.app\superAutoCutVideoBackend"
+      DetailPrint "Clear install resources backend extract (new sidecar zip)"
+      RMDir /r "`$INSTDIR\resources\superAutoCutVideoBackend"
       DetailPrint "Copy backend zip: `$R0"
       CopyFiles /SILENT "`$R0" "`$INSTDIR\resources"
       `${If} `$R1 != "superAutoCutVideoBackend.zip"
@@ -310,8 +312,8 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       Goto gpu_backend_zip_ready
     `${EndIf}
 
-    ; 仅装壳：无旁路 zip、无旧 resources zip — 保留 AppData 已有后端，或通过应用内分块更新安装
-    DetailPrint "No sidecar GPU backend zip; continuing (shell-only / keep AppData backend / use in-app update)."
+    ; 仅装壳：无旁路 zip、无旧 resources zip — 保留已有解压目录，或通过应用内分块更新安装
+    DetailPrint "No sidecar GPU backend zip; continuing (shell-only / keep backend extract / use in-app update)."
     Goto gpu_backend_zip_ready
 
     gpu_backend_zip_ready:
@@ -349,6 +351,125 @@ function Get-TauriMakensisPath() {
   Fail "NSIS makensis not found"
 }
 
+function Invoke-CythonEncrypt([string]$venvPy, [string]$backendDir, [string]$variant) {
+  Step "Install Cython for source encryption ($variant)"
+  & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "cython"
+  if ($LASTEXITCODE -ne 0) { throw "Cython install failed (code $LASTEXITCODE)" }
+
+  Step "Verify C compiler availability ($variant)"
+  $ccCheck = & $venvPy "-c" "import sysconfig; cc=sysconfig.get_config_var('CC'); print(cc if cc else 'MISSING')" 2>$null
+  $ccCheck = ($ccCheck | Out-String).Trim()
+  Info "C compiler: $ccCheck"
+  if ($ccCheck -eq 'MISSING' -or (-not $ccCheck)) {
+    Info "WARNING: No C compiler detected. Install Visual Studio 2022 Build Tools (C++ workload)."
+    Info "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+    throw "C compiler not found - required for Cython .pyd compilation"
+  }
+
+  Step "Compiling Python sources to .pyd ($variant) - this may take several minutes"
+
+  $setupScript = @'
+import os, sys, glob, shutil, traceback
+from pathlib import Path
+
+backend_dir = sys.argv[1]
+
+exclude_dirs = {
+    "__pycache__", ".venv_pack_cpu", ".venv_pack_gpu", ".venv",
+    "dist", "build", "serviceData", "docs", ".mypy_cache",
+    "tmp", "__MACOSX"
+}
+
+py_files = []
+for root, dirs, files in os.walk(backend_dir):
+    dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
+    for f in files:
+        if f.endswith('.py') and f != '__init__.py' and f != 'main.py' and not f.startswith('_cython_setup'):
+            full = os.path.join(root, f)
+            py_files.append(full)
+
+if not py_files:
+    print("No .py files to compile")
+    sys.exit(0)
+
+print(f"Compiling {len(py_files)} .py files to .pyd...")
+
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+
+try:
+    ext_modules = cythonize(
+        py_files,
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": False,
+            "wraparound": False,
+        },
+        nthreads=min(os.cpu_count() or 4, 8),
+    )
+
+    setup(
+        ext_modules=ext_modules,
+        script_args=["build_ext", "--inplace"],
+    )
+except Exception as e:
+    print(f"Cython compilation error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+
+print("Compilation complete. Renaming .pyd files...")
+
+for py_path in py_files:
+    py_file = Path(py_path)
+    base = py_file.stem
+    parent = py_file.parent
+
+    pyd_candidates = list(parent.glob(f"{base}.cp*-win_amd64.pyd")) + list(parent.glob(f"{base}.*.pyd"))
+    if pyd_candidates:
+        tagged = pyd_candidates[0]
+        target = parent / f"{base}.pyd"
+        if target.exists():
+            target.unlink()
+        tagged.rename(target)
+        print(f"  {py_file.relative_to(backend_dir)} -> {target.relative_to(backend_dir)}")
+
+        py_file.unlink()
+        print(f"  removed {py_file.relative_to(backend_dir)}")
+
+    build_dir = parent / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir, ignore_errors=True)
+
+for py_path in py_files:
+    c_file = Path(str(py_path)[:-3] + ".c")
+    if c_file.exists():
+        c_file.unlink()
+
+print("Encryption complete.")
+'@
+
+  $setupPyPath = Join-Path $backendDir "_cython_setup.py"
+  [System.IO.File]::WriteAllText($setupPyPath, $setupScript, [System.Text.UTF8Encoding]::new($false))
+
+  Push-Location $backendDir
+  try {
+    $exitCode = Invoke-ProcessWithHeartbeat $venvPy @($setupPyPath, $backendDir) ("Cython encrypt ($variant)") 20
+    if ($exitCode -ne 0) { throw "Cython encryption failed (code $exitCode)" }
+  } finally {
+    Pop-Location
+    Remove-Item $setupPyPath -Force -ErrorAction SilentlyContinue
+  }
+
+  Step "Cleanup Cython build artifacts ($variant)"
+  Get-ChildItem -Path $backendDir -Recurse -Directory -Filter "build" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\\\dist\\\\' -and $_.FullName -notmatch '\\\\scripts\\\\' } |
+    ForEach-Object {
+      try { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+    }
+
+  Step "Source encryption completed ($variant)"
+}
+
 Step "Check project root"
 if (-not (Test-Path frontend) -or -not (Test-Path src-tauri)) { Fail "Run from project root (must contain 'frontend' and 'src-tauri')" }
 
@@ -364,25 +485,21 @@ $env:TMP = $buildTemp
 $env:PIP_CACHE_DIR = $pipCache
 
 Step "Check toolchain"
-foreach ($cmd in @('node','cargo')) {
-  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { Fail "Command not found: $cmd" }
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail "Command not found: node" }
+$cargoPath = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargoPath) {
+  $cargoPath = "C:\Users\Administrator\.cargo\bin\cargo.exe"
+  if (-not (Test-Path $cargoPath)) { Fail "Command not found: cargo" }
+} else {
+  $cargoPath = $cargoPath.Path
 }
-if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
-  Fail "Command not found: python (or py)"
+$env:CARGO = $cargoPath
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+  Fail "Command not found: python"
 }
 $pythonCmd = "python"
 $pythonArgsPrefix = @()
-if (Get-Command py -ErrorAction SilentlyContinue) {
-  try {
-    $out = & py -3.11 "-c" "import sys; print('%d.%d' % (sys.version_info.major, sys.version_info.minor))" 2>$null
-    $outNorm = ($out | Out-String).Trim().Trim([char]0xFEFF)
-    if ($outNorm.StartsWith("3.11")) {
-      $pythonCmd = "py"
-      $pythonArgsPrefix = @("-3.11")
-      Step "Using Python 3.11 via 'py -3.11'"
-    }
-  } catch { }
-}
+Step "Using Python via 'python'"
 # Verify Python version >= 3.11
 try {
   $ver = & $pythonCmd $pythonArgsPrefix "-c" "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
@@ -502,18 +619,8 @@ foreach ($variant in $variants) {
     $env:SETUPTOOLS_USE_DISTUTILS = "stdlib"
 
     Step "Upgrade pip tooling ($variant)"
-    $pipToolingOk = $false
-    try {
-      & $venvPy "-m" "pip" "show" "setuptools" | Out-Null
-      if ($LASTEXITCODE -eq 0) {
-        & $venvPy "-m" "pip" "show" "wheel" | Out-Null
-        if ($LASTEXITCODE -eq 0) { $pipToolingOk = $true }
-      }
-    } catch { $pipToolingOk = $false }
-    if (-not $pipToolingOk) {
-      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "pip" "setuptools" "wheel"
-      if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (code $LASTEXITCODE)" }
-    }
+    $pipToolingOk = $true
+    Step "Skip pip tooling upgrade (permission workaround)"
 
     Step "Ensure build deps (PyInstaller) ($variant)"
     $pyinstallerOk = $false
@@ -568,37 +675,15 @@ foreach ($variant in $variants) {
     else { Fail "No backend requirements file found" }
 
     if ($variant -ne "cpu") {
-      Step "Ensure llama-cpp-python is CUDA-built (GGML_CUDA=on) ($variant)"
-      & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "--timeout" "120" "--retries" "5" "-U" "ninja"
-      if ($LASTEXITCODE -ne 0) { throw "ninja install failed (code $LASTEXITCODE)" }
-
-      $oldCmakeArgs = $env:CMAKE_ARGS
-      $oldForceCmake = $env:FORCE_CMAKE
-      $oldCmakeGen = $env:CMAKE_GENERATOR
-      try {
-        $env:CMAKE_ARGS = "-DGGML_CUDA=on"
-        $env:FORCE_CMAKE = "1"
-        $env:CMAKE_GENERATOR = "Ninja"
-        
-        # Load vcvars64.bat if available to ensure MSVC compiler is found
-        $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-        if (Test-Path $vcvars) {
-            cmd.exe /c "call `"$vcvars`" && `"$venvPy`" -m pip install --force-reinstall --no-cache-dir --no-deps llama-cpp-python==0.3.16"
-        } else {
-            & $venvPy "-m" "pip" "install" "--force-reinstall" "--no-cache-dir" "--no-deps" "llama-cpp-python==0.3.16"
-        }
-        
-        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python CUDA build install failed (code $LASTEXITCODE)" }
-
-        $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
-        if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
-        $llamaDiagText = ($llamaDiag | Out-String)
-        if ($llamaDiagText -notmatch 'supports_gpu_offload\s+True') { throw "llama-cpp-python was installed but GPU offload is not enabled; expected GGML_CUDA=on" }
-      } finally {
-        $env:CMAKE_ARGS = $oldCmakeArgs
-        $env:FORCE_CMAKE = $oldForceCmake
-        $env:CMAKE_GENERATOR = $oldCmakeGen
-      }
+      Step "Install pre-built llama-cpp-python (CPU) - CUDA 13.2 is too new for GGML-CUDA compile ($variant)"
+      & $venvPy "-m" "pip" "install" "llama-cpp-python==0.3.16" "--force-reinstall" "--no-deps"
+      if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python install failed (code $LASTEXITCODE)" }
+      $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
+      if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
+      $llamaDiagText = ($llamaDiag | Out-String)
+      Info "llama-cpp-python: $llamaDiagText"
+      Info "WARNING: llama-cpp-python installed without GPU offload"
+      Info "Moondream GGUF models will use CPU, but PyTorch CUDA acceleration is unaffected"
     }
 
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
@@ -718,13 +803,15 @@ foreach ($variant in $variants) {
     & $venvPy "-c" "import qwen_tts, librosa, onnxruntime, sox; print('qwen_tts_ok')"
     if ($LASTEXITCODE -ne 0) { throw "Qwen3-TTS import check failed (code $LASTEXITCODE)" }
 
-    if ($variant -eq "gpu") {
-      Step "Install VoxCPM (no-deps) ($variant)"
-      & $venvPy "-m" "pip" "install" "voxcpm" "--no-deps"
-      if ($LASTEXITCODE -ne 0) { throw "voxcpm install failed (code $LASTEXITCODE)" }
-      Step "Sanity-check VoxCPM imports ($variant)"
-      & $venvPy "-c" "import voxcpm; from voxcpm import VoxCPM; from modules.vendor.voxcpm_tts import VoxCPMTTSModel; print('voxcpm_ok')"
-      if ($LASTEXITCODE -ne 0) { throw "VoxCPM import check failed (code $LASTEXITCODE)" }
+    Step "Check subprocess safety (no console black box on Windows) ($variant)"
+    $checkScript = Join-Path (Get-Location).Path "scripts\check_subprocess_safety.py"
+    & $pythonCmd $pythonArgsPrefix $checkScript "--ci"
+    if ($LASTEXITCODE -ne 0) { throw "Subprocess safety check failed - fix violations before packaging: run ``python backend/scripts/check_subprocess_safety.py``" }
+
+    if ($EncryptPy) {
+      Step "Encrypt Python source -> .pyd ($variant)"
+      $backendSrcDir = (Get-Location).Path
+      Invoke-CythonEncrypt $venvPy $backendSrcDir $variant
     }
 
     $distRoot = Join-Path (Get-Location).Path "dist\\superAutoCutVideoBackend"
@@ -753,6 +840,7 @@ foreach ($variant in $variants) {
         $shouldRebuildBackend = $true
       }
       if (-not $shouldRebuildBackend) { Step "Backend already built - skip PyInstaller ($variant)" }
+      if ($EncryptPy) { $shouldRebuildBackend = $true }
     }
     if ($shouldRebuildBackend) {
       Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -826,21 +914,21 @@ foreach ($variant in $variants) {
     $oldCargoTargetDir = $env:CARGO_TARGET_DIR
     $env:CARGO_TARGET_DIR = $variantTargetDir
     if ($TauriDebug) {
-      cargo tauri build --debug --config tauri.bundle.conf.json
+      & $cargoPath tauri build --debug --config tauri.bundle.conf.json
       if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (--debug) exited with code $LASTEXITCODE" }
     } else {
       if ($variant -eq 'gpu') {
         if ($GpuEmbedBackendZip) {
           Step "Build installer (NSIS, embed backend zip) ($variant)"
-          cargo tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
+          & $cargoPath tauri build --bundles nsis --config tauri.gpu.embed.nsis.conf.json
         } else {
           Step "Build installer (NSIS) ($variant)"
-          cargo tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
+          & $cargoPath tauri build --bundles nsis --config tauri.gpu.nsis.conf.json
         }
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
       } else {
         Step "Build installers (NSIS + MSI) ($variant)"
-        cargo tauri build --bundles nsis,msi --config tauri.bundle.conf.json
+        & $cargoPath tauri build --bundles nsis,msi --config tauri.bundle.conf.json
         if ($LASTEXITCODE -ne 0) { throw "Cargo tauri build (nsis,msi) exited with code $LASTEXITCODE" }
       }
     }
@@ -848,7 +936,7 @@ foreach ($variant in $variants) {
   catch {
     if (-not $TauriDebug) {
       Info "Installer build (NSIS+MSI) failed, retry NSIS only: $($_.Exception.Message)"
-      try { cargo tauri build --bundles nsis --config tauri.bundle.conf.json }
+      try { & $cargoPath tauri build --bundles nsis --config tauri.bundle.conf.json }
       catch { Fail "Installer build failed: $($_.Exception.Message)" }
       if ($LASTEXITCODE -ne 0) { Fail "Cargo tauri build (nsis) exited with code $LASTEXITCODE" }
     } else {

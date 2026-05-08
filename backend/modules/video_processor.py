@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -18,6 +19,7 @@ import cv2
 import numpy as np
 from .audio_normalizer import AudioNormalizer
 from modules.task_cancel_store import task_cancel_store
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
 
 logger = logging.getLogger(__name__)
 WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -48,7 +50,10 @@ class VideoProcessor:
         self.audio_normalizer = AudioNormalizer()
         self.last_concat_error: Optional[str] = None
         self.last_concat_cmd: Optional[List[str]] = None
+        self.last_cut_error: Optional[str] = None
         self._encoder_usable_cache: Dict[str, bool] = {}
+        self._ffmpeg_bin = resolve_ffmpeg_bin()
+        self._ffprobe_bin = resolve_ffprobe_bin()
 
     def _should_track(self, scope: Optional[str], project_id: Optional[str], task_id: Optional[str], cancel_event: Optional[asyncio.Event]) -> bool:
         return bool(scope and project_id and task_id and cancel_event)
@@ -179,7 +184,52 @@ class VideoProcessor:
                     timeout_task.cancel()
                 except Exception:
                     pass
-    
+
+    async def _run_subprocess_exec_communicate(
+        self,
+        cmd: List[str],
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+        sync_timeout: float = 600.0,
+    ) -> Tuple[int, bytes, bytes]:
+        """create_subprocess_exec + communicate；当前事件循环不支持 asyncio 子进程时回退到同步 subprocess.run（与 cut_video_segment 一致）。"""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+            tracking = self._should_track(scope, project_id, task_id, cancel_event)
+            if tracking:
+                self._register_proc(str(scope), str(project_id), str(task_id), process)
+            try:
+                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
+            finally:
+                if tracking:
+                    self._unregister_proc(str(scope), str(project_id), str(task_id), process)
+            return process.returncode, stdout, stderr
+        except NotImplementedError:
+            logger.warning("当前事件循环不支持 asyncio 子进程，回退到同步 ffmpeg 调用")
+
+            def _sync_run() -> Tuple[int, bytes, bytes]:
+                try:
+                    r = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        creationflags=WIN_NO_WINDOW,
+                        timeout=sync_timeout,
+                    )
+                    return r.returncode, r.stdout or b"", r.stderr or b""
+                except Exception as ex:
+                    msg = f"{type(ex).__name__}: {ex}"
+                    return -1, b"", msg.encode(errors="ignore")
+
+            return await asyncio.get_running_loop().run_in_executor(None, _sync_run)
+
     async def cut_video_segment(
         self,
         input_path: str,
@@ -197,10 +247,28 @@ class VideoProcessor:
         以便按关键帧就近截取（仍使用 `-c copy` 保持高效）。
         """
         try:
+            input_path_obj = Path(input_path)
+            if not input_path_obj.exists():
+                self.last_cut_error = f"input_not_found: {input_path}"
+                logger.error("cut_video_segment input file not found: %s", input_path)
+                return False
+            try:
+                input_size = input_path_obj.stat().st_size
+            except Exception:
+                input_size = None
+            logger.info(
+                "cut_video_segment start: input=%s size=%s scope=%s start=%.3f dur=%.3f",
+                input_path,
+                input_size,
+                scope or "unknown",
+                float(start_time),
+                float(duration),
+            )
+
             trim_tag = _trim_log_tag(project_id, task_id) if scope == "trim_video" else ""
             clip_timeout = max(45.0, min(12 * 60.0, float(duration or 0.0) * 3.0 + 30.0))
             cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-ss", str(start_time),
@@ -270,9 +338,11 @@ class VideoProcessor:
                         logger.info("%s cut done mode=copy out=%s", trim_tag, output_path)
                         return True
                 logger.warning("%s cut fallback reason=output_duration_invalid", trim_tag)
+                self.last_cut_error = "copy_output_duration_invalid"
             else:
                 err = stderr.decode(errors="ignore").strip()
                 logger.error("%s cut fallback reason=copy_failed err=%s", trim_tag, err[:300])
+                self.last_cut_error = f"copy_failed: {err[:200]}"
 
             try:
                 enc_name, vcodec_args = await self._pick_fast_encoder()
@@ -280,7 +350,7 @@ class VideoProcessor:
                 enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
             reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
             reencode_cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", input_path,
@@ -331,17 +401,48 @@ class VideoProcessor:
                 if dur2 is not None and dur2 > 0.01:
                     logger.info("%s cut done mode=reencode out=%s", trim_tag, output_path)
                     return True
+                prev_err = (self.last_cut_error or "") + " -> " if self.last_cut_error else ""
+                reencode_zero_msg = f"{prev_err}reencode_output_duration_zero output={output_path}"
                 logger.error("%s cut failed reason=reencode_output_duration_zero", trim_tag)
+                self.last_cut_error = reencode_zero_msg
                 return False
             else:
-                logger.error("%s cut failed mode=reencode err=%s", trim_tag, e2.decode(errors='ignore').strip()[:300])
+                prev_err = (self.last_cut_error or "") + " -> " if self.last_cut_error else ""
+                reencode_err_msg = e2.decode(errors='ignore').strip()[:300]
+                logger.error("%s cut failed mode=reencode err=%s", trim_tag, reencode_err_msg)
+                self.last_cut_error = f"{prev_err}reencode_failed: {reencode_err_msg}"
                 return False
 
         except asyncio.TimeoutError as e:
-            logger.error("%s cut aborted reason=timeout detail=%s", trim_tag if 'trim_tag' in locals() else "", str(e))
+            timeout_msg = str(e) or _trim_timeout_label(clip_timeout if 'clip_timeout' in dir() else 0)
+            logger.error("%s cut aborted reason=timeout detail=%s", trim_tag if 'trim_tag' in locals() else "", timeout_msg)
+            prev_err = (getattr(self, "last_cut_error", None) or "")
+            chain = (prev_err + " -> ") if prev_err else ""
+            self.last_cut_error = f"{chain}timeout: {timeout_msg}"
             return False
+        except NotImplementedError:
+            logger.warning("%s 当前事件循环不支持 asyncio 子进程，回退到线程池同步剪切", trim_tag)
+            loop = asyncio.get_running_loop()
+            prev_err = (getattr(self, "last_cut_error", None) or "")
+            chain = (prev_err + " -> ") if prev_err else ""
+            self.last_cut_error = f"{chain}NotImplementedError -> sync_fallback"
+            return await loop.run_in_executor(
+                None,
+                self._cut_segment_sync_fallback,
+                input_path,
+                output_path,
+                float(start_time),
+                float(duration),
+                clip_timeout,
+                trim_tag,
+            )
         except Exception as e:
-            logger.error(f"剪切视频时出错: {e}")
+            exc_type = type(e).__name__
+            exc_msg = str(e) or "(无消息)"
+            logger.error("剪切视频时出错: type=%s msg=%s input=%s start=%.3f dur=%.3f", exc_type, exc_msg, input_path, float(start_time), float(duration))
+            prev_err = (getattr(self, "last_cut_error", None) or "")
+            chain = (prev_err + " -> ") if prev_err else ""
+            self.last_cut_error = f"{chain}exception({exc_type}): {exc_msg}"
             return False
 
     async def concat_videos(
@@ -430,28 +531,22 @@ class VideoProcessor:
             if n == 1:
                 src = str(inputs[0])
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", src,
                     "-c", "copy",
                     "-movflags", "+faststart",
                     "-y", output_path,
                 ]
                 self.last_concat_cmd = cmd
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
+                rc, _, stderr = await self._run_subprocess_exec_communicate(
+                    cmd,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
+                    sync_timeout=3600.0,
                 )
-                tracking = self._should_track(scope, project_id, task_id, cancel_event)
-                if tracking:
-                    self._register_proc(str(scope), str(project_id), str(task_id), process)
-                try:
-                    _, stderr = await self._communicate_with_cancel(process, cancel_event)
-                finally:
-                    if tracking:
-                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
-                if process.returncode == 0:
+                if rc == 0:
                     if on_progress:
                         try:
                             await on_progress(100.0)
@@ -618,7 +713,7 @@ class VideoProcessor:
                         ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
                         ts_files.append(ts_path)
                         cmd_ts = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-i", str(p),
                             "-c", "copy",
                             "-bsf:v", bsfilter_v,
@@ -677,7 +772,7 @@ class VideoProcessor:
                             raise
 
                         cmd = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-f", "concat", "-safe", "0",
                             "-i", str(ts_list_path),
                             "-c", "copy",
@@ -740,7 +835,7 @@ class VideoProcessor:
 
             if can_concat_demuxer and not can_concat_ts:
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-f", "concat", "-safe", "0",
                     "-i", str(list_path),
                     "-c", "copy",
@@ -793,7 +888,7 @@ class VideoProcessor:
                     return False
 
             cmd: List[str] = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
             ]
             for p in inputs:
                 cmd.extend(["-i", str(p)])
@@ -864,6 +959,10 @@ class VideoProcessor:
                 ])
                 self.last_concat_cmd = cmd_try
 
+                use_sync_concat = False
+                sync_rc = 0
+                sync_stderr = b""
+                process: Optional[asyncio.subprocess.Process] = None
                 try:
                     process = await asyncio.create_subprocess_exec(
                         *cmd_try,
@@ -871,6 +970,17 @@ class VideoProcessor:
                         stderr=asyncio.subprocess.PIPE,
                         creationflags=WIN_NO_WINDOW
                     )
+                except NotImplementedError:
+                    logger.warning("concat filter_complex: 当前事件循环不支持 asyncio 子进程，回退同步 ffmpeg")
+                    sync_rc, _, sync_stderr = await self._run_subprocess_exec_communicate(
+                        cmd_try,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
+                        sync_timeout=7200.0,
+                    )
+                    use_sync_concat = True
                 except OSError as e:
                     winerr = getattr(e, "winerror", None)
                     if os.name == "nt" and winerr == 206:
@@ -881,6 +991,27 @@ class VideoProcessor:
                             pass
                         return await _concat_in_batches()
                     raise
+
+                if use_sync_concat:
+                    if sync_rc == 0:
+                        if on_progress:
+                            try:
+                                await on_progress(100.0)
+                            except Exception:
+                                pass
+                        logger.info(f"视频拼接成功: {output_path}")
+                        return True
+                    err = sync_stderr.decode(errors="ignore")
+                    self.last_concat_error = err.strip() or "filter_complex 拼接失败(sync)"
+                    last_err = err
+                    logger.error(f"视频拼接失败: {err}")
+                    try:
+                        if Path(output_path).exists():
+                            Path(output_path).unlink()
+                    except Exception:
+                        pass
+                    continue
+
                 tracking = self._should_track(scope, project_id, task_id, cancel_event)
                 if tracking:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
@@ -932,27 +1063,14 @@ class VideoProcessor:
             return False
 
         except Exception as e:
-            logger.error(f"拼接视频时出错: {e}")
-            self.last_concat_error = str(e) or self.last_concat_error
+            exc_type = type(e).__name__
+            exc_msg = str(e) or "(无消息)"
+            logger.error("拼接视频时出错: type=%s msg=%s", exc_type, exc_msg)
+            self.last_concat_error = f"{exc_type}: {exc_msg}"
             return False
 
-    async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    def _parse_ffprobe_streams_json(self, out: bytes) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         try:
-            cmd = [
-                "ffprobe", "-v", "error",
-                "-print_format", "json",
-                "-show_streams",
-                path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW
-            )
-            out, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return None, None
             data = json.loads(out.decode(errors="ignore") or "{}")
             streams = data.get("streams") or []
             v = None
@@ -978,6 +1096,52 @@ class VideoProcessor:
                         "channels": s.get("channels"),
                     }
             return v, a
+        except Exception:
+            return None, None
+
+    def _probe_stream_info_sync(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        if not self._ffprobe_bin:
+            return None, None
+        cmd = [
+            self._ffprobe_bin, "-v", "error",
+            "-print_format", "json",
+            "-show_streams",
+            path,
+        ]
+        try:
+            r = subprocess.run(
+                cmd,
+                capture_output=True,
+                creationflags=WIN_NO_WINDOW,
+                timeout=60,
+            )
+            if r.returncode != 0:
+                return None, None
+            return self._parse_ffprobe_streams_json(r.stdout or b"")
+        except Exception:
+            return None, None
+
+    async def _probe_stream_info(self, path: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        try:
+            cmd = [
+                self._ffprobe_bin, "-v", "error",
+                "-print_format", "json",
+                "-show_streams",
+                path,
+            ]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
+            except NotImplementedError:
+                return await asyncio.to_thread(self._probe_stream_info_sync, path)
+            out, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None, None
+            return self._parse_ffprobe_streams_json(out or b"")
         except Exception:
             return None, None
 
@@ -1042,7 +1206,7 @@ class VideoProcessor:
                     pass
                 out_final = path.with_suffix(".mp4")
                 cmd_remux: List[str] = [
-                    "ffmpeg",
+                    self._ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -1099,7 +1263,7 @@ class VideoProcessor:
                 pass
             out_final = path.with_suffix(".mp4")
             cmd: List[str] = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel",
                 "error",
@@ -1192,6 +1356,42 @@ class VideoProcessor:
         logger.info("编码器选择: libx264 (CPU)")
         return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
 
+    def _pick_fast_encoder_sync(self) -> Tuple[str, List[str]]:
+        """_pick_fast_encoder 的同步版：从缓存读取编码器信息，或回退到 libx264"""
+        try:
+            encoders = getattr(self, "_encoders_cache", None) or []
+        except Exception:
+            encoders = []
+        if not encoders:
+            try:
+                import subprocess as _subprocess
+                proc = _subprocess.run(
+                    [self._ffmpeg_bin, "-hide_banner", "-encoders"],
+                    capture_output=True, creationflags=WIN_NO_WINDOW, timeout=10,
+                )
+                text = proc.stdout.decode(errors="ignore")
+                for name in ["h264_nvenc", "h264_qsv", "h264_amf", "libx264", "libopenh264", "h264_mf", "mpeg4"]:
+                    if name in text:
+                        encoders.append(name)
+                setattr(self, "_encoders_cache", encoders)
+            except Exception:
+                encoders = ["libx264"]
+        cuda_ok = getattr(self, "_cuda_available", False)
+        if cuda_ok and "h264_nvenc" in encoders and self._is_encoder_usable_sync("h264_nvenc"):
+            logger.info("编码器选择(sync): h264_nvenc (GPU)")
+            return "h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p3"]
+        if "h264_qsv" in encoders and self._is_encoder_usable_sync("h264_qsv"):
+            logger.info("编码器选择(sync): h264_qsv (GPU)")
+            return "h264_qsv", ["-c:v", "h264_qsv"]
+        if "h264_amf" in encoders and self._is_encoder_usable_sync("h264_amf"):
+            logger.info("编码器选择(sync): h264_amf (GPU)")
+            return "h264_amf", ["-c:v", "h264_amf"]
+        if "libx264" in encoders:
+            logger.info("编码器选择(sync): libx264 (CPU)")
+            return "libx264", ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "0"]
+        logger.info("编码器选择(sync): libx264 (CPU)")
+        return "libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"]
+
     async def _get_encoder_priority_list(self) -> List[List[str]]:
         await self._detect_cuda()
         names = await self._detect_encoders()
@@ -1224,7 +1424,7 @@ class VideoProcessor:
             return getattr(self, "_encoders_cache")
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-encoders",
+                self._ffmpeg_bin, "-hide_banner", "-encoders",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=WIN_NO_WINDOW
@@ -1265,7 +1465,7 @@ class VideoProcessor:
             return bool(cached)
         pix_fmt = self._preferred_pix_fmt(key)
         cmd = [
-            "ffmpeg",
+            self._ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -1316,10 +1516,52 @@ class VideoProcessor:
         self._encoder_usable_cache[key] = bool(ok)
         return bool(ok)
 
+    def _is_encoder_usable_sync(self, encoder_name: str) -> bool:
+        key = (encoder_name or "").strip()
+        if not key:
+            return False
+        cached = self._encoder_usable_cache.get(key)
+        if cached is not None:
+            return bool(cached)
+        pix_fmt = self._preferred_pix_fmt(key)
+        cmd = [
+            self._ffmpeg_bin,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x64:rate=30",
+            "-t",
+            "0.2",
+            "-an",
+            "-c:v",
+            key,
+            "-pix_fmt",
+            pix_fmt,
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            import subprocess as _subprocess
+            result = _subprocess.run(cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=6.0)
+            ok = (result.returncode == 0)
+            if not ok:
+                err = result.stderr.decode("utf-8", errors="ignore").strip()
+                if err:
+                    logger.info("编码器不可用(sync): %s err=%s", key, err.replace("\n", " ")[:300])
+        except Exception as e:
+            logger.info("编码器可用性检测异常(sync): %s err=%s", key, e)
+            ok = False
+        self._encoder_usable_cache[key] = bool(ok)
+        return bool(ok)
+
     async def _ffmpeg_supports_cuda_hwaccel(self) -> bool:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-hwaccels",
+                self._ffmpeg_bin, "-hide_banner", "-hwaccels",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=WIN_NO_WINDOW
@@ -1352,7 +1594,7 @@ class VideoProcessor:
     async def _ffprobe_format_name(self, path: str) -> Optional[str]:
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-show_entries", "format=format_name",
                 "-of", "default=nk=1:nw=1",
                 path,
@@ -1371,7 +1613,7 @@ class VideoProcessor:
     async def _first_frame_is_keyframe(self, path: str) -> bool:
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-select_streams", "v:0",
                 "-skip_frame", "nokey",
                 "-show_entries", "frame=pkt_pts_time",
@@ -1396,34 +1638,156 @@ class VideoProcessor:
         except Exception:
             return False
 
-    async def _ffprobe_video_duration(self, path: str) -> Optional[float]:
-        """读取视频流的时长，优先于容器总时长，避免音频缺失或容器元数据不准导致总时长偏差"""
+    @staticmethod
+    def _parse_ffprobe_duration_bytes(stdout: bytes) -> Optional[float]:
         try:
-            cmd = [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=duration",
-                "-of", "default=nk=1:nw=1",
-                path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
-            )
-            out, _ = await proc.communicate()
-            if proc.returncode == 0:
-                try:
-                    return float(out.decode().strip())
-                except Exception:
-                    return None
-            return None
+            t = stdout.decode(errors="ignore").strip()
         except Exception:
             return None
+        if not t or t.upper() == "N/A":
+            return None
+        try:
+            v = float(t)
+            return v if v > 1e-6 else None
+        except Exception:
+            return None
+
+    def _ffmpeg_probe_duration_sync(self, path: str) -> Optional[float]:
+        """当前事件循环不支持 asyncio 子进程时，用 ffmpeg -i 的 stderr 解析 Duration。"""
+        if not self._ffmpeg_bin:
+            return None
+        try:
+            r = subprocess.run(
+                [self._ffmpeg_bin, "-hide_banner", "-i", path],
+                capture_output=True,
+                creationflags=WIN_NO_WINDOW,
+                timeout=60,
+            )
+            text = (r.stderr or b"").decode(errors="ignore")
+        except Exception:
+            return None
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", text)
+        if not m:
+            return None
+        try:
+            h, mn = int(m.group(1)), int(m.group(2))
+            sec = float(m.group(3))
+            d = h * 3600.0 + mn * 60.0 + sec
+            return d if d > 1e-6 else None
+        except Exception:
+            return None
+
+    def _ffprobe_duration_sync(self, path: str, stream_type: str = "format") -> Optional[float]:
+        if not self._ffprobe_bin:
+            return self._ffmpeg_probe_duration_sync(path)
+        if stream_type == "audio":
+            cmds = (
+                [
+                    self._ffprobe_bin, "-v", "error",
+                    "-select_streams", "a:0",
+                    "-show_entries", "stream=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ],
+                [
+                    self._ffprobe_bin, "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ],
+            )
+            for cmd in cmds:
+                try:
+                    r = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        creationflags=WIN_NO_WINDOW,
+                        timeout=30,
+                    )
+                    if r.returncode == 0:
+                        v = self._parse_ffprobe_duration_bytes(r.stdout or b"")
+                        if v is not None:
+                            return v
+                except Exception:
+                    pass
+            return self._ffmpeg_probe_duration_sync(path)
+        cmd = [
+            self._ffprobe_bin, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nk=1:nw=1",
+            path,
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=30)
+            if r.returncode == 0:
+                v = self._parse_ffprobe_duration_bytes(r.stdout or b"")
+                if v is not None:
+                    return v
+        except Exception:
+            pass
+        return self._ffmpeg_probe_duration_sync(path)
+
+    def _ffprobe_video_duration_sync(self, path: str) -> Optional[float]:
+        if not self._ffprobe_bin:
+            return self._ffmpeg_probe_duration_sync(path)
+        cmd = [
+            self._ffprobe_bin, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=duration",
+            "-of", "default=nk=1:nw=1",
+            path,
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=30)
+            if r.returncode == 0:
+                v = self._parse_ffprobe_duration_bytes(r.stdout or b"")
+                if v is not None:
+                    return v
+        except Exception:
+            pass
+        v2 = self._ffprobe_duration_sync(path, "format")
+        if v2 is not None and v2 > 1e-6:
+            return v2
+        return self._ffmpeg_probe_duration_sync(path)
+
+    async def _ffprobe_video_duration(self, path: str) -> Optional[float]:
+        """读取视频流的时长，优先于容器总时长，避免音频缺失或容器元数据不准导致总时长偏差"""
+
+        async def _async_part() -> Optional[float]:
+            try:
+                cmd = [
+                    self._ffprobe_bin, "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=duration",
+                    "-of", "default=nk=1:nw=1",
+                    path,
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, creationflags=WIN_NO_WINDOW
+                )
+                out, _ = await proc.communicate()
+                if proc.returncode == 0:
+                    return self._parse_ffprobe_duration_bytes(out or b"")
+                return None
+            except Exception:
+                return None
+
+        val = await _async_part()
+        if val is not None and val > 1e-6:
+            return val
+        try:
+            s = await asyncio.to_thread(self._ffprobe_video_duration_sync, path)
+            if s is not None and s > 1e-6:
+                return s
+        except Exception:
+            pass
+        return None
 
     async def _ffprobe_has_audio(self, path: str) -> bool:
         """探测是否存在音频流"""
         try:
             cmd = [
-                "ffprobe", "-v", "error",
+                self._ffprobe_bin, "-v", "error",
                 "-select_streams", "a:0",
                 "-show_entries", "stream=codec_type",
                 "-of", "default=nk=1:nw=1",
@@ -1444,49 +1808,45 @@ class VideoProcessor:
             return False
 
     async def _ffprobe_duration(self, path: str, stream_type: str = "format") -> Optional[float]:
-        try:
-            if stream_type == "audio":
-                cmd_a = [
-                    "ffprobe", "-v", "error",
-                    "-select_streams", "a:0",
-                    "-show_entries", "stream=duration",
-                    "-of", "default=nk=1:nw=1",
-                    path,
-                ]
-                proc_a = await asyncio.create_subprocess_exec(
-                    *cmd_a,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
-                )
-                out_a, _ = await proc_a.communicate()
-                if proc_a.returncode == 0:
-                    try:
-                        return float(out_a.decode().strip())
-                    except Exception:
-                        pass
-                cmd_f = [
-                    "ffprobe", "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of", "default=nk=1:nw=1",
-                    path,
-                ]
-                proc_f = await asyncio.create_subprocess_exec(
-                    *cmd_f,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
-                )
-                out_f, _ = await proc_f.communicate()
-                if proc_f.returncode == 0:
-                    try:
-                        return float(out_f.decode().strip())
-                    except Exception:
-                        return None
-                return None
-            else:
+        async def _async_part() -> Optional[float]:
+            try:
+                if stream_type == "audio":
+                    cmd_a = [
+                        self._ffprobe_bin, "-v", "error",
+                        "-select_streams", "a:0",
+                        "-show_entries", "stream=duration",
+                        "-of", "default=nk=1:nw=1",
+                        path,
+                    ]
+                    proc_a = await asyncio.create_subprocess_exec(
+                        *cmd_a,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
+                    )
+                    out_a, _ = await proc_a.communicate()
+                    if proc_a.returncode == 0:
+                        v = self._parse_ffprobe_duration_bytes(out_a or b"")
+                        if v is not None:
+                            return v
+                    cmd_f = [
+                        self._ffprobe_bin, "-v", "error",
+                        "-show_entries", "format=duration",
+                        "-of", "default=nk=1:nw=1",
+                        path,
+                    ]
+                    proc_f = await asyncio.create_subprocess_exec(
+                        *cmd_f,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
+                    )
+                    out_f, _ = await proc_f.communicate()
+                    if proc_f.returncode == 0:
+                        return self._parse_ffprobe_duration_bytes(out_f or b"")
+                    return None
                 cmd = [
-                    "ffprobe", "-v", "error",
+                    self._ffprobe_bin, "-v", "error",
                     "-show_entries", "format=duration",
                     "-of", "default=nk=1:nw=1",
                     path,
@@ -1499,13 +1859,21 @@ class VideoProcessor:
                 )
                 out, _ = await proc.communicate()
                 if proc.returncode == 0:
-                    try:
-                        return float(out.decode().strip())
-                    except Exception:
-                        return None
+                    return self._parse_ffprobe_duration_bytes(out or b"")
                 return None
+            except Exception:
+                return None
+
+        val = await _async_part()
+        if val is not None and val > 1e-6:
+            return val
+        try:
+            s = await asyncio.to_thread(self._ffprobe_duration_sync, path, stream_type)
+            if s is not None and s > 1e-6:
+                return s
         except Exception:
-            return None
+            pass
+        return None
 
     async def replace_audio_with_narration(
         self,
@@ -1532,7 +1900,7 @@ class VideoProcessor:
             tol = 0.05
             if abs(adur - vdur) <= tol:
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", video_path,
                     "-i", narr_used,
                     "-map", "0:v:0", "-map", "1:a:0",
@@ -1542,27 +1910,20 @@ class VideoProcessor:
                     "-movflags", "+faststart",
                     "-y", output_path,
                 ]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
+                rc, stdout, stderr = await self._run_subprocess_exec_communicate(
+                    cmd,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
-                tracking = self._should_track(scope, project_id, task_id, cancel_event)
-                if tracking:
-                    self._register_proc(str(scope), str(project_id), str(task_id), process)
-                try:
-                    stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
-                finally:
-                    if tracking:
-                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
-                if process.returncode == 0:
+                if rc == 0:
                     vinfo, _ = await self._probe_stream_info(output_path)
                     if vinfo is not None:
                         return True
                     vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                     cmd_fb_direct = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                         "-i", video_path,
                         "-i", narr_used,
                         "-map", "0:v:0", "-map", "1:a:0",
@@ -1571,21 +1932,14 @@ class VideoProcessor:
                         "-shortest",
                         "-y", output_path,
                     ]
-                    p2 = await asyncio.create_subprocess_exec(
-                        *cmd_fb_direct,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        creationflags=WIN_NO_WINDOW
+                    rc2, _, e2 = await self._run_subprocess_exec_communicate(
+                        cmd_fb_direct,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
                     )
-                    tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
-                    if tracking2:
-                        self._register_proc(str(scope), str(project_id), str(task_id), p2)
-                    try:
-                        _, e2 = await self._communicate_with_cancel(p2, cancel_event)
-                    finally:
-                        if tracking2:
-                            self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
-                    if p2.returncode == 0:
+                    if rc2 == 0:
                         return True
                     err = stderr.decode(errors="ignore")
                     logger.error(f"配音替换失败(无视频流回退): {err}\n{e2.decode(errors='ignore')}")
@@ -1615,7 +1969,7 @@ class VideoProcessor:
             vcodec_args.extend(["-pix_fmt", self._preferred_pix_fmt(enc_name), "-movflags", "+faststart"])
 
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                 "-i", video_path,
                 "-i", narr_used,
                 "-filter_complex", filter_complex,
@@ -1626,27 +1980,20 @@ class VideoProcessor:
                 "-y", output_path,
             ]
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW
+            rc, stdout, stderr = await self._run_subprocess_exec_communicate(
+                cmd,
+                scope=scope,
+                project_id=project_id,
+                task_id=task_id,
+                cancel_event=cancel_event,
             )
-            tracking = self._should_track(scope, project_id, task_id, cancel_event)
-            if tracking:
-                self._register_proc(str(scope), str(project_id), str(task_id), process)
-            try:
-                stdout, stderr = await self._communicate_with_cancel(process, cancel_event)
-            finally:
-                if tracking:
-                    self._unregister_proc(str(scope), str(project_id), str(task_id), process)
-            if process.returncode == 0:
+            if rc == 0:
                 vinfo, _ = await self._probe_stream_info(output_path)
                 if vinfo is not None:
                     return True
                 vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                 cmd_fb = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                     "-i", video_path,
                     "-i", narr_used,
                     "-filter_complex", filter_complex,
@@ -1656,21 +2003,14 @@ class VideoProcessor:
                     *extra,
                     "-y", output_path,
                 ]
-                p2 = await asyncio.create_subprocess_exec(
-                    *cmd_fb,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
+                rc2, _, e2 = await self._run_subprocess_exec_communicate(
+                    cmd_fb,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
-                tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
-                if tracking2:
-                    self._register_proc(str(scope), str(project_id), str(task_id), p2)
-                try:
-                    _, e2 = await self._communicate_with_cancel(p2, cancel_event)
-                finally:
-                    if tracking2:
-                        self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
-                if p2.returncode == 0:
+                if rc2 == 0:
                     return True
                 err = stderr.decode(errors="ignore")
                 logger.error(f"片段音频替换失败(无视频流回退): {err}\n{e2.decode(errors='ignore')}")
@@ -1680,7 +2020,7 @@ class VideoProcessor:
                 if ("Cannot load nvcuda.dll" in err) or ("Error while opening encoder" in err) or ("Could not open encoder" in err):
                     vcodec_args_fb = ["-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
                     cmd_fb = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                         "-i", video_path,
                         "-i", narr_used,
                         "-filter_complex", filter_complex,
@@ -1690,21 +2030,14 @@ class VideoProcessor:
                         *extra,
                         "-y", output_path,
                     ]
-                    p2 = await asyncio.create_subprocess_exec(
-                        *cmd_fb,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        creationflags=WIN_NO_WINDOW
+                    rc2, _, e2 = await self._run_subprocess_exec_communicate(
+                        cmd_fb,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
                     )
-                    tracking2 = self._should_track(scope, project_id, task_id, cancel_event)
-                    if tracking2:
-                        self._register_proc(str(scope), str(project_id), str(task_id), p2)
-                    try:
-                        _, e2 = await self._communicate_with_cancel(p2, cancel_event)
-                    finally:
-                        if tracking2:
-                            self._unregister_proc(str(scope), str(project_id), str(task_id), p2)
-                    if p2.returncode == 0:
+                    if rc2 == 0:
                         return True
                     else:
                         logger.error(f"片段音频替换失败: {err}\n{e2.decode(errors='ignore')}")
@@ -1713,15 +2046,217 @@ class VideoProcessor:
                 return False
 
         except Exception as e:
-            logger.error(f"片段音频替换出错: {e}")
+            exc_type = type(e).__name__
+            exc_msg = str(e) or "(无消息)"
+            logger.error("片段音频替换出错: type=%s msg=%s", exc_type, exc_msg)
             return False
         
 
+    def _cut_segment_sync_fallback(
+        self,
+        input_path: str,
+        output_path: str,
+        start_time: float,
+        duration: float,
+        clip_timeout: float,
+        trim_tag: str,
+    ) -> bool:
+        """cut_video_segment 的同步回退：当 asyncio 事件循环不支持子进程时使用 subprocess.run"""
+        import subprocess as _subprocess
+
+        def _verify_output(path: str, phase: str = "") -> bool:
+            """校验输出文件：先检查文件存在性/大小，再通过 ffprobe 读取容器时长"""
+            try:
+                out_path = Path(path)
+            except Exception:
+                return False
+            if not out_path.exists():
+                logger.warning("%s %s 输出文件不存在 path=%s", trim_tag, phase, path)
+                return False
+            try:
+                fsize = out_path.stat().st_size
+            except Exception:
+                fsize = None
+            if fsize is not None and fsize < 1024:
+                logger.warning("%s %s 输出文件太小 size=%d path=%s", trim_tag, phase, fsize, path)
+                return False
+
+            def _duration_via_ffmpeg_stderr() -> Optional[float]:
+                if not self._ffmpeg_bin:
+                    return None
+                try:
+                    r = _subprocess.run(
+                        [self._ffmpeg_bin, "-hide_banner", "-i", path],
+                        capture_output=True,
+                        creationflags=WIN_NO_WINDOW,
+                        timeout=30,
+                    )
+                    text = (r.stderr or b"").decode(errors="ignore")
+                except Exception:
+                    return None
+                m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", text)
+                if not m:
+                    return None
+                try:
+                    h, mn = int(m.group(1)), int(m.group(2))
+                    sec = float(m.group(3))
+                    return h * 3600.0 + mn * 60.0 + sec
+                except Exception:
+                    return None
+
+            dur: Optional[float] = None
+            try:
+                if self._ffprobe_bin:
+                    result = _subprocess.run(
+                        [self._ffprobe_bin, "-v", "error",
+                         "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1",
+                         path],
+                        capture_output=True, creationflags=WIN_NO_WINDOW, timeout=15,
+                    )
+                    if result.returncode == 0:
+                        dur_str = result.stdout.decode(errors="ignore").strip()
+                        if dur_str:
+                            try:
+                                dur = float(dur_str)
+                            except Exception:
+                                dur = None
+                    if dur is None or dur <= 0.01:
+                        if result.returncode != 0:
+                            probe_err = result.stderr.decode(errors="ignore").strip()
+                            logger.warning(
+                                "%s %s ffprobe 失败 rc=%d path=%s size=%s err=%s",
+                                trim_tag, phase, result.returncode, path, fsize,
+                                (probe_err or "")[:300],
+                            )
+                        elif not (result.stdout.decode(errors="ignore").strip()):
+                            logger.warning(
+                                "%s %s ffprobe 输出为空 path=%s size=%s",
+                                trim_tag, phase, path, fsize,
+                            )
+            except Exception as e:
+                logger.warning("%s %s ffprobe 验证异常 path=%s err=%s", trim_tag, phase, path, e)
+
+            if dur is None or dur <= 0.01:
+                fb = _duration_via_ffmpeg_stderr()
+                if fb is not None and fb > 0.01:
+                    logger.info(
+                        "%s %s 使用 ffmpeg -i 解析时长 fallback=%.4fs path=%s",
+                        trim_tag, phase, fb, path,
+                    )
+                    dur = fb
+
+            if dur is None:
+                return False
+            ok = dur > 0.01
+            if not ok:
+                logger.warning(
+                    "%s %s 容器时长异常 dur=%.4f path=%s size=%s",
+                    trim_tag, phase, dur, path, fsize,
+                )
+            return ok
+
+        # Phase 1: copy mode
+        copy_cmd = [
+            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+            "-ss", str(start_time), "-t", str(duration),
+            "-i", input_path, "-c", "copy", "-y", output_path,
+        ]
+        logger.info(
+            "%s cut sync copy start range=%.3fs-%.3fs dur=%.3fs timeout=%s",
+            trim_tag, float(start_time), float(start_time + duration), float(duration),
+            _trim_timeout_label(clip_timeout),
+        )
+        try:
+            result = _subprocess.run(copy_cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=clip_timeout)
+        except _subprocess.TimeoutExpired:
+            logger.error("%s cut sync copy timeout", trim_tag)
+            self.last_cut_error = "sync_copy_timeout"
+            return False
+        except Exception as e:
+            logger.error("%s cut sync copy error: %s", trim_tag, e)
+            self.last_cut_error = f"sync_copy_error: {e}"
+            return False
+
+        if result.returncode == 0 and _verify_output(output_path, "copy"):
+            logger.info("%s cut sync copy done out=%s", trim_tag, output_path)
+            return True
+        copy_err = result.stderr.decode(errors="ignore").strip()
+        logger.warning("%s cut sync copy failed ret=%d err=%s", trim_tag, result.returncode, copy_err[:200])
+        self.last_cut_error = f"sync_copy_failed(rc={result.returncode}): {copy_err[:200]}"
+
+        # Phase 2: re-encode mode
+        try:
+            enc_name, vcodec_args = self._pick_fast_encoder_sync()
+        except Exception:
+            enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
+        reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
+        reencode_cmd = [
+            self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+            "-i", input_path, "-ss", str(start_time), "-t", str(duration),
+            *vcodec_args,
+            "-pix_fmt", self._preferred_pix_fmt(enc_name),
+            "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+            "-movflags", "+faststart", "-y", output_path,
+        ]
+        logger.info(
+            "%s cut sync reencode start encoder=%s timeout=%s",
+            trim_tag, enc_name, _trim_timeout_label(reencode_timeout),
+        )
+        try:
+            result2 = _subprocess.run(reencode_cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=reencode_timeout)
+        except _subprocess.TimeoutExpired:
+            logger.error("%s cut sync reencode timeout", trim_tag)
+            prev_err = (self.last_cut_error or "") + " -> " if self.last_cut_error else ""
+            self.last_cut_error = f"{prev_err}sync_reencode_timeout"
+            return False
+        except Exception as e:
+            logger.error("%s cut sync reencode error: %s", trim_tag, e)
+            prev_err = (self.last_cut_error or "") + " -> " if self.last_cut_error else ""
+            self.last_cut_error = f"{prev_err}sync_reencode_error: {e}"
+            return False
+
+        # 检查重编码输出文件状态
+        try:
+            out_path = Path(output_path)
+            out_exists = out_path.exists()
+            out_size = out_path.stat().st_size if out_exists else None
+        except Exception:
+            out_exists = False
+            out_size = None
+        logger.info(
+            "%s cut sync reencode finished: rc=%d output_exists=%s output_size=%s",
+            trim_tag, result2.returncode, out_exists, out_size,
+        )
+
+        if result2.returncode == 0 and _verify_output(output_path, "reencode"):
+            logger.info("%s cut sync reencode done out=%s", trim_tag, output_path)
+            return True
+        reencode_err = result2.stderr.decode(errors="ignore").strip()
+        prev_err = (self.last_cut_error or "") + " -> " if self.last_cut_error else ""
+        self.last_cut_error = f"{prev_err}sync_reencode_failed(rc={result2.returncode}): {reencode_err[:200]}"
+        return False
+
     async def extract_audio_mp3(self, input_video: str, output_mp3: str) -> bool:
         try:
-            Path(output_mp3).parent.mkdir(parents=True, exist_ok=True)
+            input_path = Path(input_video)
+            if not input_path.exists():
+                logger.error(f"输入视频文件不存在: {input_video}")
+                return False
+            if not input_path.is_file():
+                logger.error(f"输入路径不是文件: {input_video}")
+                return False
+
+            ffmpeg_path = Path(self._ffmpeg_bin)
+            if not ffmpeg_path.exists():
+                logger.error(f"ffmpeg可执行文件不存在: {self._ffmpeg_bin}")
+                return False
+
+            output_path = Path(output_mp3)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
             cmd = [
-                "ffmpeg",
+                self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
                 "-i", input_video,
@@ -1730,21 +2265,66 @@ class VideoProcessor:
                 "-q:a", "2",
                 "-y", output_mp3,
             ]
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                creationflags=WIN_NO_WINDOW
-            )
-            stdout, stderr = await process.communicate()
-            if process.returncode == 0:
-                return True
-            else:
-                err = stderr.decode(errors="ignore")
-                logger.error(f"提取音频失败: {err}")
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW
+                )
+                stdout, stderr = await process.communicate()
+                if process.returncode == 0:
+                    if output_path.exists():
+                        return True
+                    else:
+                        logger.error(f"ffmpeg执行成功但输出文件未生成: {output_mp3}")
+                        return False
+                else:
+                    err = stderr.decode(errors="ignore")
+                    logger.error(f"提取音频失败: {err}")
+                    return False
+
+            except NotImplementedError:
+                logger.warning("当前事件循环不支持 asyncio 子进程，回退到线程池同步执行")
+                return await self._extract_audio_mp3_sync_fallback(cmd, output_path)
+
+            except FileNotFoundError as e:
+                logger.error(f"找不到ffmpeg可执行文件: {self._ffmpeg_bin}, 错误: {e}")
                 return False
+            except PermissionError as e:
+                logger.error(f"没有权限执行ffmpeg: {self._ffmpeg_bin}, 错误: {e}")
+                return False
+
         except Exception as e:
             logger.error(f"提取音频出错: {e}")
+            return False
+
+    async def _extract_audio_mp3_sync_fallback(self, cmd: list, output_path: Path) -> bool:
+        loop = asyncio.get_running_loop()
+
+        def _run_sync():
+            return subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+
+        try:
+            result = await loop.run_in_executor(None, _run_sync)
+            if result.returncode == 0:
+                if output_path.exists():
+                    return True
+                else:
+                    logger.error(f"ffmpeg执行成功但输出文件未生成: {output_path}")
+                    return False
+            else:
+                err = result.stderr.decode(errors="ignore")
+                logger.error(f"提取音频失败(同步回退): {err}")
+                return False
+        except Exception as e:
+            logger.error(f"同步回退执行ffmpeg出错: {e}")
             return False
 
 # 全局视频处理器实例

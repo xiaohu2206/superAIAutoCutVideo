@@ -32,6 +32,8 @@ mod json_util;
 mod offline_bundle;
 mod runtime_updater;
 #[cfg(target_os = "windows")]
+use sha2::{Digest, Sha256};
+#[cfg(target_os = "windows")]
 use zip::ZipArchive;
 
 // Windows: 隐藏子进程窗口（CREATE_NO_WINDOW）
@@ -404,11 +406,16 @@ enum BackendZipStamp {
         version: String,
         mtime: String,
         size: u64,
+        /// 仅扫描 zip 中央目录得到的指纹（杀毒/复制可能导致 mtime 变化但内容不变）
+        index_sha256: Option<String>,
     },
 }
 
 #[cfg(target_os = "windows")]
 fn parse_backend_zip_stamp(content: &str) -> BackendZipStamp {
+    fn looks_like_sha256_hex(s: &str) -> bool {
+        s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+    }
     let lines: Vec<&str> = content
         .lines()
         .map(str::trim)
@@ -422,13 +429,50 @@ fn parse_backend_zip_stamp(content: &str) -> BackendZipStamp {
                 .get(2)
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(0);
+            let index_sha256 = lines
+                .get(3)
+                .copied()
+                .filter(|s| looks_like_sha256_hex(s))
+                .map(|s| s.to_string());
             BackendZipStamp::Full {
                 version: lines[0].to_string(),
                 mtime: lines[1].to_string(),
                 size,
+                index_sha256,
             }
         }
     }
+}
+
+/// 仅遍历 zip 条目元数据（不解压正文），用于判断 zip 是否实质变化。
+#[cfg(target_os = "windows")]
+fn zip_index_sha256(zip_path: &std::path::Path) -> Result<String, String> {
+    let file =
+        std::fs::File::open(zip_path).map_err(|e| format!("打开 zip 失败: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
+    let mut rows: Vec<(String, u32, u64, u64)> = Vec::with_capacity(archive.len());
+    for i in 0..archive.len() {
+        let f = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
+        rows.push((
+            f.name().to_string(),
+            f.crc32(),
+            f.size(),
+            f.compressed_size(),
+        ));
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut hasher = Sha256::new();
+    for (name, crc, sz, csz) in rows {
+        hasher.update(name.as_bytes());
+        hasher.update(&[0u8]);
+        hasher.update(crc.to_le_bytes());
+        hasher.update(sz.to_le_bytes());
+        hasher.update(csz.to_le_bytes());
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[cfg(target_os = "windows")]
@@ -437,25 +481,24 @@ fn write_backend_zip_stamp(
     app_version: &str,
     mtime: &str,
     size: u64,
+    index_sha256: Option<&str>,
 ) {
-    let _ = std::fs::write(
-        stamp_path,
-        format!("{}\n{}\n{}", app_version, mtime, size),
-    );
+    let text = match index_sha256 {
+        Some(s) => format!("{}\n{}\n{}\n{}", app_version, mtime, size, s),
+        None => format!("{}\n{}\n{}", app_version, mtime, size),
+    };
+    let _ = std::fs::write(stamp_path, text);
 }
 
 #[cfg(target_os = "windows")]
 fn ensure_backend_executable_available(
     _app_handle: &AppHandle,
-    resource_dir: &PathBuf,
+    resource_root: &PathBuf,
 ) -> Result<PathBuf, String> {
-    let app_data_dir = _app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
-    let extracted_backend_dir = app_data_dir.join("superAutoCutVideoBackend");
+    // 解压到安装目录侧 resources（与 superAutoCutVideoBackend.zip 同目录），不再使用 %APPDATA%
+    let extracted_backend_dir = resource_root.join("superAutoCutVideoBackend");
     let nested_backend_dir = extracted_backend_dir.join("superAutoCutVideoBackend");
-    let zip_path = resource_dir.join("superAutoCutVideoBackend.zip");
+    let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
     let stamp_path = extracted_backend_dir.join(".backend_zip_stamp");
     let app_version = _app_handle.package_info().version.to_string();
 
@@ -492,6 +535,13 @@ fn ensure_backend_executable_available(
         BackendZipStamp::None => false,
     };
 
+    let preserved_index_sha = match &stamp {
+        BackendZipStamp::Full {
+            index_sha256: Some(s), ..
+        } => Some(s.as_str()),
+        _ => None,
+    };
+
     if zip_fingerprint_matches {
         if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
             let need_stamp_update = match &stamp {
@@ -501,7 +551,13 @@ fn ensure_backend_executable_available(
             };
             if need_stamp_update {
                 let _ = std::fs::create_dir_all(&extracted_backend_dir);
-                write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
+                write_backend_zip_stamp(
+                    &stamp_path,
+                    &app_version,
+                    &want_mtime,
+                    want_size,
+                    preserved_index_sha,
+                );
             }
             return Ok(exe);
         }
@@ -513,9 +569,42 @@ fn ensure_backend_executable_available(
             };
             if need_stamp_update {
                 let _ = std::fs::create_dir_all(&extracted_backend_dir);
-                write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
+                write_backend_zip_stamp(
+                    &stamp_path,
+                    &app_version,
+                    &want_mtime,
+                    want_size,
+                    preserved_index_sha,
+                );
             }
             return Ok(exe);
+        }
+    }
+
+    // mtime/size 可能因杀毒扫描、同步盘等变化；若 stamp 中已有索引指纹且解压目录仍完整，则跳过整包解压
+    if !zip_fingerprint_matches {
+        if let BackendZipStamp::Full {
+            index_sha256: Some(stored_sha),
+            ..
+        } = &stamp
+        {
+            if let Some(exe) = is_valid_backend_root(&extracted_backend_dir)
+                .or_else(|| is_valid_backend_root(&nested_backend_dir))
+            {
+                if let Ok(computed) = zip_index_sha256(&zip_path) {
+                    if computed == *stored_sha {
+                        let _ = std::fs::create_dir_all(&extracted_backend_dir);
+                        write_backend_zip_stamp(
+                            &stamp_path,
+                            &app_version,
+                            &want_mtime,
+                            want_size,
+                            Some(stored_sha.as_str()),
+                        );
+                        return Ok(exe);
+                    }
+                }
+            }
         }
     }
 
@@ -523,10 +612,6 @@ fn ensure_backend_executable_available(
         let _ = std::fs::remove_dir_all(&extracted_backend_dir);
     }
 
-    let _ = std::fs::create_dir_all(&app_data_dir);
-    if extracted_backend_dir.exists() {
-        let _ = std::fs::remove_dir_all(&extracted_backend_dir);
-    }
     let _ = std::fs::create_dir_all(&extracted_backend_dir);
 
     let mut zip_extract_ok = false;
@@ -567,7 +652,14 @@ fn ensure_backend_executable_available(
         }
     }
 
-    write_backend_zip_stamp(&stamp_path, &app_version, &want_mtime, want_size);
+    let index_sha = zip_index_sha256(&zip_path).ok();
+    write_backend_zip_stamp(
+        &stamp_path,
+        &app_version,
+        &want_mtime,
+        want_size,
+        index_sha.as_deref(),
+    );
 
     if let Some(exe) = is_valid_backend_root(&extracted_backend_dir) {
         return Ok(exe);
@@ -792,12 +884,15 @@ async fn start_backend(
     #[cfg(target_os = "windows")]
     let extracted_backend_exe = if !prefer_python_backend && backend_zip_exists && !backend_folder_exists {
         let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
-        if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
-            append_log_line(
-                early_log_path.clone(),
-                &format!("[meta] app_data_dir={}", app_data_dir.to_string_lossy()),
-            );
-        }
+        append_log_line(
+            early_log_path.clone(),
+            &format!(
+                "[meta] backend_extract_dir={}",
+                resource_root
+                    .join("superAutoCutVideoBackend")
+                    .to_string_lossy()
+            ),
+        );
         append_log_line(
             early_log_path.clone(),
             &format!(
@@ -807,8 +902,14 @@ async fn start_backend(
             ),
         );
         append_log_line(early_log_path.clone(), "[meta] ensure_backend_executable_available_begin");
-        match ensure_backend_executable_available(&app_handle, &resource_root) {
-            Ok(p) => {
+        let resource_root_blocking = resource_root.clone();
+        let app_handle_blocking = app_handle.clone();
+        match tokio::task::spawn_blocking(move || {
+            ensure_backend_executable_available(&app_handle_blocking, &resource_root_blocking)
+        })
+        .await
+        {
+            Ok(Ok(p)) => {
                 append_log_line(
                     early_log_path.clone(),
                     &format!(
@@ -819,12 +920,17 @@ async fn start_backend(
                 );
                 Some(p)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 append_log_line(
                     early_log_path.clone(),
                     &format!("[meta] ensure_backend_executable_available_error={}", e),
                 );
                 return Err(e);
+            }
+            Err(e) => {
+                let msg = format!("后端解压任务异常: {}", e);
+                append_log_line(early_log_path.clone(), &format!("[meta] {}", msg));
+                return Err(msg);
             }
         }
     } else {

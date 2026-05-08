@@ -68,24 +68,32 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         label: "草稿",
         color: "text-gray-600",
         bg: "bg-gray-100",
+        darkBg: "dark:bg-gray-700",
+        darkColor: "dark:text-gray-300",
       },
       [ProjectStatus.PROCESSING]: {
         icon: Clock,
         label: "处理中",
         color: "text-blue-600",
         bg: "bg-blue-100",
+        darkBg: "dark:bg-blue-900/30",
+        darkColor: "dark:text-blue-400",
       },
       [ProjectStatus.COMPLETED]: {
         icon: CheckCircle,
         label: "已完成",
         color: "text-green-600",
         bg: "bg-green-100",
+        darkBg: "dark:bg-green-900/30",
+        darkColor: "dark:text-green-400",
       },
       [ProjectStatus.FAILED]: {
         icon: XCircle,
         label: "失败",
         color: "text-red-600",
         bg: "bg-red-100",
+        darkBg: "dark:bg-red-900/30",
+        darkColor: "dark:text-red-400",
       },
     };
     return configs[status] || configs[ProjectStatus.DRAFT];
@@ -104,6 +112,8 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         label: "全感知推理",
         color: "text-fuchsia-700",
         bg: "bg-fuchsia-100",
+        darkBg: "dark:bg-fuchsia-900/30",
+        darkColor: "dark:text-fuchsia-400",
       };
     }
     if (type === "visual") {
@@ -112,6 +122,8 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         label: "视觉推理",
         color: "text-purple-700",
         bg: "bg-purple-100",
+        darkBg: "dark:bg-purple-900/30",
+        darkColor: "dark:text-purple-400",
       };
     }
     return {
@@ -119,6 +131,8 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
       label: "字幕推理",
       color: "text-amber-700",
       bg: "bg-amber-100",
+      darkBg: "dark:bg-amber-900/30",
+      darkColor: "dark:text-amber-400",
     };
   };
   const typeConfig = getTypeConfig(project.project_type);
@@ -140,7 +154,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
 
   return (
     <div
-      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg"
+      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700"
       onClick={() => onEdit(project)}
       role="button"
       tabIndex={0}
@@ -156,7 +170,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex items-start gap-2">
-              <h3 className="line-clamp-2 flex-1 text-base font-semibold leading-6 text-gray-900">
+              <h3 className="line-clamp-2 flex-1 text-base font-semibold leading-6 text-gray-900 dark:text-gray-100">
                 {project.name}
               </h3>
               <div className="relative flex-shrink-0" ref={menuRef}>
@@ -168,13 +182,13 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                     event.stopPropagation();
                     setMenuOpen((prev) => !prev);
                   }}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-400 transition-colors hover:border-gray-200 hover:bg-gray-100 hover:text-gray-700"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-400 transition-colors hover:border-gray-200 hover:bg-gray-100 hover:text-gray-700 dark:hover:border-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 top-10 z-10 w-32 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                  <div className="absolute right-0 top-10 z-10 w-32 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                     <button
                       type="button"
                       onClick={(event) => {
@@ -182,7 +196,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                         setMenuOpen(false);
                         onEdit(project);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
                     >
                       <Edit className="h-4 w-4" />
                       编辑
@@ -194,7 +208,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                         setMenuOpen(false);
                         onDelete(project);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                     >
                       <Trash2 className="h-4 w-4" />
                       删除
@@ -206,13 +220,13 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
 
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color}`}
+                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.darkBg} ${statusConfig.darkColor}`}
               >
                 <StatusIcon className="mr-1 h-3.5 w-3.5" />
                 {statusConfig.label}
               </span>
-              <div className="flex items-center text-xs text-gray-500">
-                <Calendar className="mr-1 h-3.5 w-3.5 text-gray-400" />
+              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
+                <Calendar className="mr-1 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
                 <span>{formatDate(project.created_at)}</span>
               </div>
             </div>
@@ -229,9 +243,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
           </div>
         )} */}
 
-        <div className="mt-auto flex flex-wrap gap-2">
+        <div className="mt-auto flex items-center gap-2 overflow-hidden">
           <div
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${typeConfig.bg} ${typeConfig.color}`}
+            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${typeConfig.bg} ${typeConfig.color} ${typeConfig.darkBg} ${typeConfig.darkColor}`}
           >
             <TypeIcon className="mr-1.5 h-3.5 w-3.5" />
             <span className="truncate">{typeConfig.label}</span>

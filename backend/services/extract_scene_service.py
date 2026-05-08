@@ -18,11 +18,12 @@ import numpy as np
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
-from services.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
-from services.vision_scene_status import scene_vision_success_ok
-from services.vision_frame_analysis_service import vision_frame_analyzer
+from modules.project_task_queue import project_task_queue
+from services.asr.extract_subtitle_service import _resolve_path, _uploads_dir, _to_web_path
+from services.ai_models.vision_scene_status import scene_vision_success_ok
+from services.ai_models.vision_frame_analysis_service import vision_frame_analyzer
 from modules.subtitle_utils import parse_srt
-from modules.config.video_model_config import video_model_config_manager
+from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,12 @@ class ExtractSceneService:
                     self._model = TransNetV2Torch(str(weights_dir))
                     try:
                         info = self._model.get_backend_info()
-                        logger.info(f"TransNetV2 backend: {info}")
+                        logger.info(
+                            "[TransNetV2][%s] backend=%s device=%s",
+                            "GPU" if str(info.get("device") or "").lower().startswith("cuda") else "CPU",
+                            info.get("backend"),
+                            info.get("device"),
+                        )
                     except Exception:
                         pass
                     return self._model
@@ -212,6 +218,7 @@ class ExtractSceneService:
 
         from modules.transnetv2 import TransNetV2
         self._model = TransNetV2(str(weights_dir))
+        logger.info("[TransNetV2][CPU] backend=tensorflow device=cpu")
         return self._model
 
     def _resolve_weights_dir(self) -> Path:
@@ -317,7 +324,7 @@ class ExtractSceneService:
         enforce_online_video_file_identity: bool = False,
         video_abs: Optional[Path] = None,
     ) -> bool:
-        from services.vision_scene_status import scene_online_vision_skippable_for_current_video
+        from services.ai_models.vision_scene_status import scene_online_vision_skippable_for_current_video
 
         for scene in scenes:
             if not self._scene_needs_vision_analysis(scene, mode):
@@ -535,6 +542,7 @@ class ExtractSceneService:
         )
 
         async def _run():
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 current_p = projects_store.get_project(project_id)
                 video_abs_path = _resolve_path(current_p.video_path)
@@ -890,7 +898,7 @@ class ExtractSceneService:
                         optimized_scenes = self._merge_existing_vision_results(optimized_scenes, existing_scenes)
                         enforce_online_vid = False
                         try:
-                            ac = video_model_config_manager.get_active_config()
+                            ac = resolve_video_model_for_online_vision()
                             enforce_online_vid = bool(
                                 ac
                                 and ac.provider
@@ -969,7 +977,7 @@ class ExtractSceneService:
                             message="准备进行视觉分析...",
                         )
 
-                        active_config = video_model_config_manager.get_active_config()
+                        active_config = resolve_video_model_for_online_vision()
                         if active_config and active_config.provider in (
                             "yunwu",
                             "302ai",
@@ -1045,6 +1053,8 @@ class ExtractSceneService:
                     status="failed",
                     message=f"镜头提取失败: {str(e)}",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         

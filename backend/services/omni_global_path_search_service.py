@@ -19,7 +19,8 @@ from modules.omni_global_path_search import build_global_path_payload
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
+from modules.project_task_queue import project_task_queue
+from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ class OmniGlobalPathSearchService:
         )
 
         async def _run() -> None:
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -195,6 +197,8 @@ class OmniGlobalPathSearchService:
                     message=f"失败: {e}",
                     phase="failed",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         return {"task_id": task_id, "status": "pending", "message": "任务已提交"}

@@ -1,5 +1,6 @@
-1、使用到ffmpeg必须避免tarui出现黑框
+1、使用到ffmpeg必须避免tauri出现黑框 → 开发前阅读 .cursor/rules/windows-subprocess.mdc，提交前运行 backend/scripts/check_subprocess_safety.py
 2、调用大模型，必须有3次以上重试机制，在模型整个流程任何报错都重试
 3、任何关于打开文件、打开浏览器等功能，必须主打兼容tauri版本
 4、任何功能都主打windows系统
 5、尽量能封装为单独文件夹就将代码封装到某个文件夹中
+6、新增或修改 ffmpeg/ffprobe 子进程调用时，必须确保已添加 CREATE_NO_WINDOW 或使用 subprocess_no_console 封装。提交前运行 check_subprocess_safety.py 验证。

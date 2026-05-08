@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
 def _prompt_base_dir() -> Path:
-    # backend/modules/omni_copywriting_struct_embed -> backend/modules
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS) / "modules" / "copywriting_structuring_embedding" / "prompt"
     return Path(__file__).resolve().parent.parent / "copywriting_structuring_embedding" / "prompt"
 
 

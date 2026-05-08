@@ -1,4 +1,4 @@
-import { Copy, Minus, Square, X } from "lucide-react";
+import { AlertTriangle, Copy, Minus, Square, X } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import AppLoadingScreen from "./components/AppLoadingScreen";
 import Navigation from "./components/Navigation";
@@ -6,7 +6,9 @@ import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
 import ProjectEditPage from "./pages/ProjectEditPage";
 import ProjectManagementPage from "./pages/ProjectManagementPage";
+import UserProfile from "./components/auth/UserProfile";
 import { useAppVersion } from "./hooks/useAppVersion";
+import TaskQueueFloatingBall from "./components/projectEdit/TaskQueueFloatingBall";
 import {
   TauriCommands,
   WebSocketMessage,
@@ -29,6 +31,27 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** 与 tauri.conf 中启动完成后主界面一致（逻辑像素） */
 const TAURI_MAIN_WINDOW_INNER = { width: 1280, height: 800 } as const;
 
+/** 首屏连接后端：总体最长等待（避免安全软件拦截等情况无限卡住） */
+const STARTUP_OVERALL_MS = 180_000;
+/** 单次连接流程超时（需覆盖 Rust 侧解压 + 启动就绪等待，略大于 60s） */
+const STARTUP_ATTEMPT_TIMEOUT_MS = 72_000;
+/** 加载页出现「跳过等待」按钮前的最短等待 */
+const LOADING_SKIP_VISIBLE_MS = 45_000;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label = "操作"): Promise<T> {
+  let timer: number | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(`${label}超时`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+
 const detectTauriEnvironment = (): boolean => {
   const w: any = typeof window !== "undefined" ? window : undefined;
   const hasIpc = typeof w?.__TAURI_IPC__ === "function";
@@ -50,8 +73,11 @@ const App: React.FC = () => {
   });
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingElapsedSeconds, setLoadingElapsedSeconds] = useState(0);
+  const [showBackendStartupBanner, setShowBackendStartupBanner] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
   const { appVersion } = useAppVersion();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
   const [isMaximized, setIsMaximized] = useState(false);
@@ -122,6 +148,15 @@ const App: React.FC = () => {
     };
   }, [isTauri]);
 
+  useEffect(() => {
+    if (!isLoading) return;
+    setLoadingElapsedSeconds(0);
+    const id = window.setInterval(() => {
+      setLoadingElapsedSeconds((s) => s + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isLoading]);
+
   const handleToggleMaximize = async () => {
     const nextState = await TauriCommands.toggleMaximizeWindow();
     setIsMaximized(nextState);
@@ -141,6 +176,7 @@ const App: React.FC = () => {
 
   const initializeApp = async () => {
     setIsLoading(true);
+    setShowBackendStartupBanner(false);
 
     const expandMainWindowBeforeMainUi = async () => {
       if (!detectTauriEnvironment()) return;
@@ -151,37 +187,68 @@ const App: React.FC = () => {
       );
     };
 
-    let attempts = 0;
+    const tryConnectOnce = async (): Promise<boolean> => {
+      const status = await checkBackendStatus();
+      const apiOk = await apiClient.testConnection();
+      if (status && status.running && apiOk) {
+        try {
+          const wsTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
+          );
+          await Promise.race([wsClient.connect(), wsTimeout]);
+        } catch {
+          console.debug("WebSocket连接失败");
+        }
+        return true;
+      }
+      return false;
+    };
+
+    const startedAt = Date.now();
     let ready = false;
-    const maxAttempts = 30;
-    do {
+
+    while (!ready && Date.now() - startedAt < STARTUP_OVERALL_MS) {
       try {
-        const status = await checkBackendStatus();
-        const apiOk = await apiClient.testConnection();
-        if (status && status.running && apiOk) {
-          try {
-            const wsTimeout = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
-            );
-            await Promise.race([wsClient.connect(), wsTimeout]);
-          } catch (e) {
-            console.debug("WebSocket连接失败");
-          }
+        const ok = await withTimeout(
+          tryConnectOnce(),
+          STARTUP_ATTEMPT_TIMEOUT_MS,
+          "连接后端"
+        );
+        if (ok) {
           await expandMainWindowBeforeMainUi();
+          setShowBackendStartupBanner(false);
           setIsLoading(false);
           ready = true;
-          continue;
+          break;
         }
       } catch (e) {
-        console.debug("初始化中，后端未就绪，继续重试");
+        console.debug("初始化中，后端未就绪：", e);
       }
-      attempts += 1;
-      await sleep(Math.min(800 + attempts * 200, 3000));
-    } while (!ready && attempts < maxAttempts);
+      const elapsed = Date.now() - startedAt;
+      await sleep(Math.min(2500, 600 + Math.floor(elapsed / 20_000) * 150));
+    }
+
     if (!ready) {
       await expandMainWindowBeforeMainUi();
       setIsLoading(false);
+      if (detectTauriEnvironment()) {
+        setShowBackendStartupBanner(true);
+      }
     }
+  };
+
+  const handleSkipLoadingToMain = () => {
+    void (async () => {
+      if (detectTauriEnvironment()) {
+        await TauriCommands.setMainWindowSize(
+          TAURI_MAIN_WINDOW_INNER.width,
+          TAURI_MAIN_WINDOW_INNER.height,
+          true
+        );
+        setShowBackendStartupBanner(true);
+      }
+      setIsLoading(false);
+    })();
   };
 
   const refreshConnections = async () => {
@@ -205,6 +272,20 @@ const App: React.FC = () => {
       }
     } catch (e) {
       setConnectionStatus((prev) => ({ ...prev, backend: false, api: false, websocket: false }));
+    }
+  };
+
+  const retryBackendConnection = async () => {
+    try {
+      await refreshConnections();
+      const status = await checkBackendStatus();
+      const apiOk = await apiClient.testConnection();
+      if (status?.running && apiOk) {
+        setShowBackendStartupBanner(false);
+        setConnectionStatus((prev) => ({ ...prev, backend: true, api: true }));
+      }
+    } catch {
+      /* 保持横幅，由用户在设置中查看详情 */
     }
   };
 
@@ -293,11 +374,18 @@ const App: React.FC = () => {
       <AppLoadingScreen
         appVersion={appVersion}
         updateVersion=""
+        elapsedSeconds={loadingElapsedSeconds}
+        showSkipAfterMs={LOADING_SKIP_VISIBLE_MS}
+        onSkipToMain={handleSkipLoadingToMain}
       />
     );
   }
 
   const handleHomeClick = () => {
+    if (showProfile) {
+      setShowProfile(false);
+      return;
+    }
     if (currentProjectId) {
       setCurrentProjectId(null);
       return;
@@ -306,23 +394,27 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 dark:border-slate-700 dark:bg-gray-900 shadow-[0_24px_80px_rgba(15,23,42,0.28)] dark:shadow-[0_24px_80px_rgba(0,0,0,0.5)] ring-1 ring-slate-900/5 dark:ring-slate-700/50">
       <Navigation
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+        activeTab={showProfile ? "profile" : activeTab}
+        onTabChange={(tab) => {
+          setShowProfile(false);
+          setActiveTab(tab);
+        }}
         onHomeClick={handleHomeClick}
+        onProfileClick={() => setShowProfile(true)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))]">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-gray-900">
         {isTauri && (
-          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl">
+          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-slate-700/80 dark:bg-gray-900/88">
             <div
               className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
               onPointerDown={handleTitlebarPointerDown}
             >
               <div className="min-w-0 flex-1 select-none">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 sm:text-[15px]">
+                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 dark:text-gray-100 sm:text-[15px]">
                     SuperAI 影视剪辑
                   </h1>
                   {!!appVersion && (
@@ -336,7 +428,7 @@ const App: React.FC = () => {
               <div className="titlebar-no-drag hidden shrink-0 items-center gap-1 sm:flex">
                 <button
                   onClick={() => void TauriCommands.minimizeWindow()}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title="最小化"
                   aria-label="最小化窗口"
                 >
@@ -344,7 +436,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={handleToggleMaximize}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title={isMaximized ? "还原" : "最大化"}
                   aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
                 >
@@ -377,10 +469,45 @@ const App: React.FC = () => {
           <div
             className={
               activeTab === "settings"
-                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0"
-                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 "
+                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 dark:bg-gray-900"
+                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 dark:bg-gray-900"
             }
           >
+            {isTauri && showBackendStartupBanner && (
+              <div
+                className="mb-3 flex flex-col gap-2 rounded-xl border border-amber-200/90 bg-amber-50/95 px-3 py-2.5 text-amber-950 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"
+                role="alert"
+              >
+                <div className="flex min-w-0 gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                  <div className="min-w-0 text-[12px] leading-snug">
+                    <span className="font-medium">本地后端未就绪</span>
+                    <span className="text-amber-900/90 dark:text-amber-100/90">
+                      {" "}
+                      若已放行杀软仍无法连接，请查看临时目录日志{" "}
+                      <span className="break-all font-mono text-[11px]">super_auto_cut_backend.log</span>
+                      后重试。
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    className="titlebar-no-drag rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+                    onClick={() => void retryBackendConnection()}
+                  >
+                    重试连接
+                  </button>
+                  <button
+                    type="button"
+                    className="titlebar-no-drag rounded-lg border border-amber-300/80 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100/80 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-50 dark:hover:bg-amber-900/80"
+                    onClick={() => setShowBackendStartupBanner(false)}
+                  >
+                    关闭提示
+                  </button>
+                </div>
+              </div>
+            )}
       
               <MessageHost />
             <div
@@ -390,17 +517,31 @@ const App: React.FC = () => {
                   : "scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
               }
             >
-              {activeTab === "home" && !currentProjectId && (
+              {activeTab === "home" && !currentProjectId && !showProfile && (
                 <ProjectManagementPage
                   onEditProject={(projectId) => setCurrentProjectId(projectId)}
+                  onShowLogin={() => {
+                    const event = new CustomEvent("sacv:show-login-modal");
+                    window.dispatchEvent(event);
+                  }}
+                  onShowProfile={() => setShowProfile(true)}
                 />
               )}
 
-              {activeTab === "home" && currentProjectId && (
+              {activeTab === "home" && currentProjectId && !showProfile && (
                 <ProjectEditPage
                   projectId={currentProjectId}
                   onBack={() => setCurrentProjectId(null)}
+                  onShowLogin={() => {
+                    const event = new CustomEvent("sacv:show-login-modal");
+                    window.dispatchEvent(event);
+                  }}
+                  onShowProfile={() => setShowProfile(true)}
                 />
+              )}
+
+              {showProfile && (
+                <UserProfile onBack={() => setShowProfile(false)} />
               )}
 
               {activeTab === "settings" && (
@@ -417,6 +558,7 @@ const App: React.FC = () => {
             </div>
           </div>
         </main>
+        <TaskQueueFloatingBall />
       </div>
     </div>
   );

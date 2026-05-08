@@ -15,6 +15,7 @@ from ._runner_core import (
     CHUNK_TASK_SUFFIX,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_USER_PROMPT_TEMPLATE,
+    ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE,
     _build_copywriting_outline,
     _build_retrieval_candidates,
     _build_timeline_scenes,
@@ -26,6 +27,12 @@ from ._runner_core import (
     _format_ts,
     _post_check_items,
     _video_end_seconds,
+)
+from .prompt_options import (
+    build_language_system_addon,
+    build_original_ratio_system_addon,
+    normalize_original_ratio,
+    normalize_script_language,
 )
 
 
@@ -45,6 +52,8 @@ class OmniNarrationParams:
     system_prompt: Optional[str] = None
     user_prompt_template: Optional[str] = None
     script_language: str = "zh"
+    original_ratio: Optional[int] = None
+    interleave_mode: Optional[str] = None
 
 
 def parse_timestamp_pair_seconds(ts_range: str) -> Tuple[float, float]:
@@ -62,12 +71,7 @@ def parse_timestamp_pair_seconds(ts_range: str) -> Tuple[float, float]:
 
 
 def _language_system_addon(script_language: str) -> str:
-    lang = str(script_language or "zh").strip().lower()
-    if lang in {"en", "en-us", "英文", "english"}:
-        return "You must write all 'narration' text strictly in English; do not output Chinese or other languages."
-    if lang in {"zh", "zh-cn", "中文", "chinese"}:
-        return "你必须将所有 'narration' 文本严格用中文撰写；不得输出英文或其他语言。"
-    return ""
+    return build_language_system_addon(script_language)
 
 
 def build_chunk_metas_and_prompts(
@@ -104,14 +108,22 @@ def build_chunk_metas_and_prompts(
         gap_min_seconds=params.timeline_gap_min_seconds,
     )
     total_chunks = len(chunk_metas)
-    tpl = params.user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE
+    im = params.interleave_mode or "smart_interleave"
+    if im == "original_interleave":
+        tpl = params.user_prompt_template or ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE
+    else:
+        tpl = params.user_prompt_template or DEFAULT_USER_PROMPT_TEMPLATE
     sys_base = params.system_prompt or DEFAULT_SYSTEM_PROMPT
-    lang_hint = _language_system_addon(params.script_language)
-    system_prompt = f"{lang_hint}\n{sys_base}".strip() if lang_hint else sys_base
+    base_system_prompt = _build_system_prompt_with_options(
+        sys_base,
+        script_language=params.script_language,
+        original_ratio=params.original_ratio,
+        interleave_mode=params.interleave_mode,
+    )
 
     out: List[Dict[str, Any]] = []
     for meta in chunk_metas:
-        user_prompt = _build_user_prompt_for_chunk(
+        system_rules_prompt, user_prompt = _build_prompts_for_chunk(
             meta,
             results,
             all_shots,
@@ -124,20 +136,53 @@ def build_chunk_metas_and_prompts(
                 "chunk_index": int(meta["chunk_index"]),
                 "meta": meta,
                 "user_prompt": user_prompt,
-                "system_prompt": system_prompt,
+                "system_prompt": _append_system_rules(base_system_prompt, system_rules_prompt),
             }
         )
     return out
 
 
-def _build_user_prompt_for_chunk(
+def _build_system_prompt_with_options(
+    system_prompt: str,
+    *,
+    script_language: Optional[str],
+    original_ratio: Optional[int],
+    interleave_mode: Optional[str] = None,
+) -> str:
+    addons = [
+        build_language_system_addon(normalize_script_language(script_language)),
+        build_original_ratio_system_addon(
+            normalize_original_ratio(original_ratio) if original_ratio is not None else None,
+            interleave_mode=interleave_mode,
+        ),
+    ]
+    parts = [x for x in addons if x]
+    parts.append(system_prompt)
+    return "\n".join(parts).strip()
+
+
+def _append_system_rules(system_prompt: str, system_rules_prompt: str) -> str:
+    if not system_rules_prompt.strip():
+        return system_prompt
+    return f"{system_prompt}\n\n{system_rules_prompt.strip()}".strip()
+
+
+def _split_requirement_template(user_prompt_template: str) -> Tuple[str, str, bool]:
+    marker = "{dynamic_sections}"
+    if marker not in user_prompt_template:
+        return "", user_prompt_template, False
+    system_rules_template, user_input_template = user_prompt_template.split(marker, 1)
+    return system_rules_template.strip(), f"{marker}{user_input_template}", True
+
+
+def _build_prompts_for_chunk(
     meta: Dict[str, Any],
     results: List[Dict[str, Any]],
     all_shots: List[Dict[str, Any]],
     params: OmniNarrationParams,
     total_chunks: int,
     user_prompt_template: str,
-) -> str:
+) -> Tuple[str, str]:
     a, b = meta["slice"]
     chunk_results = results[a:b]
     chunk_copy = "\n".join([str(item.get("text", "") or "") for item in chunk_results]).strip()
@@ -176,12 +221,6 @@ def _build_user_prompt_for_chunk(
         win_end_sec=w_end,
     )
 
-    copy_block = (
-        "\n## 本批解说文案正文（须完整拆分，仅可拆分不得改写）\n"
-        "<chunk_copywriting>\n"
-        f"{chunk_copy}\n"
-        "</chunk_copywriting>\n"
-    )
     retrieval_block_c = (
         "## 检索候选摘要（每条仅 Top1）\n"
         "<retrieval_candidates>\n"
@@ -194,7 +233,7 @@ def _build_user_prompt_for_chunk(
         f"{timeline_text_c}\n"
         "</timeline_scenes>\n"
     )
-    dynamic_sections_c = "\n" + copy_block + retrieval_block_c + chunk_suffix_c + timeline_block_c
+    dynamic_sections_c = "\n" + retrieval_block_c + timeline_block_c
 
     fmt_kw = dict(
         copywriting=chunk_copy,
@@ -203,10 +242,15 @@ def _build_user_prompt_for_chunk(
         timeline_scenes=timeline_text_c,
         dynamic_sections=dynamic_sections_c,
     )
+    system_rules_template, user_input_template, moved_rules = _split_requirement_template(user_prompt_template)
+    if moved_rules:
+        system_rules_prompt = system_rules_template.format(**fmt_kw) if system_rules_template else ""
+        system_rules_prompt = _append_system_rules(system_rules_prompt, chunk_suffix_c)
+        return system_rules_prompt, user_input_template.format(**fmt_kw)
+
     user_prompt_c = user_prompt_template.format(**fmt_kw)
-    if "{dynamic_sections}" not in user_prompt_template:
-        user_prompt_c += chunk_suffix_c
-    return user_prompt_c
+    user_prompt_c += chunk_suffix_c
+    return "", user_prompt_c
 
 
 def post_check_chunk_items(items: List[Dict[str, Any]]) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -165,6 +166,24 @@ def build_narration_block(
     return "\n".join(parts).strip()
 
 
+def _strip_abstract(summary: str) -> str:
+    """从 summary 中去除"摘要："段落，只保留"详细"和"字幕"部分。
+
+    summary 格式示例：
+        详细：中景，侧机位...画面描述。
+        摘要：一家人围坐在餐桌前用餐...。
+        字幕：哎呀，真没教养
+    """
+    import re
+
+    if not summary:
+        return summary
+    # 移除 "摘要：" 开头到下一个标签（详细/字幕）或结尾的整个段落
+    # 标签可能是中文冒号或英文冒号
+    result = re.sub(r'\n?摘要[：:][^\n]*(\n|$)', '', summary)
+    return result.strip()
+
+
 def build_rerank_documents(matches: List[Dict[str, Any]], prompt_language: str = "zh") -> List[Dict[str, Any]]:
     docs: List[Dict[str, Any]] = []
     language = str(prompt_language or "zh").strip().lower()
@@ -176,17 +195,23 @@ def build_rerank_documents(matches: List[Dict[str, Any]], prompt_language: str =
         end = m.get("end")
         summary = (m.get("summary") or "").strip()
         embedding_score = float(m.get("score") or 0.0)
+        # 提取 "详细"+"字幕"，去掉 "摘要" 段落
+        summary_no_abstract = _strip_abstract(summary)
         if language == "en":
             text = f"Visual: {summary}\nTime: {start}-{end}".strip()
+            text_no_abstract = f"Visual: {summary_no_abstract}\nTime: {start}-{end}".strip()
         else:
             text = f"画面：{summary}\n时间：{start}-{end}".strip()
+            text_no_abstract = f"画面：{summary_no_abstract}\n时间：{start}-{end}".strip()
         docs.append(
             {
                 "shot_id": shot_id,
                 "start": start,
                 "end": end,
                 "summary": summary,
+                "summary_no_abstract": summary_no_abstract,
                 "text": text,
+                "text_no_abstract": text_no_abstract,
                 "embedding_score": embedding_score,
             }
         )
@@ -275,6 +300,24 @@ def get_shot_embedding(shot: Dict[str, Any]) -> Optional[List[float]]:
     return get_item_embedding(shot)
 
 
+def build_shot_embedding_text(shot: Dict[str, Any], *, prompt_language: str = "zh") -> str:
+    """
+    与 omni_multimodal_pipeline Step2 写入 embedding 时一致：优先 summary；
+    否则由 visual + 字幕拼出与 _build_shot_embedding_summary 相同的文本。
+    """
+    summary = str(shot.get("summary") or "").strip()
+    if summary:
+        return summary
+    visual = shot.get("visual") if isinstance(shot.get("visual"), dict) else {}
+    subtitle_text = str(shot.get("subtitle_full_text") or "")
+    language = str(prompt_language or "zh").strip().lower()
+    desc = str(visual.get("desc", "") or "")
+    brief = str(visual.get("brief", "") or "")
+    if language == "en":
+        return (f"Detail: {desc}\n" f"Brief: {brief}\n" f"Subtitles: {subtitle_text}").strip()
+    return (f"详细：{desc}\n" f"摘要：{brief}\n" f"字幕：{subtitle_text}").strip()
+
+
 def fine_rerank_json_schema() -> Dict[str, Any]:
     return {
         "name": "omni_fine_rerank",
@@ -305,8 +348,11 @@ def fine_rerank_json_schema() -> Dict[str, Any]:
 def load_fine_prompt_template(prompt_language: str) -> str:
     lang = str(prompt_language or "zh").strip().lower()
     name = "fine_prompt_en.md" if lang == "en" else "fine_prompt_zh.md"
-    base = Path(__file__).resolve().parents[1] / "reRank" / name
-    return base.read_text(encoding="utf-8")
+    if getattr(sys, 'frozen', False):
+        base = Path(sys._MEIPASS) / "modules" / "reRank"
+    else:
+        base = Path(__file__).resolve().parents[1] / "reRank"
+    return (base / name).read_text(encoding="utf-8")
 
 
 def build_embedding_search_results(
@@ -429,6 +475,43 @@ def merge_fine_scores_and_continuity(
     return out_results
 
 
+def _coerce_parsed_shot_id(token: str) -> Any:
+    t = (token or "").strip().strip('"').strip("'")
+    if not t:
+        return t
+    if t.isdigit():
+        return int(t)
+    return t
+
+
+def _parse_fine_llm_lines(s: str) -> List[Dict[str, Any]]:
+    """从模型纯文本中解析「shot_id|score」或「shot_id<TAB>score」行（score 在最后一列）。"""
+    out: List[Dict[str, Any]] = []
+    for line in (s or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "｜" in line:
+            parts = line.rsplit("｜", 1)
+        elif "|" in line:
+            parts = line.rsplit("|", 1)
+        elif "\t" in line:
+            parts = line.rsplit("\t", 1)
+        else:
+            continue
+        if len(parts) != 2:
+            continue
+        left, right = parts[0].strip(), parts[1].strip()
+        if not left:
+            continue
+        try:
+            score = float(right)
+        except (TypeError, ValueError):
+            continue
+        out.append({"shot_id": _coerce_parsed_shot_id(left), "score": score})
+    return out
+
+
 def parse_fine_llm_payload(raw: str) -> List[Dict[str, Any]]:
     s = (raw or "").strip()
     if not s:
@@ -445,11 +528,13 @@ def parse_fine_llm_payload(raw: str) -> List[Dict[str, Any]]:
     try:
         data = json.loads(s)
     except Exception:
-        return []
+        return _parse_fine_llm_lines(s)
     if isinstance(data, list):
-        return [x for x in data if isinstance(x, dict) and "shot_id" in x]
+        got = [x for x in data if isinstance(x, dict) and "shot_id" in x]
+        return got if got else _parse_fine_llm_lines(s)
     if isinstance(data, dict):
         items = data.get("items")
         if isinstance(items, list):
-            return [x for x in items if isinstance(x, dict) and "shot_id" in x]
-    return []
+            got = [x for x in items if isinstance(x, dict) and "shot_id" in x]
+            return got if got else _parse_fine_llm_lines(s)
+    return _parse_fine_llm_lines(s)

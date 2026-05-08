@@ -1,0 +1,466 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from fastapi import HTTPException
+
+from modules.projects_store import projects_store, Project
+from modules.task_progress_store import task_progress_store
+from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from modules.video_processor import video_processor
+from modules.ws_manager import manager
+from modules.fun_asr_service import fun_asr_service
+from modules.fun_asr_model_manager import FunASRPathManager, validate_model_dir
+from .asr_bcut import BcutASR
+from .asr_utils import utterances_to_srt
+
+
+logger = logging.getLogger(__name__)
+
+EXTRACT_SUBTITLE_SCOPE = "extract_subtitle"
+
+
+def _subtitle_executor_max_workers() -> int:
+    raw = str(os.environ.get("SUBTITLE_EXECUTOR_MAX_WORKERS") or "").strip()
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return 2
+
+
+_SUBTITLE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_subtitle_executor_max_workers(),
+    thread_name_prefix="subtitle_worker",
+)
+
+
+def _now_ts() -> str:
+    return datetime.now().isoformat()
+
+
+def _uploads_dir() -> Path:
+    return app_uploads_dir()
+
+
+def _to_web_path(p: Path) -> str:
+    return to_uploads_web_path(p)
+
+
+def _resolve_path(path_str: str) -> Path:
+    return resolve_uploads_path(path_str)
+
+
+def _ensure_parent_dir(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _compress_srt(content: str) -> str:
+    text = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    out_lines: List[str] = []
+    for b in blocks:
+        lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        timing_i = None
+        for i, ln in enumerate(lines[:3]):
+            if "-->" in ln:
+                timing_i = i
+                break
+        if timing_i is None:
+            continue
+        parts = lines[timing_i].split("-->")
+        if len(parts) < 2:
+            continue
+        start = parts[0].strip()
+        end = parts[1].strip()
+        text_lines = lines[timing_i + 1:]
+        t = " ".join(text_lines)
+        t = re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"<[^>]+>", "", t)
+        if not t:
+            continue
+        out_lines.append(f"[{start}-{end}] {t}")
+    return ("\n".join(out_lines) + ("\n" if out_lines else ""))
+
+
+def _parse_srt_content(content: str) -> List[Dict[str, Any]]:
+    def _parse_ts(ts: str) -> float:
+        h, m, rest = ts.split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+
+    segments: List[Dict[str, Any]] = []
+    norm = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = [ln.strip() for ln in norm.splitlines() if ln.strip()]
+    bracket_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2},\d{3})-(\d{2}:\d{2}:\d{2},\d{3})\]\s*(.+)$")
+    idx = 1
+    for ln in lines:
+        m = bracket_pattern.match(ln)
+        if not m:
+            continue
+        start_str, end_str, text = m.groups()
+        start_t = _parse_ts(start_str)
+        end_t = _parse_ts(end_str)
+        segments.append({
+            "id": str(idx),
+            "start_time": float(start_t),
+            "end_time": float(end_t),
+            "text": text,
+            "subtitle": text,
+        })
+        idx += 1
+    return segments
+
+
+async def _run_in_thread(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _SUBTITLE_EXECUTOR,
+        lambda: func(*args, **kwargs),
+    )
+
+
+async def _ws(
+    project_id: str,
+    type_: str,
+    phase: str,
+    message: str,
+    progress: Optional[int] = None,
+    task_id: Optional[str] = None,
+) -> None:
+    payload: Dict[str, Any] = {
+        "type": type_,
+        "scope": EXTRACT_SUBTITLE_SCOPE,
+        "project_id": project_id,
+        "task_id": task_id,
+        "phase": phase,
+        "message": message,
+        "timestamp": _now_ts(),
+    }
+    if type_ != "error" and progress is not None:
+        payload["progress"] = progress
+    elif type_ == "completed" and progress is not None:
+        payload["progress"] = progress
+    if task_id:
+        try:
+            task_progress_store.update_from_payload(payload)
+        except Exception:
+            logger.warning("task_progress_store 同步字幕进度失败", exc_info=True)
+    try:
+        await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+    except Exception as e:
+        logger.warning(f"WS broadcast failed: {e}")
+
+
+
+def _subtitle_meta(p: Project) -> Dict[str, Any]:
+    return {
+        "file_path": getattr(p, "subtitle_path", None),
+        "source": getattr(p, "subtitle_source", None),
+        "status": getattr(p, "subtitle_status", None),
+        "updated_by_user": bool(getattr(p, "subtitle_updated_by_user", False)),
+        "updated_at": getattr(p, "subtitle_updated_at", None),
+        "format": getattr(p, "subtitle_format", None),
+    }
+
+
+def _is_latest_subtitle_run(project_id: str, run_id: str) -> bool:
+    try:
+        p = projects_store.get_project(project_id)
+        if not p:
+            return False
+        cur = str(getattr(p, "subtitle_extract_run_id", "") or "")
+        return cur == str(run_id or "")
+    except Exception:
+        return False
+
+
+def _update_project_if_latest(project_id: str, run_id: str, updates: Dict[str, Any]) -> bool:
+    if not _is_latest_subtitle_run(project_id, run_id):
+        return False
+    try:
+        projects_store.update_project(project_id, updates)
+        return True
+    except Exception:
+        return False
+
+
+class ExtractSubtitleService:
+    @staticmethod
+    async def extract_subtitle(
+        project_id: str,
+        force: bool = False,
+        task_id: Optional[str] = None,
+        asr_provider: Optional[str] = None,
+        asr_model_key: Optional[str] = None,
+        asr_language: Optional[str] = None,
+        itn: bool = True,
+        hotwords: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        p: Optional[Project] = projects_store.get_project(project_id)
+        if not p:
+            await _ws(project_id, "error", "project_not_found", "项目不存在")
+            raise HTTPException(status_code=404, detail="项目不存在")
+
+        provider = (asr_provider or getattr(p, "asr_provider", None) or "bcut").strip().lower()
+        if provider not in {"bcut", "fun_asr"}:
+            provider = "bcut"
+        model_key = (asr_model_key or getattr(p, "asr_model_key", None) or "fun_asr_nano_2512").strip() or "fun_asr_nano_2512"
+        lang = (asr_language or getattr(p, "asr_language", None) or "中文").strip() or "中文"
+        hotwords_list = [str(x).strip() for x in (hotwords or []) if isinstance(x, (str, int, float)) and str(x).strip()]
+
+        subtitle_source = getattr(p, "subtitle_source", None)
+        subtitle_status = getattr(p, "subtitle_status", None)
+        subtitle_updated_by_user = bool(getattr(p, "subtitle_updated_by_user", False))
+        if subtitle_source == "user" and getattr(p, "subtitle_path", None):
+            raise HTTPException(status_code=409, detail="已上传字幕，无法提取；请先删除字幕")
+        if subtitle_status == "extracting" and not force:
+            current_run_id = str(getattr(p, "subtitle_extract_run_id", "") or "").strip()
+            request_run_id = str(task_id or "").strip()
+            if current_run_id and request_run_id and current_run_id == request_run_id:
+                raise HTTPException(status_code=409, detail="正在提取中")
+            refreshed = projects_store.get_project(project_id) or p
+            refreshed_status = str(getattr(refreshed, "subtitle_status", "") or "").strip().lower()
+            refreshed_path = getattr(refreshed, "subtitle_path", None)
+            if refreshed_status == "extracting" and not refreshed_path:
+                try:
+                    projects_store.update_project(project_id, {"subtitle_status": "failed"})
+                except Exception:
+                    pass
+            else:
+                raise HTTPException(status_code=409, detail="正在提取中")
+        if subtitle_updated_by_user and not force:
+            raise HTTPException(status_code=409, detail="字幕已被修改，若需覆盖请传 force=true")
+        if subtitle_source == "extracted" and getattr(p, "subtitle_path", None) and not force and subtitle_status == "ready":
+            subtitle_text = ""
+            try:
+                subtitle_abs = _resolve_path(str(getattr(p, "subtitle_path", "") or ""))
+                if subtitle_abs.exists():
+                    subtitle_text = subtitle_abs.read_text(encoding="utf-8")
+            except Exception:
+                subtitle_text = ""
+            await _ws(project_id, "completed", "done", "复用已提取字幕", 100, task_id=task_id)
+            return {
+                "segments": _parse_srt_content(subtitle_text),
+                "subtitle_meta": _subtitle_meta(p),
+                "task_id": task_id,
+            }
+
+        run_id = (str(task_id).strip() if task_id else "") or uuid.uuid4().hex
+
+        if provider == "fun_asr":
+            try:
+                pm = FunASRPathManager()
+                model_dir = pm.model_path(model_key)
+            except KeyError:
+                await _ws(project_id, "error", "funasr_model_unknown", f"未知 FunASR 模型：{model_key}", task_id=run_id)
+                raise HTTPException(status_code=400, detail=f"未知 FunASR 模型：{model_key}")
+            except Exception as e:
+                await _ws(project_id, "error", "funasr_model_error", f"读取 FunASR 模型信息失败：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="读取 FunASR 模型信息失败")
+
+            ok, missing = validate_model_dir(model_key, model_dir)
+            if not ok:
+                missing_text = "、".join([str(x) for x in (missing or []) if str(x).strip()]) or "文件缺失"
+                await _ws(
+                    project_id,
+                    "error",
+                    "funasr_model_missing",
+                    f"FunASR 模型不可用：{model_key}（{missing_text}），请先在设置下载并校验",
+                    task_id=run_id,
+                )
+                raise HTTPException(status_code=400, detail=f"FunASR 模型不可用：{model_key}（{missing_text}）")
+
+        video_path = (getattr(p, "video_path", None) or "").strip()
+        if not video_path:
+            await _ws(project_id, "error", "video_missing", "未找到可用的视频文件", task_id=run_id)
+            raise HTTPException(status_code=400, detail="未找到可用的视频文件")
+        video_abs = _resolve_path(video_path)
+        if not video_abs.exists():
+            await _ws(project_id, "error", "video_missing", "视频文件不存在", task_id=run_id)
+            raise HTTPException(status_code=400, detail="视频文件不存在")
+
+        projects_store.update_project(project_id, {
+            "subtitle_status": "extracting",
+            "subtitle_source": "extracted" if subtitle_source != "user" else subtitle_source,
+            "subtitle_updated_at": _now_ts(),
+            "subtitle_extract_run_id": run_id,
+            "asr_provider": provider,
+            "asr_model_key": model_key if provider == "fun_asr" else None,
+            "asr_language": lang if provider == "fun_asr" else None,
+            "chunk_audio_paths": [],
+            "chunk_results": [],
+        })
+        # 与 DB 同步写入进度存储，避免「已 extracting、尚未发出第一条 WS」的窗口期被误判为陈旧任务；亦是崩溃恢复对照依据
+        try:
+            task_progress_store.set_state(
+                EXTRACT_SUBTITLE_SCOPE,
+                project_id,
+                run_id,
+                "running",
+                1.0,
+                "字幕提取已启动",
+                phase="starting",
+            )
+        except Exception:
+            logger.warning("task_progress_store 初始化字幕提取任务失败", exc_info=True)
+
+        old_chunk_paths = getattr(p, "chunk_audio_paths", None) or []
+        if isinstance(old_chunk_paths, list):
+            for wp in old_chunk_paths:
+                try:
+                    f = _resolve_path(str(wp))
+                    if f.exists():
+                        f.unlink()
+                except Exception:
+                    pass
+
+        await _ws(project_id, "progress", "start", "开始提取字幕", 1, task_id=run_id)
+
+        if provider == "bcut":
+            await _ws(project_id, "progress", "validating_asr", "验证 ASR 服务可用性", 10, task_id=run_id)
+            asr_check = await _run_in_thread(BcutASR.test_connection)
+            if not asr_check.get("success", False):
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(
+                    project_id,
+                    "error",
+                    "asr_unavailable",
+                    asr_check.get("error") or asr_check.get("message") or "ASR服务不可用",
+                    task_id=run_id,
+                )
+                raise HTTPException(status_code=400, detail=asr_check.get("error") or asr_check.get("message") or "ASR服务不可用")
+        else:
+            await _ws(project_id, "progress", "validating_funasr", "验证 FunASR 模型可用性", 10, task_id=run_id)
+
+        audio_abs: Optional[Path] = None
+        audio_web: Optional[str] = None
+        if not audio_abs:
+            # 清理旧音频
+            old_audio_path = getattr(p, "audio_path", None)
+            if old_audio_path:
+                try:
+                    old_f = _resolve_path(old_audio_path)
+                    if old_f.exists():
+                        old_f.unlink()
+                        await _ws(project_id, "progress", "cleanup_old_audio", "清理旧音频", 25, task_id=run_id)
+                except Exception:
+                    pass
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            audio_out = _ensure_parent_dir(_uploads_dir() / "audios" / f"{project_id}_audio_{ts}.mp3")
+            await _ws(project_id, "progress", "extract_audio", "提取音频中", 30, task_id=run_id)
+            ok_audio = await video_processor.extract_audio_mp3(str(video_abs), str(audio_out))
+            if not ok_audio:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败", task_id=run_id)
+                raise HTTPException(status_code=500, detail="音频提取失败")
+            audio_abs = audio_out
+            audio_web = _to_web_path(audio_out)
+            _update_project_if_latest(project_id, run_id, {"audio_path": audio_web})
+            await _ws(project_id, "progress", "audio_ready", "音频提取完成", 45, task_id=run_id)
+
+        utterances: Optional[List[Dict[str, Any]]] = None
+        if provider == "bcut":
+            await _ws(project_id, "progress", "asr_start", "ASR 识别中", 55, task_id=run_id)
+            asr = BcutASR(str(audio_abs))
+            try:
+                data = await _run_in_thread(asr.run)
+            except Exception as e:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "asr_failed", f"语音识别服务异常：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="语音识别失败")
+
+            u = data.get("utterances") if isinstance(data, dict) else None
+            utterances = u if isinstance(u, list) else None
+        else:
+            await _ws(project_id, "progress", "funasr_start", "FunASR 识别中", 55, task_id=run_id)
+
+            def _on_progress(pct: int, msg: str) -> None:
+                try:
+                    asyncio.create_task(_ws(project_id, "progress", "funasr_progress", msg, int(pct), task_id=run_id))
+                except Exception:
+                    pass
+
+            try:
+                # 不传 max_concurrency，由 fun_asr_service 按实际运行设备解析（亦可用 SACV_FUNASR_MAX_CONCURRENCY）
+                utterances = await fun_asr_service.transcribe_to_utterances(
+                    audio_path=audio_abs,
+                    model_key=model_key,
+                    language=lang,
+                    itn=bool(itn),
+                    hotwords=hotwords_list,
+                    device=None,
+                    on_progress=_on_progress,
+                    max_concurrency=None,
+                )
+            except Exception as e:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}", task_id=run_id)
+                raise HTTPException(status_code=500, detail="语音识别失败")
+
+        if not isinstance(utterances, list) or not utterances:
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "asr_failed", "语音识别失败", task_id=run_id)
+            raise HTTPException(status_code=500, detail="语音识别失败")
+
+        await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90, task_id=run_id)
+        srt_text = utterances_to_srt(utterances)
+        compressed = _compress_srt(srt_text)
+
+        if not _is_latest_subtitle_run(project_id, run_id):
+            await _ws(project_id, "cancelled", "stale", "检测到新的字幕提取任务，本次结果已丢弃", 100, task_id=run_id)
+            p2 = projects_store.get_project(project_id) or p
+            return {
+                "segments": [],
+                "subtitle_meta": _subtitle_meta(p2),
+                "task_id": run_id,
+            }
+
+        ts2 = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        srt_out = _ensure_parent_dir(_uploads_dir() / "subtitles" / f"{project_id}_subtitle_{ts2}.srt")
+        try:
+            srt_out.write_text(compressed, encoding="utf-8")
+        except Exception:
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "subtitle_saved_failed", "字幕写入失败", task_id=run_id)
+            raise HTTPException(status_code=500, detail="字幕写入失败")
+
+        web_path = _to_web_path(srt_out)
+        _update_project_if_latest(project_id, run_id, {
+            "subtitle_path": web_path,
+            "subtitle_source": "extracted",
+            "subtitle_status": "ready",
+            "subtitle_updated_by_user": False,
+            "subtitle_updated_at": _now_ts(),
+            "subtitle_format": "compressed_srt_v1",
+        })
+        await _ws(project_id, "progress", "subtitle_saved", "字幕落盘完成", 95, task_id=run_id)
+
+        segments = _parse_srt_content(compressed)
+        await _ws(project_id, "progress", "subtitle_parsed", "字幕解析完成", 98, task_id=run_id)
+        await _ws(project_id, "completed", "done", "提取字幕成功", 100, task_id=run_id)
+
+        p2 = projects_store.get_project(project_id) or p
+        return {
+            "segments": segments,
+            "subtitle_meta": _subtitle_meta(p2),
+            "task_id": run_id,
+        }
+
+
+extract_subtitle_service = ExtractSubtitleService()

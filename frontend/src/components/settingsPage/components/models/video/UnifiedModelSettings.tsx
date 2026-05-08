@@ -145,7 +145,7 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
 
       {isLocalModel ? (
         <div className="space-y-6">
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-gray-700" />
               <h4 className="text-md font-semibold text-gray-900">模型管理</h4>
@@ -304,7 +304,7 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
             </div>
           </section>
 
-          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3">
+          <section className="bg-white/80 backdrop-blur border rounded-xl p-5 shadow-sm space-y-3 dark:bg-gray-900/80 dark:border-slate-700">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h4 className="text-md font-semibold text-gray-900">模型测试</h4>
               <button
@@ -365,7 +365,7 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
             <button
               onClick={testModelConnection}
               disabled={testingConnection || !currentConfig.api_key}
-              className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             >
               {testingConnection ? "测试中..." : "测试连接"}
             </button>

@@ -115,7 +115,6 @@
 
 ### `backend/modules/qwen3_tts_voice_store.py`
 ### `backend/modules/qwen_online_tts_voice_store.py`
-### `backend/modules/voxcpm_tts_voice_store.py`
 
 **改动目的：语音参考音与 `ref_audio_url` 均基于 `uploads_dir()` 与 `to_uploads_web_path()`，删除文件时亦按统一根定位。**
 
@@ -163,7 +162,6 @@
 | `backend/services/extract_scene_service.py` | 依赖统一后的 subtitle 工具 |
 | `backend/modules/qwen3_tts_voice_store.py` | 同上 |
 | `backend/modules/qwen_online_tts_voice_store.py` | 同上 |
-| `backend/modules/voxcpm_tts_voice_store.py` | 同上 |
 | `backend/scripts/mirror_tencent_tts_audio.py` | 脚本与线上一致 |
 
 ---

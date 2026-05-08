@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import time
@@ -5,7 +6,11 @@ import threading
 import subprocess
 from typing import Callable, Optional
 
+from modules.ffmpeg_utils import get_ffmpeg_cuda_prefix, resolve_ffmpeg_bin
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class _TorchNetNotAvailable(RuntimeError):
@@ -475,19 +480,23 @@ class TransNetV2Torch:
         if progress_callback:
             progress_callback(1.0)
 
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
-        if start_time is not None:
-            cmd += ["-ss", f"{float(start_time):.6f}"]
-        if duration is not None:
-            cmd += ["-t", f"{float(duration):.6f}"]
-        cmd += [
-            "-i", video_fn,
-            "-an", "-sn", "-dn",
-            "-vf", "scale=48:27",
-            "-pix_fmt", "rgb24",
-            "-f", "rawvideo",
-            "pipe:1",
-        ]
+        ffmpeg_bin = resolve_ffmpeg_bin()
+
+        def _build_cmd(hwaccel_prefix: tuple[str, ...] = ()):
+            cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostdin", *hwaccel_prefix]
+            if start_time is not None:
+                cmd += ["-ss", f"{float(start_time):.6f}"]
+            if duration is not None:
+                cmd += ["-t", f"{float(duration):.6f}"]
+            cmd += [
+                "-i", video_fn,
+                "-an", "-sn", "-dn",
+                "-vf", "scale=48:27",
+                "-pix_fmt", "rgb24",
+                "-f", "rawvideo",
+                "pipe:1",
+            ]
+            return cmd
 
         kwargs = {
             "stdin": subprocess.DEVNULL,
@@ -504,14 +513,58 @@ class TransNetV2Torch:
             except Exception:
                 pass
 
-        try:
-            p = subprocess.Popen(cmd, **kwargs)
-        except FileNotFoundError as exc:
-            raise ModuleNotFoundError("For `predict_video` function `ffmpeg` command line tool must be installed.") from exc
-        out, err = p.communicate()
-        if p.returncode != 0 or not out:
-            msg = (err or b"")[:2000].decode("utf-8", errors="ignore")
-            raise RuntimeError(msg or "ffmpeg_extract_failed")
+        def _run_cmd(cmd):
+            try:
+                p = subprocess.Popen(cmd, **kwargs)
+            except FileNotFoundError as exc:
+                raise ModuleNotFoundError("For `predict_video` function `ffmpeg` command line tool must be installed.") from exc
+            return p.communicate() + (p.returncode,)
+
+        def _run_cmd_with_decode_progress(cmd):
+            """ffmpeg communicate 可能长时间阻塞（整段 rawvideo 灌内存），期间周期性回调 2–9.9 供上层展示心跳。"""
+            if not progress_callback:
+                return _run_cmd(cmd)
+            holder: list = []
+
+            def worker():
+                try:
+                    holder.append(_run_cmd(cmd))
+                except Exception as e:
+                    holder.append(e)
+
+            th = threading.Thread(target=worker, daemon=True)
+            th.start()
+            ping = 2.0
+            while th.is_alive():
+                th.join(timeout=2.0)
+                if th.is_alive():
+                    ping = min(9.85, ping + 0.4)
+                    progress_callback(ping)
+            if not holder:
+                raise RuntimeError("ffmpeg decode thread produced no result")
+            first = holder[0]
+            if isinstance(first, BaseException):
+                raise first
+            return first
+
+        cuda_prefix = get_ffmpeg_cuda_prefix()
+        out = None
+        err = b""
+        rc = 0
+        if cuda_prefix:
+            logger.info("[TransNetV2][decode][GPU] predict_video ffmpeg hwaccel=cuda")
+            out, err, rc = _run_cmd_with_decode_progress(_build_cmd(cuda_prefix))
+            if rc != 0 or not out:
+                msg = (err or b"")[:500].decode("utf-8", errors="ignore").strip()
+                logger.warning("[TransNetV2][decode][GPU->CPU] CUDA hwaccel 解码失败，回退 CPU: %s", msg or f"rc={rc}")
+                out = None
+
+        if out is None:
+            logger.info("[TransNetV2][decode][CPU] predict_video ffmpeg hwaccel=off")
+            out, err, rc = _run_cmd_with_decode_progress(_build_cmd(()))
+            if rc != 0 or not out:
+                msg = (err or b"")[:2000].decode("utf-8", errors="ignore")
+                raise RuntimeError(msg or "ffmpeg_extract_failed")
 
         video = np.frombuffer(out, np.uint8).reshape([-1, 27, 48, 3])
 

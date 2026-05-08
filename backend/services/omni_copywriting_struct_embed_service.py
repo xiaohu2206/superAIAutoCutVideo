@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni 项目：解说文案结构化（与在线视觉共用「视频理解模型」）+ 向量化（向量模型设置）。
+Omni 项目：解说文案结构化（与在线视觉共用「视频理解模型」）+ 向量化（本地 BGE-base-zh-v1.5）。
 与 visual / generate_script 等业务模块解耦；产出 uploads/omni_copywriting_embed/{project_id}/。
 """
 
@@ -15,11 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from modules.config.ai_search_shot_model_config import ai_search_shot_model_config_manager
-from modules.config.video_model_config import video_model_config_manager
+from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
     load_structuring_prompt,
@@ -31,7 +28,14 @@ from modules.omni_copywriting_struct_embed import (
 from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
-from services.extract_subtitle_service import _to_web_path, _uploads_dir
+from modules.project_task_queue import project_task_queue
+from services.ai_models.ai_service import LLM_HTTP_TIMEOUT_SEC
+from services.asr.extract_subtitle_service import _to_web_path, _uploads_dir
+from services.ai_models.omni_local_bge_embedding import (
+    LOCAL_BGE_MODEL_DISPLAY_NAME,
+    assert_local_bge_model_available,
+    encode_text_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +52,7 @@ def _video_cfg_to_ai_cfg(cfg: Any) -> AIModelConfig:
         base_url=cfg.base_url,
         model_name=cfg.model_name,
         temperature=cfg.temperature,
-        timeout=cfg.timeout,
+        timeout=LLM_HTTP_TIMEOUT_SEC,
         extra_params={
             **(cfg.extra_params or {}),
             "stream_output": bool(getattr(cfg, "stream_output", False)),
@@ -86,7 +90,7 @@ async def _call_structuring_chunk(
     prompt = prompt_template.replace("{copywriting}", chunk_text)
     messages = [ChatMessage(role="user", content=prompt)]
 
-    active_vl = video_model_config_manager.get_active_config()
+    active_vl = resolve_video_model_for_online_vision()
     if not active_vl or active_vl.provider not in _STRUCT_ONLINE_VL_PROVIDERS:
         raise ValueError(
             "文案结构化需与在线视觉分析共用「视频理解模型」：请在设置中选择 "
@@ -152,40 +156,6 @@ async def _call_structuring_chunk(
     return []
 
 
-async def _embed_one_text(
-    emb_cfg: Any,
-    text: str,
-) -> List[float]:
-    headers = {
-        "Authorization": f"Bearer {emb_cfg.api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {"model": emb_cfg.embedding_model, "input": text}
-    timeout = httpx.Timeout(float(emb_cfg.timeout_seconds or 300))
-    last_err: Optional[Exception] = None
-    retries = max(1, int(emb_cfg.max_retries or 3))
-    base_sleep = float(emb_cfg.retry_sleep_seconds or 2.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in range(retries):
-            try:
-                r = await client.post(str(emb_cfg.embedding_base_url), headers=headers, json=payload)
-                r.raise_for_status()
-                data = r.json()
-                emb = data["data"][0]["embedding"]
-                if isinstance(emb, list) and emb:
-                    return emb
-                raise RuntimeError("embedding 为空")
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                last_err = e
-                if attempt + 1 >= retries:
-                    break
-                delay = min(60.0, base_sleep * (2**attempt))
-                await asyncio.sleep(delay)
-    raise RuntimeError(f"向量化失败: {last_err}")
-
-
 class OmniCopywritingStructEmbedService:
     SCOPE = _SCOPE
 
@@ -238,7 +208,7 @@ class OmniCopywritingStructEmbedService:
             task_id=task_id,
             status="pending",
             progress=0,
-            message="准备文案结构化与向量化…",
+            message="正在解析内容…",
             phase="preparing",
         )
 
@@ -249,6 +219,7 @@ class OmniCopywritingStructEmbedService:
         plang = str(prompt_language or "zh").strip().lower()
 
         async def _run() -> None:
+            await project_task_queue.acquire(project_id, self.SCOPE, task_id)
             try:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
@@ -270,7 +241,7 @@ class OmniCopywritingStructEmbedService:
                     task_id=task_id,
                     status="processing",
                     progress=5,
-                    message=f"结构化中（共 {len(chunks)} 段）…",
+                    message=f"文案处理中（共 {len(chunks)} 段）…",
                     phase="structuring",
                 )
 
@@ -317,9 +288,10 @@ class OmniCopywritingStructEmbedService:
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
 
-                emb_cfg = ai_search_shot_model_config_manager.get_config()
-                if not emb_cfg or not (emb_cfg.api_key or "").strip():
-                    raise ValueError("请先在「向量模型」设置中配置向量接口与 API Key")
+                try:
+                    assert_local_bge_model_available()
+                except (FileNotFoundError, RuntimeError) as e:
+                    raise ValueError(str(e)) from e
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -337,7 +309,10 @@ class OmniCopywritingStructEmbedService:
                 lock = asyncio.Lock()
                 llm_label = ""
                 try:
-                    av = video_model_config_manager.get_active_config()
+                    try:
+                        av = resolve_video_model_for_online_vision()
+                    except Exception:
+                        av = None
                     if av:
                         llm_label = f"{av.provider}/{av.model_name}".strip("/")
                 except Exception:
@@ -353,9 +328,9 @@ class OmniCopywritingStructEmbedService:
                         out = dict(row)
                         try:
                             emb_in = build_omni_embedding_input(row, prompt_language=plang)
-                            emb = await _embed_one_text(emb_cfg, emb_in)
+                            emb = await encode_text_async(emb_in)
                             out["embedding_input"] = emb_in
-                            out["embedding_model"] = str(emb_cfg.embedding_model or "")
+                            out["embedding_model"] = LOCAL_BGE_MODEL_DISPLAY_NAME
                             out["embedding"] = emb
                         except Exception as e:
                             out["error"] = str(e)
@@ -381,7 +356,7 @@ class OmniCopywritingStructEmbedService:
                     "meta": {
                         "project_id": project_id,
                         "structured_count": len(merged_items),
-                        "embedding_model": emb_cfg.embedding_model,
+                        "embedding_model": LOCAL_BGE_MODEL_DISPLAY_NAME,
                         "content_model_hint": llm_label,
                         "prompt_language": plang,
                         "generated_at": datetime.now().isoformat(),
@@ -405,7 +380,7 @@ class OmniCopywritingStructEmbedService:
                     task_id=task_id,
                     status="completed",
                     progress=100,
-                    message="文案结构化与向量化完成",
+                    message="任务已完成",
                     phase="done",
                 )
             except asyncio.CancelledError:
@@ -427,6 +402,8 @@ class OmniCopywritingStructEmbedService:
                     message=f"失败: {e}",
                     phase="failed",
                 )
+            finally:
+                await project_task_queue.release(project_id)
 
         asyncio.create_task(_run())
         return {"task_id": task_id, "status": "pending", "message": "任务已提交"}

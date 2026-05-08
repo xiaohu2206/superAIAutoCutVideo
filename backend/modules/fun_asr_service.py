@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from modules.app_paths import uploads_dir
+from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
 from modules.fun_asr_acceleration import get_fun_asr_preferred_device, prepare_windows_dll_search_paths
 from modules.fun_asr_model_manager import FUN_ASR_MODEL_REGISTRY, FunASRPathManager, validate_model_dir
 
@@ -201,80 +202,6 @@ def _patch_inspect_getsource_for_frozen() -> bool:
         return False
 
 
-def _find_ffmpeg_bin(name: str) -> Optional[str]:
-    env_path = os.environ.get("FFMPEG_PATH")
-    if env_path:
-        try:
-            p = Path(env_path)
-            if p.exists():
-                return str(p)
-        except Exception:
-            pass
-    env_dir = os.environ.get("FFMPEG_DIR") or os.environ.get("FFMPEG_HOME")
-    if env_dir:
-        try:
-            p = Path(env_dir) / name
-            if p.exists():
-                return str(p)
-        except Exception:
-            pass
-    hit = shutil.which(name)
-    if hit:
-        return hit
-    candidates: List[Path] = []
-    try:
-        exe_dir = Path(sys.executable).resolve().parent
-        candidates.append(exe_dir / "resources" / name)
-        candidates.append(exe_dir / name)
-    except Exception:
-        pass
-    try:
-        root = Path(__file__).resolve().parents[2]
-        candidates.append(root / "src-tauri" / "resources" / name)
-        candidates.append(root / "src-tauri" / "target" / "debug" / "resources" / name)
-        candidates.append(root / "src-tauri" / "target" / "release" / "resources" / name)
-    except Exception:
-        pass
-    install_dir = os.environ.get("SACV_INSTALL_DIR")
-    if install_dir:
-        try:
-            candidates.append(Path(install_dir) / "resources" / name)
-        except Exception:
-            pass
-    try:
-        here = Path(__file__).resolve()
-        candidates.append(here.parent.parent / "resources" / name)
-    except Exception:
-        pass
-    try:
-        candidates.append(Path.cwd() / "resources" / name)
-    except Exception:
-        pass
-    try:
-        if os.name == "nt":
-            candidates.append(Path("C:/Program Files/ffmpeg/bin") / name)
-            candidates.append(Path("C:/ffmpeg/bin") / name)
-            candidates.append(Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / name)
-            candidates.append(Path("C:/ProgramData/chocolatey/bin") / name)
-    except Exception:
-        pass
-    for c in candidates:
-        try:
-            if c.exists():
-                return str(c)
-        except Exception:
-            continue
-    return None
-
-
-def _find_ffmpeg() -> Optional[str]:
-    return _find_ffmpeg_bin("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-
-
-def _find_ffprobe() -> Optional[str]:
-    return _find_ffmpeg_bin("ffprobe.exe" if os.name == "nt" else "ffprobe")
-
-
 def _ensure_dependency_ready() -> Tuple[bool, str]:
     global _FUNASR_DIAG_LOGGED
     try:
@@ -440,7 +367,7 @@ def _tmp_dir() -> Path:
 
 
 def _ffprobe_duration_ms(path: Path) -> Optional[int]:
-    ffprobe = _find_ffprobe()
+    ffprobe = resolve_ffprobe_bin()
     if not ffprobe:
         return None
     cmd = [
@@ -466,7 +393,7 @@ def _ffprobe_duration_ms(path: Path) -> Optional[int]:
         return None
 
 def _ffprobe_sample_rate(path: Path) -> Optional[int]:
-    ffprobe = _find_ffprobe()
+    ffprobe = resolve_ffprobe_bin()
     if not ffprobe:
         return None
     cmd = [
@@ -495,7 +422,7 @@ def _ffprobe_sample_rate(path: Path) -> Optional[int]:
 
 
 def _extract_segment_to_wav(src_audio: Path, start_ms: int, end_ms: int, out_wav: Path) -> None:
-    ffmpeg = _find_ffmpeg()
+    ffmpeg = resolve_ffmpeg_bin()
     if not ffmpeg:
         raise RuntimeError("missing_dependency:ffmpeg")
     start_s = max(0.0, float(start_ms) / 1000.0)

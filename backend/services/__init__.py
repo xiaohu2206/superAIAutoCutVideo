@@ -5,7 +5,7 @@
 提供各种业务服务的实现
 """
 
-from .ai_service import AIService, ai_service, get_ai_service
+from .ai_models.ai_service import AIService, ai_service, get_ai_service
 
 __all__ = [
     "AIService",

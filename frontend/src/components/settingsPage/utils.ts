@@ -129,7 +129,7 @@ export const getContentDefaultModelName = (provider: string): string => {
     "302ai": "gemini-3.1-pro-preview",
     qwen: "qwen3-max",
     doubao: "doubao-seed-1-8-251228",
-    deepseek: "deepseek-chat",
+    deepseek: "deepseek-v4-pro",
     openrouter: "openai/gpt-4o-mini",
     custom_openai: "gpt-4o-mini",
   };

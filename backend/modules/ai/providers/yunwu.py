@@ -1,20 +1,58 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-云雾API平台模型提供商实现
+整合平台模型提供商实现
 遵循 OpenAI Chat Completions 接口规范，支持结构化输出（response_format）
 """
 
 from typing import Dict, List, Any, Optional
+import asyncio
+import json
 import logging
+from datetime import datetime
+from pathlib import Path
 
-from ..base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse
+from ..base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse, LlmProviderResponseError
 
 logger = logging.getLogger(__name__)
 
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent.parent
+_YUNWU_HTTP_DEBUG_DIR = _BACKEND_DIR / "logs"
+
+
+def _write_yunwu_http_debug_file(
+    *,
+    status_code: int,
+    request_url: str,
+    model_name: str,
+    content_type: str,
+    body_text: str,
+) -> None:
+    """在同步上下文中将原始 HTTP 信息写入文件，供 asyncio.to_thread 调用以免阻塞事件循环。"""
+    try:
+        _YUNWU_HTTP_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        fn = f"yunwu_http_{status_code}_{ts}.txt"
+        path = _YUNWU_HTTP_DEBUG_DIR / fn
+        text = "\n".join(
+            [
+                f"status_code={status_code}",
+                f"url={request_url}",
+                f"model={model_name}",
+                f"content_type={content_type}",
+                f"body_length={len(body_text)}",
+                "",
+                "--- body (truncated 500k) ---",
+                (body_text or "")[:500000],
+            ]
+        )
+        path.write_text(text, encoding="utf-8")
+    except Exception as werr:  # noqa: BLE001
+        logger.warning("写入 yunwu HTTP 调试文件失败: %s", werr)
+
 
 class YunwuProvider(AIProviderBase):
-    """云雾API平台模型提供商"""
+    """整合平台模型提供商"""
 
     def __init__(self, config: AIModelConfig):
         if not config.base_url:
@@ -79,7 +117,7 @@ class YunwuProvider(AIProviderBase):
                 finish_reason=choice.get("finish_reason"),
             )
         except Exception as e:
-            logger.error(f"解析云雾API响应失败: {e}")
+            logger.error(f"解析整合平台API响应失败: {e}")
             raise ValueError(f"解析响应失败: {e}")
 
     async def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -97,6 +135,9 @@ class YunwuProvider(AIProviderBase):
             )
             thinking = payload.pop("thinking", None)
             _ = thinking
+            # 应用内参数勿传给 OpenAI 兼容网关；部分上游对未知字段或 stream 语义处理异常会直接掐断连接。
+            payload.pop("stream_output", None)
+            payload.pop("stream", None)
 
             extra_headers = {}
             eh = payload.pop("extra_headers", None)
@@ -115,23 +156,101 @@ class YunwuProvider(AIProviderBase):
                 json=payload,
                 headers=headers,
             )
-            response_data = response.json()
-            if response.status_code >= 400:
+            status_code = int(response.status_code)
+            raw_text = response.text or ""
+            ct = (response.headers.get("content-type") or "").split(";")[0].strip()
+
+            response_data: Any
+            if not raw_text.strip():
+                if status_code >= 400:
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text="(empty body)",
+                    )
+                    raise LlmProviderResponseError(
+                        f"整合平台API 错误: HTTP {status_code} 响应体为空或仅空白"
+                        "（常见于 5xx；已写入 backend/logs/ 下 yunwu_http_*.txt 便于对比网关/HTML 页）",
+                        status_code=status_code,
+                        raw_body="",
+                        content_type=ct,
+                    )
+                response_data = {}
+            else:
+                try:
+                    response_data = json.loads(raw_text)
+                except json.JSONDecodeError as je:
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text=raw_text,
+                    )
+                    logger.error(
+                        "整合平台API 响应体非 JSON: status=%s content_type=%s len=%s preview=%r",
+                        status_code,
+                        ct,
+                        len(raw_text),
+                        raw_text[:800],
+                    )
+                    raise LlmProviderResponseError(
+                        f"整合平台API 响应体非有效 JSON (HTTP {status_code}): {je!s}；"
+                        f"已写入 backend/logs/ 下 yunwu_http_*.txt",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    ) from je
+
+            if status_code >= 400:
                 err = response_data.get("error") if isinstance(response_data, dict) else None
                 if isinstance(err, dict):
-                    raise Exception(f"云雾API错误: {err.get('message') or response.text}")
-                else:
-                    raise Exception(f"云雾API请求失败: {response.text}")
+                    raise LlmProviderResponseError(
+                        f"整合平台API错误: {err.get('message') or raw_text[:2000]}",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    )
+                # 非标准 JSON 错误体已在上方 json.loads 分支处理
+                if not (isinstance(response_data, dict) and response_data.get("error")):
+                    await asyncio.to_thread(
+                        _write_yunwu_http_debug_file,
+                        status_code=status_code,
+                        request_url=str(self.config.base_url),
+                        model_name=self.config.model_name,
+                        content_type=ct,
+                        body_text=raw_text,
+                    )
+                raise LlmProviderResponseError(
+                    f"整合平台API请求失败: {raw_text[:2000]}",
+                    status_code=status_code,
+                    raw_body=raw_text,
+                    content_type=ct,
+                )
 
             if isinstance(response_data, dict) and "error" in response_data:
                 error_info = response_data["error"]
                 if isinstance(error_info, dict):
-                    raise Exception(f"云雾API错误: {error_info.get('message', 'Unknown error')}")
-                raise Exception(f"云雾API错误: {str(error_info)}")
+                    raise LlmProviderResponseError(
+                        f"整合平台API错误: {error_info.get('message', 'Unknown error')}",
+                        status_code=status_code,
+                        raw_body=raw_text,
+                        content_type=ct,
+                    )
+                raise LlmProviderResponseError(
+                    f"整合平台API错误: {str(error_info)}",
+                    status_code=status_code,
+                    raw_body=raw_text,
+                    content_type=ct,
+                )
 
             return response_data
         except Exception as e:
-            logger.error(f"云雾API请求失败: {e}")
+            logger.error(f"整合平台API请求失败: {e}")
             raise
 
     def _extract_stream_content(self, chunk_data: Dict[str, Any]) -> Optional[str]:
@@ -164,55 +283,30 @@ class YunwuProvider(AIProviderBase):
     async def test_connection(self) -> Dict[str, Any]:
         try:
             test_messages = [
-                ChatMessage(role="system", content="你是结构化输出测试助手。请严格以json输出。"),
-                ChatMessage(
-                    role="user",
-                    content="返回一个对象，包含字段：ok(bool)、provider(string)、model(string)、timestamp(ISO8601)。仅输出JSON。",
-                ),
+                ChatMessage(role="user", content="请回复'连接成功-SUCCESS'。"),
             ]
-            schema = {
-                "name": "connectivity_check",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "ok": {"type": "boolean", "description": "连接是否正常"},
-                        "provider": {"type": "string", "description": "提供商名称"},
-                        "model": {"type": "string", "description": "模型名称"},
-                        "timestamp": {"type": "string", "description": "ISO8601时间戳"},
-                    },
-                    "required": ["ok", "provider", "model", "timestamp"],
-                    "additionalProperties": False,
-                },
-            }
-            response = await self.chat_completion(
-                test_messages,
-                extra_params={
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": schema,
-                    }
-                },
-            )
-            structured_output: Optional[Dict[str, Any]] = None
+            response = await self.chat_completion(test_messages)
             raw_content = response.content or ""
-            try:
-                import json as _json
-
-                structured_output = _json.loads(raw_content)
-            except Exception:
-                structured_output = None
+            if not raw_content.strip():
+                return {
+                    "success": False,
+                    "message": "连接已建立，但模型返回内容为空，请检查模型配置或接口状态",
+                    "provider": self.config.provider,
+                    "model": self.config.model_name,
+                    "response_preview": "",
+                    "raw_content": raw_content,
+                    "error": "empty_response",
+                }
             return {
                 "success": True,
-                "message": "连接测试成功",
+                "message": raw_content[:100] + "..." if len(raw_content) > 100 else raw_content,
                 "provider": self.config.provider,
                 "model": self.config.model_name,
                 "response_preview": raw_content[:100] + "..." if len(raw_content) > 100 else raw_content,
-                "structured_output": structured_output,
                 "raw_content": raw_content,
             }
         except Exception as e:
-            logger.error(f"云雾API连接测试失败: {e}")
+            logger.error(f"整合平台API连接测试失败: {e}")
             return {
                 "success": False,
                 "message": f"连接测试失败: {str(e)}",

@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import subprocess
 
+from modules.ffmpeg_utils import ffprobe_get_duration, resolve_ffmpeg_bin
+from modules.subprocess_no_console import acreate_subprocess_exec
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,54 +22,6 @@ VOICES_CACHE_PATH = SERVICE_DATA_DIR / "edge_voices_cache.json"
 
 async def _ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-
-
-async def _ffprobe_duration(path: str) -> Optional[float]:
-    try:
-        WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else None
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=duration",
-            "-of", "default=nk=1:nw=1",
-            path,
-        ]
-        kwargs = {"creationflags": WIN_NO_WINDOW} if os.name == "nt" else {}
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **kwargs
-        )
-        out, _ = await proc.communicate()
-        if proc.returncode == 0:
-            try:
-                return float(out.decode().strip())
-            except Exception:
-                pass
-        cmd2 = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=nk=1:nw=1",
-            path,
-        ]
-        proc2 = await asyncio.create_subprocess_exec(
-            *cmd2,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **kwargs
-        )
-        out2, _ = await proc2.communicate()
-        if proc2.returncode == 0:
-            try:
-                return float(out2.decode().strip())
-            except Exception:
-                return None
-        return None
-    except Exception:
-        return None
 
 
 def _speed_ratio_to_rate(speed_ratio: Optional[float]) -> str:
@@ -267,7 +222,7 @@ class EdgeTtsService:
                             raise
                         with open(str(out_path), "wb") as f:
                             f.write(audio_data)
-                    dur = await _ffprobe_duration(str(out_path))
+                    dur = await ffprobe_get_duration(str(out_path))
                     if delete_after:
                         try:
                             if out_path.exists():
@@ -330,7 +285,7 @@ async def _mac_say_to_mp3(text: str, voice: Optional[str], mp3_path: Path) -> bo
         if isinstance(voice, str) and voice.strip():
             args += ["-v", voice.strip()]
         args += ["-o", str(tmp_aiff), text]
-        p1 = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        p1 = await acreate_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         _, _ = await p1.communicate()
         if p1.returncode != 0:
             try:
@@ -339,8 +294,9 @@ async def _mac_say_to_mp3(text: str, voice: Optional[str], mp3_path: Path) -> bo
             except Exception:
                 pass
             return False
-        p2 = await asyncio.create_subprocess_exec(
-            "ffmpeg",
+        ffmpeg_bin = resolve_ffmpeg_bin() or "ffmpeg"
+        p2 = await acreate_subprocess_exec(
+            ffmpeg_bin,
             "-y",
             "-i",
             str(tmp_aiff),

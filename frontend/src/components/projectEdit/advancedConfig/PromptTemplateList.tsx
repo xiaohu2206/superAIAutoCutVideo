@@ -38,12 +38,12 @@ const PromptTemplateList: React.FC<Props> = ({
   onCreateTemplate,
 }) => {
   return (
-    <div className="border-gray-200">
+    <div className="border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 mb-2">{`解说风格（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2 dark:text-gray-300">{`解说风格（${narrationType || NarrationType.SHORT_DRAMA}）`}</label>
       </div>
       <div
-        className="max-h-[min(70vh,520px)] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth [scrollbar-gutter:stable] rounded-lg border border-gray-100 bg-gray-50/40"
+        className="max-h-[min(70vh,520px)] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth [scrollbar-gutter:stable] rounded-lg border border-gray-100 bg-gray-50/40 dark:border-gray-700 dark:bg-gray-900/40"
         role="region"
         aria-label="解说风格模板列表"
       >
@@ -53,15 +53,15 @@ const PromptTemplateList: React.FC<Props> = ({
                 relative flex flex-col p-3 rounded-lg border cursor-pointer transition-all duration-200 min-h-[80px]
                 ${
                   selectedIdOrKey === featureKey
-                    ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm"
-                    : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm"
+                    ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm dark:border-violet-500 dark:bg-violet-900/20 dark:ring-violet-500"
+                    : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-violet-600"
                 }
              `}
           onClick={() => onSelect("official", featureKey)}
         >
           <div className="flex items-center justify-between mb-1 gap-2">
             <span
-              className={`text-sm font-medium shrink min-w-0 ${selectedIdOrKey === featureKey ? "text-violet-900" : "text-gray-900"}`}
+              className={`text-sm font-medium shrink min-w-0 ${selectedIdOrKey === featureKey ? "text-violet-900 dark:text-violet-200" : "text-gray-900 dark:text-gray-200"}`}
             >
               默认风格
             </span>
@@ -73,7 +73,7 @@ const PromptTemplateList: React.FC<Props> = ({
           </div>
           {defaultOfficialDescription ? (
             <p
-              className="text-xs text-gray-500 leading-snug line-clamp-4 mb-2"
+              className="text-xs text-gray-500 dark:text-gray-400 leading-snug line-clamp-4 mb-2"
               title={defaultOfficialDescription}
             >
               {defaultOfficialDescription}
@@ -85,7 +85,7 @@ const PromptTemplateList: React.FC<Props> = ({
                 e.stopPropagation();
                 onPreview(featureKey);
               }}
-              className="text-xs text-blue-600 hover:underline"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
             >
               预览
             </button>
@@ -101,15 +101,15 @@ const PromptTemplateList: React.FC<Props> = ({
                   relative flex flex-col p-3 rounded-lg border cursor-pointer transition-all duration-200 min-h-[80px]
                   ${
                     isSelected
-                      ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm"
-                      : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm"
+                      ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm dark:border-violet-500 dark:bg-violet-900/20 dark:ring-violet-500"
+                      : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-violet-600"
                   }
                 `}
               onClick={() => onSelect("official", it.id_or_key)}
             >
               <div className="flex items-center justify-between mb-1 gap-2">
                 <span
-                  className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-violet-900" : "text-gray-900"}`}
+                  className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-violet-900 dark:text-violet-200" : "text-gray-900 dark:text-gray-200"}`}
                   title={it.name}
                 >
                   {it.name}
@@ -121,7 +121,7 @@ const PromptTemplateList: React.FC<Props> = ({
                 )}
               </div>
               {it.description ? (
-                <p className="text-xs text-gray-500 leading-snug line-clamp-4 mb-2" title={it.description}>
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug line-clamp-4 mb-2" title={it.description}>
                   {it.description}
                 </p>
               ) : null}
@@ -131,7 +131,7 @@ const PromptTemplateList: React.FC<Props> = ({
                     e.stopPropagation();
                     onPreview(it.id_or_key);
                   }}
-                  className="text-xs text-blue-600 hover:underline"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                 >
                   预览
                 </button>
@@ -151,19 +151,19 @@ const PromptTemplateList: React.FC<Props> = ({
                   relative flex flex-col p-3 rounded-lg border cursor-pointer transition-all duration-200 min-h-[80px]
                   ${
                     isSelected
-                      ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm"
-                      : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm"
+                      ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm dark:border-violet-500 dark:bg-violet-900/20 dark:ring-violet-500"
+                      : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-violet-600"
                   }
                 `}
                 onClick={() => onSelect("user", it.id_or_key)}
               >
                 <div className="flex items-center justify-between mb-1 gap-2">
                   <div className="flex items-center space-x-2 overflow-hidden min-w-0">
-                    <span className="text-[10px] px-1.5 py-0.5 bg-yellow-50 text-yellow-600 rounded border border-yellow-200 whitespace-nowrap shrink-0">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-yellow-50 text-yellow-600 rounded border border-yellow-200 whitespace-nowrap shrink-0 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-700">
                       自定义
                     </span>
                     <span
-                      className={`text-sm font-medium truncate ${isSelected ? "text-violet-900" : "text-gray-900"}`}
+                      className={`text-sm font-medium truncate ${isSelected ? "text-violet-900 dark:text-violet-200" : "text-gray-900 dark:text-gray-200"}`}
                       title={it.name}
                     >
                       {it.name}
@@ -176,23 +176,23 @@ const PromptTemplateList: React.FC<Props> = ({
                   )}
                 </div>
                 {it.description ? (
-                  <p className="text-xs text-gray-500 leading-snug line-clamp-3 mb-2 pl-0" title={it.description}>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-2 pl-0" title={it.description}>
                     {it.description}
                   </p>
                 ) : null}
                 <div className="mt-auto flex justify-end space-x-3" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => onPreview(it.id_or_key)} className="text-xs text-blue-600 hover:underline">
+                  <button onClick={() => onPreview(it.id_or_key)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
                     预览
                   </button>
                   <button
                     onClick={() => onEditUserTemplate(it.id_or_key)}
-                    className="text-xs text-gray-600 hover:underline hover:text-gray-900"
+                    className="text-xs text-gray-600 hover:underline hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
                   >
                     编辑
                   </button>
                   <button
                     onClick={() => onDeleteUserTemplate(it.id_or_key, it.name)}
-                    className="h-6 w-6 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                    className="h-6 w-6 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
                     title="删除"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -204,7 +204,7 @@ const PromptTemplateList: React.FC<Props> = ({
         <button
           type="button"
           onClick={onCreateTemplate}
-          className="relative flex flex-col items-center justify-center p-3 rounded-lg border border-dashed border-violet-300 text-violet-600 bg-white hover:border-violet-500 hover:bg-violet-50 transition-all duration-200 min-h-[80px]"
+          className="relative flex flex-col items-center justify-center p-3 rounded-lg border border-dashed border-violet-300 text-violet-600 bg-white hover:border-violet-500 hover:bg-violet-50 transition-all duration-200 min-h-[80px] dark:border-violet-700 dark:text-violet-400 dark:bg-gray-900 dark:hover:border-violet-500 dark:hover:bg-violet-900/20"
         >
           <span className="text-sm font-medium">新建自定义模板</span>
         </button>

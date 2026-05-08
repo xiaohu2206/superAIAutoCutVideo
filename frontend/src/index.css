@@ -23,6 +23,25 @@
     overflow: hidden;
     background: transparent;
   }
+
+  @media (prefers-color-scheme: dark) {
+    html {
+      color-scheme: dark;
+    }
+
+    /* 无显式 bg/text 类时，原生控件否则会保持 UA 白底黑字 */
+    textarea,
+    input[type="text"],
+    input[type="search"],
+    input[type="password"],
+    input[type="email"],
+    input[type="url"],
+    input[type="tel"],
+    input[type="number"],
+    select {
+      @apply bg-gray-800 text-gray-100 placeholder:text-gray-400;
+    }
+  }
 }
 
 /* 自定义组件样式 */
@@ -213,13 +232,17 @@ html::-webkit-scrollbar {
     @apply bg-gray-900 text-white;
     --tw-ring-offset-color: #111827;
   }
-  
+
   .card {
     @apply bg-gray-800 border-gray-700;
   }
   
   .input {
     @apply bg-gray-800 border-gray-600 text-white;
+  }
+
+  .select {
+    @apply bg-gray-800 border-gray-600 text-white placeholder:text-gray-400;
   }
   
   .btn-secondary {

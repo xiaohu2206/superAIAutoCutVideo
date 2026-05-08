@@ -22,6 +22,11 @@ export type LegacyScriptLengthOption = "短篇" | "中偏" | "长偏";
 
 export type ScriptLanguage = "zh" | "en";
 
+export type InterleaveMode = "smart_interleave" | "original_interleave";
+
+/** 全感知（omni）生成档位：低/中/高消耗与效果 */
+export type OmniEffectTier = "low" | "medium" | "high";
+
 /**
  * 项目状态枚举
  */
@@ -91,6 +96,13 @@ export interface SubtitleResult {
   subtitle_meta: SubtitleMeta;
 }
 
+/** POST /omni/extract-subtitle-and-run-pipeline 返回 data 形状 */
+export interface OmniExtractSubtitleAndRunPipelineResult {
+  subtitle_extracted: boolean;
+  subtitle: SubtitleResult | null;
+  pipeline: { task_id: string; status: string; message: string };
+}
+
 /**
  * 项目接口
  */
@@ -99,9 +111,12 @@ export interface Project {
   name: string; // 项目名称
   description?: string; // 项目描述
   project_type?: "subtitle" | "visual" | "omni";
+  /** 仅 omni 项目：生成档位 low | medium | high */
+  omni_effect_tier?: OmniEffectTier | null;
   narration_type: NarrationType; // 解说类型
   script_length?: ScriptLengthOption | LegacyScriptLengthOption;
   original_ratio?: number | null;
+  interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status: ProjectStatus; // 项目状态
@@ -114,6 +129,8 @@ export interface Project {
   subtitle_path?: string; // 字幕文件路径
   subtitle_source?: SubtitleSource;
   subtitle_status?: SubtitleStatus;
+  /** 字幕提取任务 id（WS 进度），刷新后可据此恢复订阅 */
+  subtitle_extract_run_id?: string | null;
   subtitle_updated_by_user?: boolean;
   subtitle_updated_at?: string | null;
   subtitle_format?: string | null;
@@ -189,6 +206,7 @@ export interface CreateProjectRequest {
   description?: string;
   project_type?: "subtitle" | "visual" | "omni";
   narration_type?: NarrationType;
+  omni_effect_tier?: OmniEffectTier;
 }
 
 /**
@@ -198,9 +216,11 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   project_type?: "subtitle" | "visual" | "omni";
+  omni_effect_tier?: OmniEffectTier | null;
   narration_type?: NarrationType;
   script_length?: ScriptLengthOption;
   original_ratio?: number | null;
+  interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
   status?: ProjectStatus;

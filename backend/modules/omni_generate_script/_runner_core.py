@@ -10,11 +10,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
 )
 
-DEFAULT_USER_PROMPT_TEMPLATE = """你必须将所有 'narration' 文本严格用中文撰写；不得输出英文或其他语言。
-OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为「播放原片+序号」）。
+DEFAULT_USER_PROMPT_TEMPLATE = """OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为「播放原片+序号」）。
 你必须仅输出一个JSON对象，键为'items'。每条时间段长度不能低于1秒。每条必须包含'id','timestamp','narration','OST'。不得输出除JSON以外的任何文字。
 一次性输出完整脚本，items 不可为空；将全部解说文案对齐到镜头时间轴。
-**解说文案铁律（高于一切其他表述）**：输入的解说文案**在任何情况下**均不得增删改——不得增加字句、不得删减句段、不得改写润色或同义替换、不得纠错或调整语序；仅允许把**原文**拆成多条 items 的 narration（每条为原文的连续片段，拼接后须与原文逐字一致）。OST=1 条目的「播放原片+序号」格式不受此限，但不得夹带额外解说。
+**解说文案铁律（高于一切其他表述）**：输入的解说文案**在任何情况下**均不得增删改——不得增加字句、不得删减句段、不得改写润色或同义替换、不得纠错或调整语序(严令禁止出现文案顺序错乱问题)；仅允许把**原文**拆成多条 items 的 narration（每条为原文的连续片段，拼接后须与原文逐字一致）。OST=1 条目的「播放原片+序号」格式不受此限，但不得夹带额外解说。
+**原文顺序与 id（必须同时满足）**：将所有 OST=0 的 narration 按 `id` 从小到大依次拼接，必须与给定解说文案原文逐字完全一致。任意两段 OST=0 解说在原文中的先后，必须与它们在 items 里按 `id` 递增时的先后一致——**禁止**为配合爆点、镜头时间或叙事节奏而调换两段 OST=0 原文的先后顺序；仅允许在相邻 OST=0 段之间插入 OST=1。`timestamp` 与爆点骨架只决定每段落在哪一段时间、是否插原声，**不得**改变 OST=0 文本在全文中的先后。
 你必须保证每条'narration'的配音时长与对应timestamp镜头时长匹配。按自然语速估算：中文约3-4字/秒（例如10个字约2.5-3.5秒），英文约2-3词/秒。若文本预计配音时长明显短于或长于镜头时长，必须改变镜头时长，不可以修改解说文案。每条预计配音时长与镜头时长误差尽量控制在±0.5秒内。
 以下为必须严格使用的解说文案文本：所有 OST=0 条目的'narration'必须仅为该文案的拆分结果；不得编造或新增任何未在原文出现的字句；上文「解说文案铁律」永久适用。
 
@@ -49,7 +49,7 @@ OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为
 - **第一步（爆点先行）**：
   - **若下方提示词中出现 `<viral_shots_preextract>`**：该块为上游模型基于本批镜头列表预提取的「爆款/爆点镜头」清单。你必须以它为**首要骨架**安排本批节奏与 OST（原声优先落在这些 shot/时间附近）；再与「全片镜头列表」「检索候选摘要」交叉校验——仅当镜头描述或时间戳明显矛盾时，才允许在**同一叙事意图**下微调时间区间或改用相邻镜头合并区间，不得凭空新增与列表无关的爆点。
   - **若未出现 `<viral_shots_preextract>`**：在编排任何解说条目之前，须先通读镜头信息（含 vision、字幕、时间戳）与检索候选，自行在影片中识别并锁定「爆点镜头」——包括但不限于：情绪高潮、剧情反转/揭示、名场面或爽点、强冲突/对峙、高光动作、关键对白或声音驱动的戏剧性瞬间；为每个爆点明确对应的时间戳区间（可合并相邻镜头），作为后续节奏与 OST 取舍的骨架。
-- **第二步（撰写脚本）**：在已建立的爆点时间轴框架下，将解说文案拆分并对齐到具体镜头时间段，生成下方 JSON；输出中仅包含 items，无需另写爆点清单，但条目顺序与 timestamp 选择须体现「先定爆点、再铺解说」的逻辑。
+- **第二步（撰写脚本）**：在已建立的爆点时间轴框架下，将解说文案按**原文从左到右顺序**拆成 OST=0 条目并对齐到具体镜头时间段，生成下方 JSON（`id` 递增时所有 OST=0 的 narration 依次拼接即原文，见上文「原文顺序与 id」）；可在其间穿插 OST=1。输出中仅包含 items，无需另写爆点清单；`timestamp` 与 OST 取舍须体现「先定爆点、再铺解说」，但**不得**违反 OST=0 的原文先后顺序。
 
 ## 任务目标
 结合镜头（scene）时间轴将解说文案对齐到对应时间段；视频时间轴上可跳过无关片段，但**输入解说文案须全部使用且无遗漏**（仅拆分，见上文「解说文案铁律」）；**优先围绕已确定的爆点镜头组织叙事节奏**（有 `<viral_shots_preextract>` 时以其为锚，无则依第一步自识别结果），避免平铺直叙忽略高潮。
@@ -61,7 +61,7 @@ OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为
 4. （可选）**爆款预提取**：若存在 `<viral_shots_preextract>`，须优先采纳其 shot_id 与时间戳作为爆点锚点，并与第 2、3 项对照校验后再写 items。
 
 ## 任务要求
-- 按时间顺序抽取镜头（时间戳可大幅跳跃），且须覆盖完整解说文案（仅拆分、不省略）。
+- 按时间顺序抽取镜头（时间戳可大幅跳跃），且须覆盖完整解说文案（仅拆分、不省略）；OST=0 解说在 items 中的先后仍须严格等于原文阅读顺序（见「原文顺序与 id」），不可因镜头跳跃而打乱文案顺序。
 - 无字幕镜头：依据 vision 判断剧情/动作/情绪以确定解说拆分位置。
 - 有字幕镜头：可结合字幕与 vision 对齐解说。
 - 时间戳格式：HH:MM:SS,mmm-HH:MM:SS,mmm。
@@ -82,6 +82,7 @@ OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为
 
 ## 重要约束
 - 不允许连续长时间纯解说或纯原声（需要节奏变化）；节奏调整仅通过 timestamp 与 OST 切换实现，**不得**以删改解说文案为代价。
+- 非常重要的约束，不允许长时间的纯原声，绝对不允许
 
 {dynamic_sections}
 """
@@ -90,10 +91,94 @@ CHUNK_TASK_SUFFIX = """
 
 ## 分批任务说明（必须遵守）
 - 本批为第 {batch_cur} / {batch_total} 批。
-- 本批解说文案对应全剧序号：第 {line_start}～{line_end} 条（共 {line_count} 条），请完整处理本批全部文案，不得遗漏；对这批文案同样遵守 user 提示中的「解说文案铁律」（仅拆分、不得增删改）。
+- 本批解说文案对应全剧序号：第 {line_start}～{line_end} 条（共 {line_count} 条），请完整处理本批全部文案，不得遗漏；对这批文案同样遵守上文「解说文案铁律」与「原文顺序与 id」（仅拆分、不得增删改；本批内 OST=0 仍按该批给定文案从左到右对应 `id` 递增顺序）。
 - 本批时间轴窗口为 {win_start_fmt} - {win_end_fmt}（约 {win_start_sec:.1f}s～{win_end_sec:.1f}s），请主要从下方「全片镜头列表」中落在该时间范围内的镜头选取画面；允许少量超出以衔接叙事。
 - 仍须遵守「先定本批爆点骨架，再撰写本批解说脚本」：若本批提示中含 `<viral_shots_preextract>`，则以其中预提取结果为爆点骨架；否则在本批时间窗口内自行识别爆点。爆点分析不落盘，仅体现在本批 items 的时间轴与 OST 取舍上。
 - 输出的 items **仅包含本批**解说内容，id 从 1 起连续编号。
+"""
+
+ORIGINAL_INTERLEAVE_USER_PROMPT_TEMPLATE = """OST=0 为解说（narration 为解说文案）；OST=1 为原声（narration 为「播放原片N」，N从1递增）。
+你必须仅输出一个JSON对象，键为'items'。每条时间段长度不能低于1秒。每条必须包含'id','timestamp','narration','OST'。不得输出除JSON以外的任何文字。
+一次性输出完整脚本，items 不可为空；将全部解说文案对齐到镜头时间轴。
+**解说文案铁律（高于一切其他表述）**：输入的解说文案**在任何情况下**均不得增删改——不得增加字句、不得删减句段、不得改写润色或同义替换、不得纠错或调整语序(严令禁止出现文案顺序错乱问题)；仅允许把**原文**拆成多条 items 的 narration（每条为原文的连续片段，拼接后须与原文逐字一致）。OST=1 条目的「播放原片N」格式不受此限，但不得夹带额外解说。
+**原文顺序与 id（必须同时满足）**：将所有 OST=0 的 narration 按 `id` 从小到大依次拼接，必须与给定解说文案原文逐字完全一致。任意两段 OST=0 解说在原文中的先后，必须与它们在 items 里按 `id` 递增时的先后一致——**禁止**为配合爆点、镜头时间或叙事节奏而调换两段 OST=0 原文的先后顺序。
+**穿插规则（原片穿插模式）**：每段 OST=0 解说之后必须紧跟一段 OST=1 原声片段（narration 为「播放原片N」，N从1依次递增）。即输出格式为：解说1 → 播放原片1 → 解说2 → 播放原片2 → ... 严禁连续两段 OST=0 或连续两段 OST=1。`timestamp` 与爆点骨架只决定每段落在哪一段时间。
+你必须保证每条'narration'的配音时长与对应timestamp镜头时长匹配。按自然语速估算：中文约3-4字/秒（例如10个字约2.5-3.5秒），英文约2-3词/秒。若文本预计配音时长明显短于或长于镜头时长，必须改变镜头时长，不可以修改解说文案。每条预计配音时长与镜头时长误差尽量控制在±0.5秒内。
+以下为必须严格使用的解说文案文本：所有 OST=0 条目的'narration'必须仅为该文案的拆分结果；不得编造或新增任何未在原文出现的字句；上文「解说文案铁律」永久适用。
+
+## 输出格式示例
+请严格按照以下JSON格式输出，绝不添加任何其他文字、说明或代码块标记：
+{{
+  "items": [
+    {{
+      "id": 1,
+      "timestamp": "00:00:0x,000-00:00:0x,x00",
+      "narration": "……",
+      "OST": 0
+    }},
+    {{
+      "id": 2,
+      "timestamp": "00:00:xx,x00-00:00:xx,000",
+      "narration": "播放原片1",
+      "OST": 1
+    }},
+    {{
+      "id": 3,
+      "timestamp": "00:00:xx,000-00:00:xx,000",
+      "narration": "xxx",
+      "OST": 0
+    }},
+    {{
+      "id": 4,
+      "timestamp": "00:00:xx,x00-00:00:xx,000",
+      "narration": "播放原片2",
+      "OST": 1
+    }}
+  ]
+}}
+
+# 解说脚本生成任务（视觉推理）
+
+## 工作流程（必须遵守）
+- **第一步（爆点先行）**：
+  - **若下方提示词中出现 `<viral_shots_preextract>`**：该块为上游模型基于本批镜头列表预提取的「爆款/爆点镜头」清单。你必须以它为**首要骨架**安排本批节奏与 OST 取舍；再与「全片镜头列表」「检索候选摘要」交叉校验——仅当镜头描述或时间戳明显矛盾时，才允许在**同一叙事意图**下微调时间区间或改用相邻镜头合并区间，不得凭空新增与列表无关的爆点。
+  - **若未出现 `<viral_shots_preextract>`**：在编排任何解说条目之前，须先通读镜头信息（含 vision、字幕、时间戳）与检索候选，自行在影片中识别并锁定「爆点镜头」——包括但不限于：情绪高潮、剧情反转/揭示、名场面或爽点、强冲突/对峙、高光动作、关键对白或声音驱动的戏剧性瞬间；为每个爆点明确对应的时间戳区间（可合并相邻镜头），作为后续节奏与 OST 取舍的骨架。
+- **第二步（撰写脚本）**：在已建立的爆点时间轴框架下，将解说文案按**原文从左到右顺序**拆成 OST=0 条目并对齐到具体镜头时间段，生成下方 JSON（`id` 递增时所有 OST=0 的 narration 依次拼接即原文，见上文「原文顺序与 id」）；每条 OST=0 后紧跟 OST=1。输出中仅包含 items，无需另写爆点清单；`timestamp` 与 OST 取舍须体现「先定爆点、再铺解说」，但**不得**违反 OST=0 的原文先后顺序。
+
+## 任务目标
+结合镜头（scene）时间轴将解说文案对齐到对应时间段；视频时间轴上可跳过无关片段，但**输入解说文案须全部使用且无遗漏**（仅拆分，见上文「解说文案铁律」）；**优先围绕已确定的爆点镜头组织叙事节奏**（有 `<viral_shots_preextract>` 时以其为锚，无则依第一步自识别结果），避免平铺直叙忽略高潮。
+
+## 输入说明
+1. 解说文案：完整叙述文本，必须整体使用并仅作拆分（不得增删改，见「解说文案铁律」）。
+2. 镜头信息：带精确时间戳的全片镜头列表，含字幕（如有）与画面理解（vision）。
+3. 检索候选：文案与镜头的检索匹配结果，每条文案仅 Top1 候选，优先参考。
+4. （可选）**爆款预提取**：若存在 `<viral_shots_preextract>`，须优先采纳其 shot_id 与时间戳作为爆点锚点，并与第 2、3 项对照校验后再写 items。
+
+## 任务要求
+- 按时间顺序抽取镜头（时间戳可大幅跳跃），且须覆盖完整解说文案（仅拆分、不省略）；OST=0 解说在 items 中的先后仍须严格等于原文阅读顺序（见「原文顺序与 id」），不可因镜头跳跃而打乱文案顺序。
+- 无字幕镜头：依据 vision 判断剧情/动作/情绪以确定解说拆分位置。
+- 有字幕镜头：可结合字幕与 vision 对齐解说。
+- 时间戳格式：HH:MM:SS,mmm-HH:MM:SS,mmm。
+- 在关键情绪爆发点、重要对白、爽点瞬间保留原声。
+
+## 核心规则
+优先使用原声（OST=1）的情况：
+- 关键剧情对白（反转/伏笔/揭示）
+- 强情绪爆发（愤怒/崩溃/告白）
+- 经典台词（有传播力）
+- 声音驱动场景（枪声/爆炸/哭声等）
+
+必须使用解说（OST=0）的情况：
+- 信息压缩（剪辑时间跳跃；**不得**用「总结式改写」代替原文，解说词仍须为原文拆分）
+- 背景补充（人物关系/设定等仍须来自原文表述）
+- 无有效对白的片段
+- 过渡镜头
+
+## 重要约束
+- 必须严格遵循解说-原片-解说-原片的交替节奏；节奏调整仅通过 timestamp 与 OST 切换实现，**不得**以删改解说文案为代价。
+- 非常重要的约束，不允许长时间的纯原声，绝对不允许
+
+{dynamic_sections}
 """
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -126,18 +211,50 @@ def _truncate_text(text: str, max_len: int) -> str:
 
 def _pick_scene_text(shot: Dict[str, Any]) -> str:
     visual = shot.get("visual") or {}
-    summary = _normalize_spaces(shot.get("summary", ""))
-    if summary:
-        return summary
-    parts = [
-        f"画面：{_normalize_spaces(visual.get('brief') or visual.get('desc') or '')}"
-        if (visual.get("brief") or visual.get("desc"))
-        else "",
-        f"动作：{_normalize_spaces(visual.get('action', ''))}" if visual.get("action") else "",
-        f"情绪：{_normalize_spaces(visual.get('emotion', ''))}" if visual.get("emotion") else "",
-        f"字幕：{_normalize_spaces(shot.get('subtitle_full_text', ''))}" if shot.get("subtitle_full_text") else "",
-    ]
-    return _normalize_spaces(" | ".join([p for p in parts if p]))
+    brief = _normalize_spaces(visual.get("brief") or "")
+    sub = _normalize_spaces(shot.get("subtitle_full_text") or "")
+    parts: List[str] = []
+    if brief:
+        parts.append(brief)
+    if sub:
+        parts.append(f"字幕：{sub}")
+    return _normalize_spaces(" | ".join(parts))
+
+
+def _parse_summary_subtitle_from_blob(blob: str) -> Tuple[str, str]:
+    """从检索 match 的 summary 长文本中拆出「摘要」「字幕」段落。"""
+    blob = (blob or "").strip()
+    if not blob:
+        return "", ""
+    m_sub = re.search(r"(?:^|\r?\n)\s*字幕：\s*(.+)$", blob, re.MULTILINE | re.DOTALL)
+    sub_from_blob = _normalize_spaces(m_sub.group(1)) if m_sub else ""
+    m_abs = re.search(
+        r"(?:^|\r?\n)\s*摘要：\s*(.+?)(?=\r?\n\s*字幕：|\Z)", blob, re.MULTILINE | re.DOTALL
+    )
+    abstract = _normalize_spaces(m_abs.group(1)) if m_abs else ""
+    if not abstract and not sub_from_blob:
+        abstract = _normalize_spaces(re.sub(r"^详细：\s*", "", blob, flags=re.MULTILINE))
+        return abstract, ""
+    if not abstract and sub_from_blob:
+        before = re.split(r"\r?\n\s*字幕：", blob, maxsplit=1)[0]
+        abstract = _normalize_spaces(re.sub(r"^详细：\s*", "", before.strip()))
+    return abstract, sub_from_blob
+
+
+def _pick_retrieval_candidate_scene_text(match: Dict[str, Any]) -> str:
+    """检索候选展示用：优先 brief+字幕；为空则用 summary 中的摘要/字幕。"""
+    primary = _pick_scene_text(match)
+    if primary:
+        return primary
+    sub = _normalize_spaces(match.get("subtitle_full_text") or "")
+    abstract, sub_blob = _parse_summary_subtitle_from_blob(match.get("summary") or "")
+    sub = sub or sub_blob
+    parts: List[str] = []
+    if abstract:
+        parts.append(f"摘要：{abstract}")
+    if sub:
+        parts.append(f"字幕：{sub}")
+    return _normalize_spaces(" | ".join(parts))
 
 
 def _build_copywriting_outline(results: List[Dict[str, Any]]) -> str:
@@ -161,7 +278,7 @@ def _build_retrieval_candidates(results: List[Dict[str, Any]], item_limit: int) 
         end = _format_ts(_safe_float(match.get("end")))
         score = _safe_float(match.get("final_score", match.get("score", 0.0)))
         reason = _truncate_text(match.get("reason", ""), 72)
-        scene = _truncate_text(_pick_scene_text(match), 120)
+        scene = _truncate_text(_pick_retrieval_candidate_scene_text(match), 120)
         lines.append(
             f"  候选1 | shot_id={match.get('shot_id')} | {start}-{end} | score={score:.3f} | {scene} "  # | 匹配原因:{reason}
         )

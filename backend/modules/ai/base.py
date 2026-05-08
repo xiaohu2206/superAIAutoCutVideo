@@ -23,7 +23,7 @@ class AIModelConfig(BaseModel):
     base_url: str  # API基础地址
     model_name: str  # 模型名称
     temperature: Optional[float] = 0.7  # 温度参数
-    timeout: Optional[int] = 600  # 超时时间（秒）
+    timeout: Optional[int] = 180  # 超时时间（秒）
     extra_params: Optional[Dict[str, Any]] = {}  # 额外参数
 
 
@@ -31,6 +31,23 @@ class ChatMessage(BaseModel):
     """聊天消息"""
     role: str  # system, user, assistant
     content: Any  # 消息内容，支持字符串或多模态内容块列表
+
+
+class LlmProviderResponseError(Exception):
+    """提供方 HTTP / 非预期响应体，携带状态码与原文便于写入 chat_failure 等日志。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        raw_body: str = "",
+        content_type: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = int(status_code)
+        self.raw_body = raw_body or ""
+        self.content_type = (content_type or "")[:200]
 
 
 class ChatResponse(BaseModel):
@@ -55,7 +72,7 @@ class AIProviderBase(ABC):
     def __init__(self, config: AIModelConfig):
         self.config = config
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(config.timeout or 600),
+            timeout=httpx.Timeout(config.timeout or 180),
             headers=self._get_headers()
         )
     

@@ -5,7 +5,7 @@ AI模块
 提供AI模型调用和管理功能
 """
 
-from .base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse
+from .base import AIProviderBase, AIModelConfig, ChatMessage, ChatResponse, LlmProviderResponseError
 from .providers import (
     QwenProvider,
     DoubaoProvider,
@@ -23,6 +23,7 @@ __all__ = [
     "AIModelConfig", 
     "ChatMessage",
     "ChatResponse",
+    "LlmProviderResponseError",
     "QwenProvider",
     "DoubaoProvider",
     "DeepSeekProvider",

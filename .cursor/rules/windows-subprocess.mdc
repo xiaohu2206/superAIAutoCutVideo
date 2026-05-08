@@ -3,8 +3,56 @@ description: Windows 下启动 ffmpeg/ffprobe 等子进程不弹 CMD 黑框
 globs: backend/**/*.py
 ---
 
+## 强制规则
+
 在 Windows 上，使用 `asyncio.create_subprocess_exec`、`subprocess.run`、`subprocess.Popen`、`subprocess.check_output` 等启动控制台程序（ffmpeg、ffprobe、python -c 等）时，**必须**隐藏控制台窗口，否则在 Tauri 等场景会反复闪现黑框。
 
-**优先**使用 `modules.subprocess_no_console`：`acreate_subprocess_exec`、`check_output_no_console`、`run_no_console`、`popen_no_console`。
+## 推荐做法
 
-仅在确有需要显示控制台时，对异步封装传入 `visible_console=True`，或自行传入合适的 `creationflags` 并注明原因。
+**优先**使用 `modules.subprocess_no_console` 封装：
+
+| 原始调用 | 替换为 |
+|---------|--------|
+| `subprocess.run(*args, **kw)` | `run_no_console(*args, **kw)` |
+| `subprocess.Popen(*args, **kw)` | `popen_no_console(*args, **kw)` |
+| `subprocess.check_output(*args, **kw)` | `check_output_no_console(*args, **kw)` |
+| `await asyncio.create_subprocess_exec(*args, **kw)` | `await acreate_subprocess_exec(*args, **kw)` |
+
+或手动设置 `creationflags=subprocess.CREATE_NO_WINDOW`（切勿遗漏）。
+
+## 例外
+
+以下情况允许不隐藏窗口，但需在行末加注释 `# noqa: subprocess-window`：
+
+- `if os.name == "nt"` 的 `else:` 分支（非 Windows 无需 `CREATE_NO_WINDOW`）
+- 刻意需要用户看到控制台窗口的场景（如调试）
+
+## 自动检测
+
+**提交前必须运行**：
+
+```bash
+python backend/scripts/check_subprocess_safety.py
+```
+
+CI 模式下检测不通过会阻止合并：
+
+```bash
+python backend/scripts/check_subprocess_safety.py --ci
+```
+
+## 常见错误模式
+
+```python
+# ❌ 错误：直接 subprocess.run 不传 creationflags
+subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+# ✅ 正确：使用 run_no_console 封装
+run_no_console(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+# ❌ 错误：asyncio.create_subprocess_exec 不传 creationflags
+proc = await asyncio.create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+
+# ✅ 正确：使用 acreate_subprocess_exec 或手动传 creationflags
+proc = await acreate_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+```

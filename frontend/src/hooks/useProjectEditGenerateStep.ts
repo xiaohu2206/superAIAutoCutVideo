@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WebSocketMessage } from "../services/clients";
 import { projectService } from "../services/projectService";
+import { TASK_SUBMITTED_EVENT } from "../components/projectEdit/TaskQueueFloatingBall";
 import type {
   GenerateCopywritingRequest,
   GenerateScriptRequest,
@@ -508,6 +509,7 @@ export function useProjectEditGenerateStep(
     try {
       const res = await projectService.startGenerateJianyingDraft(project.id);
       const taskId = res?.task_id;
+      window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
       if (taskId) {
         setDraftTaskId(taskId);
       } else {

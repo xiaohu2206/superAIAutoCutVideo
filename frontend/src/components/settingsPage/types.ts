@@ -63,6 +63,41 @@ export interface SettingsSection {
   icon: any;
 }
 
+/** 单档模型配置 */
+export interface YunwuTierConfig {
+  api_key: string;
+  base_url: string;
+  copywriting_model_name: string;
+  video_analysis_model_name: string;
+  llm_rerank_model_name: string;
+  script_generation_model_name: string;
+}
+
+/** 单个聚合平台配置 */
+export interface PlatformConfig {
+  display_name: string;
+  office_web: string;
+  tiers: {
+    low: YunwuTierConfig;
+    medium: YunwuTierConfig;
+    high: YunwuTierConfig;
+  };
+}
+
+/** 平台列表项（GET /unified-yunwu/platforms 返回） */
+export interface PlatformListItem {
+  key: string;
+  display_name: string;
+  office_web: string;
+}
+
+/** 与后端 unified_yunwu_models_config 对齐（多平台版本，GET 返回 api_key 可能脱敏） */
+export interface UnifiedYunwuModelsPayload {
+  use_custom_models: boolean;
+  active_platform: string;
+  platforms: Record<string, PlatformConfig>;
+}
+
 /**
  * TTS 引擎元信息
  */

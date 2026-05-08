@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from threading import RLock
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class TaskProgressStore:
@@ -117,6 +117,14 @@ class TaskProgressStore:
         if status in {"running", "processing", "pending"} or msg_type == "progress":
             return state
         return None
+
+    def iter_states_for_scope(self, scope: str) -> List[Dict[str, Any]]:
+        """遍历某 scope 下的全部快照（用于队列聚合等，调用方自行过滤终端状态）。"""
+        if not scope:
+            return []
+        prefix = f"{scope}::"
+        with self._lock:
+            return [dict(v) for k, v in self._states.items() if k.startswith(prefix)]
 
 
 task_progress_store = TaskProgressStore()

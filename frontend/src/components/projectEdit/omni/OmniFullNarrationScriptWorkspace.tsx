@@ -49,7 +49,7 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
           value={editedScript}
           onChange={(e) => setEditedScript(e.target.value)}
           placeholder="脚本数据将以 JSON 格式显示在这里..."
-          className="w-full h-96 px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all resize-none"
+          className="w-full h-[600px] px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all resize-none"
         />
         {editedScript ? (
           <div className="absolute top-2 right-2 bg-gray-100 px-2 py-1 rounded text-xs text-gray-600">JSON 格式</div>

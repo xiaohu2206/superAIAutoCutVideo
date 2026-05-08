@@ -27,7 +27,7 @@ class DeepSeekProvider(AIProviderBase):
                 config.base_url = config.base_url.rstrip('/') + '/chat/completions'
         
         if not config.model_name:
-            config.model_name = "deepseek-chat"
+            config.model_name = "deepseek-v4-pro"
             
         super().__init__(config)
     
@@ -130,7 +130,7 @@ class DeepSeekProvider(AIProviderBase):
     def get_available_models(cls) -> List[str]:
         """获取可用的DeepSeek模型列表"""
         return [
-            "deepseek-chat",
+            "deepseek-v4-pro",
             "deepseek-coder"
         ]
     
@@ -140,5 +140,5 @@ class DeepSeekProvider(AIProviderBase):
         return {
             "provider": "deepseek",
             "base_url": "https://api.deepseek.com/chat/completions",
-            "model_name": "deepseek-chat",
+            "model_name": "deepseek-v4-pro",
         }

@@ -74,7 +74,9 @@ export const IndexTtsSection: React.FC<IndexTtsSectionProps> = ({
   const syncStatus = useCallback(async () => {
     try {
       const res = await ttsService.getIndexTtsStatus();
-      const ok = Boolean(res?.data?.connected);
+      const cfgOn = Boolean(res?.data?.connected);
+      const reachable = res?.data?.reachable as boolean | null | undefined;
+      const ok = cfgOn && reachable !== false;
       setConnected(ok);
       setBaseUrl(res?.data?.base_url || null);
       onConnectionChange?.(ok);

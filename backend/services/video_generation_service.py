@@ -17,12 +17,14 @@ import subprocess
 
 from modules.projects_store import Project, projects_store
 from modules.video_processor import WIN_NO_WINDOW, video_processor
+from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
-from modules.audio_normalizer import AudioNormalizer
 from modules.ws_manager import manager
 from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+
+from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +65,11 @@ async def _trim_audio_silence(
             f"stop_periods=-1:stop_duration={stop_dur}:stop_threshold={th_stop}:"
             f"stop_silence={keep_tail}"
         )
+        ffmpeg_bin = resolve_ffmpeg_bin()
+        if not ffmpeg_bin:
+            return False
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -196,8 +201,11 @@ class VideoGenerationService:
                     return clip_path
 
                 out_copy = clip_path.with_name(f"{clip_path.stem}_sync{clip_path.suffix}")
+                ffmpeg_bin = resolve_ffmpeg_bin()
+                if not ffmpeg_bin:
+                    return {"success": False, "error": "ffmpeg_not_found"}
                 cmd_copy = [
-                    "ffmpeg",
+                    ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -245,7 +253,7 @@ class VideoGenerationService:
                     f"[0:a]atrim=0:{adur_str},asetpts=PTS-STARTPTS[a]"
                 )
                 cmd_re = [
-                    "ffmpeg",
+                    ffmpeg_bin,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -339,6 +347,14 @@ class VideoGenerationService:
                 end = float(seg.get("end_time", 0.0))
                 if end <= start:
                     raise ValueError(f"无效片段: idx={idx} start={start} end={end}")
+                if input_dur and end > input_dur + 0.5:
+                    logger.warning(
+                        "segment end_time exceeds video duration: idx=%s end=%.3f video_dur=%.3f clamping",
+                        idx,
+                        end,
+                        input_dur,
+                    )
+                    end = min(end, float(input_dur))
                 duration = max(0.0, end - start)
                 clip_name = f"clip_{idx:04d}.mp4"
                 clip_abs = tmp_dir / clip_name
@@ -367,7 +383,11 @@ class VideoGenerationService:
                     cancel_event=cancel_event,
                 )
                 if not ok:
-                    raise RuntimeError(f"剪切片段失败: {idx}")
+                    last_err = getattr(video_processor, "last_cut_error", "") or ""
+                    raise RuntimeError(
+                        f"剪切片段失败: idx={idx} start={start:.3f} end={end:.3f} duration={duration:.3f}"
+                        + (f" reason={last_err}" if last_err else "")
+                    )
 
                 try:
                     clip_size = clip_abs.stat().st_size
@@ -383,6 +403,9 @@ class VideoGenerationService:
                     "text": text,
                     "is_original": is_original,
                     "clip_abs": clip_abs,
+                    "OST": seg.get("OST", 0),
+                    "discard": False,
+                    "needs_recut": False,
                 })
                 try:
                     base = 15
@@ -437,7 +460,6 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - {res.get('error')}")
                     return idx, (res if isinstance(res, dict) else {})
 
-                audio_norm = AudioNormalizer()
                 if _tts_provider == "omnivoice_tts":
                     completed = 0
                     for it in need_tts:
@@ -521,7 +543,7 @@ class VideoGenerationService:
                 try:
                     cfg = tts_engine_config_manager.get_active_config()
                     provider = (getattr(cfg, "provider", None) or "").lower()
-                    if provider in ("qwen3_tts", "indextts", "omnivoice_tts"):
+                    if provider in ("indextts", "omnivoice_tts"):
                         total_tts_dur = 0.0
                         missing = 0
                         for it in need_tts:
@@ -567,7 +589,28 @@ class VideoGenerationService:
                 if cancel_event.is_set():
                     raise asyncio.CancelledError()
 
+                if it.get("discard"):
+                    continue
+
                 if is_original:
+                    if it.get("needs_recut"):
+                        ok_r = await video_processor.cut_video_segment(
+                            str(input_abs),
+                            str(clip_abs),
+                            float(it["start"]),
+                            float(it["duration"]),
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
+                        )
+                        if not ok_r:
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段重剪失败: idx={idx} start={float(it['start']):.3f} dur={float(it['duration']):.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
+                        it["needs_recut"] = False
                     clip_final = await _ensure_clip_video_not_longer_than_audio(clip_abs)
                     clip_paths.append(str(clip_final))
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
@@ -578,11 +621,6 @@ class VideoGenerationService:
                         raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
                     narr_used = seg_audio
                     provider = (getattr(tts_engine_config_manager.get_active_config(), "provider", None) or "").lower()
-                    if provider == "qwen3_tts":
-                        norm_audio = aud_tmp_dir / f"seg_{idx:04d}_norm.mp3"
-                        ok_norm = await audio_norm.normalize_audio_loudness(str(seg_audio), str(norm_audio))
-                        if ok_norm:
-                            narr_used = norm_audio
                     trim_audio = aud_tmp_dir / f"seg_{idx:04d}_trim.mp3"
                     ok_trim = await _trim_audio_silence(narr_used, trim_audio)
                     if ok_trim:
@@ -609,6 +647,37 @@ class VideoGenerationService:
                             shortage = ext - fwd
                             new_start = max(0.0, start - shortage)
                             new_dur = input_dur - new_start
+                        next_it = None
+                        for cand in segment_items:
+                            if int(cand["idx"]) == idx + 1:
+                                next_it = cand
+                                break
+                        next_seg_dict = None
+                        if next_it is not None:
+                            next_seg_dict = {
+                                "start_time": float(next_it["start"]),
+                                "end_time": float(next_it["end"]),
+                                "text": str(next_it.get("text") or ""),
+                                "OST": next_it.get("OST", 0),
+                            }
+                        _ost_res = resolve_narration_extend_vs_following_play_original(
+                            narration_new_start=new_start,
+                            narration_new_dur=new_dur,
+                            next_segment=next_seg_dict,
+                            video_duration=float(input_dur or 0.0),
+                        )
+                        new_start = float(_ost_res.narration_start)
+                        new_dur = float(_ost_res.narration_duration)
+                        if next_it is not None:
+                            if _ost_res.skip_next_segment:
+                                next_it["discard"] = True
+                            elif _ost_res.next_ost_start_override is not None:
+                                ns = float(_ost_res.next_ost_start_override)
+                                ne = float(next_it["end"])
+                                if ne > ns:
+                                    next_it["start"] = ns
+                                    next_it["duration"] = ne - ns
+                                    next_it["needs_recut"] = True
                         logger.info(f"DEBUG segment_extend idx={idx} new_start={new_start} new_dur={new_dur}")
                         ok2 = await video_processor.cut_video_segment(
                             str(input_abs),
@@ -621,7 +690,11 @@ class VideoGenerationService:
                             cancel_event=cancel_event,
                         )
                         if not ok2:
-                            raise RuntimeError(f"片段延长失败: {idx}")
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段延长失败: idx={idx} new_start={new_start:.3f} new_dur={new_dur:.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
                     elif adur > 0.0 and (adur + 0.05) < duration:
                         new_start = start
                         new_dur = adur
@@ -637,7 +710,11 @@ class VideoGenerationService:
                             cancel_event=cancel_event,
                         )
                         if not ok2s:
-                            raise RuntimeError(f"片段缩短失败: {idx}")
+                            last_err = getattr(video_processor, "last_cut_error", "") or ""
+                            raise RuntimeError(
+                                f"片段缩短失败: idx={idx} new_start={new_start:.3f} new_dur={new_dur:.3f}"
+                                + (f" reason={last_err}" if last_err else "")
+                            )
                     clip_nar_abs = clip_abs.with_name(f"{clip_abs.stem}_nar{clip_abs.suffix}")
                     rep_ok = await video_processor.replace_audio_with_narration(
                         str(clip_abs),
@@ -659,7 +736,7 @@ class VideoGenerationService:
                     if vinfo_chk is None:
                         logger.info(f"DEBUG segment_narration_fallback idx={idx} reencode nar to ensure video stream")
                         cmd_fb = [
-                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-i", str(clip_abs),
                             "-i", str(seg_audio),
                             "-map", "0:v:0", "-map", "1:a:0",

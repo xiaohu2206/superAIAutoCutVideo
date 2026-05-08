@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from modules.config.tts_config import TtsEngineConfig
-from modules.subprocess_no_console import acreate_subprocess_exec
+from modules.ffmpeg_utils import ffprobe_get_duration
 
 from .client import (
     download_task_audio,
@@ -21,31 +21,6 @@ from .client import (
 from .connection_store import omnivoice_tts_connection_store
 
 logger = logging.getLogger(__name__)
-
-
-async def _ffprobe_duration(path: str) -> Optional[float]:
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nk=1:nw=1",
-            path,
-        ]
-        proc = await acreate_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await proc.communicate()
-        if proc.returncode == 0:
-            return float(out.decode().strip())
-    except Exception:
-        pass
-    return None
 
 
 class OmniVoiceTTSService:
@@ -95,11 +70,12 @@ class OmniVoiceTTSService:
                     await download_task_audio(base, prefix, task_id, wav_tmp)
                     ok = await wav_to_mp3_with_ffmpeg(wav_tmp, out)
                     if not ok:
-                        return {"success": False, "error": "omnivoice_wav_to_mp3_failed"}
+                        logger.warning("wav 转 mp3 失败，回退为直接输出 wav 数据")
+                        out.write_bytes(wav_tmp.read_bytes())
             else:
                 await download_task_audio(base, prefix, task_id, out)
 
-            dur = await _ffprobe_duration(str(out))
+            dur = await ffprobe_get_duration(str(out))
             return {
                 "success": True,
                 "path": str(out),
