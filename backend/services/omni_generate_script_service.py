@@ -397,7 +397,7 @@ class OmniGenerateScriptService:
                                     usage=LlmModelUsage.SCRIPT_GENERATION,
                                     omni_effect_tier=omni_tier,
                                     http_max_attempts=1,
-                                    timeout=600,
+                                    timeout=300,
                                 )
                             data, _ = sanitize_json_text_to_dict(resp.content or "")
                             items = data.get("items") if isinstance(data, dict) else None

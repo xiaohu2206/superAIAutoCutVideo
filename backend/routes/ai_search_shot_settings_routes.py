@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 import logging
 import httpx
 
+from modules.httpx_trust_env import trust_env_for_http_url
 from modules.config.ai_search_shot_model_config import (
     AiSearchShotModelConfig,
     ai_search_shot_model_config_manager,
@@ -100,7 +101,10 @@ async def _test_embedding_config(config: AiSearchShotModelConfig) -> dict:
         "input": "test embedding text",
     }
     timeout = httpx.Timeout(float(config.timeout_seconds or 300))
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        trust_env=trust_env_for_http_url(str(config.embedding_base_url)),
+    ) as client:
         response = await client.post(
             str(config.embedding_base_url),
             headers=headers,
@@ -142,7 +146,10 @@ async def _test_rerank_config(config: AiSearchShotModelConfig) -> dict:
         "top_n": 2,
     }
     timeout = httpx.Timeout(float(config.timeout_seconds or 300))
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        trust_env=trust_env_for_http_url(str(config.rerank_base_url)),
+    ) as client:
         response = await client.post(
             str(config.rerank_base_url),
             headers=headers,

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import wave
 import uuid
 import zipfile
 from pathlib import Path
@@ -21,6 +22,32 @@ logger = logging.getLogger(__name__)
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 _FUNASR_DIAG_LOGGED = False
+_TIKTOKEN_SPECIAL_CHECK_PATCHED = False
+
+
+def _patch_tiktoken_special_check_for_funasr() -> None:
+    """Let FunASR encode ASR text that happens to look like special tokens."""
+    global _TIKTOKEN_SPECIAL_CHECK_PATCHED
+    if _TIKTOKEN_SPECIAL_CHECK_PATCHED:
+        return
+    try:
+        from tiktoken.core import Encoding  # type: ignore
+
+        orig_encode = Encoding.encode
+        if getattr(orig_encode, "_sacv_funasr_special_patch", False):
+            _TIKTOKEN_SPECIAL_CHECK_PATCHED = True
+            return
+
+        def _sacv_encode(self, text, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if "allowed_special" not in kwargs and "disallowed_special" not in kwargs:
+                kwargs["disallowed_special"] = ()
+            return orig_encode(self, text, *args, **kwargs)
+
+        setattr(_sacv_encode, "_sacv_funasr_special_patch", True)
+        Encoding.encode = _sacv_encode  # type: ignore[assignment]
+        _TIKTOKEN_SPECIAL_CHECK_PATCHED = True
+    except Exception:
+        return
 
 
 def _env_int(name: str) -> Optional[int]:
@@ -47,10 +74,33 @@ def _resolve_funasr_max_concurrency(requested: Optional[int], runtime_device: st
     else:
         cores = max(1, int(os.cpu_count() or 1))
         if str(runtime_device or "").startswith("cuda"):
-            n = 2
+            n = 1
         else:
-            n = min(8, cores)
+            n = min(4, cores)
     return max(1, min(int(n), 32))
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    return bool(default)
+
+
+def _env_int_range(name: str, default: int, minimum: int, maximum: int) -> int:
+    value = _env_int(name)
+    if value is None:
+        return int(default)
+    return max(int(minimum), min(int(value), int(maximum)))
+
+
+def _resolve_funasr_batch_size(runtime_device: str) -> int:
+    default = 8 if str(runtime_device or "").startswith("cuda") else 4
+    return _env_int_range("SACV_FUNASR_BATCH_SIZE", default, 1, 64)
 
 
 def _json_dumps_safe(obj: Any) -> str:
@@ -204,6 +254,7 @@ def _patch_inspect_getsource_for_frozen() -> bool:
 
 def _ensure_dependency_ready() -> Tuple[bool, str]:
     global _FUNASR_DIAG_LOGGED
+    _patch_tiktoken_special_check_for_funasr()
     try:
         patched = _patch_inspect_getsource_for_frozen()
         if patched and (bool(os.environ.get("SACV_FORCE_FUNASR_DIAG")) or not _FUNASR_DIAG_LOGGED):
@@ -457,6 +508,146 @@ def _extract_segment_to_wav(src_audio: Path, start_ms: int, end_ms: int, out_wav
         raise RuntimeError(proc.stderr.decode("utf-8", errors="ignore").strip() or "ffmpeg_extract_failed")
 
 
+def _is_target_funasr_wav(path: Path) -> bool:
+    try:
+        with wave.open(str(path), "rb") as wf:
+            return wf.getnchannels() == 1 and wf.getsampwidth() == 2 and wf.getframerate() == 16000
+    except Exception:
+        return False
+
+
+def _convert_audio_to_target_wav(src_audio: Path, out_wav: Path) -> None:
+    ffmpeg = resolve_ffmpeg_bin()
+    if not ffmpeg:
+        raise RuntimeError("missing_dependency:ffmpeg")
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(src_audio),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(out_wav),
+    ]
+    kwargs: Dict[str, Any] = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    if os.name == "nt":
+        kwargs["creationflags"] = WIN_NO_WINDOW
+    proc = subprocess.run(cmd, **kwargs)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.decode("utf-8", errors="ignore").strip() or "ffmpeg_convert_failed")
+
+
+def _ensure_target_funasr_wav(src_audio: Path, tmp_dir: Path) -> Path:
+    if _is_target_funasr_wav(src_audio):
+        return src_audio
+    out_wav = tmp_dir / "input_16k_mono.wav"
+    _convert_audio_to_target_wav(src_audio, out_wav)
+    return out_wav
+
+
+def _write_wav_segment_from_pcm(src_wav: Path, start_ms: int, end_ms: int, out_wav: Path) -> None:
+    start_ms = max(0, int(start_ms))
+    end_ms = max(start_ms, int(end_ms))
+    if end_ms <= start_ms:
+        raise RuntimeError("empty_wav_segment")
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(src_wav), "rb") as src:
+        channels = src.getnchannels()
+        sample_width = src.getsampwidth()
+        sample_rate = src.getframerate()
+        if channels != 1 or sample_width != 2 or sample_rate != 16000:
+            raise RuntimeError("source_wav_not_16k_mono_pcm16")
+        total_frames = src.getnframes()
+        start_frame = max(0, min(total_frames, int(start_ms * sample_rate / 1000)))
+        end_frame = max(start_frame, min(total_frames, int(end_ms * sample_rate / 1000)))
+        if end_frame <= start_frame:
+            raise RuntimeError("empty_wav_segment")
+        src.setpos(start_frame)
+        frames = src.readframes(end_frame - start_frame)
+        with wave.open(str(out_wav), "wb") as dst:
+            dst.setnchannels(channels)
+            dst.setsampwidth(sample_width)
+            dst.setframerate(sample_rate)
+            dst.writeframes(frames)
+
+
+def _extract_segment_to_wav_fast(src_audio: Path, start_ms: int, end_ms: int, out_wav: Path) -> None:
+    try:
+        _write_wav_segment_from_pcm(src_audio, start_ms, end_ms, out_wav)
+    except Exception:
+        _extract_segment_to_wav(src_audio, start_ms, end_ms, out_wav)
+
+
+def _normalize_vad_intervals(
+    intervals: List[Tuple[int, int]],
+    total_ms: Optional[int],
+    *,
+    min_segment_ms: Optional[int] = None,
+    merge_gap_ms: Optional[int] = None,
+    max_segment_ms: Optional[int] = None,
+) -> List[Tuple[int, int]]:
+    total = int(total_ms or 0)
+    min_ms = int(min_segment_ms if min_segment_ms is not None else _env_int_range("SACV_FUNASR_MIN_SEGMENT_MS", 300, 0, 30_000))
+    gap_ms = int(merge_gap_ms if merge_gap_ms is not None else _env_int_range("SACV_FUNASR_MERGE_GAP_MS", 300, 0, 30_000))
+    max_ms = int(max_segment_ms if max_segment_ms is not None else _env_int_range("SACV_FUNASR_MAX_SEGMENT_MS", 30_000, 1_000, 10 * 60_000))
+
+    cleaned: List[Tuple[int, int]] = []
+    for st, et in intervals:
+        try:
+            s = max(0, int(st))
+            e = max(s, int(et))
+            if total > 0:
+                s = min(s, total)
+                e = min(e, total)
+            if e <= s:
+                continue
+            if (e - s) < min_ms:
+                continue
+            cleaned.append((s, e))
+        except Exception:
+            continue
+    cleaned.sort(key=lambda x: (x[0], x[1]))
+    if not cleaned:
+        return []
+
+    merged: List[Tuple[int, int]] = []
+    cur_s, cur_e = cleaned[0]
+    for s, e in cleaned[1:]:
+        if s <= cur_e + gap_ms and (e - cur_s) <= max_ms:
+            cur_e = max(cur_e, e)
+            continue
+        merged.append((cur_s, cur_e))
+        cur_s, cur_e = s, e
+    merged.append((cur_s, cur_e))
+
+    out: List[Tuple[int, int]] = []
+    for s, e in merged:
+        if (e - s) <= max_ms:
+            out.append((s, e))
+            continue
+        part_s = s
+        while part_s < e:
+            part_e = min(e, part_s + max_ms)
+            if part_e - part_s >= max(1, min_ms):
+                out.append((part_s, part_e))
+            part_s = part_e
+    return out
+
+
+def _chunked(items: List[Tuple[int, int, int]], size: int) -> List[List[Tuple[int, int, int]]]:
+    n = max(1, int(size))
+    return [items[i : i + n] for i in range(0, len(items), n)]
+
+
 def _make_default_test_wav(out_path: Path) -> Dict[str, Any]:
     import math
     import wave
@@ -614,6 +805,7 @@ class FunASRService:
         self._load_lock = asyncio.Lock()
         self._runtime_device: str = "cpu"
         self._last_device_error: Optional[str] = None
+        self._warmup_signature: Optional[str] = None
 
     def get_runtime_status(self) -> Dict[str, Any]:
         return {
@@ -623,6 +815,9 @@ class FunASRService:
             "vad_path": self._vad_model_path,
             "device": self._runtime_device,
             "last_device_error": self._last_device_error,
+            "batch_size": _resolve_funasr_batch_size(self._runtime_device),
+            "max_concurrency": _resolve_funasr_max_concurrency(None, self._runtime_device),
+            "warmup_done": bool(self._warmup_signature),
         }
 
     def _normalize_device(self, device: Optional[str]) -> str:
@@ -816,12 +1011,37 @@ class FunASRService:
             self._vad_model = vad_model
             self._runtime_device = actual_device
             self._last_device_error = cuda_error
+            self._warmup_signature = None
             try:
                 logging.getLogger("modules.fun_asr_service").info(
                     f"FunASR loaded: key={asr_key} path={asr_path} device={actual_device} vad={vad_path}"
                 )
             except Exception:
                 pass
+            await self._warmup_asr_model(asr_key, actual_device)
+
+    async def _warmup_asr_model(self, asr_key: str, device: str) -> None:
+        if not _env_flag("SACV_FUNASR_WARMUP", True):
+            return
+        signature = f"{asr_key}|{device}|{self._asr_model_path}"
+        if self._warmup_signature == signature:
+            return
+        m_asr = self._asr_model
+        if m_asr is None:
+            return
+        warmup_path = _tmp_dir() / "warmup_16k_mono.wav"
+        try:
+            if not warmup_path.exists() or warmup_path.stat().st_size <= 44:
+                _make_default_test_wav(warmup_path)
+
+            def _run_warmup() -> Any:
+                return m_asr.generate(input=[str(warmup_path)], cache={}, batch_size=1, itn=True)
+
+            await asyncio.get_running_loop().run_in_executor(None, _run_warmup)
+            self._warmup_signature = signature
+            logger.info("FunASR warmup done: key=%s device=%s", asr_key, device)
+        except Exception as e:
+            logger.warning("FunASR warmup skipped: key=%s device=%s err=%s", asr_key, device, e)
 
     async def transcribe_to_utterances(
         self,
@@ -846,6 +1066,117 @@ class FunASRService:
                     on_progress(int(p), str(msg))
                 except Exception:
                     pass
+
+        tmp_fast = _tmp_dir() / f"job_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
+        tmp_fast.mkdir(parents=True, exist_ok=True)
+        utterances_fast: List[Dict[str, Any]] = []
+        try:
+            loop = asyncio.get_running_loop()
+            report(1, "FunASR: preparing 16k mono audio")
+            normalized_audio = await loop.run_in_executor(None, _ensure_target_funasr_wav, audio_path, tmp_fast)
+
+            report(4, "FunASR: VAD segmenting")
+
+            def _run_vad_fast() -> Any:
+                return m_vad.generate(input=[str(normalized_audio)], cache={}, batch_size=1)
+
+            res_vad_fast = await loop.run_in_executor(None, _run_vad_fast)
+            raw_intervals = _parse_vad_intervals(res_vad_fast)
+            dur_ms = _ffprobe_duration_ms(normalized_audio) or _ffprobe_duration_ms(audio_path) or 0
+            if not raw_intervals:
+                raw_intervals = [(0, dur_ms if dur_ms > 0 else 30_000)]
+
+            intervals_fast = _normalize_vad_intervals(raw_intervals, dur_ms)
+            if not intervals_fast:
+                intervals_fast = [(0, dur_ms if dur_ms > 0 else 30_000)]
+            if len(intervals_fast) > 2000:
+                intervals_fast = intervals_fast[:2000]
+
+            eff_batch_size = _resolve_funasr_batch_size(str(self._runtime_device or "cpu"))
+            eff_concurrency = _resolve_funasr_max_concurrency(max_concurrency, str(self._runtime_device or "cpu"))
+            indexed_intervals = [(i, int(st), int(et)) for i, (st, et) in enumerate(intervals_fast, start=1)]
+            batches = _chunked(indexed_intervals, eff_batch_size)
+            sem = asyncio.Semaphore(eff_concurrency)
+            total = len(indexed_intervals)
+            completed = 0
+            completed_lock = asyncio.Lock()
+
+            report(
+                8,
+                f"FunASR: VAD got {len(raw_intervals)} raw / {len(intervals_fast)} normalized segments, batch={eff_batch_size}, concurrency={eff_concurrency}",
+            )
+
+            async def _process_batch(batch_no: int, batch: List[Tuple[int, int, int]]) -> List[Dict[str, Any]]:
+                nonlocal completed
+                async with sem:
+                    def _prepare_batch_segments() -> List[Tuple[int, int, int, Path]]:
+                        out: List[Tuple[int, int, int, Path]] = []
+                        batch_dir = tmp_fast / f"batch_{batch_no:04d}"
+                        batch_dir.mkdir(parents=True, exist_ok=True)
+                        for idx, st, et in batch:
+                            seg_path = batch_dir / f"seg_{idx:05d}.wav"
+                            _extract_segment_to_wav_fast(normalized_audio, int(st), int(et), seg_path)
+                            out.append((idx, st, et, seg_path))
+                        return out
+
+                    seg_items = await loop.run_in_executor(None, _prepare_batch_segments)
+                    inputs = [str(item[3]) for item in seg_items]
+
+                    def _run_asr_batch(paths: List[str]) -> Any:
+                        return m_asr.generate(
+                            input=paths,
+                            cache={},
+                            batch_size=max(1, min(eff_batch_size, len(paths))),
+                            hotwords=hotwords or [],
+                            language=language,
+                            itn=bool(itn),
+                        )
+
+                    try:
+                        res_asr = await loop.run_in_executor(None, _run_asr_batch, inputs)
+                    except Exception:
+                        if len(inputs) <= 1:
+                            raise
+                        res_asr = []
+                        for one in inputs:
+                            single_res = await loop.run_in_executor(None, _run_asr_batch, [one])
+                            if isinstance(single_res, list):
+                                res_asr.extend(single_res)
+                            else:
+                                res_asr.append(single_res)
+
+                    results = res_asr if isinstance(res_asr, list) else [res_asr]
+                    parsed: List[Dict[str, Any]] = []
+                    for pos, item in enumerate(seg_items):
+                        _idx, st, et, _path = item
+                        text = ""
+                        try:
+                            if pos < len(results) and isinstance(results[pos], dict):
+                                text = str(results[pos].get("text") or "").strip()
+                        except Exception:
+                            text = ""
+                        if text:
+                            parsed.append({"start_time": int(st), "end_time": int(et), "text": text})
+
+                    async with completed_lock:
+                        completed += len(batch)
+                        pct = min(90, 10 + int(completed / max(1, total) * 78))
+                    report(pct, f"FunASR: batch recognizing {completed}/{total} segments")
+                    return parsed
+
+            tasks = [asyncio.create_task(_process_batch(batch_no, batch)) for batch_no, batch in enumerate(batches, start=1)]
+            for fut in asyncio.as_completed(tasks):
+                utterances_fast.extend(await fut or [])
+        finally:
+            try:
+                if tmp_fast.exists():
+                    shutil.rmtree(tmp_fast)
+            except Exception:
+                pass
+
+        report(95, "FunASR: recognition done")
+        utterances_fast.sort(key=lambda x: (int(x.get("start_time") or 0), int(x.get("end_time") or 0)))
+        return utterances_fast
 
         report(1, "开始 VAD 切分")
 

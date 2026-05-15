@@ -126,6 +126,12 @@ def get_fun_asr_acceleration_status() -> Dict[str, Any]:
         "torch": {},
         "cuda": {},
         "gpu": None,
+        "recommended": {
+            "batch_size": 4,
+            "max_concurrency": 4,
+            "warmup": True,
+            "audio_format": "wav_pcm_s16le_16k_mono",
+        },
         "min_cuda_compute_capability": {"major": _MIN_CUDA_COMPUTE_CAPABILITY[0], "minor": _MIN_CUDA_COMPUTE_CAPABILITY[1]},
     }
 
@@ -157,6 +163,7 @@ def get_fun_asr_acceleration_status() -> Dict[str, Any]:
     result["cuda"] = {
         "available": cuda_available,
         "device_count": device_count,
+        "current_device": 0 if cuda_available and device_count > 0 else None,
     }
 
     if not cuda_available:
@@ -192,4 +199,10 @@ def get_fun_asr_acceleration_status() -> Dict[str, Any]:
     result["supported"] = True
     result["preferred_device"] = "cuda:0"
     result["backend"] = "pytorch-cuda"
+    result["recommended"] = {
+        "batch_size": 8,
+        "max_concurrency": 1,
+        "warmup": True,
+        "audio_format": "wav_pcm_s16le_16k_mono",
+    }
     return result

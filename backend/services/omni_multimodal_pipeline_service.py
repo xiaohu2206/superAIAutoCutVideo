@@ -57,6 +57,36 @@ OMNI_STEP2_VL_BATCH_SIZE = 8
 _ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_openai_vision"})
 
 
+def _omni_step2_work_batch_size(api_concurrency: int) -> int:
+    """Step2 流水处理窗口，避免大量语义段一次性抽帧/视觉/向量化撑爆内存。"""
+    raw = (os.environ.get("OMNI_STEP2_WORK_BATCH_SIZE") or "").strip()
+    default = max(OMNI_STEP2_VL_BATCH_SIZE, min(64, max(1, int(api_concurrency or 1)) * OMNI_STEP2_VL_BATCH_SIZE))
+    if not raw:
+        return default
+    try:
+        n = int(raw, 10)
+        if n <= 0:
+            return default
+        return max(OMNI_STEP2_VL_BATCH_SIZE, min(n, 512))
+    except Exception:
+        return default
+
+
+def _omni_step2_snapshot_every(pending_total: int) -> int:
+    """部分结果落盘节流；大任务不再每段都重写完整 JSON。"""
+    raw = (os.environ.get("OMNI_STEP2_SNAPSHOT_EVERY") or "").strip()
+    default = max(8, min(100, max(1, int(pending_total or 1)) // 20))
+    if not raw:
+        return default
+    try:
+        n = int(raw, 10)
+        if n <= 0:
+            return default
+        return max(1, min(n, 500))
+    except Exception:
+        return default
+
+
 def _normalize_multimodal_action(raw: Optional[str]) -> str:
     m = str(raw or "auto").strip().lower()
     return m if m in ("auto", "continue", "restart") else "auto"
@@ -970,39 +1000,10 @@ class OmniMultimodalPipelineService:
                         )
                     return bundle
 
-                try:
-                    logger.info(
-                        "[omni-pipeline] Step2 阶段一抽帧开始 project_id=%s task_id=%s pending=%s extract_concurrency=%s",
-                        project_id,
-                        task_id,
-                        len(pending_idx),
-                        extract_concurrency,
-                    )
-                    task_progress_store.set_state(
-                        scope=self.SCOPE,
-                        project_id=project_id,
-                        task_id=task_id,
-                        status="processing",
-                        progress=last_reported_progress,
-                        message=f"Step2: 开始抽帧（共 {extract_total} 段）…",
-                        phase="step2",
-                    )
-                    bundles = await asyncio.gather(
-                        *(_extract_shot_with_frame_progress(i, shots[i]) for i in pending_idx)
-                    )
-                finally:
-                    try:
-                        extract_executor.shutdown(wait=True, cancel_futures=True)
-                    except Exception:
-                        try:
-                            extract_executor.shutdown(wait=True)
-                        except Exception:
-                            pass
-
                 span_to_fill_vl = max(0.0, min(94.0, 95.0) - pct0)
-                vl_lo = float(last_reported_progress)
-                vl_hi = min(94.0, vl_lo + span_to_fill_vl * 0.55)
-                vl_total = max(1, len(bundles))
+                vl_lo = min(94.0, float(pct0) + span_to_fill_vl * 0.18)
+                vl_hi = min(94.0, float(pct0) + span_to_fill_vl * 0.73)
+                vl_total = max(1, len(pending_idx))
                 vl_done_lock = asyncio.Lock()
                 vl_done = 0
 
@@ -1030,7 +1031,7 @@ class OmniMultimodalPipelineService:
                     task_id=task_id,
                     status="processing",
                     progress=last_reported_progress,
-                    message=f"Step2: 开始在线视觉理解（共 {vl_total} 段）…",
+                    message=f"Step2: 准备分批执行抽帧、在线视觉理解与本地向量化（共 {vl_total} 段）…",
                     phase="step2",
                 )
 
@@ -1072,7 +1073,6 @@ class OmniMultimodalPipelineService:
                             message=msg,
                             phase="step2",
                         )
-                    await _persist_snapshot(partial=True)
 
                 async def _finalize_step2_policy_blocked(
                     idx: int,
@@ -1121,7 +1121,6 @@ class OmniMultimodalPipelineService:
                             message=f"Step2: 多模态处理 {done_count}/{len(shots)}（含策略降级）",
                             phase="step2",
                         )
-                    await _persist_snapshot(partial=True)
 
                 async def _finalize_step2_vl_call_failed(
                     idx: int,
@@ -1173,7 +1172,6 @@ class OmniMultimodalPipelineService:
                             message=f"Step2: 多模态处理 {done_count}/{len(shots)}（含 VL 失败降级）",
                             phase="step2",
                         )
-                    await _persist_snapshot(partial=True)
 
                 async def _run_step2_infer_multi_retries(
                     images: List[Image.Image],
@@ -1510,99 +1508,191 @@ class OmniMultimodalPipelineService:
                     else:
                         await _finalize_step2_success(out.idx, out.shot, out.frame_paths, out.visual)
 
-                try:
-                    vl_batches = [
-                        bundles[i : i + OMNI_STEP2_VL_BATCH_SIZE]
-                        for i in range(0, len(bundles), OMNI_STEP2_VL_BATCH_SIZE)
-                    ]
-                    logger.info(
-                        "[omni-pipeline] Step2 阶段二-A VL gather 开始 project_id=%s task_id=%s runner_id=%s n_shots=%s n_batches=%s batch_size=%s api_concurrency=%s",
-                        project_id,
-                        task_id,
-                        id(runner),
-                        len(bundles),
-                        len(vl_batches),
-                        OMNI_STEP2_VL_BATCH_SIZE,
-                        api_concurrency,
-                    )
-                    # 必须用 return_exceptions=True：默认 gather 在首个子任务抛错时会立刻返回，
-                    # 但 finally 仍会关闭 runner，其余仍在跑的推理会打到已关闭的 httpx 客户端，
-                    # 从而刷屏「Cannot send a request, as the client has been closed」。
-                    vl_nested = await asyncio.gather(
-                        *(_run_step2_vl_batch(b) for b in vl_batches),
-                        return_exceptions=True,
-                    )
-                    vl_results: List[_Step2VlOutcome] = []
-                    for res in vl_nested:
-                        if isinstance(res, asyncio.CancelledError):
-                            raise res
-                        if isinstance(res, BaseException):
-                            raise res
-                        vl_results.extend(res)
-                    logger.info(
-                        "[omni-pipeline] Step2 阶段二-A VL gather 正常结束 project_id=%s task_id=%s runner_id=%s n_outcomes=%s",
-                        project_id,
-                        task_id,
-                        id(runner),
-                        len(vl_results),
-                    )
-                finally:
-                    logger.info(
-                        "[omni-pipeline] Step2 即将关闭 VL runner project_id=%s task_id=%s runner_id=%s",
-                        project_id,
-                        task_id,
-                        id(runner),
-                    )
-                    await runner.close()
-                    logger.info(
-                        "[omni-pipeline] Step2 VL runner 已关闭 project_id=%s task_id=%s runner_id=%s",
-                        project_id,
-                        task_id,
-                        id(runner),
-                    )
-
-                outs: List[_Step2VlOutcome] = vl_results
                 bge_note = (
                     f"（BGE 并发上限={_bge_cap}，可由 OMNI_BGE_ENCODE_ASYNC_CONCURRENCY 调整）"
                     if _bge_cap is not None
                     else ""
+                )
+                work_batch_size = _omni_step2_work_batch_size(api_concurrency)
+                snapshot_every = _omni_step2_snapshot_every(len(pending_idx))
+                snapshot_min_interval_sec = 10.0
+                last_snapshot_done = done_count
+                last_snapshot_mono = time.monotonic()
+
+                async def _await_with_heartbeat(awaitable: Any, message: str, started_at: float) -> Any:
+                    nonlocal last_reported_progress
+                    task = asyncio.ensure_future(awaitable)
+                    while True:
+                        done, _pending = await asyncio.wait({task}, timeout=8.0)
+                        if done:
+                            return await task
+                        elapsed = int(max(0.0, time.monotonic() - started_at))
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=min(94.0, max(last_reported_progress, pct0)),
+                            message=f"{message}（已等待 {elapsed}s，已完成 {done_count}/{len(shots)}，任务仍在运行）",
+                            phase="step2",
+                        )
+
+                async def _maybe_persist_snapshot(*, force: bool = False) -> None:
+                    nonlocal last_snapshot_done, last_snapshot_mono
+                    now = time.monotonic()
+                    enough_items = (done_count - last_snapshot_done) >= snapshot_every
+                    enough_time = (now - last_snapshot_mono) >= snapshot_min_interval_sec
+                    if force or enough_items or enough_time:
+                        await _persist_snapshot(partial=not force)
+                        last_snapshot_done = done_count
+                        last_snapshot_mono = now
+
+                logger.info(
+                    "[omni-pipeline] Step2 流水处理开始 project_id=%s task_id=%s pending=%s work_batch_size=%s vl_batch_size=%s api_concurrency=%s extract_concurrency=%s%s",
+                    project_id,
+                    task_id,
+                    len(pending_idx),
+                    work_batch_size,
+                    OMNI_STEP2_VL_BATCH_SIZE,
+                    api_concurrency,
+                    extract_concurrency,
+                    bge_note,
                 )
                 task_progress_store.set_state(
                     scope=self.SCOPE,
                     project_id=project_id,
                     task_id=task_id,
                     status="processing",
-                    progress=max(last_reported_progress, min(94.0, vl_hi)),
-                    message=f"Step2: 在线视觉已完成，开始本地向量化（共 {len(outs)} 段）…{bge_note}",
+                    progress=last_reported_progress,
+                    message=f"Step2: 开始分批抽帧、视觉理解与本地向量化（共 {len(pending_idx)} 段，批大小 {work_batch_size}）…",
                     phase="step2",
                 )
-                logger.info(
-                    "[omni-pipeline] Step2 阶段二-B 向量化 gather 开始 project_id=%s task_id=%s n=%s%s",
-                    project_id,
-                    task_id,
-                    len(outs),
-                    bge_note,
-                )
-                step2_embed_results = await asyncio.gather(
-                    *(_commit_step2_after_vl(o) for o in outs),
-                    return_exceptions=True,
-                )
-                for res in step2_embed_results:
-                    if isinstance(res, asyncio.CancelledError):
-                        raise res
-                for res in step2_embed_results:
-                    if isinstance(res, BaseException):
-                        raise res
-                logger.info(
-                    "[omni-pipeline] Step2 阶段二-B 向量化 gather 正常结束 project_id=%s task_id=%s",
-                    project_id,
-                    task_id,
-                )
+
+                try:
+                    for batch_start in range(0, len(pending_idx), work_batch_size):
+                        if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
+                            raise asyncio.CancelledError()
+                        batch_indices = pending_idx[batch_start : batch_start + work_batch_size]
+                        batch_no = batch_start // work_batch_size + 1
+                        batch_total = (len(pending_idx) + work_batch_size - 1) // work_batch_size
+
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=last_reported_progress,
+                            message=f"Step2: 第 {batch_no}/{batch_total} 批抽帧中（{len(batch_indices)} 段）…",
+                            phase="step2",
+                        )
+                        bundles = await _await_with_heartbeat(
+                            asyncio.gather(
+                                *(_extract_shot_with_frame_progress(i, shots[i]) for i in batch_indices),
+                                return_exceptions=True,
+                            ),
+                            f"Step2: 第 {batch_no}/{batch_total} 批抽帧中",
+                            time.monotonic(),
+                        )
+                        for res in bundles:
+                            if isinstance(res, asyncio.CancelledError):
+                                for ok in bundles:
+                                    if isinstance(ok, tuple) and len(ok) >= 4:
+                                        _close_shot_pil_images(ok[3])
+                                raise res
+                            if isinstance(res, BaseException):
+                                for ok in bundles:
+                                    if isinstance(ok, tuple) and len(ok) >= 4:
+                                        _close_shot_pil_images(ok[3])
+                                raise res
+                        batch_bundles: List[Tuple[int, Dict[str, Any], List[str], List[Image.Image]]] = list(bundles)
+
+                        vl_batches = [
+                            batch_bundles[i : i + OMNI_STEP2_VL_BATCH_SIZE]
+                            for i in range(0, len(batch_bundles), OMNI_STEP2_VL_BATCH_SIZE)
+                        ]
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=last_reported_progress,
+                            message=f"Step2: 第 {batch_no}/{batch_total} 批进入在线视觉理解（{len(vl_batches)} 个模型请求）…",
+                            phase="step2",
+                        )
+                        vl_nested = await _await_with_heartbeat(
+                            asyncio.gather(
+                                *(_run_step2_vl_batch(b) for b in vl_batches),
+                                return_exceptions=True,
+                            ),
+                            f"Step2: 第 {batch_no}/{batch_total} 批在线视觉理解中",
+                            time.monotonic(),
+                        )
+                        vl_results: List[_Step2VlOutcome] = []
+                        for res in vl_nested:
+                            if isinstance(res, asyncio.CancelledError):
+                                raise res
+                            if isinstance(res, BaseException):
+                                raise res
+                            vl_results.extend(res)
+
+                        task_progress_store.set_state(
+                            scope=self.SCOPE,
+                            project_id=project_id,
+                            task_id=task_id,
+                            status="processing",
+                            progress=last_reported_progress,
+                            message=f"Step2: 第 {batch_no}/{batch_total} 批视觉完成，正在本地向量化 {len(vl_results)} 段…{bge_note}",
+                            phase="step2",
+                        )
+                        step2_embed_results = await _await_with_heartbeat(
+                            asyncio.gather(
+                                *(_commit_step2_after_vl(o) for o in vl_results),
+                                return_exceptions=True,
+                            ),
+                            f"Step2: 第 {batch_no}/{batch_total} 批本地向量化中",
+                            time.monotonic(),
+                        )
+                        for res in step2_embed_results:
+                            if isinstance(res, asyncio.CancelledError):
+                                raise res
+                            if isinstance(res, BaseException):
+                                raise res
+
+                        await _maybe_persist_snapshot()
+                        await asyncio.sleep(0)
+
+                    await _maybe_persist_snapshot(force=True)
+                    logger.info(
+                        "[omni-pipeline] Step2 流水处理正常结束 project_id=%s task_id=%s done=%s/%s",
+                        project_id,
+                        task_id,
+                        done_count,
+                        len(shots),
+                    )
+                finally:
+                    logger.info(
+                        "[omni-pipeline] Step2 即将关闭资源 project_id=%s task_id=%s runner_id=%s",
+                        project_id,
+                        task_id,
+                        id(runner),
+                    )
+                    try:
+                        extract_executor.shutdown(wait=True, cancel_futures=True)
+                    except Exception:
+                        try:
+                            extract_executor.shutdown(wait=True)
+                        except Exception:
+                            pass
+                    await runner.close()
+                    logger.info(
+                        "[omni-pipeline] Step2 资源已关闭 project_id=%s task_id=%s runner_id=%s",
+                        project_id,
+                        task_id,
+                        id(runner),
+                    )
 
                 if task_cancel_store.is_cancelled(self.SCOPE, project_id, task_id):
                     raise asyncio.CancelledError()
-
-                await _persist_snapshot(partial=False)
 
                 done_msg = "Omni 管线完成（镜头拆分 + 多模态向量化）"
                 if vl_policy_blocked_count > 0:

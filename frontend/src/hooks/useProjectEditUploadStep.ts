@@ -14,6 +14,7 @@ function readSacvAuthTokenTrimmed(): string {
 }
 import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../types/project";
+import { projectService } from "../services/projectService";
 import { useTauriFileDrop } from "./useTauriFileDrop";
 import { useVideoOrderDrag } from "./useVideoOrderDrag";
 import { useWsTaskProgress, type WsProgressLog } from "./useWsTaskProgress";
@@ -179,6 +180,7 @@ export function useProjectEditUploadStep(
   const [extractingSubtitle, setExtractingSubtitle] = useState(false);
   const [subtitleExtractProgress, setSubtitleExtractProgress] = useState(0);
   const [subtitleExtractLogs, setSubtitleExtractLogs] = useState<WsProgressLog[]>([]);
+  const [currentSubtitleTaskId, setCurrentSubtitleTaskId] = useState<string | null>(null);
   const [subtitleDraft, setSubtitleDraft] = useState<SubtitleSegment[]>([]);
   const [subtitleSaving, setSubtitleSaving] = useState(false);
   const [subtitleAsr, setSubtitleAsr] = useState<{ provider: "bcut" | "fun_asr"; modelKey: string; language: string }>({
@@ -191,6 +193,7 @@ export function useProjectEditUploadStep(
   const uploadingVideoRef = useRef(false);
   const subtitleSegmentsSerializedRef = useRef<string | null>(null);
   const lastAsrSnapshotRef = useRef<string>("");
+  const lastSubtitleProgressLogKeyRef = useRef<string>("");
   const pendingVisionExtractOptsRef = useRef<{
     analyzeVision: boolean;
     visionMode: string;
@@ -499,6 +502,7 @@ export function useProjectEditUploadStep(
         typeof (globalThis.crypto as any).randomUUID === "function"
           ? (globalThis.crypto as any).randomUUID()
           : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      setCurrentSubtitleTaskId(taskId);
       await options.extractSubtitle({
         task_id: taskId,
         force: forceOverwrite,
@@ -522,22 +526,99 @@ export function useProjectEditUploadStep(
   useWsTaskProgress({
     scope: "extract_subtitle",
     projectId: options.project?.id,
-    taskId: options.project?.subtitle_extract_run_id ?? undefined,
+    taskId: currentSubtitleTaskId ?? options.project?.subtitle_extract_run_id ?? undefined,
     onProgress: setSubtitleExtractProgress,
     onLog: (log) => setSubtitleExtractLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setSubtitleExtractProgress(100);
       setExtractingSubtitle(false);
+      setCurrentSubtitleTaskId(null);
       options.showSuccess("字幕提取成功！");
       void options.refreshProject();
       void options.fetchSubtitle().catch(() => void 0);
     },
     onError: (m) => {
       setExtractingSubtitle(false);
+      setCurrentSubtitleTaskId(null);
       setSubtitleExtractProgress(0);
       options.showErrorText(m.message || "字幕提取失败");
     },
   });
+
+  useEffect(() => {
+    const projectId = options.project?.id;
+    const active = Boolean(projectId) && (extractingSubtitle || options.project?.subtitle_status === "extracting");
+    if (!projectId || !active) return;
+
+    let cancelled = false;
+    const syncSubtitleProgress = async () => {
+      try {
+        const latest = await projectService.getProjectLatestTasks(projectId);
+        if (cancelled) return;
+        const task = latest?.extract_subtitle;
+        if (!task) return;
+
+        const taskId = task.task_id ? String(task.task_id) : "";
+        if (currentSubtitleTaskId && taskId && taskId !== currentSubtitleTaskId) return;
+        if (taskId && !currentSubtitleTaskId) {
+          setCurrentSubtitleTaskId(taskId);
+        }
+
+        if (typeof task.progress === "number") {
+          setSubtitleExtractProgress(Math.max(0, Math.min(100, task.progress)));
+        }
+
+        const logKey = `${task.type || ""}|${task.phase || ""}|${task.progress ?? ""}|${task.message || ""}`;
+        if (task.message && logKey !== lastSubtitleProgressLogKeyRef.current) {
+          lastSubtitleProgressLogKeyRef.current = logKey;
+          setSubtitleExtractLogs((prev) => [
+            ...prev,
+            {
+              timestamp: task.timestamp || new Date().toISOString(),
+              message: task.message || "",
+              phase: task.phase,
+              type: task.type,
+            },
+          ]);
+        }
+
+        const status = String(task.status || "").toLowerCase();
+        const type = String(task.type || "").toLowerCase();
+        if (status === "completed" || type === "completed") {
+          setSubtitleExtractProgress(100);
+          setExtractingSubtitle(false);
+          setCurrentSubtitleTaskId(null);
+          void options.refreshProject();
+          void options.fetchSubtitle().catch(() => void 0);
+        } else if (status === "failed" || type === "error") {
+          setExtractingSubtitle(false);
+          setCurrentSubtitleTaskId(null);
+          setSubtitleExtractProgress(0);
+          options.showErrorText(task.message || "字幕提取失败");
+        } else if (status === "cancelled" || type === "cancelled") {
+          setExtractingSubtitle(false);
+          setCurrentSubtitleTaskId(null);
+        }
+      } catch (err) {
+        console.debug("sync subtitle progress failed", err);
+      }
+    };
+
+    void syncSubtitleProgress();
+    const id = window.setInterval(() => void syncSubtitleProgress(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    options.project?.id,
+    options.project?.subtitle_status,
+    extractingSubtitle,
+    currentSubtitleTaskId,
+    options.refreshProject,
+    options.fetchSubtitle,
+    options.showErrorText,
+  ]);
 
   /** 刷新后根据服务端状态恢复「正在提取字幕」与 WS 进度（编排接口长时间阻塞时同理） */
   useEffect(() => {
@@ -630,6 +711,7 @@ export function useProjectEditUploadStep(
               typeof (globalThis.crypto as any).randomUUID === "function"
                 ? (globalThis.crypto as any).randomUUID()
                 : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+            setCurrentSubtitleTaskId(subTaskId);
             try {
               await options.extractSubtitle({
                 task_id: subTaskId,
@@ -797,6 +879,9 @@ export function useProjectEditUploadStep(
       typeof (globalThis.crypto as any).randomUUID === "function"
         ? (globalThis.crypto as any).randomUUID()
         : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    if (needSubtitlePhase) {
+      setCurrentSubtitleTaskId(subtitleTaskId);
+    }
 
     // 已有 Omni 多模态结果时：只按需补字幕，再由弹窗里 continue/restart 单独提交管线（与原先顺序一致）
     if (p.omni_multimodal_json_path) {

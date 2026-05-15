@@ -15,6 +15,7 @@ import httpx
 from fastapi import HTTPException
 
 from modules.auth.auth_upstream import get_auth_upstream_base
+from modules.httpx_trust_env import async_client_no_proxy_env
 from modules.auth.device_id_crypto import encrypt_device_id
 from modules.auth.license_device_id import get_host_device_fingerprint
 
@@ -86,7 +87,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     auth = authorization.strip()
     base = get_auth_upstream_base()
     list_url = f"{base}/api/licenses"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with async_client_no_proxy_env(timeout=_TIMEOUT) as client:
         r = await client.get(
             list_url,
             headers={"Accept": "application/json", "Authorization": auth},
@@ -149,7 +150,7 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
             "deviceId": encrypted_device_id,
             "deviceName": device_name,
         }
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with async_client_no_proxy_env(timeout=_TIMEOUT) as client:
             vr = await client.post(
                 verify_url,
                 json=payload,

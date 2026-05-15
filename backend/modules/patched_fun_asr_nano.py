@@ -23,6 +23,14 @@ from funasr.utils.datadir_writer import DatadirWriter
 from funasr.utils.load_utils import extract_fbank, load_audio_text_image_video
 from transformers import AutoConfig, AutoModelForCausalLM
 
+
+def _tokenizer_encode_text(tokenizer, text):
+    try:
+        return tokenizer.encode(text, disallowed_special=())
+    except TypeError:
+        return tokenizer.encode(text)
+
+
 try:
     if bool(getattr(sys, "frozen", False)):
         import inspect
@@ -500,7 +508,7 @@ class FunASRNano(nn.Module):
             speech, speech_lengths = [], []
             for k, sub_str in enumerate(splits):
                 if not sub_str.startswith("<|startofspeech|>"):
-                    sub_token = tokenizer.encode(sub_str)
+                    sub_token = _tokenizer_encode_text(tokenizer, sub_str)
                     source_ids += sub_token
                     fbank_mask_i += [0] * len(sub_token)
                 else:
@@ -552,7 +560,7 @@ class FunASRNano(nn.Module):
             fake_token_len += [fake_token_len_i]
             source_mask = [-100] * len(source_ids)
             target_out = f"{target_out}<|im_end|>"
-            target_ids = tokenizer.encode(target_out)
+            target_ids = _tokenizer_encode_text(tokenizer, target_out)
             input_source_ids = input_ids + source_ids
             input_ids += source_ids + target_ids
             labels += source_mask + target_ids
@@ -853,12 +861,14 @@ class FunASRNano(nn.Module):
         for ctc_result, result in zip(ctc_results, results):
             result["ctc_text"] = ctc_result["text"].replace("<|nospeech|>", "")
             target_ids = torch.tensor(
-                self.ctc_tokenizer.encode(result["ctc_text"]), dtype=torch.int64
+                _tokenizer_encode_text(self.ctc_tokenizer, result["ctc_text"]), dtype=torch.int64
             )
             result["ctc_timestamps"] = forced_align(
                 ctc_result["ctc_logits"], target_ids, self.blank_id
             )
-            target_ids = torch.tensor(self.ctc_tokenizer.encode(result["text"]), dtype=torch.int64)
+            target_ids = torch.tensor(
+                _tokenizer_encode_text(self.ctc_tokenizer, result["text"]), dtype=torch.int64
+            )
             result["timestamps"] = forced_align(ctc_result["ctc_logits"], target_ids, self.blank_id)
             for timestamps in [result["timestamps"], result["ctc_timestamps"]]:
                 for timestamp in timestamps:

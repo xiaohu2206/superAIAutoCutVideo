@@ -349,6 +349,30 @@ class ExtractSubtitleService:
 
         audio_abs: Optional[Path] = None
         audio_web: Optional[str] = None
+        if provider == "fun_asr" and not audio_abs:
+            old_audio_path = getattr(p, "audio_path", None)
+            if old_audio_path:
+                try:
+                    old_f = _resolve_path(old_audio_path)
+                    if old_f.exists():
+                        old_f.unlink()
+                        await _ws(project_id, "progress", "cleanup_old_audio", "清理旧音频", 25, task_id=run_id)
+                except Exception:
+                    pass
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            audio_out = _ensure_parent_dir(_uploads_dir() / "audios" / f"{project_id}_audio_{ts}.wav")
+            await _ws(project_id, "progress", "extract_audio", "FunASR 音频预处理中", 30, task_id=run_id)
+            ok_audio = await video_processor.extract_audio_wav_16k_mono(str(video_abs), str(audio_out))
+            if not ok_audio:
+                _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+                await _ws(project_id, "error", "extract_audio_failed", "音频提取失败", task_id=run_id)
+                raise HTTPException(status_code=500, detail="音频提取失败")
+            audio_abs = audio_out
+            audio_web = _to_web_path(audio_out)
+            _update_project_if_latest(project_id, run_id, {"audio_path": audio_web})
+            await _ws(project_id, "progress", "audio_ready", "音频预处理完成", 45, task_id=run_id)
+
         if not audio_abs:
             # 清理旧音频
             old_audio_path = getattr(p, "audio_path", None)
@@ -388,7 +412,7 @@ class ExtractSubtitleService:
             u = data.get("utterances") if isinstance(data, dict) else None
             utterances = u if isinstance(u, list) else None
         else:
-            await _ws(project_id, "progress", "funasr_start", "FunASR 识别中", 55, task_id=run_id)
+            await _ws(project_id, "progress", "funasr_start", "FunASR 批量识别中", 55, task_id=run_id)
 
             def _on_progress(pct: int, msg: str) -> None:
                 try:

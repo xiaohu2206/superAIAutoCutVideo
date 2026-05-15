@@ -2327,5 +2327,74 @@ class VideoProcessor:
             logger.error(f"同步回退执行ffmpeg出错: {e}")
             return False
 
+    async def extract_audio_wav_16k_mono(self, input_video: str, output_wav: str) -> bool:
+        try:
+            input_path = Path(input_video)
+            if not input_path.exists() or not input_path.is_file():
+                logger.error("FunASR audio extract input invalid: %s", input_video)
+                return False
+
+            if not self._ffmpeg_bin or not Path(self._ffmpeg_bin).exists():
+                logger.error("ffmpeg unavailable for FunASR audio extract: %s", self._ffmpeg_bin)
+                return False
+
+            output_path = Path(output_wav)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                self._ffmpeg_bin,
+                "-hide_banner",
+                "-loglevel", "error",
+                "-i", input_video,
+                "-vn",
+                "-ac", "1",
+                "-ar", "16000",
+                "-c:a", "pcm_s16le",
+                "-y", output_wav,
+            ]
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    creationflags=WIN_NO_WINDOW,
+                )
+                _stdout, stderr = await process.communicate()
+                if process.returncode == 0 and output_path.exists() and output_path.stat().st_size > 44:
+                    return True
+                err = stderr.decode(errors="ignore") if stderr else ""
+                logger.error("FunASR WAV audio extract failed: %s", err[:500])
+                return False
+            except NotImplementedError:
+                return await self._extract_audio_wav_sync_fallback(cmd, output_path)
+            except FileNotFoundError as e:
+                logger.error("ffmpeg not found for FunASR WAV extract: %s", e)
+                return False
+        except Exception as e:
+            logger.error("FunASR WAV audio extract exception: %s", e)
+            return False
+
+    async def _extract_audio_wav_sync_fallback(self, cmd: list, output_path: Path) -> bool:
+        loop = asyncio.get_running_loop()
+
+        def _run_sync():
+            return subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=WIN_NO_WINDOW,
+            )
+
+        try:
+            result = await loop.run_in_executor(None, _run_sync)
+            if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 44:
+                return True
+            err = result.stderr.decode(errors="ignore") if result.stderr else ""
+            logger.error("FunASR WAV audio extract failed(sync): %s", err[:500])
+            return False
+        except Exception as e:
+            logger.error("FunASR WAV sync extract exception: %s", e)
+            return False
+
 # 全局视频处理器实例
 video_processor = VideoProcessor()

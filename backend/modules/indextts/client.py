@@ -13,6 +13,8 @@ from urllib.parse import urljoin
 
 import httpx
 
+from modules.httpx_trust_env import async_client_no_proxy_env
+
 logger = logging.getLogger(__name__)
 
 WIN_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -71,7 +73,7 @@ async def probe_indextts(base_url: str, api_prefix: str = "/api") -> Tuple[bool,
     """检测 IndexTTS 是否可用：请求 clone-voices。"""
     url = _join(base_url, api_prefix, "/clone-voices")
     try:
-        async with httpx.AsyncClient(
+        async with async_client_no_proxy_env(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
             follow_redirects=True,
@@ -122,7 +124,7 @@ async def discover_indextts(
 
 async def fetch_clone_voices_json(base_url: str, api_prefix: str) -> Dict[str, Any]:
     url = _join(base_url, api_prefix, "/clone-voices")
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -152,7 +154,7 @@ async def post_tts_generate(
         body["voice_id"] = voice_id
     if params:
         body["params"] = params
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -175,7 +177,7 @@ async def post_tts_generate(
 
 
 async def get_task_status(base_url: str, api_prefix: str, task_id: str) -> Dict[str, Any]:
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -211,7 +213,7 @@ async def poll_task_until_done(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(5.0, float(timeout_sec))
     last: Dict[str, Any] = {}
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -253,7 +255,7 @@ async def download_task_audio(
 ) -> None:
     url = _join(base_url, api_prefix, f"/tts/tasks/{task_id}/audio")
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -290,7 +292,7 @@ async def upload_clone_voice(
 ) -> Dict[str, Any]:
     """POST /clone-voices/upload（multipart）"""
     url = _join(base_url, api_prefix, "/clone-voices/upload")
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -308,7 +310,7 @@ async def upload_clone_voice(
 async def post_clone_voice_select(base_url: str, api_prefix: str, voice_id: str) -> Dict[str, Any]:
     """POST /clone-voices/select"""
     url = _join(base_url, api_prefix, "/clone-voices/select")
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,
@@ -324,7 +326,7 @@ async def post_clone_voice_select(base_url: str, api_prefix: str, voice_id: str)
 async def post_clone_voice_delete(base_url: str, api_prefix: str, voice_id: str) -> Dict[str, Any]:
     """POST /clone-voices/delete"""
     url = _join(base_url, api_prefix, "/clone-voices/delete")
-    async with httpx.AsyncClient(
+    async with async_client_no_proxy_env(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
         follow_redirects=True,

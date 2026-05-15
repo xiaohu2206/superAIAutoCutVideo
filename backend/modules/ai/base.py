@@ -13,6 +13,8 @@ import json
 import logging
 import traceback
 
+from modules.httpx_trust_env import trust_env_for_http_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +75,8 @@ class AIProviderBase(ABC):
         self.config = config
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(config.timeout or 180),
-            headers=self._get_headers()
+            headers=self._get_headers(),
+            trust_env=trust_env_for_http_url(config.base_url),
         )
     
     @abstractmethod

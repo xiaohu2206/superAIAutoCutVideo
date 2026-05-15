@@ -177,6 +177,7 @@ export interface ProjectRunningTasks {
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
+  extract_subtitle?: TaskProgressState | null;
   extract_scene?: TaskProgressState | null;
   omni_multimodal?: TaskProgressState | null;
   omni_copywriting_embed?: TaskProgressState | null;
@@ -190,6 +191,7 @@ export interface ProjectLatestTasks {
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
   generate_jianying_draft?: TaskProgressState | null;
+  extract_subtitle?: TaskProgressState | null;
   extract_scene?: TaskProgressState | null;
   omni_multimodal?: TaskProgressState | null;
   omni_copywriting_embed?: TaskProgressState | null;

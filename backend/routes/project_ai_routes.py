@@ -765,6 +765,7 @@ async def get_project_running_tasks(project_id: str):
         "generate_script": task_progress_store.get_latest_running("generate_script", project_id),
         "generate_video": task_progress_store.get_latest_running("generate_video", project_id),
         "generate_jianying_draft": task_progress_store.get_latest_running(JianyingDraftManager.SCOPE, project_id),
+        "extract_subtitle": task_progress_store.get_latest_running(EXTRACT_SUBTITLE_SCOPE, project_id),
         "extract_scene": task_progress_store.get_latest_running(extract_scene_service.SCOPE, project_id),
         "omni_multimodal": task_progress_store.get_latest_running(omni_multimodal_pipeline_service.SCOPE, project_id),
         "omni_copywriting_embed": task_progress_store.get_latest_running(
@@ -806,6 +807,7 @@ async def get_project_latest_tasks(project_id: str):
                 "generate_script": None,
                 "generate_video": None,
                 "generate_jianying_draft": None,
+                "extract_subtitle": None,
                 "extract_scene": None,
                 "omni_multimodal": None,
                 "omni_copywriting_embed": None,
@@ -823,6 +825,7 @@ async def get_project_latest_tasks(project_id: str):
             "generate_script": task_progress_store.get_state("generate_script", project_id),
             "generate_video": task_progress_store.get_state("generate_video", project_id),
             "generate_jianying_draft": task_progress_store.get_state(JianyingDraftManager.SCOPE, project_id),
+            "extract_subtitle": task_progress_store.get_state(EXTRACT_SUBTITLE_SCOPE, project_id),
             "extract_scene": task_progress_store.get_state(extract_scene_service.SCOPE, project_id),
             "omni_multimodal": task_progress_store.get_state(omni_multimodal_pipeline_service.SCOPE, project_id),
             "omni_copywriting_embed": task_progress_store.get_state(
