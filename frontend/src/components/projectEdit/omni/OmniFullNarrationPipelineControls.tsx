@@ -38,7 +38,7 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
 
   return (
     <div className="flex flex-col gap-3 items-stretch max-w-xl">
-      {/* <div className="rounded-lg border border-dashed border-amber-300/80 bg-amber-50/60 px-3 py-2">
+      <div className="rounded-lg border border-dashed border-amber-300/80 bg-amber-50/60 px-3 py-2">
         <div className="text-xs text-amber-900/80 mb-2 font-medium">分步测试（按全链路顺序点击）</div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -72,7 +72,7 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
             ③ 解说脚本生成
           </button>
         </div>
-      </div> */}
+      </div>
 
       <button
         type="button"

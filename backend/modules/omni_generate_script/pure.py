@@ -45,9 +45,15 @@ class OmniNarrationParams:
     chunk_balance_mode: str = "balanced_shots"
     chunk_min_lines: int = 1
     chunk_overlap_ratio: float = 0.1
-    timeline_window_mode: str = "proportional"
+    timeline_window_mode: str = "top1_span"
     timeline_gap_median_multiplier: float = 4.0
     timeline_gap_min_seconds: float = 30.0
+    top1_cluster_gap_min_seconds: float = 60.0
+    top1_cluster_gap_median_multiplier: float = 4.0
+    top1_main_cluster_ratio: float = 0.7
+    top1_window_pad_ratio: float = 0.1
+    top1_window_pad_min_seconds: float = 30.0
+    top1_window_pad_max_seconds: float = 180.0
     timeline_shot_id_redundancy_ratio: float = 0.1
     system_prompt: Optional[str] = None
     user_prompt_template: Optional[str] = None
@@ -106,6 +112,12 @@ def build_chunk_metas_and_prompts(
         window_mode=params.timeline_window_mode,
         gap_median_mult=params.timeline_gap_median_multiplier,
         gap_min_seconds=params.timeline_gap_min_seconds,
+        top1_cluster_gap_min_seconds=params.top1_cluster_gap_min_seconds,
+        top1_cluster_gap_median_multiplier=params.top1_cluster_gap_median_multiplier,
+        top1_main_cluster_ratio=params.top1_main_cluster_ratio,
+        top1_window_pad_ratio=params.top1_window_pad_ratio,
+        top1_window_pad_min_seconds=params.top1_window_pad_min_seconds,
+        top1_window_pad_max_seconds=params.top1_window_pad_max_seconds,
     )
     total_chunks = len(chunk_metas)
     im = params.interleave_mode or "smart_interleave"

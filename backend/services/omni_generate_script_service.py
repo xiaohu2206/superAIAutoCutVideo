@@ -190,6 +190,21 @@ def _params_from_request_and_project(
             g.get("timeline_gap_median_multiplier", base.timeline_gap_median_multiplier) or base.timeline_gap_median_multiplier
         ),
         timeline_gap_min_seconds=float(g.get("timeline_gap_min_seconds", base.timeline_gap_min_seconds) or base.timeline_gap_min_seconds),
+        top1_cluster_gap_min_seconds=float(
+            g.get("top1_cluster_gap_min_seconds", base.top1_cluster_gap_min_seconds) or base.top1_cluster_gap_min_seconds
+        ),
+        top1_cluster_gap_median_multiplier=float(
+            g.get("top1_cluster_gap_median_multiplier", base.top1_cluster_gap_median_multiplier)
+            or base.top1_cluster_gap_median_multiplier
+        ),
+        top1_main_cluster_ratio=float(g.get("top1_main_cluster_ratio", base.top1_main_cluster_ratio) or base.top1_main_cluster_ratio),
+        top1_window_pad_ratio=float(g.get("top1_window_pad_ratio", base.top1_window_pad_ratio) or base.top1_window_pad_ratio),
+        top1_window_pad_min_seconds=float(
+            g.get("top1_window_pad_min_seconds", base.top1_window_pad_min_seconds) or base.top1_window_pad_min_seconds
+        ),
+        top1_window_pad_max_seconds=float(
+            g.get("top1_window_pad_max_seconds", base.top1_window_pad_max_seconds) or base.top1_window_pad_max_seconds
+        ),
         timeline_shot_id_redundancy_ratio=float(
             g.get("timeline_shot_id_redundancy_ratio", base.timeline_shot_id_redundancy_ratio) or base.timeline_shot_id_redundancy_ratio
         ),

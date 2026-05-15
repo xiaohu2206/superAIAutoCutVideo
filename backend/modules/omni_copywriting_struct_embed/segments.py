@@ -109,6 +109,31 @@ def _strip_code_fence(raw: str) -> str:
     return s
 
 
+def _looks_like_segment_object(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    return isinstance(data.get("text"), str) and any(
+        key in data
+        for key in (
+            "event",
+            "subject",
+            "emotion",
+            "scene_type",
+            "visual_keywords",
+            "action",
+            "camera_hint",
+        )
+    )
+
+
+def _looks_like_segment_array(data: Any) -> bool:
+    if not isinstance(data, list):
+        return False
+    if not data:
+        return True
+    return all(isinstance(x, dict) for x in data)
+
+
 def parse_model_json_array(raw: str) -> List[Any]:
     s = _strip_code_fence(raw)
     data = json.loads(s)
@@ -117,10 +142,14 @@ def parse_model_json_array(raw: str) -> List[Any]:
     if isinstance(data, dict):
         for key in ("segments", "items", "data", "copywriting_segments", "result"):
             v = data.get(key)
-            if isinstance(v, list):
+            if _looks_like_segment_array(v):
                 return v
+            if _looks_like_segment_object(v):
+                return [v]
+        if _looks_like_segment_object(data):
+            return [data]
         for v in data.values():
-            if isinstance(v, list):
+            if _looks_like_segment_array(v):
                 return v
         raise ValueError(f"模型输出对象中未找到数组字段: keys={list(data.keys())}")
     raise ValueError(f"模型输出不是 JSON 数组或可解析对象: {type(data)}")

@@ -5,6 +5,8 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from .top1_window import Top1WindowConfig, compute_top1_span_window
+
 DEFAULT_SYSTEM_PROMPT = (
     "你是一位专业的视频脚本时间轴编辑器。"
     "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。"
@@ -600,6 +602,12 @@ def _compute_chunk_time_windows(
     window_mode: str = "proportional",
     gap_median_mult: float = 4.0,
     gap_min_seconds: float = 30.0,
+    top1_cluster_gap_min_seconds: float = 60.0,
+    top1_cluster_gap_median_multiplier: float = 4.0,
+    top1_main_cluster_ratio: float = 0.7,
+    top1_window_pad_ratio: float = 0.1,
+    top1_window_pad_min_seconds: float = 30.0,
+    top1_window_pad_max_seconds: float = 180.0,
 ) -> List[Dict[str, Any]]:
     """
     估计本批用于挑选镜头的影片时间窗口。
@@ -615,6 +623,14 @@ def _compute_chunk_time_windows(
     ve = max(0.0, video_end)
     n = len(results)
     mode = (window_mode or "proportional").strip().lower()
+    top1_config = Top1WindowConfig(
+        cluster_gap_min_seconds=top1_cluster_gap_min_seconds,
+        cluster_gap_median_multiplier=top1_cluster_gap_median_multiplier,
+        main_cluster_ratio=top1_main_cluster_ratio,
+        pad_ratio=top1_window_pad_ratio,
+        pad_min_seconds=top1_window_pad_min_seconds,
+        pad_max_seconds=top1_window_pad_max_seconds,
+    )
 
     for ci, (a, b) in enumerate(chunk_ranges):
         chunk_results = results[a:b]
@@ -630,6 +646,40 @@ def _compute_chunk_time_windows(
 
         ratio_a = (a / float(n)) if n > 0 else 0.0
         ratio_b = (b / float(n)) if n > 0 else 1.0
+
+        if mode == "top1_span":
+            top1_window = compute_top1_span_window(chunk_results, ve, top1_config)
+            if top1_window is not None:
+                w_start = top1_window.window_start
+                w_end = top1_window.window_end
+                prev_window_end = w_end
+
+                metas.append(
+                    {
+                        "chunk_index": ci,
+                        "slice": (a, b),
+                        "line_start_1based": a + 1,
+                        "line_end_1based": b,
+                        "line_count": b - a,
+                        "window_start": w_start,
+                        "window_end": w_end,
+                        "raw_min": top1_window.raw_min,
+                        "raw_max": top1_window.raw_max,
+                        "top1_span": top1_window.top1_span,
+                        "window_mode": mode,
+                        "copy_film_ratio_start": None,
+                        "copy_film_ratio_end": None,
+                        "timeline_gap_threshold": top1_window.gap_threshold,
+                        "monotonic_top1_overlap": top1_window.anchor_count,
+                        "monotonic_top1_kept": top1_window.selected_anchor_count,
+                        "top1_window_pad_seconds": top1_window.pad_seconds,
+                        "top1_anchor_count": top1_window.anchor_count,
+                        "top1_selected_anchor_count": top1_window.selected_anchor_count,
+                        "top1_cluster_count": top1_window.cluster_count,
+                        "top1_selected_cluster_ratio": top1_window.selected_cluster_ratio,
+                    }
+                )
+                continue
 
         if mode == "legacy_top1":
             if ci == 0:
@@ -674,6 +724,10 @@ def _compute_chunk_time_windows(
             )
             continue
 
+        effective_window_mode = (
+            "top1_span_fallback_proportional" if mode == "top1_span" else mode
+        )
+
         # proportional：文案占比 ↔ 影片时间占比
         if n > 0 and ve > 0:
             w_start = ratio_a * ve
@@ -712,7 +766,7 @@ def _compute_chunk_time_windows(
                 "raw_min": raw_min if intervals else w_start,
                 "raw_max": raw_max if intervals else w_end,
                 "top1_span": span,
-                "window_mode": mode,
+                "window_mode": effective_window_mode,
                 "copy_film_ratio_start": ratio_a,
                 "copy_film_ratio_end": ratio_b,
                 "timeline_gap_threshold": gap_thr,

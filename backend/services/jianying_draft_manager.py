@@ -279,12 +279,23 @@ class JianyingDraftManager:
 
     @staticmethod
     def _copy_unique(src: Path, dst_dir: Path) -> Path:
+        src = Path(src)
+        dst_dir = Path(dst_dir)
         dst_dir.mkdir(parents=True, exist_ok=True)
-        dst = dst_dir / src.name
+        ext = src.suffix
+        # Windows：整段路径超过 MAX_PATH 时，copy2 在创建目标时可能报 FileNotFoundError（非目录缺失）
+        max_path = 240 if os.name == "nt" else 4090
+
+        def pick_dst(preferred: str) -> Path:
+            candidate = dst_dir / preferred
+            if len(str(candidate)) <= max_path:
+                return candidate
+            return dst_dir / f"v_{uuid.uuid4().hex}{ext}"
+
+        dst = pick_dst(src.name)
         if dst.exists():
-            base = src.stem
-            ext = src.suffix
-            dst = dst_dir / f"{base}_{uuid.uuid4().hex[:6]}{ext}"
+            dst = pick_dst(f"{src.stem}_{uuid.uuid4().hex[:6]}{ext}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         return dst
 
