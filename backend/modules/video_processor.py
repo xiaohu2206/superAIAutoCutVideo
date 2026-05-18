@@ -42,6 +42,53 @@ def _trim_timeout_label(seconds: float) -> str:
     return f"{seconds:.0f}s"
 
 
+def _env_float(name: str, default: float, min_value: Optional[float] = None) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        value = float(default)
+    else:
+        try:
+            value = float(raw)
+        except Exception:
+            value = float(default)
+    if min_value is not None:
+        value = max(float(min_value), value)
+    return value
+
+
+def _calc_cut_timeouts(duration: float, input_size: Optional[int] = None) -> Tuple[float, float]:
+    dur = max(0.0, float(duration or 0.0))
+    copy_cap = _env_float("SACV_CUT_COPY_TIMEOUT_MAX_SEC", 12 * 60.0, 60.0)
+    reencode_cap = _env_float("SACV_CUT_REENCODE_TIMEOUT_MAX_SEC", 60 * 60.0, 5 * 60.0)
+    base_copy = max(45.0, min(copy_cap, dur * 3.0 + 30.0))
+
+    size_gb = 0.0
+    try:
+        if input_size:
+            size_gb = max(0.0, float(input_size) / (1024.0 ** 3))
+    except Exception:
+        size_gb = 0.0
+
+    reencode_floor = _env_float("SACV_CUT_REENCODE_TIMEOUT_MIN_SEC", 10 * 60.0, 60.0)
+    reencode_budget = max(
+        reencode_floor,
+        base_copy * 4.0,
+        dur * 15.0 + 180.0,
+        size_gb * 90.0 + 180.0,
+    )
+    return base_copy, min(reencode_cap, reencode_budget)
+
+
+def _reencode_seek_args(start_time: float) -> Tuple[List[str], float]:
+    start = max(0.0, float(start_time or 0.0))
+    window = _env_float("SACV_CUT_REENCODE_PRESEEK_SEC", 5.0, 0.0)
+    if start <= 0.0 or window <= 0.0:
+        return [], start
+    pre_seek = max(0.0, start - window)
+    inner_seek = max(0.0, start - pre_seek)
+    return ["-ss", f"{pre_seek:.3f}"], inner_seek
+
+
 class VideoProcessor:
     """视频处理器类"""
     
@@ -266,7 +313,7 @@ class VideoProcessor:
             )
 
             trim_tag = _trim_log_tag(project_id, task_id) if scope == "trim_video" else ""
-            clip_timeout = max(45.0, min(12 * 60.0, float(duration or 0.0) * 3.0 + 30.0))
+            clip_timeout, reencode_timeout = _calc_cut_timeouts(duration, input_size)
             cmd = [
                 self._ffmpeg_bin,
                 "-hide_banner",
@@ -348,13 +395,14 @@ class VideoProcessor:
                 enc_name, vcodec_args = await self._pick_fast_encoder()
             except Exception:
                 enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
-            reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
+            preseek_args, inner_seek = _reencode_seek_args(start_time)
             reencode_cmd = [
                 self._ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel", "error",
+                *preseek_args,
                 "-i", input_path,
-                "-ss", str(start_time),
+                "-ss", f"{inner_seek:.3f}",
                 "-t", str(duration),
                 *vcodec_args,
                 "-pix_fmt", self._preferred_pix_fmt(enc_name),
@@ -364,9 +412,11 @@ class VideoProcessor:
                 output_path
             ]
             logger.info(
-                "%s cut start mode=reencode encoder=%s timeout=%s",
+                "%s cut start mode=reencode encoder=%s preseek=%s inner_seek=%.3fs timeout=%s",
                 trim_tag,
                 enc_name,
+                bool(preseek_args),
+                float(inner_seek),
                 _trim_timeout_label(reencode_timeout),
             )
             p2 = await asyncio.create_subprocess_exec(
@@ -2190,18 +2240,24 @@ class VideoProcessor:
             enc_name, vcodec_args = self._pick_fast_encoder_sync()
         except Exception:
             enc_name, vcodec_args = ("libx264", ["-c:v", "libx264", "-preset", "superfast", "-crf", "18"])
-        reencode_timeout = max(60.0, min(20 * 60.0, clip_timeout * 2.0))
+        try:
+            input_size = Path(input_path).stat().st_size
+        except Exception:
+            input_size = None
+        _, reencode_timeout = _calc_cut_timeouts(duration, input_size)
+        preseek_args, inner_seek = _reencode_seek_args(start_time)
         reencode_cmd = [
             self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
-            "-i", input_path, "-ss", str(start_time), "-t", str(duration),
+            *preseek_args,
+            "-i", input_path, "-ss", f"{inner_seek:.3f}", "-t", str(duration),
             *vcodec_args,
             "-pix_fmt", self._preferred_pix_fmt(enc_name),
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
             "-movflags", "+faststart", "-y", output_path,
         ]
         logger.info(
-            "%s cut sync reencode start encoder=%s timeout=%s",
-            trim_tag, enc_name, _trim_timeout_label(reencode_timeout),
+            "%s cut sync reencode start encoder=%s preseek=%s inner_seek=%.3fs timeout=%s",
+            trim_tag, enc_name, bool(preseek_args), float(inner_seek), _trim_timeout_label(reencode_timeout),
         )
         try:
             result2 = _subprocess.run(reencode_cmd, capture_output=True, creationflags=WIN_NO_WINDOW, timeout=reencode_timeout)

@@ -273,10 +273,20 @@ function Repair-GpuNsisMultilineMessageBox([string]$content) {
   return $content
 }
 
+function Repair-GpuNsisCommentSwallowedLogic([string]$content) {
+  # If a non-ASCII comment line is decoded incorrectly, an NSIS logic macro can end up on the same comment line.
+  return [regex]::Replace(
+    $content,
+    '(?m)^(\s*;[^\r\n]*?)\s+(\$\{(?:If|IfNot|Unless|OrIf|AndIf)\b[^\r\n]*)$',
+    { param($m) $m.Groups[1].Value + "`r`n" + "    " + $m.Groups[2].Value }
+  )
+}
+
 function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
   $content = Repair-GpuNsisMultilineMessageBox $content
+  $content = Repair-GpuNsisCommentSwallowedLogic $content
   $alreadyHasBackendCopy = $content -match [regex]::Escape("superAutoCutVideoBackend_gpu.zip")
 
   if ($content -notmatch '(?m)^!ifndef OUTFILE\s*$') {
@@ -493,6 +503,7 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   }
 
   $content = Repair-GpuNsisMultilineMessageBox $content
+  $content = Repair-GpuNsisCommentSwallowedLogic $content
   Microsoft.PowerShell.Management\Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
 }
 
@@ -861,11 +872,11 @@ foreach ($variant in $variants) {
 
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
     $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu128" }
-    # StrictMode：在分支外先绑定，避免仅写在注释行尾或条件块内导致未赋值
+    # Bind outside branches for StrictMode.
     $preferOfficialTorch = ($env:SACV_PREFER_PYTORCH_OFFICIAL -eq "1")
     $torchAlreadyOk = $false
     try {
-      # torchaudio 在某些镜像源可能没有 +cuXXX 轮子；这里以 torch/torchvision 的 CUDA tag 判断是否需要重装
+      # Some mirrors may not have torchaudio +cuXXX wheels; use torch/torchvision tags to decide reinstall.
       $vers = & $venvPy "-c" "import torch, torchvision; print(torch.__version__); print(torchvision.__version__)" 2>$null
       if ($LASTEXITCODE -eq 0) {
         $versText = ($vers | Out-String)
@@ -895,8 +906,8 @@ foreach ($variant in $variants) {
       }
     }
     if (-not $torchAlreadyOk -and -not $usedLocal) {
-      # 本脚本已将 PIP_INDEX_URL 指向阿里云 PyPI；PyTorch CUDA/CPU 轮子优先用阿里云 -f，避免先连 download.pytorch.org
-      #（部分网络/代理会出现 SSL EOF，且失败重试会白白耗时）。需要官方源时再设 SACV_PREFER_PYTORCH_OFFICIAL=1。
+      # PIP_INDEX_URL points to Aliyun PyPI. Prefer Aliyun torch wheels first to avoid slow official retries.
+      # Set SACV_PREFER_PYTORCH_OFFICIAL=1 when the official PyTorch index should be tried first.
       if ($variant -eq "cpu") {
         if ($preferOfficialTorch) {
           & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"

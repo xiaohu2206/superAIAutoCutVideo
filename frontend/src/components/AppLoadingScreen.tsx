@@ -155,7 +155,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
               {statusLine}
             </p>
 
-            {backendResourceStatus && (
+            {/* {backendResourceStatus && (
               <div
                 className={`w-full rounded-lg border px-2.5 py-2 text-[10px] leading-snug ${
                   backendResourceStatus.zip_exists || backendExeReady
@@ -182,7 +182,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
                   {backendResourceStatus.message}
                 </div>
               </div>
-            )}
+            )} */}
 
             {!compactMode && (
               <p className="text-center text-[11px] leading-snug text-slate-400">

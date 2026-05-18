@@ -40,10 +40,10 @@ if (-not (Test-Path -LiteralPath $SourceDir)) {
 $manifestPath = Join-Path $SourceDir "runtime-manifest.json"
 $bundlePath = Join-Path $SourceDir "offline-bundle-manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) {
-    throw "未找到 runtime-manifest.json: $manifestPath（请先运行 split-backend.ps1）"
+    throw "runtime-manifest.json not found: $manifestPath (run split-backend.ps1 first)"
 }
 if (-not (Test-Path -LiteralPath $bundlePath)) {
-    throw "未找到 offline-bundle-manifest.json: $bundlePath"
+    throw "offline-bundle-manifest.json not found: $bundlePath"
 }
 
 if (-not $StagingDir) {
@@ -66,9 +66,9 @@ foreach ($z in $zips) {
 Write-Host ""
 Write-Host "已写入: $StagingDir"
 Write-Host "  清单: runtime-manifest.json, offline-bundle-manifest.json"
-Write-Host "  分块 zip 数量: $($zips.Count)（合计约 $([math]::Round($totalMb, 1)) MB）"
+Write-Host "  chunk zip count: $($zips.Count) (total about $([math]::Round($totalMb, 1)) MB)"
 foreach ($z in $zips) {
     Write-Host "    - $($z.Name) ($([math]::Round($z.Length / 1MB, 1)) MB)"
 }
 Write-Host ""
-Write-Host "可将该文件夹整体上传到网盘；用户仅下载此夹后，在应用「关于」里选择 offline-bundle-manifest.json。"
+Write-Host "Upload this folder as the offline patch; users can select offline-bundle-manifest.json in the app."
