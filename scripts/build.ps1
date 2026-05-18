@@ -14,11 +14,14 @@ param(
   [switch]$SkipClean,
   [switch]$SkipPortable,
   # 使用 Cython 将 .py 编译为 .pyd 加密（需安装 Visual Studio 2022 Build Tools）
+  # 与 -RuntimeChunks 同用时 GPU 后端默认开启；可用 -EncryptPy:$false 关闭
   [switch]$EncryptPy
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$runtimeChunksRequested = $PSBoundParameters.ContainsKey('RuntimeChunks') -and [bool]$PSBoundParameters['RuntimeChunks']
 
 function Step($msg) { Write-Host "[+] $msg" -ForegroundColor Cyan }
 function Info($msg) { Write-Host "    $msg" }
@@ -251,9 +254,29 @@ function Invoke-NsisRebuildBundleExe([string]$variantTargetDir, [string]$variant
   if ($LASTEXITCODE -ne 0) { Fail "makensis failed with exit code $LASTEXITCODE" }
 }
 
+function Repair-GpuNsisMultilineMessageBox([string]$content) {
+  # PowerShell `r`n inside here-strings becomes real newlines; NSIS string literals must stay on one line (use $\r$\n).
+  $pattern = '(?m)MessageBox MB_ICONSTOP "([^"]*?):\r?\n(\$[^\r\n"]+)\r?\n\r?\n([^"]+)"'
+  $shortPattern = '(?m)MessageBox MB_ICONSTOP "([^"]*?):\r?\n(\$[^\r\n"]+)"'
+  $prev = $null
+  while ($content -ne $prev) {
+    $prev = $content
+    $content = [regex]::Replace($content, $pattern, {
+      param($m)
+      ('MessageBox MB_ICONSTOP "{0}:$\r$\n{1}$\r$\n$\r$\n{2}"' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value)
+    })
+    $content = [regex]::Replace($content, $shortPattern, {
+      param($m)
+      ('MessageBox MB_ICONSTOP "{0}:$\r$\n{1}"' -f $m.Groups[1].Value, $m.Groups[2].Value)
+    })
+  }
+  return $content
+}
+
 function Patch-GpuNsisInstaller([string]$installerNsiPath) {
   if (-not (Test-Path $installerNsiPath)) { Fail "NSIS script not found: $installerNsiPath" }
   $content = Get-Content -Raw -Encoding UTF8 $installerNsiPath
+  $content = Repair-GpuNsisMultilineMessageBox $content
   $alreadyHasBackendCopy = $content -match [regex]::Escape("superAutoCutVideoBackend_gpu.zip")
 
   if ($content -notmatch '(?m)^!ifndef OUTFILE\s*$') {
@@ -264,17 +287,22 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     )
   }
 
-  if ($content -notmatch '(?m)^InstallDir\s+"\$PROGRAMFILES64\\SuperAutoCutVideo"\s*$') {
+  if ($content -match '(?m)^InstallDir\s+"\$PROGRAMFILES64\\SuperAutoCutVideo"\s*$') {
     $content = [regex]::Replace(
       $content,
-      '(?m)^InstallDir\s+"[^"]+"\s*$',
-      'InstallDir "$PROGRAMFILES64\SuperAutoCutVideo"',
+      '(?m)^InstallDir\s+"\$PROGRAMFILES64\\SuperAutoCutVideo"\s*$',
+      'InstallDir "${PLACEHOLDER_INSTALL_DIR}"',
       1
     )
   }
 
-  if ($content -notmatch '(?m)^!define\s+APPNAME_DIR\s+"SuperAutoCutVideo"\s*$') {
-    $content = "!define APPNAME_DIR `"SuperAutoCutVideo`"`r`n" + $content
+  if ($content -match '(?m)^!define\s+APPNAME_DIR\s+"SuperAutoCutVideo"\s*$') {
+    $content = [regex]::Replace(
+      $content,
+      '(?m)^!define\s+APPNAME_DIR\s+"SuperAutoCutVideo"\s*\r?\n',
+      '',
+      1
+    )
   }
 
   if (-not $alreadyHasBackendCopy) {
@@ -283,6 +311,7 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       Fail "Failed to patch NSIS script (marker not found): $insertPattern"
     }
 
+    $nsNl = '$\r$\n'
     $snippet = @"
 
     SetOverwrite on
@@ -295,13 +324,64 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
 
     ; 同目录有 zip：复制进 resources，并清理安装目录内解压缓存以便与 zip 一致
     `${If} `${FileExists} "`$R0"
+      DetailPrint "Check resources write permission: `$INSTDIR\resources"
+      CreateDirectory "`$INSTDIR\resources"
+      `${IfNot} `${FileExists} "`$INSTDIR\resources\*.*"
+        `${If} `${Silent}
+          Abort
+        `${Else}
+          MessageBox MB_ICONSTOP "Cannot create resources directory:${nsNl}`$INSTDIR\resources${nsNl}${nsNl}Please run the installer as administrator, or choose a writable install location."
+          Abort
+        `${EndIf}
+      `${EndIf}
+      ClearErrors
+      Delete "`$INSTDIR\resources\.sacv_write_test.tmp"
+      FileOpen `$R2 "`$INSTDIR\resources\.sacv_write_test.tmp" w
+      `${If} `${Errors}
+        `${If} `${Silent}
+          Abort
+        `${Else}
+          MessageBox MB_ICONSTOP "No permission to write backend resources:${nsNl}`$INSTDIR\resources${nsNl}${nsNl}Please run the installer as administrator, or choose a writable install location."
+          Abort
+        `${EndIf}
+      `${EndIf}
+      FileWrite `$R2 "write-test"
+      FileClose `$R2
+      Delete "`$INSTDIR\resources\.sacv_write_test.tmp"
+
       DetailPrint "Clear install resources backend extract (new sidecar zip)"
       RMDir /r "`$INSTDIR\resources\superAutoCutVideoBackend"
       DetailPrint "Copy backend zip: `$R0"
+      ClearErrors
       CopyFiles /SILENT "`$R0" "`$INSTDIR\resources"
+      `${If} `${Errors}
+        `${If} `${Silent}
+          Abort
+        `${Else}
+          MessageBox MB_ICONSTOP "Failed to copy backend ZIP to:${nsNl}`$INSTDIR\resources${nsNl}${nsNl}Please check disk space and permissions, then run setup again."
+          Abort
+        `${EndIf}
+      `${EndIf}
       `${If} `$R1 != "superAutoCutVideoBackend.zip"
+        ClearErrors
         Delete "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
         Rename "`$INSTDIR\resources\`$R1" "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+        `${If} `${Errors}
+          `${If} `${Silent}
+            Abort
+          `${Else}
+            MessageBox MB_ICONSTOP "Failed to rename backend ZIP in:${nsNl}`$INSTDIR\resources${nsNl}${nsNl}Please check permissions, then run setup again."
+            Abort
+          `${EndIf}
+        `${EndIf}
+      `${EndIf}
+      `${IfNot} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+        `${If} `${Silent}
+          Abort
+        `${Else}
+          MessageBox MB_ICONSTOP "Backend ZIP was not installed correctly:${nsNl}`$INSTDIR\resources\superAutoCutVideoBackend.zip${nsNl}${nsNl}Setup will stop to avoid installing an unusable application."
+          Abort
+        `${EndIf}
       `${EndIf}
       Goto gpu_backend_zip_ready
     `${EndIf}
@@ -312,22 +392,98 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
       Goto gpu_backend_zip_ready
     `${EndIf}
 
-    ; 仅装壳：无旁路 zip、无旧 resources zip — 保留已有解压目录，或通过应用内分块更新安装
-    DetailPrint "No sidecar GPU backend zip; continuing (shell-only / keep backend extract / use in-app update)."
-    Goto gpu_backend_zip_ready
+    ; No sidecar zip and no existing installed zip: abort to avoid installing a shell without backend runtime.
+    DetailPrint "GPU backend zip missing: `$EXEDIR\superAutoCutVideoBackend_gpu.zip"
+    `${If} `${Silent}
+      Abort
+    `${Else}
+      MessageBox MB_ICONSTOP "GPU backend zip not found. Please put superAutoCutVideoBackend_gpu.zip next to the installer, then run setup again."
+      Abort
+    `${EndIf}
 
     gpu_backend_zip_ready:
+    `${IfNot} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+      `${IfNot} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+        DetailPrint "Extract backend zip to resources\superAutoCutVideoBackend"
+        RMDir /r "`$INSTDIR\resources\superAutoCutVideoBackend"
+        CreateDirectory "`$INSTDIR\resources\superAutoCutVideoBackend"
+        ClearErrors
+        Delete "`$TEMP\sacv_extract_backend.ps1"
+        FileOpen `$R2 "`$TEMP\sacv_extract_backend.ps1" w
+        `${If} `${Errors}
+          `${If} `${Silent}
+            Abort
+          `${Else}
+            MessageBox MB_ICONSTOP "Failed to create temporary backend extract script:${nsNl}`$TEMP\sacv_extract_backend.ps1"
+            Abort
+          `${EndIf}
+        `${EndIf}
+        FileWrite `$R2 "Expand-Archive -LiteralPath '`$INSTDIR\resources\superAutoCutVideoBackend.zip' -DestinationPath '`$INSTDIR\resources\superAutoCutVideoBackend' -Force -ErrorAction Stop`$\r`$\n"
+        FileClose `$R2
+        ClearErrors
+        nsExec::ExecToLog '"`$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "`$TEMP\sacv_extract_backend.ps1"'
+        Pop `$R3
+        Delete "`$TEMP\sacv_extract_backend.ps1"
+        `${If} `$R3 != 0
+          `${If} `${Silent}
+            Abort
+          `${Else}
+            MessageBox MB_ICONSTOP "Failed to extract backend ZIP:${nsNl}`$INSTDIR\resources\superAutoCutVideoBackend.zip${nsNl}${nsNl}Please check disk space, permissions, and security software, then run setup again."
+            Abort
+          `${EndIf}
+        `${EndIf}
+        `${IfNot} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+          `${IfNot} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+            `${If} `${Silent}
+              Abort
+            `${Else}
+              MessageBox MB_ICONSTOP "Backend was not extracted correctly. Missing:${nsNl}`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe${nsNl}${nsNl}Setup will stop to avoid installing an unusable application."
+              Abort
+            `${EndIf}
+          `${EndIf}
+        `${EndIf}
+      `${EndIf}
+    `${EndIf}
+
+    ; SACV_DELETE_BACKEND_ZIP_AFTER_EXTRACT — 解压目录就绪后删除 zip，节省安装目录空间
+    `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+    `${OrIf} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+      `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+        DetailPrint "Remove backend zip after extract"
+        Delete "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+      `${EndIf}
+    `${EndIf}
 "@
 
     $content = $content -replace $insertPattern, ('$&' + $snippet)
   }
 
-  # 历史 installer.nsi 仍含 MessageBox+Abort 时，强制改为继续（与是否已插入过 gpu 片段无关）
-  if ($content -match 'GPU backend zip not found') {
+  # Keep already-patched installer.nsi files buildable when -SkipClean reuses a previous generated script.
+  $content = [regex]::Replace(
+    $content,
+    '(?m)^\s*FileWrite\s+\$R2\s+"\$ErrorActionPreference = ''Stop''\$\\r\$\\n"\s*\r?\n',
+    ''
+  )
+  $content = $content -replace 'Expand-Archive -LiteralPath ''\$INSTDIR\\resources\\superAutoCutVideoBackend\.zip'' -DestinationPath ''\$INSTDIR\\resources\\superAutoCutVideoBackend'' -Force\$\\r\$\\n', 'Expand-Archive -LiteralPath ''$INSTDIR\resources\superAutoCutVideoBackend.zip'' -DestinationPath ''$INSTDIR\resources\superAutoCutVideoBackend'' -Force -ErrorAction Stop$\r$\n'
+
+  $deleteZipMarker = 'SACV_DELETE_BACKEND_ZIP_AFTER_EXTRACT'
+  if ($content -match [regex]::Escape('gpu_backend_zip_ready:') -and $content -notmatch [regex]::Escape($deleteZipMarker)) {
+    $deleteZipSnippet = @"
+
+    ; $deleteZipMarker — 解压目录就绪后删除 zip，节省安装目录空间
+    `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+    `${OrIf} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+      `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+        DetailPrint "Remove backend zip after extract"
+        Delete "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
+      `${EndIf}
+    `${EndIf}
+"@
     $content = [regex]::Replace(
       $content,
-      '(?s)\$\{If\}\s+\$\{Silent\}\s*\r?\n\s*Abort\s*\r?\n\s*\$\{Else\}\s*\r?\n\s*MessageBox[^\r\n]*GPU backend zip not found[^\r\n]*\r?\n\s*Abort\s*\r?\n\s*\$\{EndIf\}',
-      "    DetailPrint `"No sidecar GPU backend zip; continuing (shell-only or existing backend).`"`r`n    Goto gpu_backend_zip_ready"
+      '(?ms)(gpu_backend_zip_ready:.*?)(\r?\n\s*(Section\s|Function\s|!insertmacro\s))',
+      { param($m) $m.Groups[1].Value + $deleteZipSnippet + $m.Groups[2].Value + $m.Groups[3].Value },
+      1
     )
   }
 
@@ -336,6 +492,7 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     $content = $content -replace [regex]::Escape($uninstallMarker), ($uninstallMarker + "`r`n    Delete `"`$INSTDIR\resources\superAutoCutVideoBackend.zip`"")
   }
 
+  $content = Repair-GpuNsisMultilineMessageBox $content
   Microsoft.PowerShell.Management\Set-Content -Encoding UTF8 -NoNewline -Path $installerNsiPath -Value $content
 }
 
@@ -579,6 +736,12 @@ $artifactBase = if ($TauriDebug) {
 New-Item -ItemType Directory -Force $artifactBase | Out-Null
 
 foreach ($variant in $variants) {
+  $doEncryptPy = [bool]$EncryptPy
+  if (-not $doEncryptPy -and -not $PSBoundParameters.ContainsKey('EncryptPy') -and $runtimeChunksRequested -and $variant -eq 'gpu') {
+    $doEncryptPy = $true
+    Info "RuntimeChunks: Cython encrypt enabled by default (same as -EncryptPy)"
+  }
+
   Step "Package backend ($variant)"
   Push-Location backend
   try {
@@ -675,8 +838,18 @@ foreach ($variant in $variants) {
     else { Fail "No backend requirements file found" }
 
     if ($variant -ne "cpu") {
-      Step "Install pre-built llama-cpp-python (CPU) - CUDA 13.2 is too new for GGML-CUDA compile ($variant)"
-      & $venvPy "-m" "pip" "install" "llama-cpp-python==0.3.16" "--force-reinstall" "--no-deps"
+      Step "Ensure llama-cpp-python 0.3.16 (CPU wheel; avoid --force-reinstall on Win32 — DLL lock / WinError 5) ($variant)"
+      $llamaPipArgs = @("install", "llama-cpp-python==0.3.16", "--no-deps", "--disable-pip-version-check", "--no-input")
+      if ($env:SACV_FORCE_REINSTALL_LLAMA -eq "1") {
+        Info "SACV_FORCE_REINSTALL_LLAMA=1: appending --force-reinstall for llama-cpp-python"
+        $llamaPipArgs += "--force-reinstall"
+      }
+      & $venvPy "-m" "pip" @llamaPipArgs
+      if ($LASTEXITCODE -ne 0) {
+        Info "llama-cpp-python pip install failed; retry once after 5s (often transient DLL/AV lock on Windows)"
+        Start-Sleep -Seconds 5
+        & $venvPy "-m" "pip" @llamaPipArgs
+      }
       if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python install failed (code $LASTEXITCODE)" }
       $llamaDiag = & $venvPy "-c" "import llama_cpp; import llama_cpp.llama_cpp as ll; print('llama_cpp', getattr(llama_cpp, '__version__', None)); print('supports_gpu_offload', bool(ll.llama_supports_gpu_offload()))"
       if ($LASTEXITCODE -ne 0) { throw "llama-cpp-python import/diag failed (code $LASTEXITCODE)" }
@@ -688,6 +861,8 @@ foreach ($variant in $variants) {
 
     $suffix = if ($variant -eq "cpu") { "cpu" } else { "cu128" }
     $desiredTag = if ($variant -eq "cpu") { "+cpu" } else { "+cu128" }
+    # StrictMode：在分支外先绑定，避免仅写在注释行尾或条件块内导致未赋值
+    $preferOfficialTorch = ($env:SACV_PREFER_PYTORCH_OFFICIAL -eq "1")
     $torchAlreadyOk = $false
     try {
       # torchaudio 在某些镜像源可能没有 +cuXXX 轮子；这里以 torch/torchvision 的 CUDA tag 判断是否需要重装
@@ -722,7 +897,6 @@ foreach ($variant in $variants) {
     if (-not $torchAlreadyOk -and -not $usedLocal) {
       # 本脚本已将 PIP_INDEX_URL 指向阿里云 PyPI；PyTorch CUDA/CPU 轮子优先用阿里云 -f，避免先连 download.pytorch.org
       #（部分网络/代理会出现 SSL EOF，且失败重试会白白耗时）。需要官方源时再设 SACV_PREFER_PYTORCH_OFFICIAL=1。
-      $preferOfficialTorch = ($env:SACV_PREFER_PYTORCH_OFFICIAL -eq "1")
       if ($variant -eq "cpu") {
         if ($preferOfficialTorch) {
           & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
@@ -733,7 +907,7 @@ foreach ($variant in $variants) {
         } else {
           & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cpu/" "--extra-index-url" "$env:PIP_INDEX_URL"
           if ($LASTEXITCODE -ne 0) {
-            Info "Aliyun PyTorch CPU wheels failed; try official index"
+            Info "Aliyun PyTorch CPU wheels failed; fallback to official index"
             & $venvPy "-m" "pip" "install" "torch==2.7.1+cpu" "torchvision==0.22.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
           }
         }
@@ -747,7 +921,7 @@ foreach ($variant in $variants) {
         } else {
           & $venvPy "-m" "pip" "install" "torch==2.7.1+cu128" "torchvision==0.22.1+cu128" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu128/" "--extra-index-url" "$env:PIP_INDEX_URL"
           if ($LASTEXITCODE -ne 0) {
-            Info "Aliyun PyTorch cu128 wheels failed; try official index"
+            Info "Aliyun PyTorch cu128 wheels failed; fallback to official index"
             & $venvPy "-m" "pip" "install" "torch==2.7.1+cu128" "torchvision==0.22.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
           }
         }
@@ -755,7 +929,6 @@ foreach ($variant in $variants) {
       if ($LASTEXITCODE -ne 0) { throw "PyTorch install failed (code $LASTEXITCODE)" }
     }
     if (-not $torchAlreadyOk) {
-      $preferOfficialTorch = ($env:SACV_PREFER_PYTORCH_OFFICIAL -eq "1")
       if ($variant -eq "cpu") {
         if ($preferOfficialTorch) {
           & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
@@ -766,7 +939,7 @@ foreach ($variant in $variants) {
         } else {
           & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cpu/" "--extra-index-url" "$env:PIP_INDEX_URL"
           if ($LASTEXITCODE -ne 0) {
-            Info "Aliyun torchaudio CPU wheels failed; try official index"
+            Info "Aliyun torchaudio CPU wheels failed; fallback to official index"
             & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cpu" "--index-url" "https://download.pytorch.org/whl/cpu" "--extra-index-url" "$env:PIP_INDEX_URL"
           }
         }
@@ -780,7 +953,7 @@ foreach ($variant in $variants) {
         } else {
           & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "-f" "https://mirrors.aliyun.com/pytorch-wheels/cu128/" "--extra-index-url" "$env:PIP_INDEX_URL"
           if ($LASTEXITCODE -ne 0) {
-            Info "Aliyun torchaudio cu128 wheels failed; try official index"
+            Info "Aliyun torchaudio cu128 wheels failed; fallback to official index"
             & $venvPy "-m" "pip" "install" "torchaudio==2.7.1+cu128" "--index-url" "https://download.pytorch.org/whl/cu128" "--extra-index-url" "$env:PIP_INDEX_URL"
           }
         }
@@ -808,7 +981,7 @@ foreach ($variant in $variants) {
     & $pythonCmd $pythonArgsPrefix $checkScript "--ci"
     if ($LASTEXITCODE -ne 0) { throw "Subprocess safety check failed - fix violations before packaging: run ``python backend/scripts/check_subprocess_safety.py``" }
 
-    if ($EncryptPy) {
+    if ($doEncryptPy) {
       Step "Encrypt Python source -> .pyd ($variant)"
       $backendSrcDir = (Get-Location).Path
       Invoke-CythonEncrypt $venvPy $backendSrcDir $variant
@@ -840,7 +1013,7 @@ foreach ($variant in $variants) {
         $shouldRebuildBackend = $true
       }
       if (-not $shouldRebuildBackend) { Step "Backend already built - skip PyInstaller ($variant)" }
-      if ($EncryptPy) { $shouldRebuildBackend = $true }
+      if ($doEncryptPy) { $shouldRebuildBackend = $true }
     }
     if ($shouldRebuildBackend) {
       Get-Process superAutoCutVideoBackend -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -1024,7 +1197,7 @@ foreach ($variant in $variants) {
     }
   }
 
-  # GPU 分块打包：NSIS 产出后复制到 runtime-chunks，并写入 offline-bundle-manifest.json 的 shell_installer（与 split-backend.ps1 生成的清单同目录）
+  # GPU runtime chunks: copy NSIS output and write shell_installer into offline-bundle-manifest.json.
   if (-not $TauriDebug -and $variant -eq 'gpu' -and $PSBoundParameters.ContainsKey('RuntimeChunks') -and $PSBoundParameters['RuntimeChunks']) {
     $runtimeChunksDir = Join-Path $rootDir 'src-tauri\target\release\dist\runtime-chunks'
     if (Test-Path $runtimeChunksDir) {
@@ -1106,4 +1279,3 @@ foreach ($variant in $variants) {
   if ($zipPath) { Info "Portable ZIP: $zipPath" }
   Info "Installers dir: $installersOut"
 }
-

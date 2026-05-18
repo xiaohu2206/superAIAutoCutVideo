@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WebSocketMessage } from "../services/clients";
 import { projectService } from "../services/projectService";
 import { TASK_SUBMITTED_EVENT } from "../components/projectEdit/TaskQueueFloatingBall";
@@ -7,12 +7,37 @@ import type {
   GenerateScriptRequest,
   NarrationCopywriting,
   Project,
-  ProjectLatestTasks,
   ProjectRunningTasks,
   TaskProgressState,
   VideoScript,
 } from "../types/project";
 import { useWsTaskProgress, type WsProgressLog } from "./useWsTaskProgress";
+
+const PROGRESS_POLL_INTERVAL_MS = 1500;
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["running", "processing", "pending", "queued", "waiting"]);
+const TERMINAL_TYPES = new Set(["completed", "error", "cancelled"]);
+
+const clampProgress = (value: unknown, fallback = 0) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(100, value));
+};
+
+const taskTimestampMs = (task?: TaskProgressState | null) => {
+  if (!task?.timestamp) return 0;
+  const parsed = Date.parse(task.timestamp);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const taskLog = (task: TaskProgressState): WsProgressLog | null => {
+  if (!task.message) return null;
+  return {
+    timestamp: task.timestamp || new Date().toISOString(),
+    message: task.message,
+    phase: task.phase,
+    type: task.type || task.status,
+  };
+};
 
 export interface UseProjectEditGenerateStepOptions {
   project?: Project | null;
@@ -99,13 +124,17 @@ export function useProjectEditGenerateStep(
   const [videoGenLogs, setVideoGenLogs] = useState<WsProgressLog[]>([]);
   const [draftGenProgress, setDraftGenProgress] = useState<number>(0);
   const [draftGenLogs, setDraftGenLogs] = useState<WsProgressLog[]>([]);
+  const copywritingStartedAtRef = useRef<number>(0);
+  const scriptStartedAtRef = useRef<number>(0);
+  const videoStartedAtRef = useRef<number>(0);
+  const draftStartedAtRef = useRef<number>(0);
 
   const isTaskActive = useCallback((task?: TaskProgressState | null) => {
     if (!task) return false;
     const status = String(task.status || "").toLowerCase();
     const type = String(task.type || "").toLowerCase();
     if (type === "progress") return true;
-    return status === "running" || status === "processing" || status === "pending";
+    return ACTIVE_STATUSES.has(status);
   }, []);
 
   const applyRunningTask = useCallback((task: TaskProgressState | null | undefined, apply: (t: TaskProgressState) => void) => {
@@ -118,8 +147,58 @@ export function useProjectEditGenerateStep(
     if (!task) return false;
     const status = String(task.status || "").toLowerCase();
     const type = String(task.type || "").toLowerCase();
-    return type === "completed" || status === "completed" || status === "failed" || type === "error" || status === "cancelled" || type === "cancelled";
+    return TERMINAL_TYPES.has(type) || TERMINAL_STATUSES.has(status);
   }, []);
+
+  const taskIsAfterStart = useCallback((task: TaskProgressState | null | undefined, startedAt: number) => {
+    if (!task || !startedAt) return true;
+    const ts = taskTimestampMs(task);
+    return !ts || ts >= startedAt - 2000;
+  }, []);
+
+  const appendTaskLog = useCallback((task: TaskProgressState, setLogs: React.Dispatch<React.SetStateAction<WsProgressLog[]>>) => {
+    const log = taskLog(task);
+    if (!log) return;
+    setLogs((prev) => {
+      const key = `${log.timestamp}|${log.type || ""}|${log.phase || ""}|${log.message}`;
+      const last = prev[prev.length - 1];
+      const lastKey = last ? `${last.timestamp}|${last.type || ""}|${last.phase || ""}|${last.message}` : "";
+      if (key === lastKey) return prev;
+      return [...prev.slice(-19), log];
+    });
+  }, []);
+
+  const applyTaskSnapshot = useCallback((
+    task: TaskProgressState | null | undefined,
+    startedAt: number,
+    setBusy: React.Dispatch<React.SetStateAction<boolean>>,
+    setProgress: React.Dispatch<React.SetStateAction<number>>,
+    setLogs: React.Dispatch<React.SetStateAction<WsProgressLog[]>>,
+    setTaskId?: React.Dispatch<React.SetStateAction<string | null>>,
+  ) => {
+    if (!task || !taskIsAfterStart(task, startedAt)) return;
+
+    if (task.task_id && setTaskId) {
+      setTaskId(task.task_id);
+    }
+
+    if (isTaskActive(task)) {
+      setBusy(true);
+      const fallback = String(task.status || "").toLowerCase() === "queued" ? 1 : 0;
+      const next = clampProgress(task.progress, fallback);
+      setProgress((prev) => Math.max(prev, next));
+      appendTaskLog(task, setLogs);
+      return;
+    }
+
+    if (isTaskFinished(task)) {
+      setBusy(false);
+      const status = String(task.status || "").toLowerCase();
+      const type = String(task.type || "").toLowerCase();
+      setProgress(status === "completed" || type === "completed" ? 100 : 0);
+      appendTaskLog(task, setLogs);
+    }
+  }, [appendTaskLog, isTaskActive, isTaskFinished, taskIsAfterStart]);
 
   const setEditedCopywritingSafe = useCallback((copywriting: string) => {
     setEditedCopywriting(copywriting);
@@ -194,35 +273,16 @@ export function useProjectEditGenerateStep(
         const res: ProjectRunningTasks | null = await projectService.getProjectRunningTasks(project.id);
         if (cancelled || !res) return;
         applyRunningTask(res.generate_copywriting, (task) => {
-          setIsGeneratingCopywriting(true);
-          setCopywritingGenProgress(typeof task.progress === "number" ? task.progress : 1);
-          if (task.task_id) setCopywritingTaskId(task.task_id || null);
-          if (task.message) {
-            setCopywritingGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
-          }
+          applyTaskSnapshot(task, 0, setIsGeneratingCopywriting, setCopywritingGenProgress, setCopywritingGenLogs, setCopywritingTaskId);
         });
         applyRunningTask(res.generate_script, (task) => {
-          setIsGeneratingScript(true);
-          setScriptGenProgress(typeof task.progress === "number" ? task.progress : 1);
-          if (task.message) {
-            setScriptGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
-          }
+          applyTaskSnapshot(task, 0, setIsGeneratingScript, setScriptGenProgress, setScriptGenLogs);
         });
         applyRunningTask(res.generate_video, (task) => {
-          setIsGeneratingVideo(true);
-          setVideoGenProgress(typeof task.progress === "number" ? task.progress : 1);
-          setVideoTaskId(task.task_id || null);
-          if (task.message) {
-            setVideoGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
-          }
+          applyTaskSnapshot(task, 0, setIsGeneratingVideo, setVideoGenProgress, setVideoGenLogs, setVideoTaskId);
         });
         applyRunningTask(res.generate_jianying_draft, (task) => {
-          setIsGeneratingDraft(true);
-          setDraftGenProgress(typeof task.progress === "number" ? task.progress : 1);
-          setDraftTaskId(task.task_id || null);
-          if (task.message) {
-            setDraftGenLogs([{ timestamp: task.timestamp || new Date().toISOString(), message: task.message, type: task.type }]);
-          }
+          applyTaskSnapshot(task, 0, setIsGeneratingDraft, setDraftGenProgress, setDraftGenLogs, setDraftTaskId);
         });
       } catch {
         return;
@@ -232,7 +292,7 @@ export function useProjectEditGenerateStep(
     return () => {
       cancelled = true;
     };
-  }, [applyRunningTask, project?.id]);
+  }, [applyRunningTask, applyTaskSnapshot, project?.id]);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -240,50 +300,78 @@ export function useProjectEditGenerateStep(
     let stopped = false;
     const tick = async () => {
       try {
-        const latest: ProjectLatestTasks | null = await projectService.getProjectLatestTasks(project.id);
-        if (stopped || !latest) return;
+        const [latest, queue] = await Promise.all([
+          projectService.getProjectLatestTasks(project.id).catch(() => null),
+          projectService.getTaskQueue().catch(() => null),
+        ]);
+        if (stopped) return;
+
+        const queueTasks: TaskProgressState[] = [];
+        for (const task of queue?.active_tasks ?? []) {
+          if (task?.project_id === project.id) {
+            queueTasks.push(task as TaskProgressState);
+          }
+        }
+        for (const waitingProject of queue?.waiting_projects ?? []) {
+          if (waitingProject?.project_id !== project.id) continue;
+          for (const task of waitingProject.tasks ?? []) {
+            queueTasks.push({
+              ...(task.task_state ?? {}),
+              project_id: task.project_id,
+              task_id: task.task_id,
+              scope: task.scope,
+              status: task.queue_status || task.task_state?.status || "queued",
+              progress: typeof task.task_state?.progress === "number" ? task.task_state.progress : 1,
+              message: task.task_state?.message || "任务已提交，等待队列调度",
+              timestamp: task.task_state?.timestamp,
+              type: task.task_state?.type || "progress",
+            });
+          }
+        }
+
+        const fromQueue = (scope: string) => queueTasks.find((task) => task.scope === scope);
 
         if (isGeneratingCopywriting) {
-          const t = latest.generate_copywriting;
+          const t = fromQueue("generate_copywriting") || latest?.generate_copywriting;
+          applyTaskSnapshot(t, copywritingStartedAtRef.current, setIsGeneratingCopywriting, setCopywritingGenProgress, setCopywritingGenLogs, setCopywritingTaskId);
           if (t?.task_id && !copywritingTaskId) {
             setCopywritingTaskId(t.task_id || null);
           }
-          if (isTaskFinished(t)) {
+          if (taskIsAfterStart(t, copywritingStartedAtRef.current) && isTaskFinished(t)) {
             setIsGeneratingCopywriting(false);
-            setCopywritingGenProgress(100);
             void options.refreshProject();
           }
         }
 
         if (isGeneratingScript) {
-          const t = latest.generate_script;
-          if (isTaskFinished(t)) {
+          const t = fromQueue("generate_script") || latest?.generate_script;
+          applyTaskSnapshot(t, scriptStartedAtRef.current, setIsGeneratingScript, setScriptGenProgress, setScriptGenLogs);
+          if (taskIsAfterStart(t, scriptStartedAtRef.current) && isTaskFinished(t)) {
             setIsGeneratingScript(false);
-            setScriptGenProgress(100);
             void options.refreshProject();
           }
         }
 
         if (isGeneratingDraft) {
-          const t = latest.generate_jianying_draft;
+          const t = fromQueue("generate_jianying_draft") || latest?.generate_jianying_draft;
+          applyTaskSnapshot(t, draftStartedAtRef.current, setIsGeneratingDraft, setDraftGenProgress, setDraftGenLogs, setDraftTaskId);
           if (t?.task_id && !draftTaskId) {
             setDraftTaskId(t.task_id || null);
           }
-          if (isTaskFinished(t)) {
+          if (taskIsAfterStart(t, draftStartedAtRef.current) && isTaskFinished(t)) {
             setIsGeneratingDraft(false);
-            setDraftGenProgress(100);
             void options.refreshProject();
           }
         }
 
         if (isGeneratingVideo) {
-          const t = latest.generate_video;
+          const t = fromQueue("generate_video") || latest?.generate_video;
+          applyTaskSnapshot(t, videoStartedAtRef.current, setIsGeneratingVideo, setVideoGenProgress, setVideoGenLogs, setVideoTaskId);
           if (t?.task_id && !videoTaskId) {
             setVideoTaskId(t.task_id || null);
           }
-          if (isTaskFinished(t)) {
+          if (taskIsAfterStart(t, videoStartedAtRef.current) && isTaskFinished(t)) {
             setIsGeneratingVideo(false);
-            setVideoGenProgress(100);
             void options.refreshProject();
           }
         }
@@ -293,12 +381,13 @@ export function useProjectEditGenerateStep(
     };
 
     void tick();
-    const id = window.setInterval(() => void tick(), 1500);
+    const id = window.setInterval(() => void tick(), PROGRESS_POLL_INTERVAL_MS);
     return () => {
       stopped = true;
       window.clearInterval(id);
     };
   }, [
+    applyTaskSnapshot,
     copywritingTaskId,
     draftTaskId,
     isGeneratingCopywriting,
@@ -308,6 +397,7 @@ export function useProjectEditGenerateStep(
     isTaskFinished,
     options,
     project?.id,
+    taskIsAfterStart,
     videoTaskId,
   ]);
 
@@ -325,6 +415,7 @@ export function useProjectEditGenerateStep(
       options.showErrorText("请先提取字幕或上传字幕");
       return;
     }
+    copywritingStartedAtRef.current = Date.now();
     setIsGeneratingCopywriting(true);
     setCopywritingGenProgress(0);
     setCopywritingGenLogs([]);
@@ -385,6 +476,7 @@ export function useProjectEditGenerateStep(
       return;
     }
 
+    scriptStartedAtRef.current = Date.now();
     setIsGeneratingScript(true);
     setScriptGenProgress(0);
     setScriptGenLogs([]);
@@ -477,6 +569,7 @@ export function useProjectEditGenerateStep(
       options.showErrorText("请先上传原始视频文件");
       return;
     }
+    videoStartedAtRef.current = Date.now();
     setIsGeneratingVideo(true);
     setVideoGenProgress(0);
     setVideoGenLogs([]);
@@ -502,6 +595,7 @@ export function useProjectEditGenerateStep(
       options.showErrorText("请先上传原始视频文件");
       return;
     }
+    draftStartedAtRef.current = Date.now();
     setIsGeneratingDraft(true);
     setDraftGenProgress(0);
     setDraftGenLogs([]);
@@ -551,7 +645,7 @@ export function useProjectEditGenerateStep(
   useWsTaskProgress({
     scope: "generate_copywriting",
     projectId: project?.id,
-    onProgress: setCopywritingGenProgress,
+    onProgress: (progress) => setCopywritingGenProgress((prev) => Math.max(prev, progress)),
     onLog: (log) => setCopywritingGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingCopywriting(false);
@@ -575,7 +669,7 @@ export function useProjectEditGenerateStep(
   useWsTaskProgress({
     scope: "generate_script",
     projectId: project?.id,
-    onProgress: setScriptGenProgress,
+    onProgress: (progress) => setScriptGenProgress((prev) => Math.max(prev, progress)),
     onLog: (log) => setScriptGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingScript(false);
@@ -594,7 +688,7 @@ export function useProjectEditGenerateStep(
     scope: "generate_video",
     projectId: project?.id,
     taskId: videoTaskId,
-    onProgress: setVideoGenProgress,
+    onProgress: (progress) => setVideoGenProgress((prev) => Math.max(prev, progress)),
     onLog: (log) => setVideoGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingVideo(false);
@@ -619,10 +713,11 @@ export function useProjectEditGenerateStep(
     scope: "generate_jianying_draft",
     projectId: project?.id,
     taskId: draftTaskId,
-    onProgress: setDraftGenProgress,
+    onProgress: (progress) => setDraftGenProgress((prev) => Math.max(prev, progress)),
     onLog: (log) => setDraftGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingDraft(false);
+      setDraftGenProgress(100);
       options.showSuccess("剪映草稿生成成功！");
       void options.refreshProject();
     },
@@ -634,6 +729,7 @@ export function useProjectEditGenerateStep(
     },
     onError: (m: WebSocketMessage) => {
       setIsGeneratingDraft(false);
+      setDraftGenProgress(0);
       options.showErrorText(m.message || "生成剪映草稿失败");
     },
   });

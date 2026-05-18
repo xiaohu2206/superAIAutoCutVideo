@@ -13,7 +13,9 @@ pub struct OfflineBundleResolved {
 const BUNDLE_MANIFEST_FILENAME: &str = "offline-bundle-manifest.json";
 
 /// 仅接受文件名为 `offline-bundle-manifest.json` 的总清单（与 runtime-manifest.json 分离开）。
-pub fn resolve_offline_update_bundle(selected_path: String) -> Result<OfflineBundleResolved, String> {
+pub fn resolve_offline_update_bundle(
+    selected_path: String,
+) -> Result<OfflineBundleResolved, String> {
     let path = PathBuf::from(&selected_path);
     if !path.is_file() {
         return Err(format!("文件不存在: {}", selected_path));
@@ -30,8 +32,7 @@ pub fn resolve_offline_update_bundle(selected_path: String) -> Result<OfflineBun
         ));
     }
 
-    let text =
-        std::fs::read_to_string(&path).map_err(|e| format!("读取清单失败: {}", e))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读取清单失败: {}", e))?;
     let text = crate::json_util::trim_utf8_bom(&text);
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("JSON 解析失败: {}", e))?;
@@ -81,9 +82,7 @@ pub fn resolve_offline_update_bundle(selected_path: String) -> Result<OfflineBun
         });
     }
 
-    Err(
-        "总清单格式无效：需要 schema_version 为 1，且包含 backend_runtime_manifest 字段".into(),
-    )
+    Err("总清单格式无效：需要 schema_version 为 1，且包含 backend_runtime_manifest 字段".into())
 }
 
 /// 启动本机已下载的 Windows 安装包（由用户从网盘放入同一目录）。

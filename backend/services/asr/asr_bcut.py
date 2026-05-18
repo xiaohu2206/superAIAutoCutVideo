@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from typing import Optional, List
 
@@ -26,6 +27,21 @@ API_CREATE_TASK = API_BASE_URL + "/task"
 API_QUERY_RESULT = API_BASE_URL + "/task/result"
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _bcut_requests_session():
+    session = requests_session_with_os_trust()
+    # VPN clients often publish a system proxy that breaks Bcut's API and
+    # presigned upload URLs. Keep this ASR provider direct by default.
+    session.trust_env = _env_flag("BCUT_ASR_TRUST_ENV", default=False)
+    return session
+
+
 class BcutASR(BaseASR):
     """ 语音识别接口"""
     headers = {
@@ -35,7 +51,7 @@ class BcutASR(BaseASR):
 
     def __init__(self, audio_path: [str, bytes], use_cache: bool = False):
         super().__init__(audio_path, use_cache=use_cache)
-        self.session = requests_session_with_os_trust()
+        self.session = _bcut_requests_session()
         self.task_id: Optional[str] = None
         self.__etags: List[str] = []
 
@@ -51,7 +67,7 @@ class BcutASR(BaseASR):
     @staticmethod
     def test_connection(timeout: int = 6) -> dict:
         try:
-            session = requests_session_with_os_trust()
+            session = _bcut_requests_session()
             resp = session.get(API_BASE_URL, timeout=timeout)
             ok = int(resp.status_code) < 500
             if ok:

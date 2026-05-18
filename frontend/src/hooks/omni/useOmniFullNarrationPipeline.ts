@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useAuth } from "../../components/auth/AuthContext";
+import { TASK_SUBMITTED_EVENT } from "../../components/projectEdit/TaskQueueFloatingBall";
 import {
   fetchLicenseClientDeviceId,
   fetchMyLicenses,
@@ -44,6 +45,32 @@ export const OMNI_STEP_SCOPE = {
 } as const;
 
 const OMNI_WS_IDLE = "__omni_ws_idle__";
+const OMNI_PROGRESS_POLL_INTERVAL_MS = 1500;
+
+const clampProgress = (value: unknown, fallback = 0) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(100, value));
+};
+
+const appendTaskLog = (
+  task: TaskProgressState,
+  setLogs: Dispatch<SetStateAction<WsProgressLog[]>>
+) => {
+  if (!task.message) return;
+  const log: WsProgressLog = {
+    timestamp: task.timestamp || new Date().toISOString(),
+    message: task.message,
+    phase: task.phase,
+    type: task.type || task.status,
+  };
+  setLogs((prev) => {
+    const last = prev[prev.length - 1];
+    const lastKey = last ? `${last.timestamp}|${last.type || ""}|${last.phase || ""}|${last.message}` : "";
+    const nextKey = `${log.timestamp}|${log.type || ""}|${log.phase || ""}|${log.message}`;
+    if (lastKey === nextKey) return prev;
+    return [...prev.slice(-19), log];
+  });
+};
 
 export type OmniStepTestPhase = keyof typeof OMNI_STEP_SCOPE;
 
@@ -98,7 +125,7 @@ const isTaskActive = (t?: TaskProgressState | null) => {
   if (!t) return false;
   const status = String(t?.status || "").toLowerCase();
   const type = String(t?.type || "").toLowerCase();
-  return status === "pending" || status === "processing" || status === "running" || type === "progress";
+  return status === "pending" || status === "processing" || status === "running" || status === "queued" || status === "waiting" || type === "progress";
 };
 
 export function useOmniFullNarrationPipeline(
@@ -187,17 +214,8 @@ export function useOmniFullNarrationPipeline(
         if (isTaskActive(full) && full?.task_id) {
           setOmniPipelineBusy(true);
           setOmniPipelineTaskId(String(full.task_id));
-          setOmniPipelineProgress(typeof full.progress === "number" ? full.progress : 1);
-          if (full.message) {
-            setOmniPipelineLogs([
-              {
-                timestamp: full.timestamp || new Date().toISOString(),
-                message: full.message,
-                type: full.type,
-                phase: full.phase,
-              },
-            ]);
-          }
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(full.progress, 1)));
+          appendTaskLog(full, setOmniPipelineLogs);
           return;
         }
 
@@ -207,17 +225,8 @@ export function useOmniFullNarrationPipeline(
           setOmniStepTestPhase("embed");
           setOmniStepTestScope(OMNI_STEP_SCOPE.embed);
           setOmniStepTestTaskId(String(embed.task_id));
-          setOmniPipelineProgress(typeof embed.progress === "number" ? embed.progress : 1);
-          if (embed.message) {
-            setOmniPipelineLogs([
-              {
-                timestamp: embed.timestamp || new Date().toISOString(),
-                message: embed.message,
-                type: embed.type,
-                phase: embed.phase,
-              },
-            ]);
-          }
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(embed.progress, 1)));
+          appendTaskLog(embed, setOmniPipelineLogs);
           return;
         }
 
@@ -227,17 +236,8 @@ export function useOmniFullNarrationPipeline(
           setOmniStepTestPhase("shotMatch");
           setOmniStepTestScope(OMNI_STEP_SCOPE.shotMatch);
           setOmniStepTestTaskId(String(shot.task_id));
-          setOmniPipelineProgress(typeof shot.progress === "number" ? shot.progress : 1);
-          if (shot.message) {
-            setOmniPipelineLogs([
-              {
-                timestamp: shot.timestamp || new Date().toISOString(),
-                message: shot.message,
-                type: shot.type,
-                phase: shot.phase,
-              },
-            ]);
-          }
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(shot.progress, 1)));
+          appendTaskLog(shot, setOmniPipelineLogs);
           return;
         }
 
@@ -247,17 +247,8 @@ export function useOmniFullNarrationPipeline(
           setOmniStepTestPhase("generateScript");
           setOmniStepTestScope(OMNI_STEP_SCOPE.generateScript);
           setOmniStepTestTaskId(String(gen.task_id));
-          setOmniPipelineProgress(typeof gen.progress === "number" ? gen.progress : 1);
-          if (gen.message) {
-            setOmniPipelineLogs([
-              {
-                timestamp: gen.timestamp || new Date().toISOString(),
-                message: gen.message,
-                type: gen.type,
-                phase: gen.phase,
-              },
-            ]);
-          }
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(gen.progress, 1)));
+          appendTaskLog(gen, setOmniPipelineLogs);
         }
       } catch {
         return;
@@ -278,9 +269,17 @@ export function useOmniFullNarrationPipeline(
         if (stopped || !latest?.omni_full_narration_pipeline) return;
         const t = latest.omni_full_narration_pipeline;
         if (t?.task_id && String(t.task_id) !== String(omniPipelineTaskId)) return;
+        if (t && isTaskActive(t)) {
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(t.progress, 1)));
+          appendTaskLog(t, setOmniPipelineLogs);
+          return;
+        }
         if (isTaskFinished(t)) {
           setOmniPipelineBusy(false);
-          setOmniPipelineProgress(100);
+          const status = String(t.status || "").toLowerCase();
+          const type = String(t.type || "").toLowerCase();
+          setOmniPipelineProgress(status === "completed" || type === "completed" ? 100 : 0);
+          appendTaskLog(t, setOmniPipelineLogs);
           void options.refreshProject();
         }
       } catch {
@@ -288,7 +287,7 @@ export function useOmniFullNarrationPipeline(
       }
     };
     void tick();
-    const id = window.setInterval(() => void tick(), 1500);
+    const id = window.setInterval(() => void tick(), OMNI_PROGRESS_POLL_INTERVAL_MS);
     return () => {
       stopped = true;
       window.clearInterval(id);
@@ -306,12 +305,20 @@ export function useOmniFullNarrationPipeline(
         if (stopped || !latest) return;
         const t = latest[key];
         if (t?.task_id && String(t.task_id) !== String(omniStepTestTaskId)) return;
+        if (t && isTaskActive(t)) {
+          setOmniPipelineProgress((prev) => Math.max(prev, clampProgress(t.progress, 1)));
+          appendTaskLog(t, setOmniPipelineLogs);
+          return;
+        }
         if (isTaskFinished(t)) {
           setOmniStepTestBusy(false);
           setOmniStepTestTaskId(null);
           setOmniStepTestScope(null);
           setOmniStepTestPhase(null);
-          setOmniPipelineProgress(100);
+          const status = String(t?.status || "").toLowerCase();
+          const type = String(t?.type || "").toLowerCase();
+          setOmniPipelineProgress(status === "completed" || type === "completed" ? 100 : 0);
+          if (t) appendTaskLog(t, setOmniPipelineLogs);
           void options.refreshProject();
         }
       } catch {
@@ -319,7 +326,7 @@ export function useOmniFullNarrationPipeline(
       }
     };
     void tick();
-    const interval = window.setInterval(() => void tick(), 1500);
+    const interval = window.setInterval(() => void tick(), OMNI_PROGRESS_POLL_INTERVAL_MS);
     return () => {
       stopped = true;
       window.clearInterval(interval);
@@ -376,6 +383,7 @@ export function useOmniFullNarrationPipeline(
         return;
       }
       setOmniPipelineTaskId(tid);
+      window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
       message.success(res?.message || "全链路任务已提交");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "提交 Omni 全链路任务失败";
@@ -428,6 +436,7 @@ export function useOmniFullNarrationPipeline(
           return;
         }
         setOmniStepTestTaskId(tid);
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
         message.success(res?.message || "任务已提交");
       } catch (e) {
         message.error(e instanceof Error ? e.message : "提交 Omni 单步任务失败");
@@ -488,8 +497,8 @@ export function useOmniFullNarrationPipeline(
     scope: omniWsScope,
     projectId: project?.id,
     taskId: omniWsTaskId,
-    onProgress: setOmniPipelineProgress,
-    onLog: (log) => setOmniPipelineLogs((prev) => [...prev, log]),
+    onProgress: (progress) => setOmniPipelineProgress((prev) => Math.max(prev, progress)),
+    onLog: (log) => setOmniPipelineLogs((prev) => [...prev.slice(-19), log]),
     onCompleted: (m: WebSocketMessage) => {
       const s = (m as { scope?: string }).scope;
       if (s === "omni_full_narration_pipeline") {

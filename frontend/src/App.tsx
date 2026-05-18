@@ -1,6 +1,7 @@
 import { AlertTriangle, Copy, Minus, Square, X } from "lucide-react";
-import React, { useEffect, useState } from "react";
-import AppLoadingScreen from "./components/AppLoadingScreen";
+import React, { useEffect, useRef, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import AppLoadingScreen, { type BackendExtractProgress } from "./components/AppLoadingScreen";
 import Navigation from "./components/Navigation";
 import SettingsPage from "./components/settingsPage";
 import MessageHost from "./components/ui/MessageHost";
@@ -10,6 +11,8 @@ import UserProfile from "./components/auth/UserProfile";
 import { useAppVersion } from "./hooks/useAppVersion";
 import TaskQueueFloatingBall from "./components/projectEdit/TaskQueueFloatingBall";
 import {
+  type BackendReadyPayload,
+  type BackendResourceStatus,
   TauriCommands,
   WebSocketMessage,
   apiClient,
@@ -28,28 +31,189 @@ interface BackendStatus {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** 与 tauri.conf 首屏 loading 小窗一致（逻辑像素） */
+const TAURI_LOADING_WINDOW_INNER = { width: 800, height: 350 } as const;
+
 /** 与 tauri.conf 中启动完成后主界面一致（逻辑像素） */
 const TAURI_MAIN_WINDOW_INNER = { width: 1280, height: 800 } as const;
 
-/** 首屏连接后端：总体最长等待（避免安全软件拦截等情况无限卡住） */
-const STARTUP_OVERALL_MS = 180_000;
-/** 单次连接流程超时（需覆盖 Rust 侧解压 + 启动就绪等待，略大于 60s） */
-const STARTUP_ATTEMPT_TIMEOUT_MS = 72_000;
+/** 首屏连接后端：总体最长等待（GPU 冷启动可能数分钟） */
+const STARTUP_OVERALL_MS = 420_000;
+/** 首屏轮询后端 HTTP 就绪的间隔 */
+const STARTUP_POLL_MS = 800;
 /** 加载页出现「跳过等待」按钮前的最短等待 */
 const LOADING_SKIP_VISIBLE_MS = 45_000;
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, label = "操作"): Promise<T> {
-  let timer: number | undefined;
+function statusFromReadyPayload(payload: BackendReadyPayload): BackendStatus {
+  return {
+    running: true,
+    port: payload.port,
+    boot_token: payload.boot_token ?? undefined,
+  };
+}
+
+async function withTimeoutOrNull<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  let timeoutId: number | undefined;
   try {
     return await Promise.race([
       promise,
-      new Promise<T>((_, reject) => {
-        timer = window.setTimeout(() => reject(new Error(`${label}超时`)), ms);
+      new Promise<null>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(null), timeoutMs);
       }),
     ]);
+  } catch {
+    return null;
   } finally {
-    if (timer !== undefined) window.clearTimeout(timer);
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
   }
+}
+
+async function fetchOkWithTimeout(url: string, timeoutMs: number): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    return response.ok;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function getConfiguredBackendPort(): number | null {
+  try {
+    const port = Number(new URL(apiClient.getBaseUrl()).port || 0);
+    return port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+/** WebView 直接探活兜底：只要 /api/hello 已通，就不要继续卡在首屏。 */
+async function probeBackendByHello(): Promise<BackendStatus | null> {
+  const configuredPort = getConfiguredBackendPort();
+  const ports = Array.from(
+    new Set([
+      configuredPort,
+      18000,
+      8000,
+      ...Array.from({ length: 20 }, (_, i) => 18001 + i),
+      ...Array.from({ length: 10 }, (_, i) => 8001 + i),
+    ].filter((p): p is number => typeof p === "number" && p > 0))
+  );
+
+  return new Promise((resolve) => {
+    let pending = ports.length;
+    let settled = false;
+
+    for (const port of ports) {
+      const baseUrl = `http://127.0.0.1:${port}`;
+      void (async () => {
+        try {
+          try {
+            const info = await handshakeVerifyBackend(baseUrl, {
+              requireBootToken: false,
+              timeoutMs: 700,
+            });
+            if (!settled) {
+              settled = true;
+              resolve({ running: true, port: info.port || port, boot_token: info.boot_token });
+            }
+            return;
+          } catch {
+            if (await fetchOkWithTimeout(`${baseUrl}/api/hello`, 700)) {
+              if (!settled) {
+                settled = true;
+                resolve({ running: true, port });
+              }
+              return;
+            }
+          }
+        } catch {
+          /* ignore this port */
+        } finally {
+          pending -= 1;
+          if (!settled && pending <= 0) {
+            settled = true;
+            resolve(null);
+          }
+        }
+      })();
+    }
+  });
+}
+
+/** 首屏探测：优先 Rust 缓存/探活，再回退 WebView 端口扫描 */
+async function probeBackendReady(): Promise<BackendStatus | null> {
+  const probes: Array<Promise<BackendStatus | null>> = [probeBackendByHello()];
+
+  if (detectTauriEnvironment()) {
+    probes.push((async () => {
+    try {
+      const pending = await withTimeoutOrNull(TauriCommands.takePendingBackendReady(), 800);
+      if (pending?.port) {
+        return statusFromReadyPayload(pending);
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const peek = await withTimeoutOrNull(TauriCommands.probeBackendHttpReady(), 1200);
+      if (peek?.running && peek.port) {
+        return { running: true, port: peek.port, boot_token: peek.boot_token };
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+    })());
+  }
+
+  probes.push((async () => {
+  if (await withTimeoutOrNull(autoConfigureBackend(), 2500)) {
+    try {
+      const info = await withTimeoutOrNull(handshakeVerifyBackend(apiClient.getBaseUrl(), {
+        requireBootToken: false,
+        timeoutMs: 2500,
+      }), 3000);
+      if (!info) return null;
+      const port =
+        info.port ||
+        Number(new URL(apiClient.getBaseUrl()).port || 0) ||
+        (import.meta.env.DEV ? 8000 : 18000);
+      return { running: true, port, boot_token: info.boot_token };
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
+  })());
+
+  return new Promise((resolve) => {
+    let pending = probes.length;
+    let settled = false;
+    for (const probe of probes) {
+      void probe.then((status) => {
+        if (!settled && status?.running && status.port) {
+          settled = true;
+          resolve(status);
+        }
+      }).catch(() => {
+        /* ignore this probe */
+      }).finally(() => {
+        pending -= 1;
+        if (!settled && pending <= 0) {
+          settled = true;
+          resolve(null);
+        }
+      });
+    }
+  });
 }
 
 const detectTauriEnvironment = (): boolean => {
@@ -74,6 +238,8 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingElapsedSeconds, setLoadingElapsedSeconds] = useState(0);
+  const [backendExtractProgress, setBackendExtractProgress] = useState<BackendExtractProgress | null>(null);
+  const [backendResourceStatus, setBackendResourceStatus] = useState<BackendResourceStatus | null>(null);
   const [showBackendStartupBanner, setShowBackendStartupBanner] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -81,9 +247,18 @@ const App: React.FC = () => {
   const { appVersion } = useAppVersion();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
   const [isMaximized, setIsMaximized] = useState(false);
+  const startupInitStartedRef = useRef(false);
 
   // 初始化应用
   useEffect(() => {
+    if (startupInitStartedRef.current) {
+      return;
+    }
+    startupInitStartedRef.current = true;
+
+    let mounted = true;
+    let backendProgressUnlisten: UnlistenFn | null = null;
+
     setIsTauri(detectTauriEnvironment());
     const timer = window.setInterval(() => {
       const detected = detectTauriEnvironment();
@@ -111,10 +286,29 @@ const App: React.FC = () => {
     wsClient.on("close", handleWsClose);
     wsClient.on("error", handleWsError);
 
-    initializeApp();
+    const setupStartupListeners = async () => {
+      if (detectTauriEnvironment()) {
+        const unlisten = await listen<BackendExtractProgress>("backend-extract-progress", (event) => {
+          if (!mounted) return;
+          setBackendExtractProgress(event.payload);
+        });
+        if (mounted) {
+          backendProgressUnlisten = unlisten;
+        } else {
+          unlisten();
+        }
+      }
+      if (mounted) {
+        void initializeApp(() => mounted);
+      }
+    };
+
+    void setupStartupListeners();
 
     return () => {
+      mounted = false;
       window.clearInterval(timer);
+      backendProgressUnlisten?.();
       wsClient.off("*", handleWsMessage);
       wsClient.off("open", handleWsOpen);
       wsClient.off("close", handleWsClose);
@@ -157,6 +351,74 @@ const App: React.FC = () => {
     return () => window.clearInterval(id);
   }, [isLoading]);
 
+  useEffect(() => {
+    if (!isLoading || !isTauri) return;
+    void TauriCommands.setMainWindowSize(
+      TAURI_LOADING_WINDOW_INNER.width,
+      TAURI_LOADING_WINDOW_INNER.height,
+      true,
+    ).catch((error) => {
+      console.debug("首屏加载窗口居中失败:", error);
+    });
+  }, [isLoading, isTauri]);
+
+  useEffect(() => {
+    if (!isLoading || !isTauri) return;
+    let mounted = true;
+
+    const refresh = async () => {
+      try {
+        const status = await TauriCommands.getBackendResourceStatus();
+        if (mounted) setBackendResourceStatus(status);
+      } catch (error) {
+        console.debug("读取后端资源状态失败:", error);
+      }
+    };
+
+    void refresh();
+    const id = window.setInterval(refresh, 1000);
+    return () => {
+      mounted = false;
+      window.clearInterval(id);
+    };
+  }, [isLoading, isTauri]);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    let mounted = true;
+
+    const completeFromHttpProbe = async () => {
+      const status = await probeBackendByHello();
+      if (!mounted || !status?.running || !status.port) return;
+      configureBackend(status.port);
+      setBackendStatus(status);
+      setConnectionStatus((prev) => ({ ...prev, backend: true, api: true }));
+      setShowBackendStartupBanner(false);
+      setBackendExtractProgress(null);
+      setBackendResourceStatus(null);
+      setIsLoading(false);
+      if (detectTauriEnvironment()) {
+        void TauriCommands.setMainWindowSize(
+          TAURI_MAIN_WINDOW_INNER.width,
+          TAURI_MAIN_WINDOW_INNER.height,
+          true
+        ).catch((error) => {
+          console.debug("HTTP探活成功后调整主窗口尺寸失败，继续进入主界面:", error);
+        });
+      }
+    };
+
+    void completeFromHttpProbe();
+    const id = window.setInterval(() => {
+      void completeFromHttpProbe();
+    }, 1000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(id);
+    };
+  }, [isLoading]);
+
   const handleToggleMaximize = async () => {
     const nextState = await TauriCommands.toggleMaximizeWindow();
     setIsMaximized(nextState);
@@ -174,61 +436,104 @@ const App: React.FC = () => {
     void TauriCommands.startDragWindow();
   };
 
-  const initializeApp = async () => {
+  const initializeApp = async (isMounted: () => boolean = () => true) => {
     setIsLoading(true);
+    setBackendExtractProgress(null);
+    setBackendResourceStatus(null);
     setShowBackendStartupBanner(false);
 
     const expandMainWindowBeforeMainUi = async () => {
       if (!detectTauriEnvironment()) return;
-      await TauriCommands.setMainWindowSize(
-        TAURI_MAIN_WINDOW_INNER.width,
-        TAURI_MAIN_WINDOW_INNER.height,
-        true
-      );
+      try {
+        await TauriCommands.setMainWindowSize(
+          TAURI_MAIN_WINDOW_INNER.width,
+          TAURI_MAIN_WINDOW_INNER.height,
+          true
+        );
+      } catch (error) {
+        console.debug("调整主窗口尺寸失败，继续进入主界面:", error);
+      }
     };
 
-    const tryConnectOnce = async (): Promise<boolean> => {
-      const status = await checkBackendStatus();
-      const apiOk = await apiClient.testConnection();
-      if (status && status.running && apiOk) {
+    let startupDone = false;
+    let backendReadyUnlisten: UnlistenFn | null = null;
+
+    const completeStartup = async (status: BackendStatus) => {
+      if (!isMounted() || startupDone) return;
+      startupDone = true;
+      configureBackend(status.port);
+      setBackendStatus(status);
+      setConnectionStatus((prev) => ({ ...prev, backend: true, api: true }));
+      setShowBackendStartupBanner(false);
+      setBackendExtractProgress(null);
+      setBackendResourceStatus(null);
+      // 先退出 loading，避免窗口调整/WebSocket 阻塞首屏
+      setIsLoading(false);
+      void expandMainWindowBeforeMainUi();
+      void (async () => {
         try {
           const wsTimeout = new Promise((_, reject) =>
             setTimeout(() => reject(new Error("WebSocket连接超时")), 2000)
           );
           await Promise.race([wsClient.connect(), wsTimeout]);
         } catch {
-          console.debug("WebSocket连接失败");
+          console.debug("WebSocket连接失败，进入主界面后重试");
         }
-        return true;
-      }
-      return false;
+      })();
     };
 
-    const startedAt = Date.now();
-    let ready = false;
-
-    while (!ready && Date.now() - startedAt < STARTUP_OVERALL_MS) {
+    if (detectTauriEnvironment()) {
       try {
-        const ok = await withTimeout(
-          tryConnectOnce(),
-          STARTUP_ATTEMPT_TIMEOUT_MS,
-          "连接后端"
-        );
-        if (ok) {
-          await expandMainWindowBeforeMainUi();
-          setShowBackendStartupBanner(false);
-          setIsLoading(false);
-          ready = true;
-          break;
+        const pending = await TauriCommands.takePendingBackendReady();
+        if (pending?.port) {
+          await completeStartup(statusFromReadyPayload(pending));
+          return;
         }
-      } catch (e) {
-        console.debug("初始化中，后端未就绪：", e);
+      } catch (error) {
+        console.debug("读取缓存 backend-ready 失败:", error);
       }
-      const elapsed = Date.now() - startedAt;
-      await sleep(Math.min(2500, 600 + Math.floor(elapsed / 20_000) * 150));
+
+      try {
+        backendReadyUnlisten = await listen<BackendReadyPayload>("backend-ready", (event) => {
+          const { port, boot_token } = event.payload;
+          if (!port) return;
+          void completeStartup({
+            running: true,
+            port,
+            boot_token: boot_token ?? undefined,
+          });
+        });
+      } catch (error) {
+        console.debug("监听 backend-ready 失败，将仅使用轮询:", error);
+      }
+
+      void TauriCommands.startBackend()
+        .then((status) => {
+          if (status?.running && status.port) {
+            void completeStartup(status);
+          }
+        })
+        .catch((error) => {
+          console.debug("后台启动后端:", error);
+        });
     }
 
-    if (!ready) {
+    const startedAt = Date.now();
+
+    try {
+      while (!startupDone && Date.now() - startedAt < STARTUP_OVERALL_MS) {
+        const status = await probeBackendReady();
+        if (status?.running && status.port) {
+          await completeStartup(status);
+          break;
+        }
+        await sleep(STARTUP_POLL_MS);
+      }
+    } finally {
+      backendReadyUnlisten?.();
+    }
+
+    if (!startupDone) {
       await expandMainWindowBeforeMainUi();
       setIsLoading(false);
       if (detectTauriEnvironment()) {
@@ -239,14 +544,26 @@ const App: React.FC = () => {
 
   const handleSkipLoadingToMain = () => {
     void (async () => {
-      if (detectTauriEnvironment()) {
-        await TauriCommands.setMainWindowSize(
-          TAURI_MAIN_WINDOW_INNER.width,
-          TAURI_MAIN_WINDOW_INNER.height,
-          true
-        );
-        setShowBackendStartupBanner(true);
+      const status = await probeBackendReady();
+      if (status?.port) {
+        configureBackend(status.port);
+        setBackendStatus(status);
+        setConnectionStatus((prev) => ({ ...prev, backend: true, api: true }));
       }
+      if (detectTauriEnvironment()) {
+        try {
+          await TauriCommands.setMainWindowSize(
+            TAURI_MAIN_WINDOW_INNER.width,
+            TAURI_MAIN_WINDOW_INNER.height,
+            true
+          );
+        } catch (error) {
+          console.debug("跳过加载时调整主窗口尺寸失败，继续进入主界面:", error);
+        }
+        setShowBackendStartupBanner(!status?.running);
+      }
+      setBackendExtractProgress(null);
+      setBackendResourceStatus(null);
       setIsLoading(false);
     })();
   };
@@ -307,10 +624,16 @@ const App: React.FC = () => {
       // 检查是否在Tauri环境中
       if (isTauriRuntime) {
         status = await TauriCommands.getBackendStatus();
+        let handshakeOk = false;
         if (status?.running && status.port) {
-          await ensureHandshake(status);
+          try {
+            await ensureHandshake(status);
+            handshakeOk = true;
+          } catch (error) {
+            console.debug("后端进程存在但握手未通过，将尝试启动/等待就绪:", error);
+          }
         }
-        if (!status?.running) {
+        if (!handshakeOk) {
           try {
             const started = await TauriCommands.startBackend();
             if (!started?.running || !started.port) {
@@ -319,19 +642,31 @@ const App: React.FC = () => {
             status = started;
             await ensureHandshake(status);
           } catch (e) {
-            if (import.meta.env.DEV) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            if (errMsg.includes("正在启动中")) {
+              for (let i = 0; i < 8; i++) {
+                await sleep(1500);
+                const pending = await TauriCommands.getBackendStatus();
+                if (pending?.running && pending.port) {
+                  status = pending;
+                  await ensureHandshake(status);
+                  break;
+                }
+              }
+              if (!status?.running) {
+                throw e;
+              }
+            } else {
               const discoveredOk = await autoConfigureBackend();
               if (discoveredOk) {
                 const info = await handshakeVerifyBackend(apiClient.getBaseUrl(), {
                   requireBootToken: false,
-                  timeoutMs: 1200,
+                  timeoutMs: 2000,
                 });
-                status = { running: true, port: info.port };
+                status = { running: true, port: info.port, boot_token: info.boot_token ?? undefined };
               } else {
                 throw e;
               }
-            } else {
-              throw e;
             }
           }
         }
@@ -375,6 +710,8 @@ const App: React.FC = () => {
         appVersion={appVersion}
         updateVersion=""
         elapsedSeconds={loadingElapsedSeconds}
+        backendExtractProgress={backendExtractProgress}
+        backendResourceStatus={backendResourceStatus}
         showSkipAfterMs={LOADING_SKIP_VISIBLE_MS}
         onSkipToMain={handleSkipLoadingToMain}
       />

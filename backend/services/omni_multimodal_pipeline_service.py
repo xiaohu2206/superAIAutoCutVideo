@@ -194,6 +194,29 @@ def _close_shot_pil_images(imgs: List[Image.Image]) -> None:
             pass
 
 
+def _open_rgb_images_sync(paths: List[str]) -> List[Image.Image]:
+    images: List[Image.Image] = []
+    try:
+        for fp in paths:
+            with Image.open(fp) as im:
+                images.append(im.convert("RGB"))
+        return images
+    except Exception:
+        _close_shot_pil_images(images)
+        raise
+
+
+def _optimize_images_for_online_vision_sync(imgs: List[Image.Image]) -> List[Image.Image]:
+    optimized: List[Image.Image] = []
+    try:
+        for im in imgs:
+            optimized.append(optimize_image_for_online_vision(im, max_edge=1024))
+        return optimized
+    except Exception:
+        _close_shot_pil_images(optimized)
+        raise
+
+
 def _try_load_existing_multimodal_json(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
@@ -965,8 +988,7 @@ class OmniMultimodalPipelineService:
                         str(frames_dir),
                     )
                     images: List[Image.Image] = []
-                    for fp in frame_paths:
-                        images.append(Image.open(fp).convert("RGB"))
+                    images = await asyncio.to_thread(_open_rgb_images_sync, list(frame_paths))
                     return (idx, shot, frame_paths, images)
 
                 extract_total = len(pending_idx)
@@ -1246,7 +1268,7 @@ class OmniMultimodalPipelineService:
                     idx, shot, frame_paths, imgs = bundle
                     optimized_imgs: List[Image.Image] = []
                     try:
-                        optimized_imgs = [optimize_image_for_online_vision(im, max_edge=1024) for im in imgs]
+                        optimized_imgs = await asyncio.to_thread(_optimize_images_for_online_vision_sync, imgs)
                         sub_text = str(shot.get("subtitle_full_text") or "")
                         prompt = load_frame_analysis_prompt(vl_prompt_language, sub_text)
                         chunk_timeout = float(infer_wall_sec)
@@ -1406,7 +1428,7 @@ class OmniMultimodalPipelineService:
                         imgs_flat: List[Image.Image] = []
                         for _idx, _shot, _fp, imgs in batch:
                             imgs_flat.extend(imgs)
-                        optimized_imgs = [optimize_image_for_online_vision(im, max_edge=1024) for im in imgs_flat]
+                        optimized_imgs = await asyncio.to_thread(_optimize_images_for_online_vision_sync, imgs_flat)
                         subtitle_texts = [str(b[1].get("subtitle_full_text") or "") for b in batch]
                         prompt = load_frame_analysis_batch_prompt(vl_prompt_language, subtitle_texts)
                         chunk_timeout = float(infer_wall_sec)

@@ -428,6 +428,60 @@ export const useProjectDetail = (
     void poll();
   }, [stopOmniPolling]);
 
+  useEffect(() => {
+    if (!project?.id) return;
+    const projectId = project.id;
+    const handler = (message: WebSocketMessage & { [key: string]: any }) => {
+      if (
+        !message ||
+        (message.type !== "progress" && message.type !== "completed" && message.type !== "error" && message.type !== "cancelled") ||
+        message.scope !== "omni_multimodal" ||
+        message.project_id !== projectId
+      ) {
+        return;
+      }
+
+      const msgTaskId = typeof message.task_id === "string" ? message.task_id : null;
+      if (omniTaskId && msgTaskId && msgTaskId !== omniTaskId) return;
+
+      if (msgTaskId) setOmniTaskId(msgTaskId);
+      if (typeof message.progress === "number") {
+        setOmniPipelineProgress(Math.max(0, Math.min(100, message.progress)));
+      }
+      setOmniPipelineMessage(message.message || "");
+      setOmniPipelinePhase(typeof message.phase === "string" ? message.phase : null);
+
+      if (message.type === "completed") {
+        omniPollSessionRef.current += 1;
+        stopOmniPolling();
+        setExtractingOmniPipeline(false);
+        setOmniTaskId(null);
+        setOmniPipelineProgress(100);
+        void projectService.getOmniMultimodalResult(projectId).then(setOmniMultimodalResult).catch(console.error);
+        void projectService.getProject(projectId).then(setProject).catch(console.error);
+        return;
+      }
+
+      if (message.type === "error" || message.type === "cancelled") {
+        omniPollSessionRef.current += 1;
+        stopOmniPolling();
+        setExtractingOmniPipeline(false);
+        setOmniTaskId(null);
+        if (message.type === "error") {
+          setError(message.message || "Omni 管线失败");
+        }
+        return;
+      }
+
+      setExtractingOmniPipeline(true);
+    };
+
+    wsClient.on("*", handler);
+    return () => {
+      wsClient.off("*", handler);
+    };
+  }, [project?.id, omniTaskId, stopOmniPolling]);
+
   const startScenePolling = useCallback((projectId: string, taskId: string, reloadProject?: (id: string) => Promise<void>) => {
     stopScenePolling();
 

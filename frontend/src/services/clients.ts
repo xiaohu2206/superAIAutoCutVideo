@@ -4,8 +4,8 @@ import { message } from "./message";
 
 // API基础配置（默认端口，运行时可通过 configureBackend 动态覆盖）
 const DEFAULT_HOST = "127.0.0.1";
-const DEFAULT_PORT = 8000;
-const DEFAULT_START_PORT = import.meta.env.DEV ? 8000 : 18000;
+const DEFAULT_PORT = import.meta.env.DEV ? 8000 : 18000;
+const DEFAULT_START_PORT = DEFAULT_PORT;
 const API_BASE_URL = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const WS_BASE_URL = `ws://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 export const EXPECTED_BACKEND_IDENTIFIER = "super-auto-cut-video-backend";
@@ -66,6 +66,27 @@ export interface BackendStatus {
   port: number;
   pid?: number;
   boot_token?: string;
+}
+
+export interface BackendReadyPayload {
+  port: number;
+  boot_token?: string | null;
+}
+
+export interface BackendResourceStatus {
+  resource_dir: string;
+  resource_root: string;
+  zip_path: string;
+  zip_exists: boolean;
+  zip_size: number;
+  extract_dir: string;
+  extract_dir_exists: boolean;
+  backend_exe_path: string;
+  backend_exe_exists: boolean;
+  nested_backend_exe_path: string;
+  nested_backend_exe_exists: boolean;
+  ready: boolean;
+  message: string;
 }
 
 export interface ApiResponse<T = any> {
@@ -325,7 +346,7 @@ export class ApiClient {
   async testConnection(): Promise<boolean> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1000); // 1秒超时
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
 
       const url = `${this.baseUrl}/api/hello`;
       const response = await fetch(url, {
@@ -834,6 +855,21 @@ export class TauriCommands {
   // 获取后端状态
   static async getBackendStatus(): Promise<BackendStatus> {
     return TauriCommands.coreInvoke<BackendStatus>("get_backend_status");
+  }
+
+  /** 消费 Rust 缓存的 backend-ready（弥补事件早于 listen 注册的竞态） */
+  static async takePendingBackendReady(): Promise<BackendReadyPayload | null> {
+    return TauriCommands.coreInvoke<BackendReadyPayload | null>("take_pending_backend_ready");
+  }
+
+  /** Rust 侧 HTTP 探活（不依赖 WebView fetch） */
+  static async probeBackendHttpReady(): Promise<BackendStatus> {
+    return TauriCommands.coreInvoke<BackendStatus>("probe_backend_http_ready");
+  }
+
+  // 获取后端资源复制/解压状态
+  static async getBackendResourceStatus(): Promise<BackendResourceStatus> {
+    return TauriCommands.coreInvoke<BackendResourceStatus>("get_backend_resource_status");
   }
 
   // 选择视频文件

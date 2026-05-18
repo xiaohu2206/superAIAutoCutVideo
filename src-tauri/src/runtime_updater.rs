@@ -124,8 +124,7 @@ pub fn read_installed_state(app_handle: &AppHandle) -> Result<InstalledState, St
     let data = std::fs::read_to_string(&path)
         .map_err(|e| format!("读取 runtime_state.json 失败: {}", e))?;
     let data = crate::json_util::trim_utf8_bom(&data);
-    serde_json::from_str(data)
-        .map_err(|e| format!("解析 runtime_state.json 失败: {}", e))
+    serde_json::from_str(data).map_err(|e| format!("解析 runtime_state.json 失败: {}", e))
 }
 
 pub fn write_installed_state(app_handle: &AppHandle, state: &InstalledState) -> Result<(), String> {
@@ -135,15 +134,13 @@ pub fn write_installed_state(app_handle: &AppHandle, state: &InstalledState) -> 
     }
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| format!("序列化 runtime_state.json 失败: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("写入 runtime_state.json 失败: {}", e))
+    std::fs::write(&path, json).map_err(|e| format!("写入 runtime_state.json 失败: {}", e))
 }
 
 // ── 拉取远端清单 ──────────────────────────────────────────────────
 
 pub fn read_manifest_from_path(path: &Path) -> Result<RuntimeManifest, String> {
-    let data = std::fs::read_to_string(path)
-        .map_err(|e| format!("读取清单文件失败: {}", e))?;
+    let data = std::fs::read_to_string(path).map_err(|e| format!("读取清单文件失败: {}", e))?;
     let data = crate::json_util::trim_utf8_bom(&data);
     serde_json::from_str(data).map_err(|e| format!("解析清单 JSON 失败: {}", e))
 }
@@ -172,7 +169,10 @@ pub fn local_zip_path_for_chunk(manifest_dir: &Path, chunk: &RuntimeChunk) -> Pa
     manifest_dir.join(local_zip_filename(chunk))
 }
 
-pub fn check_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result<RuntimeUpdateInfo, String> {
+pub fn check_local_update(
+    app_handle: &AppHandle,
+    manifest_path: &str,
+) -> Result<RuntimeUpdateInfo, String> {
     let path = PathBuf::from(manifest_path);
     if !path.is_file() {
         return Err(format!("清单文件不存在: {}", path.display()));
@@ -182,7 +182,10 @@ pub fn check_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result
     Ok(compute_update_plan(&local, &remote))
 }
 
-pub fn apply_local_update(app_handle: &AppHandle, manifest_path: &str) -> Result<RuntimeUpdateInfo, String> {
+pub fn apply_local_update(
+    app_handle: &AppHandle,
+    manifest_path: &str,
+) -> Result<RuntimeUpdateInfo, String> {
     let path = PathBuf::from(manifest_path);
     if !path.is_file() {
         return Err(format!("清单文件不存在: {}", path.display()));
@@ -320,8 +323,7 @@ pub async fn fetch_remote_manifest(url: &str) -> Result<RuntimeManifest, String>
         .await
         .map_err(|e| format!("读取远端清单内容失败: {}", e))?;
 
-    serde_json::from_str(&body)
-        .map_err(|e| format!("解析远端清单 JSON 失败: {}", e))
+    serde_json::from_str(&body).map_err(|e| format!("解析远端清单 JSON 失败: {}", e))
 }
 
 // ── 计算更新计划 ──────────────────────────────────────────────────
@@ -390,11 +392,7 @@ async fn download_chunk_to_file(
         .map_err(|e| format!("下载 {} 失败: {}", chunk.name, e))?;
 
     if !resp.status().is_success() {
-        return Err(format!(
-            "下载 {} 返回 HTTP {}",
-            chunk.name,
-            resp.status()
-        ));
+        return Err(format!("下载 {} 返回 HTTP {}", chunk.name, resp.status()));
     }
 
     let total = resp.content_length().unwrap_or(chunk.size);
@@ -424,8 +422,7 @@ async fn download_chunk_to_file(
         );
     }
 
-    file.flush()
-        .map_err(|e| format!("flush 文件失败: {}", e))?;
+    file.flush().map_err(|e| format!("flush 文件失败: {}", e))?;
     drop(file);
 
     let actual_hash = sha256_of_file(dest)?;
@@ -446,8 +443,7 @@ fn extract_chunk_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), String> {
     let file = std::fs::File::open(zip_path)
         .map_err(|e| format!("打开 zip {} 失败: {}", zip_path.display(), e))?;
 
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("解析 zip 失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {}", e))?;
 
     for i in 0..archive.len() {
         let mut entry = archive

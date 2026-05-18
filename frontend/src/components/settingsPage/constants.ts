@@ -24,8 +24,8 @@ export const defaultSettings: AppSettings = {
 export const sections: SettingsSection[] = [
   { id: "integratedModel", label: "整合模型", icon: Layers },
   { id: "tts", label: "音色设置（TTS）", icon: Mic },
-  { id: "subtitleAsr", label: "字幕识别", icon: Subtitles },
   { id: "jianyingDraftPath", label: "剪映草稿路径", icon: FolderOpen },
+  { id: "subtitleAsr", label: "字幕识别（非必填）", icon: Subtitles },
   { id: "storage", label: "存储设置", icon: HardDrive },
   { id: "about", label: "关于", icon: Info },
 ];

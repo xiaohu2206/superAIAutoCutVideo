@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+import os
+import time
 from datetime import datetime
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
+
+
+logger = logging.getLogger(__name__)
+
+
+_TERMINAL_STATUSES = {"completed", "failed", "error", "cancelled"}
+
+
+def _status_to_message_type(status: str, fallback: Optional[str] = None) -> str:
+    explicit = str(fallback or "").strip().lower()
+    if explicit:
+        return explicit
+    st = str(status or "").strip().lower()
+    if st == "completed":
+        return "completed"
+    if st in {"failed", "error"}:
+        return "error"
+    if st == "cancelled":
+        return "cancelled"
+    return "progress"
 
 
 class TaskProgressStore:
@@ -10,6 +35,22 @@ class TaskProgressStore:
         self._lock = RLock()
         self._states: Dict[str, Dict[str, Any]] = {}
         self._active: Dict[Tuple[str, str], str] = {}
+        self._last_broadcast: Dict[str, Tuple[float, str, float, str, str]] = {}
+        self._broadcast_min_interval = self._read_float_env("TASK_PROGRESS_WS_MIN_INTERVAL_SEC", 0.5)
+        self._broadcast_keepalive_interval = self._read_float_env("TASK_PROGRESS_WS_KEEPALIVE_SEC", 2.0)
+        self._broadcast_progress_delta = self._read_float_env("TASK_PROGRESS_WS_PROGRESS_DELTA", 0.25)
+
+    def _read_float_env(self, name: str, default: float) -> float:
+        try:
+            raw = str(os.environ.get(name) or "").strip()
+            if not raw:
+                return default
+            value = float(raw)
+            if value < 0:
+                return default
+            return value
+        except Exception:
+            return default
 
     def _key(self, scope: str, project_id: str, task_id: Optional[str]) -> str:
         return f"{scope}::{project_id}::{task_id or ''}"
@@ -44,6 +85,8 @@ class TaskProgressStore:
         if not scope or not project_id:
             return
         key = self._key(scope, project_id, task_id)
+        should_broadcast = False
+        state: Dict[str, Any]
         with self._lock:
             existing = self._states.get(key) or {}
             state = {
@@ -56,11 +99,63 @@ class TaskProgressStore:
                 else float(existing.get("progress", 0.0)),
                 "message": message if message is not None else existing.get("message"),
                 "phase": phase if phase is not None else existing.get("phase"),
-                "type": msg_type if msg_type is not None else existing.get("type"),
-                "timestamp": timestamp or existing.get("timestamp") or datetime.now().isoformat(),
+                "timestamp": timestamp or datetime.now().isoformat(),
             }
+            state["type"] = msg_type if msg_type is not None else _status_to_message_type(str(state.get("status") or ""))
             self._states[key] = state
             self._active[(project_id, scope)] = task_id or ""
+            should_broadcast = self._should_broadcast_locked(key, state)
+        if should_broadcast:
+            self._schedule_ws_broadcast(dict(state))
+
+    def _should_broadcast_locked(self, key: str, state: Dict[str, Any]) -> bool:
+        status = str(state.get("status") or "").strip().lower()
+        msg_type = _status_to_message_type(status, state.get("type"))
+        progress = float(state.get("progress") or 0.0)
+        message = str(state.get("message") or "")
+        phase = str(state.get("phase") or "")
+        now = time.monotonic()
+        prev = self._last_broadcast.get(key)
+
+        if status in _TERMINAL_STATUSES or msg_type in {"completed", "error", "cancelled"}:
+            self._last_broadcast[key] = (now, status, progress, message, phase)
+            return True
+        if prev is None:
+            self._last_broadcast[key] = (now, status, progress, message, phase)
+            return True
+
+        last_at, last_status, last_progress, last_message, last_phase = prev
+        elapsed = now - last_at
+        changed_text = status != last_status or message != last_message or phase != last_phase
+        changed_progress = abs(progress - last_progress) >= self._broadcast_progress_delta
+        if (changed_text or changed_progress) and elapsed >= self._broadcast_min_interval:
+            self._last_broadcast[key] = (now, status, progress, message, phase)
+            return True
+        if elapsed >= self._broadcast_keepalive_interval:
+            self._last_broadcast[key] = (now, status, progress, message, phase)
+            return True
+        return False
+
+    def _schedule_ws_broadcast(self, state: Dict[str, Any]) -> None:
+        try:
+            from modules.ws_manager import manager
+
+            if not getattr(manager, "active_connections", None):
+                return
+            status = str(state.get("status") or "").strip().lower()
+            payload = {
+                **state,
+                "type": _status_to_message_type(status, state.get("type")),
+                "timestamp": state.get("timestamp") or datetime.now().isoformat(),
+            }
+            message = json.dumps(payload, ensure_ascii=False)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(manager.broadcast(message))
+        except Exception:
+            logger.debug("task progress ws broadcast schedule failed", exc_info=True)
 
     def update_from_payload(self, payload: Dict[str, Any]) -> None:
         scope = payload.get("scope")

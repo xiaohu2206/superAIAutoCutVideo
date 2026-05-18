@@ -21,12 +21,10 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 use std::io::{Read, Write};
-#[cfg(target_os = "windows")]
-use std::process::Stdio as _;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 mod json_util;
 mod offline_bundle;
@@ -63,12 +61,20 @@ fn kill_all_backend_processes() {
     let _ = apply_windows_no_window(cmd).status();
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct BackendReadyPayload {
+    port: u16,
+    boot_token: Option<String>,
+}
+
 // 应用状态结构
 struct AppState {
     backend_process: Arc<Mutex<Option<Child>>>,
     backend_port: Arc<Mutex<u16>>,
     backend_starting: Arc<AtomicBool>,
     backend_boot_token: Arc<Mutex<Option<String>>>,
+    /// 后端 HTTP 就绪后缓存（防止 frontend 尚未 listen 时丢失 backend-ready 事件）
+    pending_backend_ready: Arc<Mutex<Option<BackendReadyPayload>>>,
     app_is_quitting: Arc<AtomicBool>,
 }
 
@@ -79,8 +85,28 @@ impl Default for AppState {
             backend_port: Arc::new(Mutex::new(0)),
             backend_starting: Arc::new(AtomicBool::new(false)),
             backend_boot_token: Arc::new(Mutex::new(None)),
+            pending_backend_ready: Arc::new(Mutex::new(None)),
             app_is_quitting: Arc::new(AtomicBool::new(false)),
         }
+    }
+}
+
+/// 确保 `backend_starting` 在 `start_backend` 任意返回路径上都会被复位（避免卡死在「正在启动中」）。
+struct BackendStartingLease<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> BackendStartingLease<'a> {
+    fn begin(state: &'a AppState) -> Self {
+        Self {
+            flag: &state.backend_starting,
+        }
+    }
+}
+
+impl Drop for BackendStartingLease<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
     }
 }
 
@@ -95,11 +121,94 @@ struct BackendStatus {
     boot_token: Option<String>,
 }
 
+#[derive(Serialize, Debug)]
+struct BackendResourceStatus {
+    resource_dir: String,
+    resource_root: String,
+    zip_path: String,
+    zip_exists: bool,
+    zip_size: u64,
+    extract_dir: String,
+    extract_dir_exists: bool,
+    backend_exe_path: String,
+    backend_exe_exists: bool,
+    nested_backend_exe_path: String,
+    nested_backend_exe_exists: bool,
+    ready: bool,
+    message: String,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Serialize, Clone)]
+struct BackendExtractProgress {
+    phase: String,
+    extracted: u64,
+    total: u64,
+    current_file: String,
+    current_index: u64,
+    total_files: u64,
+}
+
+fn emit_backend_ready(app_handle: &AppHandle, port: u16, boot_token: Option<String>) {
+    let payload = BackendReadyPayload {
+        port,
+        boot_token: boot_token.clone(),
+    };
+    {
+        let state = app_handle.state::<AppState>();
+        *state.pending_backend_ready.lock().unwrap() = Some(payload.clone());
+    }
+    let _ = app_handle.emit("backend-ready", payload);
+}
+
+fn backend_ready_status(
+    app_handle: &AppHandle,
+    port: u16,
+    pid: Option<u32>,
+    boot_token: Option<String>,
+) -> BackendStatus {
+    emit_backend_ready(app_handle, port, boot_token.clone());
+    BackendStatus {
+        running: true,
+        port,
+        pid,
+        boot_token,
+    }
+}
+
 // 文件选择结果
 #[derive(Serialize, Deserialize)]
 struct FileSelection {
     path: Option<String>,
     cancelled: bool,
+}
+
+fn backend_ready_wait_secs(is_dev_mode: bool) -> u64 {
+    if is_dev_mode {
+        90
+    } else {
+        360
+    }
+}
+
+async fn probe_backend_ready(host: &str, port: u16) -> bool {
+    if port == 0 {
+        return false;
+    }
+    let url = format!("http://{}:{}/api/hello", host, port);
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(1200))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    client
+        .get(&url)
+        .send()
+        .await
+        .map(|resp| resp.status().is_success())
+        .unwrap_or(false)
 }
 
 async fn wait_for_backend_ready(host: &str, port: u16, total_wait_secs: u64) -> bool {
@@ -491,6 +600,134 @@ fn write_backend_zip_stamp(
 }
 
 #[cfg(target_os = "windows")]
+fn emit_backend_extract_progress(
+    app_handle: &AppHandle,
+    phase: &str,
+    extracted: u64,
+    total: u64,
+    current_file: &str,
+    current_index: u64,
+    total_files: u64,
+) {
+    let _ = app_handle.emit(
+        "backend-extract-progress",
+        BackendExtractProgress {
+            phase: phase.to_string(),
+            extracted,
+            total,
+            current_file: current_file.to_string(),
+            current_index,
+            total_files,
+        },
+    );
+}
+
+#[cfg(target_os = "windows")]
+fn extract_backend_zip_with_progress(
+    app_handle: &AppHandle,
+    zip_path: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("打开后端ZIP包失败: {}", e))?;
+    let mut zip = ZipArchive::new(file).map_err(|e| format!("解析后端ZIP包失败: {}", e))?;
+    let mut total: u64 = 0;
+    let mut total_files: u64 = 0;
+    for i in 0..zip.len() {
+        let file = zip
+            .by_index(i)
+            .map_err(|e| format!("读取ZIP条目失败: {}", e))?;
+        if !file.name().ends_with('/') {
+            total = total.saturating_add(file.size());
+            total_files = total_files.saturating_add(1);
+        }
+    }
+
+    emit_backend_extract_progress(app_handle, "start", 0, total, "", 0, total_files);
+
+    let mut extracted: u64 = 0;
+    let mut file_index: u64 = 0;
+    let mut last_emit_at = std::time::Instant::now();
+    let mut last_emit_bytes: u64 = 0;
+    let mut buffer = vec![0u8; 1024 * 1024];
+
+    for i in 0..zip.len() {
+        let mut entry = zip
+            .by_index(i)
+            .map_err(|e| format!("读取ZIP条目失败: {}", e))?;
+        let enclosed = match entry.enclosed_name() {
+            Some(p) => p.to_owned(),
+            None => continue,
+        };
+        let out_path = out_dir.join(enclosed);
+
+        if entry.name().ends_with('/') {
+            std::fs::create_dir_all(&out_path)
+                .map_err(|e| format!("创建后端目录失败 {:?}: {}", out_path, e))?;
+            continue;
+        }
+
+        file_index = file_index.saturating_add(1);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建后端目录失败 {:?}: {}", parent, e))?;
+        }
+
+        let current_file = entry.name().to_string();
+        emit_backend_extract_progress(
+            app_handle,
+            "extracting",
+            extracted,
+            total,
+            &current_file,
+            file_index,
+            total_files,
+        );
+
+        let mut out_file = std::fs::File::create(&out_path)
+            .map_err(|e| format!("创建后端文件失败 {:?}: {}", out_path, e))?;
+        loop {
+            let read = entry
+                .read(&mut buffer)
+                .map_err(|e| format!("读取后端ZIP内容失败 {}: {}", current_file, e))?;
+            if read == 0 {
+                break;
+            }
+            out_file
+                .write_all(&buffer[..read])
+                .map_err(|e| format!("写入后端文件失败 {:?}: {}", out_path, e))?;
+            extracted = extracted.saturating_add(read as u64);
+
+            let should_emit = extracted.saturating_sub(last_emit_bytes) >= 16 * 1024 * 1024
+                || last_emit_at.elapsed() >= Duration::from_millis(500);
+            if should_emit {
+                emit_backend_extract_progress(
+                    app_handle,
+                    "extracting",
+                    extracted,
+                    total,
+                    &current_file,
+                    file_index,
+                    total_files,
+                );
+                last_emit_at = std::time::Instant::now();
+                last_emit_bytes = extracted;
+            }
+        }
+    }
+
+    emit_backend_extract_progress(
+        app_handle,
+        "done",
+        total,
+        total,
+        "",
+        total_files,
+        total_files,
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 fn ensure_backend_executable_available(
     _app_handle: &AppHandle,
     resource_root: &PathBuf,
@@ -615,11 +852,13 @@ fn ensure_backend_executable_available(
     let _ = std::fs::create_dir_all(&extracted_backend_dir);
 
     let mut zip_extract_ok = false;
-    if let Ok(file) = std::fs::File::open(&zip_path) {
-        if let Ok(mut zip) = ZipArchive::new(file) {
-            if zip.extract(&extracted_backend_dir).is_ok() {
-                zip_extract_ok = true;
-            }
+    match extract_backend_zip_with_progress(_app_handle, &zip_path, &extracted_backend_dir) {
+        Ok(()) => {
+            zip_extract_ok = true;
+        }
+        Err(e) => {
+            emit_backend_extract_progress(_app_handle, "fallback", 0, want_size, "", 0, 0);
+            eprintln!("内置ZIP解压失败，尝试 PowerShell Expand-Archive: {}", e);
         }
     }
     if !zip_extract_ok {
@@ -650,6 +889,7 @@ fn ensure_backend_executable_available(
                 status.code()
             ));
         }
+        emit_backend_extract_progress(_app_handle, "done", want_size, want_size, "", 0, 0);
     }
 
     let index_sha = zip_index_sha256(&zip_path).ok();
@@ -682,6 +922,79 @@ fn append_log_line(path: PathBuf, line: &str) {
     {
         use std::io::Write;
         let _ = writeln!(file, "{}", line);
+    }
+}
+
+fn resolve_backend_resource_root(app_handle: &AppHandle) -> (PathBuf, PathBuf) {
+    let resource_dir = match app_handle.path().resource_dir() {
+        Ok(p) => p,
+        Err(_) => {
+            let exe_dir_fallback = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            if let Some(dir) = exe_dir_fallback {
+                dir.join("resources")
+            } else {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("resources")
+            }
+        }
+    };
+    let resource_root = {
+        let sub = resource_dir.join("resources");
+        if sub.exists() { sub } else { resource_dir.clone() }
+    };
+    (resource_dir, resource_root)
+}
+
+fn inspect_backend_resource_status(app_handle: &AppHandle) -> BackendResourceStatus {
+    let (resource_dir, resource_root) = resolve_backend_resource_root(app_handle);
+    let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
+    let extract_dir = resource_root.join("superAutoCutVideoBackend");
+    let backend_exe_path = if cfg!(target_os = "windows") {
+        extract_dir.join("superAutoCutVideoBackend.exe")
+    } else {
+        extract_dir.join("superAutoCutVideoBackend")
+    };
+    let nested_backend_exe_path = if cfg!(target_os = "windows") {
+        extract_dir
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend.exe")
+    } else {
+        extract_dir
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+    };
+
+    let zip_exists = zip_path.is_file();
+    let zip_size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+    let extract_dir_exists = extract_dir.is_dir();
+    let backend_exe_exists = backend_exe_path.is_file();
+    let nested_backend_exe_exists = nested_backend_exe_path.is_file();
+    let ready = backend_exe_exists || nested_backend_exe_exists;
+    let message = if ready {
+        "后端可执行文件已就绪".to_string()
+    } else if zip_exists {
+        "后端ZIP已复制到resources，等待解压或正在解压".to_string()
+    } else if extract_dir_exists {
+        "解压目录存在，但未找到后端可执行文件".to_string()
+    } else {
+        "未找到后端ZIP，也未找到已解压的后端目录".to_string()
+    };
+
+    BackendResourceStatus {
+        resource_dir: resource_dir.to_string_lossy().to_string(),
+        resource_root: resource_root.to_string_lossy().to_string(),
+        zip_path: zip_path.to_string_lossy().to_string(),
+        zip_exists,
+        zip_size,
+        extract_dir: extract_dir.to_string_lossy().to_string(),
+        extract_dir_exists,
+        backend_exe_path: backend_exe_path.to_string_lossy().to_string(),
+        backend_exe_exists,
+        nested_backend_exe_path: nested_backend_exe_path.to_string_lossy().to_string(),
+        nested_backend_exe_exists,
+        ready,
+        message,
     }
 }
 
@@ -738,69 +1051,88 @@ async fn start_backend(
         .open(&early_log_path);
     append_log_line(early_log_path.clone(), "[meta] start_backend invoked");
 
+    let host = "127.0.0.1";
+    let is_dev_mode =
+        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
+    let ready_wait_secs = backend_ready_wait_secs(is_dev_mode);
+
     // 最早期并发启动防护：若已有启动流程进行中，则等待其更新状态，避免重复拉起
     if state.backend_starting.swap(true, Ordering::SeqCst) {
-        for _ in 0..40 {
-            tokio::time::sleep(Duration::from_millis(150)).await;
+        for _ in 0..(ready_wait_secs * 4) {
+            tokio::time::sleep(Duration::from_millis(250)).await;
             let port = *state.backend_port.lock().unwrap();
             let boot_token = state.backend_boot_token.lock().unwrap().clone();
-            let process_guard = state.backend_process.lock().unwrap();
-            let running = process_guard.is_some() || port != 0;
-            drop(process_guard);
-            if running {
-                if port != 0 {
-                    println!(
-                        "[backend] 启动中（复用已有启动流程）：http://127.0.0.1:{}",
-                        port
-                    );
-                }
-                return Ok(BackendStatus {
-                    running,
+            let has_process = {
+                let process_guard = state.backend_process.lock().unwrap();
+                process_guard.is_some()
+            };
+            if port != 0 && probe_backend_ready(host, port).await {
+                println!(
+                    "[backend] 启动中（复用已有启动流程）：http://127.0.0.1:{}",
+                    port
+                );
+                return Ok(backend_ready_status(
+                    &app_handle,
                     port,
-                    pid: None,
+                    None,
                     boot_token,
-                });
+                ));
+            }
+            if !has_process && port == 0 {
+                break;
             }
         }
+        append_log_line(
+            early_log_path.clone(),
+            "[meta] start_backend rejected: another start still in progress",
+        );
         return Err("后端正在启动中，请稍后重试".to_string());
     }
 
+    let _starting_lease = BackendStartingLease::begin(&state);
+
     // 先短暂持锁检查和清理状态，避免并发重复启动
-    {
+    let existing_running = {
         let mut process_guard = state.backend_process.lock().unwrap();
         if let Some(ref mut child) = *process_guard {
             match child.try_wait() {
                 Ok(Some(_)) => {
-                    // 进程已退出，清理
                     *process_guard = None;
+                    None
                 }
-                Ok(None) => {
-                    // 进程仍在运行
-                    let port = *state.backend_port.lock().unwrap();
-                    let boot_token = state.backend_boot_token.lock().unwrap().clone();
-                    println!(
-                        "[backend] 已在运行：http://127.0.0.1:{} (pid={})",
-                        port,
-                        child.id()
-                    );
-                    return Ok(BackendStatus {
-                        running: true,
-                        port,
-                        pid: Some(child.id()),
-                        boot_token,
-                    });
-                }
+                Ok(None) => Some((
+                    *state.backend_port.lock().unwrap(),
+                    state.backend_boot_token.lock().unwrap().clone(),
+                    child.id(),
+                )),
                 Err(_) => {
-                    // 检查失败，清理
                     *process_guard = None;
+                    None
                 }
             }
+        } else {
+            None
         }
+    };
+    if let Some((port, boot_token, pid)) = existing_running {
+        if port != 0 && wait_for_backend_ready(host, port, ready_wait_secs).await {
+            println!("[backend] 已在运行并就绪：http://{}:{} (pid={})", host, port, pid);
+            return Ok(backend_ready_status(
+                &app_handle,
+                port,
+                Some(pid),
+                boot_token,
+            ));
+        }
+        append_log_line(
+            early_log_path.clone(),
+            "[meta] start_backend: existing process not http-ready yet",
+        );
+        return Err(
+            "后端进程已存在但尚未就绪，请查看 super_auto_cut_backend.log".to_string(),
+        );
     }
 
-    let host = "127.0.0.1";
-    let is_dev_mode =
-        cfg!(debug_assertions) || std::env::var("TAURI_DEV").ok().as_deref() == Some("1");
     let forced_port_opt = std::env::var("SACV_FORCE_PORT")
         .ok()
         .and_then(|s| s.parse::<u16>().ok())
@@ -810,12 +1142,7 @@ async fn start_backend(
             *state.backend_port.lock().unwrap() = p;
             *state.backend_boot_token.lock().unwrap() = boot_token.clone();
             println!("[backend] 已发现运行中的后端：http://{}:{}", host, p);
-            return Ok(BackendStatus {
-                running: true,
-                port: p,
-                pid: None,
-                boot_token,
-            });
+            return Ok(backend_ready_status(&app_handle, p, None, boot_token));
         }
     }
     // 生产环境也尝试发现已运行的后端，避免重复启动
@@ -824,33 +1151,12 @@ async fn start_backend(
             *state.backend_port.lock().unwrap() = p;
             *state.backend_boot_token.lock().unwrap() = boot_token.clone();
             println!("[backend] 已发现运行中的后端：http://{}:{}", host, p);
-            return Ok(BackendStatus {
-                running: true,
-                port: p,
-                pid: None,
-                boot_token,
-            });
+            return Ok(backend_ready_status(&app_handle, p, None, boot_token));
         }
     }
 
     // 获取资源目录路径（并准备后备路径：与应用同级 resources 目录）
-    let resource_dir = match app_handle.path().resource_dir() {
-        Ok(p) => p,
-        Err(_e) => {
-            let exe_dir_fallback = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-            if let Some(dir) = exe_dir_fallback {
-                dir.join("resources")
-            } else {
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("resources")
-            }
-        }
-    };
-    let resource_root = {
-        let sub = resource_dir.join("resources");
-        if sub.exists() { sub } else { resource_dir.clone() }
-    };
+    let (resource_dir, resource_root) = resolve_backend_resource_root(&app_handle);
     let exe_dir_fallback = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -862,80 +1168,122 @@ async fn start_backend(
         std::env::var("FORCE_PACKAGED_BACKEND").ok().as_deref() == Some("1");
     let backend_zip_path = resource_root.join("superAutoCutVideoBackend.zip");
     let backend_zip_exists = backend_zip_path.exists();
-    let backend_folder_exe = resource_root
-        .join("superAutoCutVideoBackend")
-        .join("superAutoCutVideoBackend.exe");
-    let backend_folder_exists = backend_folder_exe.exists();
+    let force_backend_reextract =
+        std::env::var("SACV_FORCE_BACKEND_REEXTRACT").ok().as_deref() == Some("1");
+    let backend_folder_exe = if cfg!(target_os = "windows") {
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend.exe")
+    } else {
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+    };
+    let backend_nested_folder_exe = if cfg!(target_os = "windows") {
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend.exe")
+    } else {
+        resource_root
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+            .join("superAutoCutVideoBackend")
+    };
+    let backend_folder_exists =
+        !force_backend_reextract && (backend_folder_exe.exists() || backend_nested_folder_exe.exists());
     let prefer_python_backend =
         is_dev_mode && !force_packaged_backend && !backend_zip_exists && !backend_folder_exists;
 
     append_log_line(
         early_log_path.clone(),
         &format!(
-            "[meta] is_dev_mode={} prefer_python_backend={} resource_dir={} resource_root={} backend_zip_exists={}",
+            "[meta] is_dev_mode={} prefer_python_backend={} resource_dir={} resource_root={} backend_zip_exists={} backend_folder_exists={} force_backend_reextract={}",
             is_dev_mode,
             prefer_python_backend,
             resource_dir.to_string_lossy(),
             resource_root.to_string_lossy(),
-            backend_zip_exists
+            backend_zip_exists,
+            backend_folder_exists,
+            force_backend_reextract
         ),
     );
 
+    if !is_dev_mode && !backend_zip_exists && !backend_folder_exists {
+        *state.backend_port.lock().unwrap() = 0;
+        *state.backend_boot_token.lock().unwrap() = None;
+        let err = format!(
+            "安装资源缺失：未找到 {}，也未找到已解压的后端目录 {}。请确认安装包同目录带有 superAutoCutVideoBackend_gpu.zip，或重新安装包含后端资源的版本。",
+            backend_zip_path.to_string_lossy(),
+            resource_root.join("superAutoCutVideoBackend").to_string_lossy()
+        );
+        append_log_line(early_log_path.clone(), &format!("[error] {}", err));
+        return Err(err);
+    }
+
     #[cfg(target_os = "windows")]
-    let extracted_backend_exe = if !prefer_python_backend && backend_zip_exists && !backend_folder_exists {
-        let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
-        append_log_line(
-            early_log_path.clone(),
-            &format!(
-                "[meta] backend_extract_dir={}",
-                resource_root
-                    .join("superAutoCutVideoBackend")
-                    .to_string_lossy()
-            ),
-        );
-        append_log_line(
-            early_log_path.clone(),
-            &format!(
-                "[meta] backend_zip_exists={} backend_zip_path={}",
-                zip_path.exists(),
-                zip_path.to_string_lossy()
-            ),
-        );
-        append_log_line(early_log_path.clone(), "[meta] ensure_backend_executable_available_begin");
-        let resource_root_blocking = resource_root.clone();
-        let app_handle_blocking = app_handle.clone();
-        match tokio::task::spawn_blocking(move || {
-            ensure_backend_executable_available(&app_handle_blocking, &resource_root_blocking)
-        })
-        .await
-        {
-            Ok(Ok(p)) => {
-                append_log_line(
-                    early_log_path.clone(),
-                    &format!(
-                        "[meta] ensure_backend_executable_available_ok={} exists={}",
-                        p.to_string_lossy(),
-                        p.exists()
-                    ),
-                );
-                Some(p)
+    let extracted_backend_exe =
+        if !prefer_python_backend && backend_zip_exists && !backend_folder_exists {
+            let zip_path = resource_root.join("superAutoCutVideoBackend.zip");
+            append_log_line(
+                early_log_path.clone(),
+                &format!(
+                    "[meta] backend_extract_dir={}",
+                    resource_root
+                        .join("superAutoCutVideoBackend")
+                        .to_string_lossy()
+                ),
+            );
+            append_log_line(
+                early_log_path.clone(),
+                &format!(
+                    "[meta] backend_zip_exists={} backend_zip_path={}",
+                    zip_path.exists(),
+                    zip_path.to_string_lossy()
+                ),
+            );
+            append_log_line(
+                early_log_path.clone(),
+                "[meta] ensure_backend_executable_available_begin",
+            );
+            let resource_root_blocking = resource_root.clone();
+            let app_handle_blocking = app_handle.clone();
+            match tokio::task::spawn_blocking(move || {
+                ensure_backend_executable_available(&app_handle_blocking, &resource_root_blocking)
+            })
+            .await
+            {
+                Ok(Ok(p)) => {
+                    append_log_line(
+                        early_log_path.clone(),
+                        &format!(
+                            "[meta] ensure_backend_executable_available_ok={} exists={}",
+                            p.to_string_lossy(),
+                            p.exists()
+                        ),
+                    );
+                    Some(p)
+                }
+                Ok(Err(e)) => {
+                    append_log_line(
+                        early_log_path.clone(),
+                        &format!("[meta] ensure_backend_executable_available_error={}", e),
+                    );
+                    *state.backend_port.lock().unwrap() = 0;
+                    *state.backend_boot_token.lock().unwrap() = None;
+                    return Err(e);
+                }
+                Err(e) => {
+                    let msg = format!("后端解压任务异常: {}", e);
+                    append_log_line(early_log_path.clone(), &format!("[meta] {}", msg));
+                    *state.backend_port.lock().unwrap() = 0;
+                    *state.backend_boot_token.lock().unwrap() = None;
+                    return Err(msg);
+                }
             }
-            Ok(Err(e)) => {
-                append_log_line(
-                    early_log_path.clone(),
-                    &format!("[meta] ensure_backend_executable_available_error={}", e),
-                );
-                return Err(e);
-            }
-            Err(e) => {
-                let msg = format!("后端解压任务异常: {}", e);
-                append_log_line(early_log_path.clone(), &format!("[meta] {}", msg));
-                return Err(msg);
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     #[cfg(target_os = "windows")]
     {
@@ -967,6 +1315,7 @@ async fn start_backend(
         candidates.push(p);
     }
     candidates.push(primary_path_dir.clone());
+    candidates.push(backend_nested_folder_exe.clone());
     candidates.push(primary_path_file.clone());
     if let Some(dir) = &exe_dir_fallback {
         if cfg!(target_os = "windows") {
@@ -1127,6 +1476,8 @@ async fn start_backend(
         let err = "未找到打包的后端可执行文件，请检查打包配置 bundle.resources".to_string();
         let path = std::env::temp_dir().join("super_auto_cut_backend.log");
         append_log_line(path, &format!("[error] {}", err));
+        *state.backend_port.lock().unwrap() = 0;
+        *state.backend_boot_token.lock().unwrap() = None;
         return Err(err);
     };
 
@@ -1240,10 +1591,9 @@ async fn start_backend(
                 let mut process_guard = state.backend_process.lock().unwrap();
                 *process_guard = Some(child);
             }
-            state.backend_starting.store(false, Ordering::SeqCst);
 
-            // 等待后端就绪（最多 60 秒，避免首次解压或冷启动偏慢）
-            if wait_for_backend_ready(host, port, 60).await {
+            // 等待后端就绪（GPU 冷启动可能较慢）
+            if wait_for_backend_ready(host, port, ready_wait_secs).await {
                 println!("[backend] 已就绪：http://{}:{}", host, port);
                 let _ = tauri_plugin_notification::NotificationExt::notification(&app_handle)
                     .builder()
@@ -1251,12 +1601,12 @@ async fn start_backend(
                     .body("后端服务启动成功")
                     .show();
 
-                Ok(BackendStatus {
-                    running: true,
+                Ok(backend_ready_status(
+                    &app_handle,
                     port,
-                    pid: Some(pid),
-                    boot_token: Some(boot_token),
-                })
+                    Some(pid),
+                    Some(boot_token),
+                ))
             } else {
                 // 超时未就绪，尝试从日志解析实际监听端口
                 if let Some(found_port) = parse_backend_port_from_log() {
@@ -1265,12 +1615,12 @@ async fn start_backend(
                         "[backend] 从日志解析到监听端口：http://{}:{}",
                         host, found_port
                     );
-                    Ok(BackendStatus {
-                        running: true,
-                        port: found_port,
-                        pid: Some(pid),
-                        boot_token: state.backend_boot_token.lock().unwrap().clone(),
-                    })
+                    Ok(backend_ready_status(
+                        &app_handle,
+                        found_port,
+                        Some(pid),
+                        state.backend_boot_token.lock().unwrap().clone(),
+                    ))
                 } else {
                     if let Some((found_port, found_token)) =
                         discover_existing_backend_quick(host, !is_dev_mode).await
@@ -1281,12 +1631,12 @@ async fn start_backend(
                             "[backend] 已发现运行中的后端：http://{}:{}",
                             host, found_port
                         );
-                        Ok(BackendStatus {
-                            running: true,
-                            port: found_port,
-                            pid: Some(pid),
-                            boot_token: found_token,
-                        })
+                        Ok(backend_ready_status(
+                            &app_handle,
+                            found_port,
+                            Some(pid),
+                            found_token,
+                        ))
                     } else {
                         // 未发现已就绪端口，保留已启动的进程，返回错误以提示检查日志，但不杀进程
                         Err("后端服务启动超时，但进程已保留；请查看临时日志 super_auto_cut_backend.log".to_string())
@@ -1295,7 +1645,6 @@ async fn start_backend(
             }
         }
         Err(e) => {
-            state.backend_starting.store(false, Ordering::SeqCst);
             *state.backend_port.lock().unwrap() = 0;
             *state.backend_boot_token.lock().unwrap() = None;
             let path = std::env::temp_dir().join("super_auto_cut_backend.log");
@@ -1310,6 +1659,7 @@ async fn start_backend(
 
 /// 停止后端并释放 AppData 下 DLL 文件锁（覆盖后端目录前必须调用，否则 Windows 报 os error 32）。
 fn stop_backend_sync(state: &AppState) -> Result<bool, String> {
+    state.backend_starting.store(false, Ordering::SeqCst);
     let mut process_guard = state.backend_process.lock().unwrap();
 
     if let Some(mut child) = process_guard.take() {
@@ -1343,43 +1693,119 @@ async fn stop_backend(state: State<'_, AppState>) -> Result<bool, String> {
     stop_backend_sync(&state)
 }
 
+/// 取出 Rust 侧缓存的 backend-ready（仅消费一次，用于弥补前端 listen 注册前的竞态）
+#[tauri::command]
+fn take_pending_backend_ready(state: State<'_, AppState>) -> Option<BackendReadyPayload> {
+    state.pending_backend_ready.lock().unwrap().take()
+}
+
+/// 由 Rust 直接探测 HTTP（不依赖 WebView fetch），供首屏 loading 轮询
+#[tauri::command]
+async fn probe_backend_http_ready(state: State<'_, AppState>) -> Result<BackendStatus, String> {
+    let host = "127.0.0.1";
+    let port = *state.backend_port.lock().unwrap();
+    let boot_token = state.backend_boot_token.lock().unwrap().clone();
+    if port != 0 && probe_backend_ready(host, port).await {
+        return Ok(BackendStatus {
+            running: true,
+            port,
+            pid: None,
+            boot_token,
+        });
+    }
+    for p in [18000u16, 8000u16] {
+        if probe_backend_ready(host, p).await {
+            *state.backend_port.lock().unwrap() = p;
+            return Ok(BackendStatus {
+                running: true,
+                port: p,
+                pid: None,
+                boot_token: state.backend_boot_token.lock().unwrap().clone(),
+            });
+        }
+    }
+    for p in 18001u16..=18100 {
+        if probe_backend_ready(host, p).await {
+            *state.backend_port.lock().unwrap() = p;
+            return Ok(BackendStatus {
+                running: true,
+                port: p,
+                pid: None,
+                boot_token: state.backend_boot_token.lock().unwrap().clone(),
+            });
+        }
+    }
+    for p in 8001u16..=8100 {
+        if probe_backend_ready(host, p).await {
+            *state.backend_port.lock().unwrap() = p;
+            return Ok(BackendStatus {
+                running: true,
+                port: p,
+                pid: None,
+                boot_token: state.backend_boot_token.lock().unwrap().clone(),
+            });
+        }
+    }
+    Ok(BackendStatus {
+        running: false,
+        port: 0,
+        pid: None,
+        boot_token: None,
+    })
+}
+
 // Tauri命令：获取后端状态
 #[tauri::command]
 async fn get_backend_status(state: State<'_, AppState>) -> Result<BackendStatus, String> {
-    let mut process_guard = state.backend_process.lock().unwrap();
-
-    if let Some(ref mut child) = *process_guard {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                // 进程已退出
-                *process_guard = None;
-                Ok(BackendStatus {
-                    running: false,
-                    port: 0,
-                    pid: None,
-                    boot_token: None,
-                })
+    let host = "127.0.0.1";
+    let snapshot = {
+        let mut process_guard = state.backend_process.lock().unwrap();
+        if let Some(ref mut child) = *process_guard {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    *process_guard = None;
+                    *state.backend_port.lock().unwrap() = 0;
+                    *state.backend_boot_token.lock().unwrap() = None;
+                    None
+                }
+                Ok(None) => Some((
+                    *state.backend_port.lock().unwrap(),
+                    state.backend_boot_token.lock().unwrap().clone(),
+                    Some(child.id()),
+                )),
+                Err(e) => return Err(format!("检查进程状态失败: {}", e)),
             }
-            Ok(None) => {
-                // 进程仍在运行
-                let port = *state.backend_port.lock().unwrap();
-                Ok(BackendStatus {
-                    running: true,
-                    port,
-                    pid: Some(child.id()),
-                    boot_token: state.backend_boot_token.lock().unwrap().clone(),
-                })
-            }
-            Err(e) => Err(format!("检查进程状态失败: {}", e)),
+        } else {
+            Some((
+                *state.backend_port.lock().unwrap(),
+                state.backend_boot_token.lock().unwrap().clone(),
+                None,
+            ))
         }
-    } else {
-        Ok(BackendStatus {
+    };
+
+    let Some((port, boot_token, pid)) = snapshot else {
+        return Ok(BackendStatus {
             running: false,
             port: 0,
             pid: None,
             boot_token: None,
-        })
-    }
+        });
+    };
+
+    let http_ready = port != 0 && probe_backend_ready(host, port).await;
+    Ok(BackendStatus {
+        running: http_ready,
+        port,
+        pid,
+        boot_token,
+    })
+}
+
+// Tauri命令：检查后端资源是否已复制/解压到resources
+#[tauri::command]
+fn get_backend_resource_status(app_handle: AppHandle) -> Result<BackendResourceStatus, String> {
+    Ok(inspect_backend_resource_status(&app_handle))
 }
 
 // Tauri命令：选择视频文件
@@ -1700,18 +2126,31 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         window_builder.build()?;
     }
 
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.center();
+    }
+
+    if std::env::var("SACV_DISABLE_SETUP_AUTO_START_BACKEND")
+        .ok()
+        .as_deref()
+        == Some("1")
     {
+        println!("[backend] setup 阶段自动启动已禁用（SACV_DISABLE_SETUP_AUTO_START_BACKEND=1）");
+    } else {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
+            // Give the WebView a brief chance to register event listeners first. If the
+            // frontend invoke path fails, this delayed fallback still starts the backend.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
             let state = app_handle.state::<AppState>();
             match start_backend(state, app_handle.clone()).await {
                 Ok(status) => {
                     if status.running && status.port != 0 {
-                        println!("[backend] 自动启动完成：http://127.0.0.1:{}", status.port);
+                        println!("[backend] setup 延迟自动启动完成：http://127.0.0.1:{}", status.port);
                     }
                 }
                 Err(e) => {
-                    eprintln!("[backend] 自动启动失败: {}", e);
+                    eprintln!("[backend] setup 延迟自动启动失败: {}", e);
                 }
             }
         });
@@ -1775,6 +2214,9 @@ fn main() {
             start_backend,
             stop_backend,
             get_backend_status,
+            take_pending_backend_ready,
+            probe_backend_http_ready,
+            get_backend_resource_status,
             select_video_file,
             select_output_directory,
             select_offline_bundle_manifest,
