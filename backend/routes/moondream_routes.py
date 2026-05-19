@@ -238,17 +238,22 @@ async def update_settings(req: MoondreamSettingsUpdateRequest) -> Dict[str, Any]
     return {"success": True, "data": {"settings": st, "resolved": runtime, "meta": meta}, "message": "ok"}
 
 
-@router.get("/acceleration-status")
-async def get_acceleration_status() -> Dict[str, Any]:
+def _build_acceleration_status_payload() -> Dict[str, Any]:
+    """同步探测 torch/llama，须在线程池中执行以免阻塞其它 API（如 /api/projects）。"""
     st = get_moondream_settings()
     resolved, meta = resolve_moondream_runtime_config(st, env_n_gpu_layers=_env_n_gpu_layers())
-    data = {
+    return {
         "acceleration": get_moondream_acceleration_status(),
         "settings": st,
         "resolved": resolved,
         "resolved_meta": meta,
         "runtime": vision_frame_analyzer.get_moondream_runtime_status(),
     }
+
+
+@router.get("/acceleration-status")
+async def get_acceleration_status() -> Dict[str, Any]:
+    data = await asyncio.to_thread(_build_acceleration_status_payload)
     return {"success": True, "data": data, "message": "ok"}
 
 @router.post("/models/download")

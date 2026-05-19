@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { HelpCircle, KeyRound, Loader2, Monitor, Plus, RefreshCw, Smartphone } from "lucide-react";
+import { createPortal } from "react-dom";
+import {
+  HelpCircle,
+  KeyRound,
+  Link2Off,
+  Loader2,
+  Monitor,
+  Plus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { TauriCommands } from "@/services/clients";
+import { message } from "@/services/message";
 import {
   bindLicense,
   fetchLicenseClientDeviceId,
   fetchMyLicenses,
   getDefaultLicenseClientDeviceName,
+  selfUnbindLicense,
   type LicenseRecord,
 } from "./licenseApi";
 
@@ -61,6 +73,25 @@ function getEffectiveStatus(lic: LicenseRecord): string {
   return lic.status;
 }
 
+function canOfferSelfUnbind(lic: LicenseRecord): boolean {
+  if (lic.status === "revoked") return false;
+  if (getEffectiveStatus(lic) === "revoked") return false;
+  if (typeof lic.remainingSelfUnbinds === "number" && lic.remainingSelfUnbinds <= 0) {
+    return false;
+  }
+  return true;
+}
+
+function isNextSelfUnbindTheRevokeOne(lic: LicenseRecord): boolean {
+  if (typeof lic.userSelfUnbindCount === "number" && lic.userSelfUnbindCount >= 2) {
+    return true;
+  }
+  if (typeof lic.remainingSelfUnbinds === "number" && lic.remainingSelfUnbinds === 1) {
+    return true;
+  }
+  return false;
+}
+
 function getExpireStatus(lic: LicenseRecord): { color: string; text: string } {
   if (!lic.expireAt) {
     return { color: "text-slate-400", text: "无到期时间" };
@@ -92,6 +123,8 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
   const [clientDeviceId, setClientDeviceId] = useState("");
   const [clientDeviceLoading, setClientDeviceLoading] = useState(true);
   const [binding, setBinding] = useState(false);
+  const [unbindDialog, setUnbindDialog] = useState<LicenseRecord | null>(null);
+  const [unbindingId, setUnbindingId] = useState<number | null>(null);
 
   const refreshClientDevice = useCallback(async () => {
     setClientDeviceLoading(true);
@@ -149,7 +182,29 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
     }
   };
 
-  const autoDeviceName = getDefaultLicenseClientDeviceName();
+  const confirmSelfUnbind = async () => {
+    const lic = unbindDialog;
+    if (!lic || !accessToken.trim()) return;
+    setUnbindingId(lic.id);
+    setError(null);
+    try {
+      const res = await selfUnbindLicense(accessToken, lic.id);
+      setUnbindDialog(null);
+      await load();
+      if (res.licenseRevoked) {
+        message.warning("本次为第 3 次自助解绑，该 License 已被吊销，无法再使用。", 5);
+      } else {
+        message.success(
+          `解绑成功。该密钥在您账号下已累计自助解绑 ${res.userSelfUnbindCount} 次（上限 3 次），剩余可自助解绑次数：${res.remainingSelfUnbinds}。`,
+          4
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUnbindingId(null);
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/80 shadow-sm">
@@ -239,11 +294,15 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
                       </p>
                       <p className="mt-0.5 text-xs text-slate-500">
                         ID {lic.id} · {formatPlan(lic.planType)}
+                        {typeof lic.remainingSelfUnbinds === "number" ? (
+                          <span> · 自助解绑还可 {lic.remainingSelfUnbinds} 次</span>
+                        ) : null}
                       </p>
                     </div>
                   </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
                       getEffectiveStatus(lic) === "active"
                         ? "bg-green-50 text-green-700 ring-green-200/80"
                         : getEffectiveStatus(lic) === "expired"
@@ -253,6 +312,22 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
                   >
                     {formatStatus(getEffectiveStatus(lic))}
                   </span>
+                  {canOfferSelfUnbind(lic) ? (
+                    <button
+                      type="button"
+                      onClick={() => setUnbindDialog(lic)}
+                      disabled={unbindingId === lic.id}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-red-600 disabled:opacity-50"
+                    >
+                      {unbindingId === lic.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Link2Off className="h-3 w-3" />
+                      )}
+                      解绑
+                    </button>
+                  ) : null}
+                  </div>
                 </div>
                 <dl className="mt-2 grid grid-cols-1 gap-1 text-xs text-slate-500 sm:grid-cols-2">
                   <div>
@@ -277,6 +352,93 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
           </ul>
         )}
       </div>
+
+      {unbindDialog && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                onClick={() => !unbindingId && setUnbindDialog(null)}
+                aria-hidden
+              />
+              <div
+                className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="license-unbind-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+                  <div>
+                    <h4 id="license-unbind-title" className="text-sm font-semibold text-slate-900">
+                      确认自助解绑
+                    </h4>
+                    <p className="mt-1 text-xs text-slate-500">
+                      每个 License 在您账号下最多可自助解绑 3 次；第 3 次完成后密钥将被吊销。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUnbindDialog(null)}
+                    disabled={unbindingId !== null}
+                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+                    aria-label="关闭"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 px-5 py-4 text-sm text-slate-700">
+                  <p className="break-all font-mono text-xs text-slate-600">{unbindDialog.licenseKey}</p>
+                  {typeof unbindDialog.userSelfUnbindCount === "number" ||
+                  typeof unbindDialog.remainingSelfUnbinds === "number" ? (
+                    <p className="text-xs text-slate-500">
+                      {typeof unbindDialog.userSelfUnbindCount === "number"
+                        ? `已累计自助解绑 ${unbindDialog.userSelfUnbindCount} 次（上限 3 次）`
+                        : null}
+                      {typeof unbindDialog.remainingSelfUnbinds === "number" ? (
+                        <>
+                          {typeof unbindDialog.userSelfUnbindCount === "number" ? "，" : null}
+                          当前还可自助解绑 {unbindDialog.remainingSelfUnbinds} 次
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {isNextSelfUnbindTheRevokeOne(unbindDialog) ? (
+                    <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                      本次为第 3 次自助解绑，完成后该 License 将被吊销且无法再使用，请谨慎操作。
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setUnbindDialog(null)}
+                    disabled={unbindingId !== null}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmSelfUnbind()}
+                    disabled={unbindingId !== null}
+                    className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {unbindingId !== null ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Link2Off className="h-4 w-4" />
+                    )}
+                    确认解绑
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

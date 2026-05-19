@@ -294,9 +294,12 @@ export function useProjectEditGenerateStep(
     };
   }, [applyRunningTask, applyTaskSnapshot, project?.id]);
 
+  const copywritingPollActive =
+    isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100);
+
   useEffect(() => {
     if (!project?.id) return;
-    if (!isGeneratingCopywriting && !isGeneratingScript && !isGeneratingDraft && !isGeneratingVideo) return;
+    if (!copywritingPollActive && !isGeneratingScript && !isGeneratingDraft && !isGeneratingVideo) return;
     let stopped = false;
     const tick = async () => {
       try {
@@ -331,7 +334,7 @@ export function useProjectEditGenerateStep(
 
         const fromQueue = (scope: string) => queueTasks.find((task) => task.scope === scope);
 
-        if (isGeneratingCopywriting) {
+        if (copywritingPollActive) {
           const t = fromQueue("generate_copywriting") || latest?.generate_copywriting;
           applyTaskSnapshot(t, copywritingStartedAtRef.current, setIsGeneratingCopywriting, setCopywritingGenProgress, setCopywritingGenLogs, setCopywritingTaskId);
           if (t?.task_id && !copywritingTaskId) {
@@ -339,6 +342,12 @@ export function useProjectEditGenerateStep(
           }
           if (taskIsAfterStart(t, copywritingStartedAtRef.current) && isTaskFinished(t)) {
             setIsGeneratingCopywriting(false);
+            const status = String(t?.status || "").toLowerCase();
+            const type = String(t?.type || "").toLowerCase();
+            if (status !== "completed" && type !== "completed") {
+              setCopywritingGenProgress(0);
+              setCopywritingGenLogs([]);
+            }
             void options.refreshProject();
           }
         }
@@ -388,9 +397,9 @@ export function useProjectEditGenerateStep(
     };
   }, [
     applyTaskSnapshot,
+    copywritingPollActive,
     copywritingTaskId,
     draftTaskId,
-    isGeneratingCopywriting,
     isGeneratingDraft,
     isGeneratingScript,
     isGeneratingVideo,
@@ -435,8 +444,12 @@ export function useProjectEditGenerateStep(
       options.showSuccess("解说文案生成成功！");
     } catch (err) {
       options.showError(err, "生成解说文案失败");
+      setCopywritingGenProgress(0);
+      setCopywritingGenLogs([]);
     } finally {
       setIsGeneratingCopywriting(false);
+      setCopywritingGenProgress(0);
+      setCopywritingGenLogs([]);
     }
   }, [options, project, setEditedCopywritingSafe]);
 
@@ -649,8 +662,7 @@ export function useProjectEditGenerateStep(
     onLog: (log) => setCopywritingGenLogs((prev) => [...prev, log]),
     onCompleted: () => {
       setIsGeneratingCopywriting(false);
-      setCopywritingGenProgress(100);
-      options.showSuccess("解说文案生成成功！");
+      setCopywritingGenProgress(0);
       void options.refreshProject();
     },
     onCancelled: (m: WebSocketMessage) => {

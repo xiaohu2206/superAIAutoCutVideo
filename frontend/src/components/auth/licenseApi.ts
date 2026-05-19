@@ -79,6 +79,30 @@ export interface LicenseRecord {
   devices: LicenseDevice[];
   createdAt: string;
   updatedAt: string;
+  /** 当前用户下累计自助解绑次数（上游列表可选返回） */
+  userSelfUnbindCount?: number;
+  /** 剩余可自助解绑次数；为 0 时不展示解绑按钮 */
+  remainingSelfUnbinds?: number;
+}
+
+export interface SelfUnbindLicenseResult {
+  ok: boolean;
+  licenseId: number;
+  userSelfUnbindCount: number;
+  licenseRevoked: boolean;
+  remainingSelfUnbinds: number;
+}
+
+function isSelfUnbindPayload(v: unknown): v is SelfUnbindLicenseResult {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    o.ok === true &&
+    typeof o.licenseId === "number" &&
+    typeof o.userSelfUnbindCount === "number" &&
+    typeof o.licenseRevoked === "boolean" &&
+    typeof o.remainingSelfUnbinds === "number"
+  );
 }
 
 /** GET /api/licenses/client-device：由本机后端按系统信息（mac / Windows 等）生成的设备 ID */
@@ -193,4 +217,28 @@ export async function bindLicense(
     throw new Error("绑定响应格式异常");
   }
   return payload as { licenseId: number };
+}
+
+/** POST /api/licenses/:id/self-unbind */
+export async function selfUnbindLicense(
+  token: string,
+  licenseId: number
+): Promise<SelfUnbindLicenseResult> {
+  const raw = await fetchJson<unknown>(
+    `${backendBase()}/api/licenses/${licenseId}/self-unbind`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    }
+  );
+  const payload = unwrapSuccessBody(raw);
+  if (!isSelfUnbindPayload(payload)) {
+    throw new Error("解绑响应格式异常");
+  }
+  return payload;
 }

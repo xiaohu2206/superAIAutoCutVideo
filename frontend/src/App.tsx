@@ -854,7 +854,14 @@ const App: React.FC = () => {
                   : "scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
               }
             >
-              {activeTab === "home" && !currentProjectId && !showProfile && (
+              <div
+                className={
+                  activeTab === "home" && !currentProjectId && !showProfile
+                    ? "contents"
+                    : "hidden"
+                }
+                aria-hidden={activeTab !== "home" || !!currentProjectId || showProfile}
+              >
                 <ProjectManagementPage
                   onEditProject={(projectId) => setCurrentProjectId(projectId)}
                   onShowLogin={() => {
@@ -863,7 +870,7 @@ const App: React.FC = () => {
                   }}
                   onShowProfile={() => setShowProfile(true)}
                 />
-              )}
+              </div>
 
               {activeTab === "home" && currentProjectId && !showProfile && (
                 <ProjectEditPage

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { projectService } from "../services/projectService";
-import { apiClient, wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
+import { wsClient, type WebSocketMessage, TauriCommands } from "../services/clients";
 import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type {
   CreateProjectRequest,
@@ -37,8 +37,6 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * 项目管理Hook返回类型
  */
@@ -59,37 +57,29 @@ export const useProjects = (): UseProjectsReturn => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetchSeqRef = useRef(0);
 
   /**
-   * 获取项目列表
+   * 获取项目列表（应用启动后后端已由 App 探测就绪，此处直接请求，避免与设置页并发时重复 /api/hello 阻塞）
    */
   const fetchProjects = useCallback(async () => {
+    const requestId = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
-    const maxAttempts = 20;
-    let attempts = 0;
     try {
-      while (attempts < maxAttempts) {
-        const ready = await apiClient.testConnection();
-        if (ready) break;
-        attempts += 1;
-        setError(`后端未就绪，正在重试(${attempts}/${maxAttempts})...`);
-        await sleep(Math.min(800 + attempts * 200, 3000));
-      }
-      if (attempts >= maxAttempts) {
-        const msg = "后端未就绪，请稍后重试";
-        setError(msg);
-        throw new Error(msg);
-      }
       const data = await projectService.getProjects();
+      if (requestId !== fetchSeqRef.current) return;
       setProjects(data);
       setError(null);
     } catch (err) {
+      if (requestId !== fetchSeqRef.current) return;
       const msg = getErrorMessage(err, "获取项目列表失败");
       setError(msg);
       throw err instanceof Error ? err : new Error(msg);
     } finally {
-      setLoading(false);
+      if (requestId === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 

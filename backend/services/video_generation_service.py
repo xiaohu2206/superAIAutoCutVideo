@@ -10,18 +10,15 @@ import logging
 import asyncio
 from datetime import datetime
 import shutil
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-import subprocess
 
 from modules.projects_store import Project, projects_store
-from modules.video_processor import WIN_NO_WINDOW, video_processor
+from modules.video_processor import video_processor
 from modules.ffmpeg_utils import resolve_ffmpeg_bin
 from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
-from modules.task_cancel_store import task_cancel_store
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
@@ -84,17 +81,8 @@ async def _trim_audio_silence(
             "2",
             str(output_path),
         ]
-        kwargs: Dict[str, Any] = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **kwargs,
-        )
-        await proc.communicate()
-        return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+        rc, _, _ = await video_processor._run_subprocess_exec_communicate(cmd)
+        return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
     except Exception:
         return False
 
@@ -219,18 +207,14 @@ class VideoGenerationService:
                     "-y",
                     str(out_copy),
                 ]
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd_copy,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW,
+                rc_copy, _, stderr = await video_processor._run_subprocess_exec_communicate(
+                    cmd_copy,
+                    scope="generate_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
-                task_cancel_store.register_process("generate_video", project_id, task_id, proc)
-                try:
-                    _, stderr = await video_processor._communicate_with_cancel(proc, cancel_event)
-                finally:
-                    task_cancel_store.unregister_process("generate_video", project_id, task_id, proc)
-                if proc.returncode == 0 and out_copy.exists():
+                if rc_copy == 0 and out_copy.exists():
                     v2 = await video_processor._ffprobe_video_duration(str(out_copy))
                     if v2 is None:
                         v2 = await video_processor._ffprobe_duration(str(out_copy), "format")
@@ -275,25 +259,21 @@ class VideoGenerationService:
                     "-y",
                     str(out_re),
                 ]
-                proc2 = await asyncio.create_subprocess_exec(
-                    *cmd_re,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW,
+                rc_re, _, stderr2 = await video_processor._run_subprocess_exec_communicate(
+                    cmd_re,
+                    scope="generate_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                    cancel_event=cancel_event,
                 )
-                task_cancel_store.register_process("generate_video", project_id, task_id, proc2)
-                try:
-                    _, stderr2 = await video_processor._communicate_with_cancel(proc2, cancel_event)
-                finally:
-                    task_cancel_store.unregister_process("generate_video", project_id, task_id, proc2)
-                if proc2.returncode == 0 and out_re.exists():
+                if rc_re == 0 and out_re.exists():
                     v3 = await video_processor._ffprobe_video_duration(str(out_re))
                     if v3 is None:
                         v3 = await video_processor._ffprobe_duration(str(out_re), "format")
                     v3 = float(v3 or 0.0)
                     if v3 > 0.0 and v3 <= (adur + tol):
                         return out_re
-                if proc2.returncode != 0:
+                if rc_re != 0:
                     try:
                         _ = (stderr2 or stderr or b"").decode(errors="ignore")
                     except Exception:
@@ -735,10 +715,13 @@ class VideoGenerationService:
                     vinfo_chk, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
                     if vinfo_chk is None:
                         logger.info(f"DEBUG segment_narration_fallback idx={idx} reencode nar to ensure video stream")
+                        ffmpeg_bin = resolve_ffmpeg_bin()
+                        if not ffmpeg_bin:
+                            raise RuntimeError(f"ffmpeg 不可用，片段配音重编码失败: {idx}")
                         cmd_fb = [
                             ffmpeg_bin, "-hide_banner", "-loglevel", "error",
                             "-i", str(clip_abs),
-                            "-i", str(seg_audio),
+                            "-i", str(narr_used),
                             "-map", "0:v:0", "-map", "1:a:0",
                             "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
                             "-pix_fmt", "yuv420p",
@@ -746,41 +729,14 @@ class VideoGenerationService:
                             "-shortest",
                             "-y", str(clip_nar_abs),
                         ]
-                        p3 = await asyncio.create_subprocess_exec(
-                            *cmd_fb,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                            creationflags=WIN_NO_WINDOW,
+                        rc_fb, _, e3 = await video_processor._run_subprocess_exec_communicate(
+                            cmd_fb,
+                            scope="generate_video",
+                            project_id=project_id,
+                            task_id=task_id,
+                            cancel_event=cancel_event,
                         )
-                        task_cancel_store.register_process("generate_video", project_id, task_id, p3)
-                        try:
-                            comm_task = asyncio.create_task(p3.communicate())
-                            cancel_task = asyncio.create_task(cancel_event.wait())
-                            done, _ = await asyncio.wait({comm_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
-                            if cancel_task in done:
-                                try:
-                                    if p3.returncode is None:
-                                        try:
-                                            p3.terminate()
-                                        except Exception:
-                                            pass
-                                finally:
-                                    try:
-                                        await asyncio.wait_for(comm_task, timeout=1.5)
-                                    except Exception:
-                                        try:
-                                            comm_task.cancel()
-                                        except Exception:
-                                            pass
-                                raise asyncio.CancelledError()
-                            try:
-                                cancel_task.cancel()
-                            except Exception:
-                                pass
-                            _, e3 = await comm_task
-                        finally:
-                            task_cancel_store.unregister_process("generate_video", project_id, task_id, p3)
-                        if p3.returncode != 0:
+                        if rc_fb != 0:
                             raise RuntimeError(f"片段配音替换失败(强制重编码): {idx} - {e3.decode(errors='ignore')}")
                         vinfo_chk2, _ = await video_processor._probe_stream_info(str(clip_nar_abs))
                         if vinfo_chk2 is None:

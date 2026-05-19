@@ -5,6 +5,7 @@ License 路由：请求体与 Authorization 原样转发至上游账号服务，
 与 auth_routes 使用同一上游基址与 forward 实现。
 
 说明：POST /api/licenses/bind 的 devices[].deviceId 由本机后端根据系统信息生成并注入，不信任浏览器。
+POST /api/licenses/{id}/self-unbind 将空 JSON 体与 Authorization 原样转发上游。
 """
 
 import asyncio
@@ -79,6 +80,19 @@ async def bind_license(request: Request):
         "/api/licenses/bind",
         out,
         auth,
+        "application/json",
+    )
+
+
+@licenses_router.post(
+    "/{license_id}/self-unbind",
+    summary="自助解绑 License（上游累计 3 次，第 3 次将吊销）",
+)
+async def self_unbind_license(license_id: int, request: Request):
+    return await forward_upstream_post_raw(
+        f"/api/licenses/{license_id}/self-unbind",
+        b"{}",
+        request.headers.get("Authorization"),
         "application/json",
     )
 

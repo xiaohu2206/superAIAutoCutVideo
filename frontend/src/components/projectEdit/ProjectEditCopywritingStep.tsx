@@ -194,7 +194,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
           </div>
 
           {/* 文案生成进度 */}
-          {(isGeneratingCopywriting || (copywritingGenProgress > 0 && copywritingGenProgress < 100)) && (
+          {isGeneratingCopywriting && (
             <div className="w-full ml-0 mt-3">
               <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
                 <span>文案生成进度(预计1～2分钟)</span>
