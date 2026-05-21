@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { promptsService } from '../services/promptsService'
 import type { CreatePromptPayload, ProjectPromptSelection, PromptSummaryItem } from '../types/prompts'
-import { NarrationType } from '../types/project'
+import type { NarrationType } from '../types/project'
+import { getPromptCategoryByNarrationType } from '../constants/narrationTypes'
 
 export function usePrompts(projectId: string, narrationType?: NarrationType) {
   const [categories, setCategories] = useState<string[]>([])
@@ -10,15 +11,7 @@ export function usePrompts(projectId: string, narrationType?: NarrationType) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const defaultCategory = useMemo(() => {
-    switch (narrationType) {
-      case NarrationType.MOVIE:
-        return 'movie_narration'
-      case NarrationType.SHORT_DRAMA:
-      default:
-        return 'short_drama_narration'
-    }
-  }, [narrationType])
+  const defaultCategory = useMemo(() => getPromptCategoryByNarrationType(narrationType), [narrationType])
   const featureKey = useMemo(() => `${defaultCategory}:script_generation`, [defaultCategory])
 
   const fetchAll = useCallback(async () => {

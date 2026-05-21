@@ -17,6 +17,8 @@ from threading import RLock
 import logging
 from pydantic import BaseModel, Field
 
+from .narration_types import get_default_script_length, normalize_narration_type
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,11 +235,7 @@ class ProjectsStore:
 
     def _get_default_script_length(self, narration_type: str) -> str:
         """根据解说类型获取默认脚本长度"""
-        if "电影" in narration_type:
-            return "60～80条"
-        elif "短剧" in narration_type:
-            return "30～40条"
-        return "30～40条"
+        return get_default_script_length(narration_type)
 
     def list_projects(self) -> List[Project]:
         with self._lock:
@@ -257,7 +255,7 @@ class ProjectsStore:
     ) -> Project:
         now = datetime.now().isoformat()
         new_id = str(uuid.uuid4())
-        effective_narration_type = narration_type or "短剧解说"
+        effective_narration_type = normalize_narration_type(narration_type)
         pt = str(project_type or "subtitle").strip().lower()
         tier_norm: Optional[str] = None
         if pt == "omni":
@@ -381,6 +379,8 @@ class ProjectsStore:
                     else:
                         s = str(v).strip().lower()
                         data[key] = s if s in ("low", "medium", "high") else None
+                elif key == "narration_type":
+                    data[key] = normalize_narration_type(updates.get(key))
                 elif key == "interleave_mode":
                     v = updates.get(key)
                     if v is None or v == "":

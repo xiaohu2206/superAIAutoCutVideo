@@ -340,7 +340,7 @@ class VideoGenerationService:
                 clip_abs = tmp_dir / clip_name
                 text = str(seg.get("text", "") or "").strip()
                 ost_flag = seg.get("OST")
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                is_original = (ost_flag == 1) or text.startswith("播放原")
                 logger.info(
                     "DEBUG segment_init idx=%s start=%.3f end=%.3f duration=%.3f ost=%s text_len=%s is_original=%s",
                     idx,

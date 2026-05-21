@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from modules.app_paths import uploads_dir as app_uploads_dir, to_uploads_web_path, resolve_uploads_path
 from modules.auth.omni_project_license import require_valid_license_for_omni
 from modules.projects_store import projects_store
+from modules.narration_types import DEFAULT_NARRATION_TYPE, is_valid_narration_type, normalize_narration_type
 from modules.runtime_log_store import runtime_log_store
 from modules.task_progress_store import task_progress_store
 from modules.subtitle_utils import format_ts_srt
@@ -546,10 +547,13 @@ async def create_project(req: CreateProjectRequest, request: Request):
     for existing in projects_store.list_projects():
         if (existing.name or "").strip() == name_clean:
             raise HTTPException(status_code=400, detail="项目名称已存在")
+    narration_type = normalize_narration_type(req.narration_type)
+    if req.narration_type and not is_valid_narration_type(req.narration_type):
+        raise HTTPException(status_code=400, detail="解说类型无效")
     p = projects_store.create_project(
         name_clean,
         req.description,
-        req.narration_type or "短剧解说",
+        narration_type or DEFAULT_NARRATION_TYPE,
         req.project_type or "subtitle",
         omni_effect_tier=req.omni_effect_tier,
     )
@@ -563,6 +567,10 @@ async def create_project(req: CreateProjectRequest, request: Request):
 @router.post("/{project_id}")
 async def update_project(project_id: str, req: UpdateProjectRequest):
     updates = req.model_dump(exclude_unset=True)
+    if "narration_type" in updates:
+        if updates.get("narration_type") and not is_valid_narration_type(updates.get("narration_type")):
+            raise HTTPException(status_code=400, detail="解说类型无效")
+        updates["narration_type"] = normalize_narration_type(updates.get("narration_type"))
     if "script_length" in updates:
         try:
             updates["script_length"] = normalize_script_length_selection(

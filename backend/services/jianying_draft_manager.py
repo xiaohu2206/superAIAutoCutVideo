@@ -936,7 +936,7 @@ class JianyingDraftManager:
                     continue
                 text = str(seg.get("text") or "").strip()
                 ost_flag = seg.get("OST")
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                is_original = (ost_flag == 1) or text.startswith("播放原")
                 if not is_original:
                     need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
 
@@ -1057,7 +1057,7 @@ class JianyingDraftManager:
                 text = str(seg.get("text") or "").strip()
                 subtitle = str(seg.get("subtitle") or "").strip()
                 ost_flag = seg.get("OST")
-                is_original = (ost_flag == 1) or text.startswith("播放原片")
+                is_original = (ost_flag == 1) or text.startswith("播放原")
 
                 if is_original:
                     timeline_items.append({

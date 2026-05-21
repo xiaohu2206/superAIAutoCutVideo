@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from modules.ai import ChatMessage
 from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_items
@@ -10,7 +10,8 @@ from services.ai_models.unified_model_usage import LlmModelUsage
 
 from .constants import MAX_SUBTITLE_CHARS_PER_CALL
 from .subtitle_utils import _format_timestamp_range, _parse_timestamp_pair
-from modules.prompts.common.output_format_blocks import movie, short_drama
+from modules.narration_types import get_original_label, get_output_format_kind, get_prompt_category
+from modules.prompts.common.output_format_blocks import build_output_format_block
 
 logger = logging.getLogger(__name__)
 
@@ -84,39 +85,43 @@ def _normalize_original_ratio(value: Optional[int]) -> int:
     return num
 
 
-def _build_ost_system_hint(original_ratio: Optional[int], interleave_mode: Optional[str] = None) -> str:
+def _build_ost_system_hint(
+    original_ratio: Optional[int],
+    interleave_mode: Optional[str] = None,
+    original_label: str = "原片",
+) -> str:
+    play_label = f"播放{original_label}"
     if interleave_mode == "original_interleave":
         return (
-            "原片穿插模式：所有 OST=1 项 narration 使用\"播放原片N\"格式（N从1递增），且每段 OST=0 解说后必须紧跟 OST=1。"
-            "解说-原片-解说-原片严格交替。"
+            f"{original_label}穿插模式：所有 OST=1 项 narration 使用\"{play_label}N\"格式（N从1递增），且每段 OST=0 解说后必须紧跟 OST=1。"
+            f"解说-{original_label}-解说-{original_label}严格交替。"
         )
     if original_ratio is None:
         return "原声片段标识：OST=1表示原声，OST=0表示解说。"
     ratio_val = _normalize_original_ratio(original_ratio)
     if ratio_val <= 0:
-        return "本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“播放原片+序号”格式。"
+        return f"本次只生成解说片段：所有条目的OST必须为0，且narration为解说文案；不得使用“{play_label}+序号”格式。"
     if ratio_val >= 100:
-        return "本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“播放原片+序号”格式；不得输出解说文案。"
+        return f"本次只生成原声片段：所有条目的OST必须为1，且narration必须使用“{play_label}+序号”格式；不得输出解说文案。"
     return (
-        f"原片占比范围：本次原片占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
+        f"{original_label}占比范围：本次{original_label}占比为{ratio_val}%，解说占比为{100 - ratio_val}%。"
         "原声片段标识：OST=1表示原声，OST=0表示解说。"
     )
 
 
-def _detect_narration_type(project_id: Optional[str]) -> str:
+def _resolve_narration_settings(project_id: Optional[str]) -> Tuple[str, str, str]:
     if not project_id:
-        return "short_drama_narration"
+        return "short_drama_narration", "short_drama", "原片"
     try:
         from modules.projects_store import projects_store
 
         p = projects_store.get_project(project_id)
         if p:
             t = str(getattr(p, "narration_type", "") or "")
-            if t == "电影解说":
-                return "movie_narration"
+            return get_prompt_category(t), get_output_format_kind(t), get_original_label(t)
     except Exception:
         pass
-    return "short_drama_narration"
+    return "short_drama_narration", "short_drama", "原片"
 
 
 def _build_fixed_visual_script_prompt(
@@ -125,25 +130,27 @@ def _build_fixed_visual_script_prompt(
     script_language: Optional[str],
     original_ratio: Optional[int] = None,
     interleave_mode: Optional[str] = None,
+    original_label: str = "原片",
 ) -> str:
     lang = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
     ratio_val = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
+    play_label = f"播放{original_label}"
 
     requirements_extra = ""
     ost_rules = ""
     if interleave_mode == "original_interleave":
-        requirements_extra = "- 原片穿插模式：解说（OST=0）与原片（OST=1）严格交替，不得连续两段同一类型\n"
+        requirements_extra = f"- {original_label}穿插模式：解说（OST=0）与{original_label}（OST=1）严格交替，不得连续两段同一类型\n"
         ost_rules = (
-            "## 原片穿插规则\n"
+            f"## {original_label}穿插规则\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
-            "- OST=1 表示原声，narration 使用\"播放原片N\"格式（N从1递增）\n"
-            "- 每段解说后一般紧跟一段原声，形成解说-原片-解说-原片的交替节奏，但是解说片段之间需要合并还是可以进行合并的，避免解说片段太分散问题，因为解说片段本身的拆分可能不合理\n"
+            f"- OST=1 表示原声，narration 使用\"{play_label}N\"格式（N从1递增）\n"
+            f"- 每段解说后一般紧跟一段原声，形成解说-{original_label}-解说-{original_label}的交替节奏，但是解说片段之间需要合并还是可以进行合并的，避免解说片段太分散问题，因为解说片段本身的拆分可能不合理\n"
         )
     elif ratio_val is None:
         requirements_extra = "- 原声片段（OST=1）占比约 40%，解说片段（OST=0）占比约 60%\n"
         ost_rules = (
             "## 原声片段规则（约 40%）\n"
-            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            f"- OST=1 表示保留原声，narration 使用\"{play_label}+序号\"格式\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
             "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
         )
@@ -157,15 +164,15 @@ def _build_fixed_visual_script_prompt(
         requirements_extra = "- 本次只生成原声片段（OST 必须为 1），不得输出解说片段\n"
         ost_rules = (
             "## 原声片段规则\n"
-            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            f"- OST=1 表示保留原声，narration 使用\"{play_label}+序号\"格式\n"
         )
     else:
         requirements_extra = (
-            f"- 合理分配原声片段（OST=1）和解说片段（OST=0），原片占比约 {ratio_val}%\n"
+            f"- 合理分配原声片段（OST=1）和解说片段（OST=0），{original_label}占比约 {ratio_val}%\n"
         )
         ost_rules = (
             "## 原声片段规则\n"
-            "- OST=1 表示保留原声，narration 使用\"播放原片+序号\"格式\n"
+            f"- OST=1 表示保留原声，narration 使用\"{play_label}+序号\"格式\n"
             "- OST=0 表示解说，narration 填写对应的解说文案内容\n"
             "- 在关键情绪爆发点、重要对白、爽点瞬间保留原声\n"
         )
@@ -224,7 +231,7 @@ async def _generate_visual_script_chunk(
         scenes_text_lines.append(f"[{ts}] {s['text']}")
     scenes_text = "\n".join(scenes_text_lines)
 
-    narration_type = _detect_narration_type(project_id)
+    narration_type, _output_format_kind, original_label = _resolve_narration_settings(project_id)
     lang_key = "en" if script_language and str(script_language).strip().lower() in {"en", "en-us", "英文", "english"} else "zh"
 
     user_prompt = _build_fixed_visual_script_prompt(
@@ -233,6 +240,7 @@ async def _generate_visual_script_chunk(
         script_language=script_language,
         original_ratio=original_ratio,
         interleave_mode=interleave_mode,
+        original_label=original_label,
     )
 
     system_prompt = (
@@ -240,10 +248,14 @@ async def _generate_visual_script_chunk(
         "你必须严格按照JSON格式输出，绝不能包含任何其他文字、说明或代码块标记。\n\n"
     )
     ratio_for_blocks = _normalize_original_ratio(original_ratio) if original_ratio is not None else None
-    if narration_type == "movie_narration":
-        system_prompt += movie(lang_key, ratio_for_blocks, interleave_mode=interleave_mode)
-    else:
-        system_prompt += short_drama(lang_key, ratio_for_blocks, interleave_mode=interleave_mode)
+    system_prompt += build_output_format_block(
+        lang_key,
+        ratio_for_blocks,
+        interleave_mode=interleave_mode,
+        original_label=original_label,
+        narration_sample_a="……" if _output_format_kind == "movie" and lang_key != "en" else "...",
+        narration_sample_b="xxx",
+    )
 
     messages: List[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
@@ -323,7 +335,7 @@ async def _generate_visual_script_chunk(
         0,
         ChatMessage(
             role="system",
-            content=_build_ost_system_hint(original_ratio, interleave_mode=interleave_mode),
+            content=_build_ost_system_hint(original_ratio, interleave_mode=interleave_mode, original_label=original_label),
         ),
     )
 

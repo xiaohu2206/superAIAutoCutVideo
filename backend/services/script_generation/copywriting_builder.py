@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import importlib
 import logging
 import math
 import re
@@ -137,11 +138,13 @@ def _build_template_messages(
     except KeyError:
         try:
             cat = key.split(":", 1)[0] if ":" in key else "short_drama_narration"
-            if cat == "movie_narration":
-                from modules.prompts.movie_narration import register_prompts
-            else:
-                from modules.prompts.short_drama_narration import register_prompts
-            register_prompts()
+            try:
+                module = importlib.import_module(f"modules.prompts.{cat}")
+            except Exception:
+                module = importlib.import_module("modules.prompts.short_drama_narration")
+            register_prompts = getattr(module, "register_prompts", None)
+            if callable(register_prompts):
+                register_prompts()
             messages_dicts = prompt_manager.build_chat_messages(key, variables)
         except Exception:
             messages_dicts = prompt_manager.build_chat_messages(default_key, variables)

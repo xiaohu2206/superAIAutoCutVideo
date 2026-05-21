@@ -1,13 +1,18 @@
 // 项目管理页面（一级页面）
 
-import { Plus, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
 import ProjectList from "../components/projectManagement/ProjectList";
 import BasicConfigCheckModal from "../components/projectManagement/BasicConfigCheckModal";
+import NarrationTypePicker from "../components/projectManagement/NarrationTypePicker";
 import { useProjects } from "../hooks/useProjects";
-import type { CreateProjectRequest, Project } from "../types/project";
+import {
+  NarrationType,
+  type CreateProjectRequest,
+  type Project,
+} from "../types/project";
 import { message } from "../services/message";
 
 interface ProjectManagementPageProps {
@@ -35,6 +40,8 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   } = useProjects();
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createInitialNarrationType, setCreateInitialNarrationType] =
+    useState<NarrationType>(NarrationType.MOVIE);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isBasicConfigCheckOpen, setIsBasicConfigCheckOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -156,7 +163,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6">
-      {/* 区块标题：最近项目 + 搜索 + 创建按钮 */}
+      {/* 区块标题：最近项目 + 基础检测 + 搜索 + 刷新 */}
       <div className="flex items-center justify-between px-1 shrink-0">
         <div className="flex items-baseline space-x-2">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900">项目</h2>
@@ -203,17 +210,16 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
             />
             刷新
           </button>
-          <button
-            onClick={() => {
-              setIsCreateModalOpen(true);
-            }}
-            className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            创建项目
-          </button>
         </div>
       </div>
+
+      {/* 解说类型选择器：点击任意类型即触发创建项目流程 */}
+      <NarrationTypePicker
+        onSelect={(narrationType) => {
+          setCreateInitialNarrationType(narrationType);
+          setIsCreateModalOpen(true);
+        }}
+      />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         {/* 项目列表 */}
@@ -241,6 +247,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
         onCreate={handleCreateProject}
         onShowLogin={onShowLogin}
         onShowProfile={onShowProfile}
+        initialNarrationType={createInitialNarrationType}
       />
 
       {/* 删除确认模态框 */}

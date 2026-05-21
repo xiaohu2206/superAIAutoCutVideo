@@ -17,7 +17,7 @@ def segment_is_play_original(seg: Optional[Dict[str, Any]]) -> bool:
         return False
     text = str(seg.get("text") or "").strip()
     ost_flag = seg.get("OST")
-    return (ost_flag == 1) or text.startswith("播放原片")
+    return (ost_flag == 1) or text.startswith("播放原")
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,7 @@ from services.reference_copywriting_wash import (
     wash_reference_copywriting_pipeline,
 )
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from modules.narration_types import supports_context, supports_reference_copywriting
 from services.ai_models.unified_model_usage import omni_effect_tier_for_project
 
 
@@ -66,9 +67,8 @@ def _load_subtitle_text(p: Project, subtitle_path: Optional[str]) -> str:
     return sub_abs.read_text(encoding="utf-8", errors="ignore")
 
 
-def _movie_narration_film_context(p: Project, narration_type: str) -> Optional[str]:
-    t = (narration_type or "").strip()
-    if "电影解说" not in t:
+def _narration_context(p: Project, narration_type: str) -> Optional[str]:
+    if not supports_context(narration_type):
         return None
     raw = getattr(p, "narration_film_context", None)
     if raw is None:
@@ -77,9 +77,8 @@ def _movie_narration_film_context(p: Project, narration_type: str) -> Optional[s
     return s if s else None
 
 
-def _movie_narration_reference_copywriting(p: Project, narration_type: str) -> Optional[str]:
-    t = (narration_type or "").strip()
-    if "电影解说" not in t:
+def _narration_reference_copywriting(p: Project, narration_type: str) -> Optional[str]:
+    if not supports_reference_copywriting(narration_type):
         return None
     raw = getattr(p, "narration_reference_copywriting", None)
     if raw is None:
@@ -125,6 +124,7 @@ class GenerateCopywritingService:
         p = projects_store.get_project(project_id)
         if not p:
             raise HTTPException(status_code=404, detail="项目不存在")
+        narration_type = str(getattr(p, "narration_type", None) or narration_type or "").strip()
 
         video_abs = _resolve_path(video_path)
         if not video_abs.exists():
@@ -218,8 +218,8 @@ class GenerateCopywritingService:
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        film_ctx = _movie_narration_film_context(p, narration_type)
-        reference_cw = _movie_narration_reference_copywriting(p, narration_type)
+        film_ctx = _narration_context(p, narration_type)
+        reference_cw = _narration_reference_copywriting(p, narration_type)
 
         wash_applied = False
         copywriting_text = ""

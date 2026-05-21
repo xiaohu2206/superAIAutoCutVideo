@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { X, Folder, Sparkles } from "lucide-react";
 import type { CreateProjectRequest, OmniEffectTier } from "../../types/project";
 import { NarrationType } from "../../types/project";
+import { NARRATION_TYPE_OPTIONS } from "../../constants/narrationTypes";
 import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import videoModelService from "../../services/videoModelService";
 import AppSelect from "../ui/AppSelect";
@@ -16,6 +17,8 @@ interface CreateProjectModalProps {
   onCreate: (data: CreateProjectRequest) => Promise<void>;
   onShowLogin?: () => void;
   onShowProfile?: () => void;
+  /** 初始解说类型（一般由外部解说类型选择器决定），未传则使用默认值 */
+  initialNarrationType?: NarrationType;
 }
 
 /**
@@ -27,12 +30,13 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   onCreate,
   onShowLogin,
   onShowProfile,
+  initialNarrationType,
 }) => {
   const { isAuthenticated } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [narrationType, setNarrationType] = useState<NarrationType>(
-    NarrationType.MOVIE
+    initialNarrationType ?? NarrationType.MOVIE
   );
   const [projectType, setProjectType] = useState<"subtitle" | "visual" | "omni">("subtitle");
   const [omniEffectTier, setOmniEffectTier] = useState<OmniEffectTier>("high");
@@ -51,6 +55,9 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       setYunwuUseCustomModels(null);
       setIsMoondreamEnabled(false);
       return;
+    }
+    if (initialNarrationType) {
+      setNarrationType(initialNarrationType);
     }
     let cancelled = false;
     void (async () => {
@@ -88,7 +95,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, initialNarrationType]);
 
   /**
    * 处理提交
@@ -119,7 +126,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       // 重置表单
       setName("");
       setDescription("");
-      setNarrationType(NarrationType.SHORT_DRAMA);
+      setNarrationType(initialNarrationType ?? NarrationType.MOVIE);
       setProjectType("subtitle");
       setOmniEffectTier("high");
       onClose();
@@ -433,8 +440,11 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 }
                 disabled={loading}
               >
-                <option value={NarrationType.SHORT_DRAMA}>短剧解说</option>
-                <option value={NarrationType.MOVIE}>电影解说</option>
+                {NARRATION_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </AppSelect>
             </div>
 

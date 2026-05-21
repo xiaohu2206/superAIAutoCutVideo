@@ -1,6 +1,7 @@
 from typing import Optional
 
 from modules.projects_store import projects_store
+from modules.narration_types import get_prompt_category
 
 
 def _default_prompt_key_for_project(project_id: Optional[str]) -> str:
@@ -8,11 +9,7 @@ def _default_prompt_key_for_project(project_id: Optional[str]) -> str:
     if project_id:
         p = projects_store.get_project(project_id)
         if p:
-            t = str(getattr(p, "narration_type", "") or "")
-            if t == "电影解说":
-                category = "movie_narration"
-            else:
-                category = "short_drama_narration"
+            category = get_prompt_category(str(getattr(p, "narration_type", "") or ""))
     return f"{category}:script_generation"
 
 

@@ -6,6 +6,12 @@
 export enum NarrationType {
   SHORT_DRAMA = "短剧解说",
   MOVIE = "电影解说",
+  TV_DRAMA = "电视剧解说",
+  VARIETY = "综艺解说",
+  DOCUMENTARY = "纪录片解说",
+  SPORTS = "体育解说",
+  GENERAL = "通用解说",
+  CUSTOM = "自定义解说",
 }
 
 export type ScriptLengthOption =

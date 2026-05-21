@@ -158,7 +158,12 @@ class PromptManager:
 
             def _preamble(cat: Optional[str]) -> str:
                 c = str(cat or "")
-                if c == "short_drama_narration":
+                if c.endswith("_narration"):
+                    try:
+                        from modules.narration_types import get_config_by_category
+                        work_kind = get_config_by_category(c).work_kind
+                    except Exception:
+                        work_kind = "短剧"
                     return (
                         "\n### 原始字幕（含精确时间戳）\n"
                         "<subtitles>\n"
@@ -168,7 +173,7 @@ class PromptManager:
                         "<plot>\n"
                         "${plot_analysis}\n"
                         "</plot>\n\n"
-                        "现在请基于以上要求，为短剧《${drama_name}》创作解说脚本：\n"
+                        f"现在请基于以上要求，为{work_kind}《${{drama_name}}》创作解说脚本：\n"
                     )
                 return ""
 
