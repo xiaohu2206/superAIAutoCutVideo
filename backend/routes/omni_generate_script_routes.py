@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from modules.projects_store import projects_store
 from modules.task_progress_store import task_progress_store
 from services.omni_generate_script_service import omni_generate_script_service
+from services.omni_shot_options_service import omni_shot_options_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +93,19 @@ async def omni_generate_script_paths(project_id: str) -> Dict[str, Any]:
         },
         "timestamp": _now_ts(),
     }
+
+
+@router.get("/{project_id}/omni/generate-script/shot-options")
+async def omni_generate_script_shot_options(project_id: str) -> Dict[str, Any]:
+    try:
+        data = omni_shot_options_service.get_options(project_id)
+        return {"message": "获取候选镜头成功", "data": data, "timestamp": _now_ts()}
+    except ValueError as e:
+        detail = str(e)
+        status = 404 if detail == "项目不存在" else 400
+        raise HTTPException(status_code=status, detail=detail)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("omni generate-script shot-options failed")
+        raise HTTPException(status_code=500, detail=str(e))

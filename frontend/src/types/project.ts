@@ -46,6 +46,14 @@ export interface ScriptSegment {
   end_time: number; // 结束时间（秒）
   text: string; // 解说文本
   subtitle?: string; // 对应字幕
+  OST?: 0 | 1 | boolean | string;
+  shot_id?: number | string;
+  shot_source?: "auto" | "manual";
+  tts_audio_path?: string;
+  tts_audio_duration?: number;
+  tts_source?: "manual" | "bulk";
+  tts_text_hash?: string;
+  tts_updated_at?: string;
 }
 
 /**

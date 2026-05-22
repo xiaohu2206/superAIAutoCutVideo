@@ -13,7 +13,7 @@ import type {
   UpdateProjectRequest,
   VideoScript,
 } from "../types/project";
-import type { OmniMultimodalResult } from "../types/omniMultimodal";
+import type { OmniMultimodalResult, OmniShotOptionsResponse } from "../types/omniMultimodal";
 import type { SceneResult } from "../types/scene";
 import { apiClient, type ApiResponse } from "./clients";
 
@@ -861,6 +861,16 @@ export class ProjectService {
     );
     if (!response.data) {
       throw new Error("Omni 多模态结果为空");
+    }
+    return response.data;
+  }
+
+  async getOmniShotOptions(projectId: string): Promise<OmniShotOptionsResponse> {
+    const response = await apiClient.get<ApiResponse<OmniShotOptionsResponse>>(
+      `/api/projects/${projectId}/omni/generate-script/shot-options`
+    );
+    if (!response.data) {
+      throw new Error("Omni 候选镜头为空");
     }
     return response.data;
   }

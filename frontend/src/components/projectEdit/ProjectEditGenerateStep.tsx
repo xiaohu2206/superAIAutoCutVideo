@@ -186,6 +186,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
       {project.project_type === "omni" ? (
         <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
           <OmniFullNarrationScriptWorkspace
+            project={project}
             editedScript={omniNarration.omniEditedScript}
             setEditedScript={omniNarration.setOmniEditedScript}
             isSaving={omniNarration.omniScriptSaving}

@@ -88,10 +88,10 @@ def _log_omni_shot_match_rerank_failure(
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as werr:  # noqa: BLE001
         logger.warning("omni_shot_match: 写入精排失败调试 log 失败: %s", werr)
-_TOP_K = 20
-_STAGE1_TOP_N = 15
-_STAGE2_TOP_N = 15
-_STAGE2_RETURN_N = 3
+_TOP_K = 30
+_STAGE1_TOP_N = 30
+_STAGE2_TOP_N = 30
+_STAGE2_RETURN_N = 30
 _OUTPUT_TOP_K = 0
 _CONCURRENCY = 32
 
