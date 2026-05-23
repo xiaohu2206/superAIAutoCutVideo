@@ -184,13 +184,18 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
       {/* 脚本编辑区 */}
       {project.project_type === "omni" ? (
-        <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-md p-6 space-y-8">
           <OmniFullNarrationScriptWorkspace
             project={project}
             editedScript={omniNarration.omniEditedScript}
             setEditedScript={omniNarration.setOmniEditedScript}
+            setEditedScriptFromServer={omniNarration.setOmniEditedScriptFromServer}
+            onSegmentTtsQueueActive={omniNarration.setOmniSegmentTtsQueueActive}
+            syncScriptToServer={omniNarration.syncOmniScriptToServer}
+            scriptDirty={omniNarration.omniScriptDirty}
+            segmentTtsQueueActive={omniNarration.omniSegmentTtsQueueActive}
             isSaving={omniNarration.omniScriptSaving}
-            onSave={omniNarration.handleSaveOmniScript}
+            refreshProject={refreshProject}
           />
         </div>
       ) : (

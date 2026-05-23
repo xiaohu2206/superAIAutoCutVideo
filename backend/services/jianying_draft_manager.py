@@ -20,6 +20,7 @@ from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
+from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
@@ -929,6 +930,7 @@ class JianyingDraftManager:
             provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
             need_tts: List[Dict[str, Any]] = []
+            tts_results: Dict[int, Dict[str, Any]] = {}
             for idx, seg in enumerate(segments, start=1):
                 st = float(seg.get("start_time") or 0.0)
                 et = float(seg.get("end_time") or 0.0)
@@ -937,10 +939,22 @@ class JianyingDraftManager:
                 text = str(seg.get("text") or "").strip()
                 ost_flag = seg.get("OST")
                 is_original = (ost_flag == 1) or text.startswith("播放原片")
-                if not is_original:
-                    need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
-
-            tts_results: Dict[int, Dict[str, Any]] = {}
+                if is_original:
+                    continue
+                out_path = assets_audio_dir / f"seg_{idx:04d}.mp3"
+                if isinstance(seg, dict) and is_valid_segment_tts(seg):
+                    src = segment_tts_abs_path(seg)
+                    if src:
+                        try:
+                            shutil.copy2(str(src), str(out_path))
+                            tts_results[idx] = {
+                                "duration": seg.get("tts_audio_duration"),
+                                "reused": True,
+                            }
+                            continue
+                        except Exception:
+                            pass
+                need_tts.append({"idx": idx, "text": text, "out": out_path})
             if need_tts:
                 _jianying_tts_msg = (
                     f"串行生成配音（{len(need_tts)} 段）"

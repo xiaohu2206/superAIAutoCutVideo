@@ -484,11 +484,12 @@ export class ProjectService {
    */
   async saveScript(
     projectId: string,
-    script: VideoScript
+    script: VideoScript,
+    expectedRevision?: number
   ): Promise<VideoScript> {
     const response = await apiClient.post<{ data: VideoScript }>(
       `/api/projects/${projectId}/script`,
-      { script }
+      { script, expected_revision: expectedRevision }
     );
     return response.data;
   }
@@ -563,6 +564,48 @@ export class ProjectService {
       body ?? {},
       120000,
       authHeaders
+    );
+    return response.data ?? {};
+  }
+
+  async runOmniScriptBulkTts(
+    projectId: string,
+    body?: { force?: boolean }
+  ): Promise<{ task_id?: string; scope?: string; message?: string }> {
+    const response = await apiClient.post<
+      ApiResponse<{ task_id?: string; scope?: string; dedup_hit?: boolean }>
+    >(`/api/projects/${projectId}/omni/script/tts/run`, body ?? {}, 60000);
+    return {
+      task_id: response.data?.task_id,
+      scope: response.data?.scope,
+      message: response.message,
+    };
+  }
+
+  async synthesizeOmniScriptSegmentTts(
+    projectId: string,
+    segmentId: string | number,
+    options?: { expectedRevision?: number; expectedTextHash?: string }
+  ): Promise<{
+    script?: VideoScript;
+    segment_index?: number;
+    tts_audio_path?: string;
+    tts_audio_duration?: number;
+  }> {
+    const response = await apiClient.post<
+      ApiResponse<{
+        script?: VideoScript;
+        segment_index?: number;
+        tts_audio_path?: string;
+        tts_audio_duration?: number;
+      }>
+    >(
+      `/api/projects/${projectId}/omni/script/segments/${encodeURIComponent(String(segmentId))}/tts`,
+      {
+        expected_revision: options?.expectedRevision,
+        expected_text_hash: options?.expectedTextHash,
+      },
+      300000
     );
     return response.data ?? {};
   }

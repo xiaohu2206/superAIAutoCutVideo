@@ -67,6 +67,7 @@ export interface VideoScript {
     video_name?: string;
     created_at?: string;
     updated_at?: string;
+    omni_revision?: number;
     [key: string]: any;
   };
 }
@@ -192,6 +193,7 @@ export interface ProjectRunningTasks {
   omni_shot_match?: TaskProgressState | null;
   omni_generate_script?: TaskProgressState | null;
   omni_full_narration_pipeline?: TaskProgressState | null;
+  omni_script_tts?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
@@ -206,6 +208,7 @@ export interface ProjectLatestTasks {
   omni_shot_match?: TaskProgressState | null;
   omni_generate_script?: TaskProgressState | null;
   omni_full_narration_pipeline?: TaskProgressState | null;
+  omni_script_tts?: TaskProgressState | null;
 }
 
 /**

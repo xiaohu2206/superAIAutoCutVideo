@@ -20,6 +20,17 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+class ScriptRevisionConflict(ValueError):
+    """Raised when a script save is based on a stale revision."""
+
+    def __init__(self, current_revision: int, expected_revision: Optional[int]):
+        self.current_revision = int(current_revision or 0)
+        self.expected_revision = expected_revision
+        super().__init__(
+            f"script revision conflict: current={self.current_revision}, expected={expected_revision}"
+        )
+
+
 class Project(BaseModel):
     id: str
     name: str
@@ -410,6 +421,28 @@ class ProjectsStore:
             self._persist()
             return project
 
+    def _script_revision(self, script: Optional[Dict[str, Any]]) -> int:
+        if not isinstance(script, dict):
+            return 0
+        meta = script.get("metadata") if isinstance(script.get("metadata"), dict) else {}
+        try:
+            return int(meta.get("omni_revision") or 0)
+        except Exception:
+            return 0
+
+    def _with_next_script_revision(self, script: Dict[str, Any], current_revision: int) -> Dict[str, Any]:
+        next_script = dict(script or {})
+        meta = dict(next_script.get("metadata") or {})
+        meta["updated_at"] = datetime.now().isoformat()
+        meta["omni_revision"] = int(current_revision or 0) + 1
+        next_script["metadata"] = meta
+        return next_script
+
+    def get_script_revision(self, project_id: str) -> int:
+        with self._lock:
+            p = self._projects.get(project_id)
+            return self._script_revision(p.script if p else None)
+
     def delete_project(self, project_id: str) -> bool:
         with self._lock:
             if project_id in self._projects:
@@ -418,8 +451,54 @@ class ProjectsStore:
                 return True
             return False
 
-    def save_script(self, project_id: str, script: Dict[str, Any]) -> Optional[Project]:
-        return self.update_project(project_id, {"script": script})
+    def save_script(
+        self,
+        project_id: str,
+        script: Dict[str, Any],
+        *,
+        expected_revision: Optional[int] = None,
+    ) -> Optional[Project]:
+        with self._lock:
+            p = self._projects.get(project_id)
+            if not p:
+                return None
+            current_revision = self._script_revision(p.script)
+            if expected_revision is not None and int(expected_revision) != current_revision:
+                raise ScriptRevisionConflict(current_revision, expected_revision)
+            data = p.model_dump()
+            data["script"] = self._with_next_script_revision(script, current_revision)
+            data["updated_at"] = datetime.now().isoformat()
+            project = Project(**data)
+            project = self._refresh_effective_video_path(project)
+            self._projects[project_id] = project
+            self._persist()
+            return project
+
+    def update_script_atomic(
+        self,
+        project_id: str,
+        updater,
+        *,
+        expected_revision: Optional[int] = None,
+    ) -> Optional[Project]:
+        with self._lock:
+            p = self._projects.get(project_id)
+            if not p:
+                return None
+            current_revision = self._script_revision(p.script)
+            if expected_revision is not None and int(expected_revision) != current_revision:
+                raise ScriptRevisionConflict(current_revision, expected_revision)
+            next_script = updater(dict(p.script or {}), current_revision)
+            if next_script is None:
+                return p
+            data = p.model_dump()
+            data["script"] = self._with_next_script_revision(next_script, current_revision)
+            data["updated_at"] = datetime.now().isoformat()
+            project = Project(**data)
+            project = self._refresh_effective_video_path(project)
+            self._projects[project_id] = project
+            self._persist()
+            return project
 
     def update_prompt_selection(self, project_id: str, feature_key: str, selection: Dict[str, Any]) -> Optional[Project]:
         with self._lock:
