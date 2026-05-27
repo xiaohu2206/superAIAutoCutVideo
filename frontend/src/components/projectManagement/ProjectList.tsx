@@ -67,14 +67,15 @@ const ProjectList: React.FC<ProjectListProps> = ({
     );
   }
 
-  // 项目列表
-  // 将项目列表反转显示（通常是为了让最新的项目显示在前面）
-  const reversedProjects = [...projects].reverse();
+  const sortedProjects = [...projects].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   return (
     <div className="px-1 pb-3">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
-      {reversedProjects.map((project) => (
+      {sortedProjects.map((project) => (
         <ProjectCard
           key={project.id}
           project={project}

@@ -34,7 +34,7 @@ from .project_routes import (
     DRAFT_TASK_HANDLES,
     VIDEO_TASK_HANDLES,
 )
-from modules.projects_store import projects_store
+from modules.projects_store import ScriptRevisionConflict, projects_store
 from modules.ws_manager import manager
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 class SaveScriptRequest(BaseModel):
     script: Dict[str, Any]
+    expected_revision: Optional[int] = None
 
 
 class SaveCopywritingRequest(BaseModel):
@@ -559,13 +560,27 @@ async def save_script(project_id: str, req: SaveScriptRequest):
     if not isinstance(script, dict) or "segments" not in script:
         raise HTTPException(status_code=400, detail="脚本格式错误")
 
-    p2 = projects_store.save_script(project_id, script)
+    try:
+        p2 = projects_store.save_script(
+            project_id,
+            script,
+            expected_revision=req.expected_revision,
+        )
+    except ScriptRevisionConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "脚本已被其他任务更新，请刷新后重试",
+                "current_revision": e.current_revision,
+                "expected_revision": e.expected_revision,
+            },
+        )
     if not p2:
         raise HTTPException(status_code=500, detail="服务器错误")
 
     return {
         "message": "脚本保存成功",
-        "data": script,
+        "data": p2.script,
         "timestamp": now_ts(),
     }
 
@@ -755,6 +770,7 @@ async def get_project_running_tasks(project_id: str):
     from services.omni_shot_match_service import omni_shot_match_service
     from services.omni_global_path_search_service import omni_global_path_search_service
     from services.omni_generate_script_service import omni_generate_script_service
+    from services.omni_script_tts_service import omni_script_tts_service
     from omni_full_narration_pipeline import omni_full_narration_pipeline_service
 
     p = projects_store.get_project(project_id)
@@ -781,6 +797,9 @@ async def get_project_running_tasks(project_id: str):
         "omni_full_narration_pipeline": task_progress_store.get_latest_running(
             omni_full_narration_pipeline_service.SCOPE, project_id
         ),
+        "omni_script_tts": task_progress_store.get_latest_running(
+            omni_script_tts_service.SCOPE, project_id
+        ),
     }
     return {
         "message": "获取任务进度",
@@ -796,6 +815,7 @@ async def get_project_latest_tasks(project_id: str):
     from services.omni_shot_match_service import omni_shot_match_service
     from services.omni_global_path_search_service import omni_global_path_search_service
     from services.omni_generate_script_service import omni_generate_script_service
+    from services.omni_script_tts_service import omni_script_tts_service
     from omni_full_narration_pipeline import omni_full_narration_pipeline_service
 
     p = projects_store.get_project(project_id)
@@ -815,6 +835,7 @@ async def get_project_latest_tasks(project_id: str):
                 "omni_global_path_search": None,
                 "omni_generate_script": None,
                 "omni_full_narration_pipeline": None,
+                "omni_script_tts": None,
             },
             "timestamp": now_ts(),
         }
@@ -840,6 +861,9 @@ async def get_project_latest_tasks(project_id: str):
             ),
             "omni_full_narration_pipeline": task_progress_store.get_state(
                 omni_full_narration_pipeline_service.SCOPE, project_id
+            ),
+            "omni_script_tts": task_progress_store.get_state(
+                omni_script_tts_service.SCOPE, project_id
             ),
         },
         "timestamp": now_ts(),

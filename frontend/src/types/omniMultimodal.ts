@@ -8,7 +8,7 @@ export interface OmniMultimodalShotVisual {
 }
 
 export interface OmniMultimodalShot {
-  shot_id?: number;
+  shot_id?: number | string;
   start: number;
   end: number;
   duration?: number;
@@ -19,6 +19,33 @@ export interface OmniMultimodalShot {
   visual?: OmniMultimodalShotVisual;
   summary?: string;
   embedding?: number[];
+}
+
+export interface OmniSelectableShot {
+  shot_id: number | string;
+  start: number;
+  end: number;
+  duration?: number;
+  subtitle_full_text?: string;
+  visual?: OmniMultimodalShotVisual;
+  summary?: string;
+  score?: number;
+  final_score?: number;
+  embedding_score?: number;
+  rerank_score?: number;
+  continuity_score?: number;
+  reason?: string;
+  option_source: "preferred" | "other";
+}
+
+export interface OmniShotOptionsSegment {
+  segment_id: string;
+  preferred_shots: OmniSelectableShot[];
+  other_shots: OmniSelectableShot[];
+}
+
+export interface OmniShotOptionsResponse {
+  segments: OmniShotOptionsSegment[];
 }
 
 export interface OmniMultimodalResult {

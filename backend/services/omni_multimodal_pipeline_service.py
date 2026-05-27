@@ -30,7 +30,7 @@ from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
 from services.asr.extract_subtitle_service import _resolve_path, _to_web_path, _uploads_dir, extract_subtitle_service
-from services.omni_internal.frame_extract import extract_middle_frame
+from services.omni_internal.frame_extract import extract_third_frames
 from services.omni_internal.multimodal_json_crypto import read_multimodal_json, write_encrypted_multimodal_json
 from services.omni_internal.shot_subtitle_mapper import ShotSubtitleMapper
 from services.ai_models.omni_local_bge_embedding import LOCAL_BGE_MODEL_DISPLAY_NAME, assert_local_bge_model_available, encode_text_async
@@ -51,8 +51,10 @@ logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_multimodal"
 
-# Step2 在线视觉：一次请求合并分析的语义段数量（与 frame_analysis_multi_zh.md 一致）
-OMNI_STEP2_VL_BATCH_SIZE = 8
+# Step2 在线视觉：一次请求最多 10 张图（每镜头 2 帧 → 5 个语义段，与 frame_analysis_multi_zh.md 一致）
+OMNI_STEP2_FRAMES_PER_SHOT = 2
+OMNI_STEP2_VL_BATCH_IMAGES = 12
+OMNI_STEP2_VL_BATCH_SIZE = OMNI_STEP2_VL_BATCH_IMAGES // OMNI_STEP2_FRAMES_PER_SHOT
 
 _ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_openai_vision"})
 
@@ -982,7 +984,7 @@ class OmniMultimodalPipelineService:
                         raise asyncio.CancelledError()
                     frame_paths = await loop.run_in_executor(
                         extract_executor,
-                        extract_middle_frame,
+                        extract_third_frames,
                         str(video_abs),
                         shot,
                         str(frames_dir),
@@ -1419,7 +1421,7 @@ class OmniMultimodalPipelineService:
                 async def _run_step2_vl_batch(
                     batch: List[Tuple[int, Dict[str, Any], List[str], List[Image.Image]]],
                 ) -> List[_Step2VlOutcome]:
-                    """每批最多 OMNI_STEP2_VL_BATCH_SIZE 段一次 infer_multi；失败或 JSON 不合法时回退为逐段 _run_step2_vl_for_bundle。"""
+                    """每批最多 OMNI_STEP2_VL_BATCH_SIZE 段（OMNI_STEP2_VL_BATCH_IMAGES 张图）一次 infer_multi；失败或 JSON 不合法时回退为逐段 _run_step2_vl_for_bundle。"""
                     batch_n = len(batch)
                     idxs = [b[0] for b in batch]
                     optimized_imgs: List[Image.Image] = []

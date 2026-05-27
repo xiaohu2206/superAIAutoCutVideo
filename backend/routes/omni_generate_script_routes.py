@@ -9,9 +9,11 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 
-from modules.projects_store import projects_store
+from modules.projects_store import ScriptRevisionConflict, projects_store
 from modules.task_progress_store import task_progress_store
 from services.omni_generate_script_service import omni_generate_script_service
+from services.omni_script_tts_service import omni_script_tts_service
+from services.omni_shot_options_service import omni_shot_options_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +94,75 @@ async def omni_generate_script_paths(project_id: str) -> Dict[str, Any]:
         },
         "timestamp": _now_ts(),
     }
+
+
+class OmniScriptTtsRunRequest(BaseModel):
+    force: bool = Field(default=False)
+
+
+class OmniScriptSegmentTtsRequest(BaseModel):
+    expected_revision: Optional[int] = None
+    expected_text_hash: Optional[str] = None
+
+
+@router.post("/{project_id}/omni/script/segments/{segment_id}/tts")
+async def omni_script_segment_tts(
+    project_id: str,
+    segment_id: str,
+    req: OmniScriptSegmentTtsRequest = Body(default=OmniScriptSegmentTtsRequest()),
+):
+    try:
+        data = await omni_script_tts_service.synthesize_segment(
+            project_id,
+            segment_id,
+            source="manual",
+            expected_revision=req.expected_revision,
+            expected_text_hash=req.expected_text_hash,
+        )
+        return {"message": "单条配音完成", "data": data, "timestamp": _now_ts()}
+    except ScriptRevisionConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "脚本已被其他任务更新，本次配音结果已忽略",
+                "current_revision": e.current_revision,
+                "expected_revision": e.expected_revision,
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("omni script segment tts failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/omni/script/tts/run")
+async def omni_script_tts_run(
+    project_id: str,
+    req: OmniScriptTtsRunRequest = Body(default=OmniScriptTtsRunRequest()),
+):
+    try:
+        data = await omni_script_tts_service.submit_bulk_run(project_id, force=bool(req.force))
+        msg = "任务已存在" if data.get("dedup_hit") else "开始批量配音"
+        return {"message": msg, "data": data, "timestamp": _now_ts()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("omni script bulk tts failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/omni/generate-script/shot-options")
+async def omni_generate_script_shot_options(project_id: str) -> Dict[str, Any]:
+    try:
+        data = omni_shot_options_service.get_options(project_id)
+        return {"message": "获取候选镜头成功", "data": data, "timestamp": _now_ts()}
+    except ValueError as e:
+        detail = str(e)
+        status = 404 if detail == "项目不存在" else 400
+        raise HTTPException(status_code=status, detail=detail)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("omni generate-script shot-options failed")
+        raise HTTPException(status_code=500, detail=str(e))
