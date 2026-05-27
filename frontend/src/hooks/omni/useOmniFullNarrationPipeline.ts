@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useAuth } from "../../components/auth/AuthContext";
 import { TASK_SUBMITTED_EVENT } from "../../components/projectEdit/TaskQueueFloatingBall";
 import {
@@ -9,6 +9,11 @@ import {
 import type { WebSocketMessage } from "../../services/clients";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
+import {
+  areOmniScriptsEquivalent,
+  makeScriptJson,
+} from "../../components/projectEdit/omni/omniScriptWorkspaceUtils";
+import { getOmniScriptRevision } from "./useOmniScriptSessionManager";
 import type { Project, ProjectLatestTasks, TaskProgressState, VideoScript } from "../../types/project";
 import { useWsTaskProgress, type WsProgressLog } from "../useWsTaskProgress";
 
@@ -81,9 +86,19 @@ export interface UseOmniFullNarrationPipelineOptions {
   onShowProfile?: () => void;
 }
 
+const isOmniScriptRevisionConflict = (err: unknown): boolean => {
+  if (!(err instanceof Error)) return false;
+  return /revision|脚本已被其他任务更新|409/.test(err.message);
+};
+
 export interface UseOmniFullNarrationPipelineReturn {
   omniEditedScript: string;
+  omniScriptDirty: boolean;
   setOmniEditedScript: (s: string) => void;
+  setOmniEditedScriptFromServer: (s: string) => void;
+  syncOmniScriptToServer: (scriptOverride?: VideoScript) => Promise<VideoScript | null>;
+  omniSegmentTtsQueueActive: boolean;
+  setOmniSegmentTtsQueueActive: (active: boolean) => void;
   omniScriptSaving: boolean;
   handleSaveOmniScript: () => void;
   omniPipelineBusy: boolean;
@@ -137,8 +152,10 @@ export function useOmniFullNarrationPipeline(
   const { isAuthenticated, token } = useAuth();
 
   const [omniEditedScript, setOmniEditedScript] = useState("");
+  const omniEditedScriptRef = useRef(omniEditedScript);
   const [omniScriptDirty, setOmniScriptDirty] = useState(false);
   const [omniScriptSaving, setOmniScriptSaving] = useState(false);
+  const [omniSegmentTtsQueueActive, setOmniSegmentTtsQueueActive] = useState(false);
 
   const [omniPipelineBusy, setOmniPipelineBusy] = useState(false);
   const [omniPipelineProgress, setOmniPipelineProgress] = useState(0);
@@ -151,22 +168,36 @@ export function useOmniFullNarrationPipeline(
   const [omniStepTestTaskId, setOmniStepTestTaskId] = useState<string | null>(null);
 
   const setOmniEditedScriptSafe = useCallback((raw: string) => {
+    omniEditedScriptRef.current = raw;
     setOmniEditedScript(raw);
     setOmniScriptDirty(false);
   }, []);
 
   const setOmniEditedScriptUser = useCallback((raw: string) => {
+    omniEditedScriptRef.current = raw;
     setOmniEditedScript(raw);
     setOmniScriptDirty(true);
   }, []);
 
   useEffect(() => {
-    if (!project?.script) return;
+    omniEditedScriptRef.current = omniEditedScript;
+  }, [omniEditedScript]);
+
+  useEffect(() => {
+    if (!project?.script || omniScriptDirty || omniScriptSaving) return;
+    try {
+      if (omniEditedScript.trim()) {
+        const local = JSON.parse(omniEditedScript) as VideoScript;
+        if (areOmniScriptsEquivalent(local, project.script)) return;
+      }
+    } catch {
+      /* 本地 JSON 无效时仍允许用服务端覆盖 */
+    }
     const next = JSON.stringify(project.script, null, 2);
-    if (!omniScriptDirty && next !== omniEditedScript) {
+    if (next !== omniEditedScript) {
       setOmniEditedScriptSafe(next);
     }
-  }, [omniEditedScript, omniScriptDirty, project?.script, setOmniEditedScriptSafe]);
+  }, [omniEditedScript, omniScriptDirty, omniScriptSaving, project?.script, setOmniEditedScriptSafe]);
 
   const subtitleReady =
     Boolean(project?.subtitle_path) && (project?.subtitle_status ? project.subtitle_status === "ready" : true);
@@ -469,29 +500,113 @@ export function useOmniFullNarrationPipeline(
     );
   }, [project?.id, runOmniStep]);
 
-  const handleSaveOmniScript = useCallback(async () => {
-    if (!omniEditedScript.trim()) {
-      message.error("脚本内容不能为空");
-      return;
+  const syncOmniScriptToServer = useCallback(
+    async (scriptOverride?: VideoScript): Promise<VideoScript | null> => {
+      if (!project?.id) return null;
+      await projectService.flushPendingUpdates(project.id);
+      let scriptData: VideoScript;
+      try {
+        if (scriptOverride) {
+          scriptData = scriptOverride;
+        } else {
+          const raw = omniEditedScriptRef.current;
+          if (!raw.trim()) return null;
+          scriptData = JSON.parse(raw) as VideoScript;
+        }
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          message.error("脚本格式错误，请检查 JSON 格式是否正确");
+        }
+        if (err instanceof Error && /revision|脚本|409|变化|更新/.test(err.message)) {
+          await options.refreshProject();
+        }
+        return null;
+      }
+      setOmniScriptSaving(true);
+      try {
+        const saveOnce = async (payload: VideoScript): Promise<VideoScript> => {
+          const expectedRevision = getOmniScriptRevision(payload);
+          return projectService.saveScript(project.id, payload, expectedRevision);
+        };
+
+        let saved: VideoScript;
+        try {
+          saved = await saveOnce(scriptData);
+        } catch (err) {
+          if (!isOmniScriptRevisionConflict(err)) throw err;
+          await options.refreshProject();
+          const fresh = await projectService.getProject(project.id);
+          const serverRev = getOmniScriptRevision(fresh.script);
+          const retryPayload: VideoScript = {
+            ...scriptData,
+            metadata: { ...(scriptData.metadata ?? {}), omni_revision: serverRev },
+          };
+          saved = await saveOnce(retryPayload);
+        }
+
+        let localNow: VideoScript;
+        try {
+          localNow = JSON.parse(omniEditedScriptRef.current) as VideoScript;
+        } catch {
+          localNow = scriptData;
+        }
+        if (!areOmniScriptsEquivalent(localNow, scriptData)) {
+          const patchedJson = makeScriptJson({
+            ...localNow,
+            metadata: {
+              ...(localNow.metadata ?? {}),
+              omni_revision: getOmniScriptRevision(saved),
+              updated_at: saved.metadata?.updated_at ?? localNow.metadata?.updated_at,
+            },
+          });
+          omniEditedScriptRef.current = patchedJson;
+          setOmniEditedScript(patchedJson);
+          return saved;
+        }
+        const savedJson = makeScriptJson(saved);
+        omniEditedScriptRef.current = savedJson;
+        setOmniEditedScriptSafe(savedJson);
+        await options.refreshProject();
+        return saved;
+      } catch (err) {
+        if (isOmniScriptRevisionConflict(err)) {
+          await options.refreshProject();
+        }
+        message.error(err instanceof Error ? err.message : "保存脚本失败");
+        return null;
+      } finally {
+        setOmniScriptSaving(false);
+      }
+    },
+    [options, project?.id, setOmniEditedScriptSafe]
+  );
+
+  const handleSaveOmniScript = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!omniEditedScript.trim()) {
+        if (!opts?.silent) message.error("脚本内容不能为空");
+        return;
+      }
+      const saved = await syncOmniScriptToServer();
+      if (saved && !opts?.silent) message.success("脚本保存成功！");
+    },
+    [omniEditedScript, syncOmniScriptToServer]
+  );
+
+  useEffect(() => {
+    if (!omniScriptDirty || !omniEditedScript.trim() || !project?.id) {
+      return undefined;
     }
     try {
-      if (!project?.id) return;
-      const scriptData: VideoScript = JSON.parse(omniEditedScript);
-      setOmniScriptSaving(true);
-      await projectService.saveScript(project.id, scriptData);
-      setOmniScriptDirty(false);
-      message.success("脚本保存成功！");
-      void options.refreshProject();
-    } catch (err) {
-      if (err instanceof SyntaxError) {
-        message.error("脚本格式错误，请检查 JSON 格式是否正确");
-      } else {
-        message.error(err instanceof Error ? err.message : "保存脚本失败");
-      }
-    } finally {
-      setOmniScriptSaving(false);
+      JSON.parse(omniEditedScript);
+    } catch {
+      return undefined;
     }
-  }, [omniEditedScript, options, project?.id]);
+    const timer = window.setTimeout(() => {
+      void handleSaveOmniScript({ silent: true });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [handleSaveOmniScript, omniEditedScript, omniScriptDirty, project?.id]);
 
   useWsTaskProgress({
     scope: omniWsScope,
@@ -559,7 +674,12 @@ export function useOmniFullNarrationPipeline(
 
   return {
     omniEditedScript,
+    omniScriptDirty,
     setOmniEditedScript: setOmniEditedScriptUser,
+    setOmniEditedScriptFromServer: setOmniEditedScriptSafe,
+    syncOmniScriptToServer,
+    omniSegmentTtsQueueActive,
+    setOmniSegmentTtsQueueActive,
     omniScriptSaving,
     handleSaveOmniScript,
     omniPipelineBusy,

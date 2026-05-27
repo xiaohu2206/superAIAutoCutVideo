@@ -21,6 +21,7 @@ from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
+from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
@@ -386,6 +387,7 @@ class VideoGenerationService:
                     "OST": seg.get("OST", 0),
                     "discard": False,
                     "needs_recut": False,
+                    "seg": seg,
                 })
                 try:
                     base = 15
@@ -406,7 +408,22 @@ class VideoGenerationService:
                 except Exception:
                     pass
 
-            need_tts = [it for it in segment_items if not bool(it.get("is_original"))]
+            need_tts: List[Dict[str, Any]] = []
+            pre_tts_paths: Dict[int, Path] = {}
+            pre_tts_meta: Dict[int, Dict[str, Any]] = {}
+            for it in segment_items:
+                if bool(it.get("is_original")):
+                    continue
+                seg_dict = it.get("seg") if isinstance(it.get("seg"), dict) else {}
+                if is_valid_segment_tts(seg_dict):
+                    src = segment_tts_abs_path(seg_dict)
+                    if src:
+                        pre_tts_paths[int(it["idx"])] = src
+                        pre_tts_meta[int(it["idx"])] = {
+                            "duration": seg_dict.get("tts_audio_duration"),
+                        }
+                        continue
+                need_tts.append(it)
             tts_results: Dict[int, Dict[str, Any]] = {}
             _cfg_tts = tts_engine_config_manager.get_active_config()
             _tts_provider = (getattr(_cfg_tts, "provider", None) or "").lower()
@@ -596,9 +613,19 @@ class VideoGenerationService:
                     logger.info(f"DEBUG segment_use_original idx={idx} path={clip_abs}")
                 else:
                     seg_audio = aud_tmp_dir / f"seg_{idx:04d}.mp3"
-                    sy = tts_results.get(idx)
-                    if not sy:
-                        raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
+                    pre_src = pre_tts_paths.get(idx)
+                    if pre_src:
+                        try:
+                            shutil.copy2(str(pre_src), str(seg_audio))
+                        except Exception as e:
+                            raise RuntimeError(f"复用配音失败: {idx} - {e}") from e
+                        sy = pre_tts_meta.get(idx) or {}
+                        if not isinstance(sy, dict):
+                            sy = {}
+                    else:
+                        sy = tts_results.get(idx)
+                        if not sy:
+                            raise RuntimeError(f"TTS合成失败: {idx} - missing_result")
                     narr_used = seg_audio
                     provider = (getattr(tts_engine_config_manager.get_active_config(), "provider", None) or "").lower()
                     trim_audio = aud_tmp_dir / f"seg_{idx:04d}_trim.mp3"

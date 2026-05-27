@@ -52,6 +52,14 @@ export interface ScriptSegment {
   end_time: number; // 结束时间（秒）
   text: string; // 解说文本
   subtitle?: string; // 对应字幕
+  OST?: 0 | 1 | boolean | string;
+  shot_id?: number | string;
+  shot_source?: "auto" | "manual";
+  tts_audio_path?: string;
+  tts_audio_duration?: number;
+  tts_source?: "manual" | "bulk";
+  tts_text_hash?: string;
+  tts_updated_at?: string;
 }
 
 /**
@@ -65,6 +73,7 @@ export interface VideoScript {
     video_name?: string;
     created_at?: string;
     updated_at?: string;
+    omni_revision?: number;
     [key: string]: any;
   };
 }
@@ -190,6 +199,7 @@ export interface ProjectRunningTasks {
   omni_shot_match?: TaskProgressState | null;
   omni_generate_script?: TaskProgressState | null;
   omni_full_narration_pipeline?: TaskProgressState | null;
+  omni_script_tts?: TaskProgressState | null;
 }
 
 export interface ProjectLatestTasks {
@@ -204,6 +214,7 @@ export interface ProjectLatestTasks {
   omni_shot_match?: TaskProgressState | null;
   omni_generate_script?: TaskProgressState | null;
   omni_full_narration_pipeline?: TaskProgressState | null;
+  omni_script_tts?: TaskProgressState | null;
 }
 
 /**

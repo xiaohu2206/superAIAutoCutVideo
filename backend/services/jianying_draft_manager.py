@@ -20,6 +20,7 @@ from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
+from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
@@ -251,13 +252,24 @@ class JianyingDraftManager:
                     st = 0.0
                 if et <= st:
                     continue
-                segs.append({
+                normalized: Dict[str, Any] = {
                     "start_time": st,
                     "end_time": et,
                     "text": str(seg.get("text") or ""),
                     "subtitle": str(seg.get("subtitle") or ""),
                     "OST": seg.get("OST", 0),
-                })
+                }
+                # 保留已有 TTS 字段，供后续 is_valid_segment_tts 判定复用，避免重复配音
+                for key in (
+                    "tts_audio_path",
+                    "tts_audio_duration",
+                    "tts_source",
+                    "tts_text_hash",
+                    "tts_updated_at",
+                ):
+                    if seg.get(key) is not None:
+                        normalized[key] = seg.get(key)
+                segs.append(normalized)
         if segs:
             return segs
         if video_dur and video_dur > 0:
@@ -395,6 +407,7 @@ class JianyingDraftManager:
         audio_speed_id = uuid.uuid4().hex
         speed_materials: List[dict] = [{"curve_speed": None, "id": audio_speed_id, "mode": 0, "speed": 1, "type": "speed"}]
         segments: List[dict] = []
+        original_sound_segments: List[dict] = []
         timeline_cursor_us = 0
         for item in timeline_items:
             duration_us = int(item["duration_us"])
@@ -433,7 +446,7 @@ class JianyingDraftManager:
                 "keyframe_refs": [],
                 "source_timerange": {"start": source_start_us, "duration": duration_us},
                 "speed": 1,
-                "volume": 0 if (bool(item.get("mute")) or bool(item.get("narration_path"))) else 1,
+                "volume": 0,
                 "extra_material_refs": [speed_id],
                 "clip": {
                     "alpha": 1,
@@ -447,6 +460,22 @@ class JianyingDraftManager:
                 "render_index": 0,
             }
             segments.append(seg_obj)
+            if not bool(item.get("narration_path")) and not bool(item.get("mute")):
+                original_speed_id = uuid.uuid4().hex
+                speed_materials.append({"curve_speed": None, "id": original_speed_id, "mode": 0, "speed": 1, "type": "speed"})
+                original_sound_seg = dict(seg_obj)
+                original_sound_seg["id"] = uuid.uuid4().hex
+                original_sound_seg["volume"] = 1
+                original_sound_seg["extra_material_refs"] = [original_speed_id]
+                original_sound_seg["target_timerange"] = dict(seg_obj["target_timerange"])
+                original_sound_seg["source_timerange"] = dict(seg_obj["source_timerange"])
+                original_sound_seg["clip"] = dict(seg_obj["clip"])
+                original_sound_seg["clip"]["flip"] = dict(seg_obj["clip"]["flip"])
+                original_sound_seg["clip"]["scale"] = dict(seg_obj["clip"]["scale"])
+                original_sound_seg["clip"]["transform"] = dict(seg_obj["clip"]["transform"])
+                original_sound_seg["uniform_scale"] = dict(seg_obj["uniform_scale"])
+                original_sound_seg["hdr_settings"] = dict(seg_obj["hdr_settings"])
+                original_sound_segments.append(original_sound_seg)
             narr_path = item.get("narration_path")
             narr_dur_us = int(item.get("narration_duration_us") or 0)
             if narr_path and narr_dur_us > 0:
@@ -659,14 +688,14 @@ class JianyingDraftManager:
                 "os_version": "10",
             },
         }
-        # 轨道顺序：主视频在上，配音 audio 轨放在视频轨下方（与剪映时间轴展示一致）
+        # Keep a complete muted main track; duplicate original-sound clips on a separate track for audio.
         track_main_id = uuid.uuid4().hex
-        track_video_id = uuid.uuid4().hex
+        track_original_sound_id = uuid.uuid4().hex
         track_overlay_id = uuid.uuid4().hex
         track_audio_id = uuid.uuid4().hex
         draft["tracks"] = [
             {"attribute": 0, "flag": 0, "id": track_main_id, "is_default_name": False, "name": "main", "segments": segments, "type": "video"},
-            {"attribute": 0, "flag": 0, "id": track_video_id, "is_default_name": False, "name": "video_main", "segments": [], "type": "video"},
+            {"attribute": 0, "flag": 0, "id": track_original_sound_id, "is_default_name": False, "name": "original_sound_video", "segments": original_sound_segments, "type": "video"},
             {"attribute": 0, "flag": 0, "id": track_overlay_id, "is_default_name": False, "name": "overlay_main", "segments": overlay_track_segments, "type": "video"},
             {"attribute": 0, "flag": 0, "id": track_audio_id, "is_default_name": False, "name": "audio", "segments": audio_segments, "type": "audio"},
         ]
@@ -929,6 +958,7 @@ class JianyingDraftManager:
             provider = (getattr(cfg, "provider", None) or "tencent_tts").lower()
 
             need_tts: List[Dict[str, Any]] = []
+            tts_results: Dict[int, Dict[str, Any]] = {}
             for idx, seg in enumerate(segments, start=1):
                 st = float(seg.get("start_time") or 0.0)
                 et = float(seg.get("end_time") or 0.0)
@@ -937,10 +967,22 @@ class JianyingDraftManager:
                 text = str(seg.get("text") or "").strip()
                 ost_flag = seg.get("OST")
                 is_original = (ost_flag == 1) or text.startswith("播放原")
-                if not is_original:
-                    need_tts.append({"idx": idx, "text": text, "out": assets_audio_dir / f"seg_{idx:04d}.mp3"})
-
-            tts_results: Dict[int, Dict[str, Any]] = {}
+                if is_original:
+                    continue
+                out_path = assets_audio_dir / f"seg_{idx:04d}.mp3"
+                if isinstance(seg, dict) and is_valid_segment_tts(seg):
+                    src = segment_tts_abs_path(seg)
+                    if src:
+                        try:
+                            shutil.copy2(str(src), str(out_path))
+                            tts_results[idx] = {
+                                "duration": seg.get("tts_audio_duration"),
+                                "reused": True,
+                            }
+                            continue
+                        except Exception:
+                            pass
+                need_tts.append({"idx": idx, "text": text, "out": out_path})
             if need_tts:
                 _jianying_tts_msg = (
                     f"串行生成配音（{len(need_tts)} 段）"

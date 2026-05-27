@@ -92,22 +92,20 @@ const StorageSettingsSection: React.FC = () => {
               placeholder="请选择或输入新的 uploads 根路径"
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder:text-gray-500 dark:focus:border-blue-600 dark:focus:ring-blue-900/30"
             />
-            <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 ring-1 ring-slate-200/80 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
+            <div className="px-3 text-xs text-slate-500  text-gray-500">
               当前: <span className="break-all font-medium text-slate-700 dark:text-gray-200">{current?.uploads_root || "未知"}</span>
             </div>
           </div>
 
-          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 cursor-pointer dark:border-slate-700 dark:bg-gray-800/70">
+          <label className="flex items-start gap-3 rounded-2xl  bg-slate-50/70 px-4 py-3 cursor-pointer dark:border-slate-700 dark:bg-gray-800/70">
             <input
               type="checkbox"
               checked={migrate}
               onChange={(e) => setMigrate(e.target.checked)}
               className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200 dark:border-gray-600 dark:focus:ring-blue-800"
             />
-            <span className="text-sm text-slate-700 dark:text-gray-200">
               迁移旧数据
               <span className="ml-1 text-xs text-slate-500 dark:text-gray-400">(谨慎操作，迁移可能耗时)</span>
-            </span>
           </label>
 
           {error ? (

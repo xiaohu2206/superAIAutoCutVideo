@@ -519,6 +519,10 @@ class VideoProcessor:
             n = len(inputs)
 
             async def _concat_in_batches(batch_size: int = 20) -> bool:
+                if n <= 1:
+                    return False
+                if n <= batch_size:
+                    batch_size = max(1, n // 2)
                 tmp_dir = Path(output_path).parent
                 token_b = uuid.uuid4().hex[:10]
                 outputs: List[str] = []
@@ -679,6 +683,30 @@ class VideoProcessor:
                 copy_possible = False
             token = uuid.uuid4().hex[:10]
             total_duration = sum(durations)
+
+            def _windows_cmdline_len(cmd_args: List[str]) -> int:
+                try:
+                    return len(subprocess.list2cmdline([str(x) for x in cmd_args]))
+                except Exception:
+                    return sum(len(str(x)) + 3 for x in cmd_args)
+
+            def _is_windows_cmdline_too_long_error(err: Any) -> bool:
+                if os.name != "nt":
+                    return False
+                if isinstance(err, BaseException) and getattr(err, "winerror", None) == 206:
+                    return True
+                if isinstance(err, bytes):
+                    text = err.decode(errors="ignore")
+                else:
+                    text = str(err or "")
+                text_l = text.lower()
+                return (
+                    "winerror 206" in text_l
+                    or "filename or extension is too long" in text_l
+                    or "file name or extension is too long" in text_l
+                    or "文件名或扩展名太长" in text
+                )
+
             async def _consume_progress_stream(process: asyncio.subprocess.Process) -> None:
                 if not on_progress:
                     return
@@ -1008,6 +1036,20 @@ class VideoProcessor:
                     "-y", output_path
                 ])
                 self.last_concat_cmd = cmd_try
+                cmdline_len = _windows_cmdline_len(cmd_try)
+                if os.name == "nt" and cmdline_len > 28000 and n > 1:
+                    logger.warning(
+                        "concat filter_complex command too long on Windows: args=%s cmdline_len=%s inputs=%s; fallback to batches",
+                        len(cmd_try),
+                        cmdline_len,
+                        n,
+                    )
+                    try:
+                        if list_path.exists():
+                            list_path.unlink()
+                    except Exception:
+                        pass
+                    return await _concat_in_batches()
 
                 use_sync_concat = False
                 sync_rc = 0
@@ -1032,14 +1074,13 @@ class VideoProcessor:
                     )
                     use_sync_concat = True
                 except OSError as e:
-                    winerr = getattr(e, "winerror", None)
-                    if os.name == "nt" and winerr == 206:
+                    if _is_windows_cmdline_too_long_error(e):
                         try:
                             if list_path.exists():
                                 list_path.unlink()
                         except Exception:
                             pass
-                        return await _concat_in_batches()
+                        return await _concat_in_batches(max(1, n // 2))
                     raise
 
                 if use_sync_concat:
@@ -1052,6 +1093,17 @@ class VideoProcessor:
                         logger.info(f"视频拼接成功: {output_path}")
                         return True
                     err = sync_stderr.decode(errors="ignore")
+                    if _is_windows_cmdline_too_long_error(sync_stderr) and n > 1:
+                        logger.warning(
+                            "concat filter_complex sync fallback hit Windows command length limit: inputs=%s; fallback to batches",
+                            n,
+                        )
+                        try:
+                            if list_path.exists():
+                                list_path.unlink()
+                        except Exception:
+                            pass
+                        return await _concat_in_batches(max(1, n // 2))
                     self.last_concat_error = err.strip() or "filter_complex 拼接失败(sync)"
                     last_err = err
                     logger.error(f"视频拼接失败: {err}")
