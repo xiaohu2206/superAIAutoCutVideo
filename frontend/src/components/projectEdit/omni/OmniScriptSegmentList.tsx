@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Loader, Trash2, Volume2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Loader, Trash2, Volume2 } from "lucide-react";
 
 import React from "react";
 
@@ -73,6 +73,8 @@ export interface OmniScriptSegmentListProps {
 
   onMoveSegment: (index: number, direction: -1 | 1) => void;
 
+  onDuplicateSegment: (index: number) => void;
+
   onDeleteSegment: (index: number) => void;
 
 }
@@ -120,6 +122,8 @@ const OmniScriptSegmentList: React.FC<OmniScriptSegmentListProps> = ({
   onOpenPicker,
 
   onMoveSegment,
+
+  onDuplicateSegment,
 
   onDeleteSegment,
 
@@ -406,6 +410,24 @@ const OmniScriptSegmentList: React.FC<OmniScriptSegmentListProps> = ({
                 >
 
                   <ChevronDown className="h-3.5 w-3.5" />
+
+                </button>
+
+                <button
+
+                  type="button"
+
+                  onClick={() => onDuplicateSegment(index)}
+
+                  title="复制并向下插入"
+
+                  disabled={blockedByOp}
+
+                  className="inline-flex items-center justify-center p-0.5 border border-gray-300 dark:border-gray-600 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+
+                >
+
+                  <Copy className="h-3.5 w-3.5" />
 
                 </button>
 

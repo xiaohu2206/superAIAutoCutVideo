@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   areOmniScriptsEquivalent,
+  computeTtsTextHash,
   isOriginalAudio,
   isValidSegmentTts,
   makeScriptJson,
@@ -119,6 +120,7 @@ export function useOmniScriptTts({
   }, [script?.segments, textHashes]);
 
   const allDubbed = dubbableCount > 0 && validDubbedCount >= dubbableCount;
+  const hasAnyDubbed = validDubbedCount > 0;
   const bulkButtonLabel = allDubbed ? "重新配音" : "批量配音";
 
   const bulkDisabledReason = useMemo(() => {
@@ -296,33 +298,37 @@ export function useOmniScriptTts({
     [applyScriptFromServer]
   );
 
-  const handleBulkTts = useCallback(async () => {
-    if (bulkDisabledReason) {
-      message.error(bulkDisabledReason);
-      return;
-    }
-    setBulkBusy(true);
-    setBulkProgress(0);
-    setBulkTaskId(null);
-    try {
-      await alignScriptWithServer();
-      const res = await projectService.runOmniScriptBulkTts(project.id, { force: allDubbed });
-      const tid = res?.task_id ? String(res.task_id) : "";
-      if (!tid) {
-        message.error(res?.message || "提交批量配音失败");
-        setBulkBusy(false);
+  const handleBulkTts = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (bulkDisabledReason) {
+        message.error(bulkDisabledReason);
         return;
       }
-      setBulkTaskId(tid);
-      window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
-      message.success(
-        res?.message || (allDubbed ? "重新配音任务已提交" : "批量配音任务已提交")
-      );
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "提交批量配音失败");
-      setBulkBusy(false);
-    }
-  }, [allDubbed, alignScriptWithServer, bulkDisabledReason, project.id]);
+      const force = typeof options?.force === "boolean" ? options.force : allDubbed;
+      setBulkBusy(true);
+      setBulkProgress(0);
+      setBulkTaskId(null);
+      try {
+        await alignScriptWithServer();
+        const res = await projectService.runOmniScriptBulkTts(project.id, { force });
+        const tid = res?.task_id ? String(res.task_id) : "";
+        if (!tid) {
+          message.error(res?.message || "提交批量配音失败");
+          setBulkBusy(false);
+          return;
+        }
+        setBulkTaskId(tid);
+        window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
+        message.success(
+          res?.message || (force ? "重新配音任务已提交" : "批量配音任务已提交")
+        );
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : "提交批量配音失败");
+        setBulkBusy(false);
+      }
+    },
+    [allDubbed, alignScriptWithServer, bulkDisabledReason, project.id]
+  );
 
   const syncSegmentTtsQueueState = useCallback(() => {
     session.dispatch({ type: "setQueue", keys: [...segmentTtsQueueRef.current] });
@@ -345,11 +351,14 @@ export function useOmniScriptTts({
     async (key: string) => {
       const index = findSegmentIndexByKey(key);
       if (index < 0) return null;
-      const seg = scriptRef.current?.segments?.[index];
+      const latest = readLatestLocalScript();
+      const seg = latest?.segments?.[index] ?? scriptRef.current?.segments?.[index];
       if (!seg) return null;
       const segId = seg.id ?? index + 1;
+      const text = String(seg.text ?? "").trim();
+      const expectedTextHash = await computeTtsTextHash(text);
       const data = await projectService.synthesizeOmniScriptSegmentTts(project.id, segId, {
-        expectedTextHash: textHashes[index],
+        expectedTextHash,
       });
       if (data.script) {
         applyScriptFromServer(data.script);
@@ -373,7 +382,6 @@ export function useOmniScriptTts({
       readLatestLocalScript,
       refreshProject,
       scriptDirty,
-      textHashes,
     ]
   );
 
@@ -472,6 +480,7 @@ export function useOmniScriptTts({
     bulkDisabledReason,
     bulkButtonLabel,
     allDubbed,
+    hasAnyDubbed,
     dubbableCount,
     validDubbedCount,
     segmentTtsProcessingIndex:

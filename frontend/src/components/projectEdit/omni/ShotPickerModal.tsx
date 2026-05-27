@@ -136,8 +136,23 @@ const ShotPickerModal: React.FC<ShotPickerModalProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredPreferred = preferred.filter(filterShot);
-  const filteredOther = other.filter(filterShot);
+  const isApplied = React.useCallback(
+    (shot: OmniSelectableShot) =>
+      segment.shot_id != null && String(segment.shot_id) === String(shot.shot_id),
+    [segment.shot_id]
+  );
+
+  const sortAppliedFirst = React.useCallback(
+    (a: OmniSelectableShot, b: OmniSelectableShot) => {
+      const aApplied = isApplied(a) ? 1 : 0;
+      const bApplied = isApplied(b) ? 1 : 0;
+      return bApplied - aApplied;
+    },
+    [isApplied]
+  );
+
+  const filteredPreferred = preferred.filter(filterShot).sort(sortAppliedFirst);
+  const filteredOther = other.filter(filterShot).sort(sortAppliedFirst);
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>

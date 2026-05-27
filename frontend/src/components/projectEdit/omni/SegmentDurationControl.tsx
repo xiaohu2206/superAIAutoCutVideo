@@ -5,6 +5,7 @@ import {
   DURATION_ADJUST_STEPS,
   DURATION_SLIDER_STEP,
   durationLabel,
+  getEffectiveDuration,
   getEndTimeBounds,
   getStartTimeBounds,
   roundSegmentTime,
@@ -38,26 +39,30 @@ interface TimePointRowProps {
 }
 
 const TimePointRow: React.FC<TimePointRowProps> = ({ label, value, min, max, onChange }) => {
-  const clamped = Math.min(max, Math.max(min, roundSegmentTime(value)));
+  const rounded = roundSegmentTime(value);
+  // 当 value 超出 [min, max]（例如视频元数据尚未加载、videoDuration 偏小时），
+  // 仍以原始值显示，避免与列表中的时间段不一致引发误解；滑块范围同步扩展以正常拖拽。
+  const safeMin = Math.min(min, rounded);
+  const safeMax = Math.max(max, rounded);
   const negativeSteps = DURATION_ADJUST_STEPS.filter((s) => s < 0);
   const positiveSteps = DURATION_ADJUST_STEPS.filter((s) => s > 0);
 
   const apply = (next: number) => {
-    onChange(Math.min(max, Math.max(min, roundSegmentTime(next))));
+    onChange(Math.min(safeMax, Math.max(safeMin, roundSegmentTime(next))));
   };
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{label}</span>
-        <span className="font-mono text-xs tabular-nums text-gray-600 dark:text-gray-400">{secondsToTime(clamped)}</span>
+        <span className="font-mono text-xs tabular-nums text-gray-600 dark:text-gray-400">{secondsToTime(rounded)}</span>
       </div>
       <input
         type="range"
-        min={min}
-        max={max}
+        min={safeMin}
+        max={safeMax}
         step={DURATION_SLIDER_STEP}
-        value={clamped}
+        value={rounded}
         onChange={(e) => apply(parseFloat(e.target.value))}
         className="w-full h-2 accent-blue-600 cursor-pointer"
         aria-label={`${label}滑块`}
@@ -68,8 +73,8 @@ const TimePointRow: React.FC<TimePointRowProps> = ({ label, value, min, max, onC
             <button
               key={step}
               type="button"
-              onClick={() => apply(clamped + step)}
-              disabled={clamped + step < min - 1e-6}
+              onClick={() => apply(rounded + step)}
+              disabled={rounded + step < safeMin - 1e-6}
               title={`${label} 提前 ${Math.abs(step)} 秒`}
               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -83,8 +88,8 @@ const TimePointRow: React.FC<TimePointRowProps> = ({ label, value, min, max, onC
             <button
               key={step}
               type="button"
-              onClick={() => apply(clamped + step)}
-              disabled={clamped + step > max + 1e-6}
+              onClick={() => apply(rounded + step)}
+              disabled={rounded + step > safeMax + 1e-6}
               title={`${label} 延后 ${step} 秒`}
               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -105,11 +110,14 @@ const SegmentDurationControl: React.FC<SegmentDurationControlProps> = ({
   playbackUsesTts,
   onRangeChange,
 }) => {
-  const startBounds = getStartTimeBounds(endTime, videoDuration);
-  const endBounds = getEndTimeBounds(startTime, videoDuration);
+  // videoDuration 可能尚未加载或与脚本时间轴不一致，使用工具函数得到一个不会把真实时间压回的有效上限，
+  // 与 useOmniScriptWorkspace.updateSegmentTimeRange 保持一致，避免 UI clamp 后又被 hook 二次 clamp 回退。
+  const effectiveDuration = getEffectiveDuration(videoDuration, startTime, endTime);
+  const startBounds = getStartTimeBounds(endTime, effectiveDuration);
+  const endBounds = getEndTimeBounds(startTime, effectiveDuration);
 
   const emit = (start: number, end: number) => {
-    onRangeChange(clampSegmentTimes(start, end, videoDuration));
+    onRangeChange(clampSegmentTimes(start, end, effectiveDuration));
   };
 
   return (

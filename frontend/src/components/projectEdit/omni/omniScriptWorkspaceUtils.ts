@@ -21,6 +21,22 @@ export const MIN_SEGMENT_DURATION = 0.1;
 export const DURATION_SLIDER_STEP = 0.1;
 export const DURATION_ADJUST_STEPS = [-1, -0.5, -0.1, 0.1, 0.5, 1] as const;
 const DEFAULT_MAX_SEGMENT_DURATION = 300;
+/** 视频时长未加载或不可靠时，预留一段可调整空间 */
+export const DURATION_HEADROOM = 60;
+
+/**
+ * 当 videoDuration 不可靠（未加载、或小于当前 segment 时间）时，使用 segment 自身时间 + 余量作为有效上限，
+ * 避免 clampSegmentTimes 把真实时间压回到默认上限或更小的值。
+ */
+export const getEffectiveDuration = (
+  videoDuration: number | undefined,
+  ...segmentTimes: Array<number | undefined>
+): number => {
+  const segMax = Math.max(0, ...segmentTimes.map((t) => Number(t) || 0));
+  const vd = Number(videoDuration) || 0;
+  if (vd >= segMax + MIN_SEGMENT_DURATION) return vd;
+  return segMax + DURATION_HEADROOM;
+};
 
 export const segmentDurationSec = (start?: number, end?: number) => {
   const s = Math.max(0, Number(start) || 0);

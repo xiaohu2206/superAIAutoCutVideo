@@ -1,8 +1,9 @@
 import { Loader, Mic } from "lucide-react";
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import type { Project, VideoScript } from "../../../types/project";
 import { useOmniScriptTts } from "../../../hooks/omni/useOmniScriptTts";
 import { useOmniScriptWorkspace } from "../../../hooks/omni/useOmniScriptWorkspace";
+import BulkTtsChoiceModal from "./BulkTtsChoiceModal";
 import OmniScriptPreviewPanel from "./OmniScriptPreviewPanel";
 import OmniScriptSegmentList from "./OmniScriptSegmentList";
 import ShotPickerModal from "./ShotPickerModal";
@@ -65,6 +66,25 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
     [scriptTts, workspace]
   );
 
+  const [bulkChoiceOpen, setBulkChoiceOpen] = useState(false);
+
+  const handleBulkTtsClick = useCallback(() => {
+    if (scriptTts.bulkDisabledReason) return;
+    if (scriptTts.hasAnyDubbed) {
+      setBulkChoiceOpen(true);
+      return;
+    }
+    void scriptTts.handleBulkTts({ force: false });
+  }, [scriptTts]);
+
+  const handleBulkChoice = useCallback(
+    (force: boolean) => {
+      setBulkChoiceOpen(false);
+      void scriptTts.handleBulkTts({ force });
+    },
+    [scriptTts]
+  );
+
   if (!script || parsed.error) {
     return (
       <div className="space-y-4">
@@ -106,12 +126,12 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => void scriptTts.handleBulkTts()}
+            onClick={handleBulkTtsClick}
             disabled={Boolean(scriptTts.bulkDisabledReason)}
             title={
               scriptTts.bulkDisabledReason ||
-              (scriptTts.allDubbed
-                ? "重新为所有解说段生成配音（保留单条手动配音）"
+              (scriptTts.hasAnyDubbed
+                ? "已存在部分配音，点击后选择补全未完成或全部重新配音"
                 : "为未配音的解说段批量生成配音")
             }
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -125,6 +145,23 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
               ? `${scriptTts.bulkButtonLabel} ${Math.round(scriptTts.bulkProgress)}%`
               : scriptTts.bulkButtonLabel}
           </button>
+          {scriptTts.dubbableCount > 0 ? (
+            <span
+              title={
+                scriptTts.allDubbed
+                  ? "全部解说段已完成配音"
+                  : `还有 ${scriptTts.dubbableCount - scriptTts.validDubbedCount} 段未配音；生成视频/剪映时会自动补齐，无需手动批量`
+              }
+              className={
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs " +
+                (scriptTts.allDubbed
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                  : "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300")
+              }
+            >
+              已配音 {scriptTts.validDubbedCount} / {scriptTts.dubbableCount}
+            </span>
+          ) : null}
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {isSaving ? (
               <span className="inline-flex items-center gap-1.5">
@@ -146,12 +183,13 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
         </div>
       ) : null}
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        {scriptTts.allDubbed
-          ? "已全部配音，可点「重新配音」整批重跑（单条手动配音仍会保留）。播放镜头时以配音时长为准。"
-          : "已有有效配音的段落会保留；修改解说文案后需重新配音。播放镜头时以配音时长为准。"}
+        {scriptTts.hasAnyDubbed
+          ? "已存在部分配音，点击批量配音可选择「补全未完成」或「全部重新」。"
+          : "尚无配音，点击批量配音将为所有解说段生成配音。"}
+        生成视频/剪映草稿时会自动复用已有配音，仅对未配音段按需补齐，不会重复配音。播放镜头时以配音时长为准。
       </p>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)] gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-[35%_minmax(0,1fr)] gap-5">
         <OmniScriptPreviewPanel
           videoRef={workspace.videoRef}
           ttsAudioRef={workspace.ttsAudioRef}
@@ -192,6 +230,7 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
           onUpdateText={(index, text) => workspace.setScriptSegment(index, (s) => ({ ...s, text }))}
           onOpenPicker={workspace.setPickerIndex}
           onMoveSegment={workspace.moveSegment}
+          onDuplicateSegment={workspace.duplicateSegment}
           onDeleteSegment={workspace.deleteSegment}
         />
       </div>
@@ -209,6 +248,15 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
           onApply={workspace.applyShot}
         />
       ) : null}
+
+      <BulkTtsChoiceModal
+        isOpen={bulkChoiceOpen}
+        dubbableCount={scriptTts.dubbableCount}
+        validDubbedCount={scriptTts.validDubbedCount}
+        onClose={() => setBulkChoiceOpen(false)}
+        onContinueIncomplete={() => handleBulkChoice(false)}
+        onRestartAll={() => handleBulkChoice(true)}
+      />
     </div>
   );
 };

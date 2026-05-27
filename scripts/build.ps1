@@ -519,13 +519,60 @@ function Get-TauriMakensisPath() {
   Fail "NSIS makensis not found"
 }
 
+function Import-VsDevEnvironment {
+  if (Get-Command cl -ErrorAction SilentlyContinue) { return $true }
+
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (-not (Test-Path $vswhere)) { return $false }
+
+  $vsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Out-String).Trim()
+  if (-not $vsPath) { return $false }
+
+  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+  if (-not (Test-Path $vcvars)) { return $false }
+
+  $tempCmdScript = [System.IO.Path]::GetTempFileName() + ".cmd"
+  $tempOutputFile = [System.IO.Path]::GetTempFileName() + ".env"
+  try {
+    $cmdContent = @"
+@echo off
+call "$vcvars" >nul 2>&1
+set > "$tempOutputFile"
+"@
+    Set-Content -Path $tempCmdScript -Value $cmdContent -Encoding Default
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "cmd.exe"
+    $psi.Arguments = "/c `"$tempCmdScript`""
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.WaitForExit()
+    if ($p.ExitCode -ne 0 -or -not (Test-Path $tempOutputFile)) { return $false }
+
+    Get-Content -Path $tempOutputFile | ForEach-Object {
+      $eqPos = $_.IndexOf('=')
+      if ($eqPos -gt 0) {
+        [Environment]::SetEnvironmentVariable($_.Substring(0, $eqPos), $_.Substring($eqPos + 1), [EnvironmentVariableTarget]::Process)
+      }
+    }
+    return [bool](Get-Command cl -ErrorAction SilentlyContinue)
+  } finally {
+    Remove-Item $tempCmdScript -Force -ErrorAction SilentlyContinue
+    Remove-Item $tempOutputFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Invoke-CythonEncrypt([string]$venvPy, [string]$backendDir, [string]$variant) {
   Step "Install Cython for source encryption ($variant)"
   & $venvPy "-m" "pip" "install" "--disable-pip-version-check" "--no-input" "cython"
   if ($LASTEXITCODE -ne 0) { throw "Cython install failed (code $LASTEXITCODE)" }
 
   Step "Verify C compiler availability ($variant)"
-  $ccCheck = & $venvPy "-c" "import sysconfig; cc=sysconfig.get_config_var('CC'); print(cc if cc else 'MISSING')" 2>$null
+  if (-not (Import-VsDevEnvironment)) {
+    Info "WARNING: Could not load Visual Studio Build Tools environment."
+  }
+  $ccCheck = & $venvPy "-c" "import shutil; cc=shutil.which('cl'); print(cc if cc else 'MISSING')" 2>$null
   $ccCheck = ($ccCheck | Out-String).Trim()
   Info "C compiler: $ccCheck"
   if ($ccCheck -eq 'MISSING' -or (-not $ccCheck)) {
@@ -540,80 +587,86 @@ function Invoke-CythonEncrypt([string]$venvPy, [string]$backendDir, [string]$var
 import os, sys, glob, shutil, traceback
 from pathlib import Path
 
-backend_dir = sys.argv[1]
-
 exclude_dirs = {
     "__pycache__", ".venv_pack_cpu", ".venv_pack_gpu", ".venv",
     "dist", "build", "serviceData", "docs", ".mypy_cache",
     "tmp", "__MACOSX"
 }
 
-py_files = []
-for root, dirs, files in os.walk(backend_dir):
-    dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
-    for f in files:
-        if f.endswith('.py') and f != '__init__.py' and f != 'main.py' and not f.startswith('_cython_setup'):
-            full = os.path.join(root, f)
-            py_files.append(full)
+def collect_py_files(backend_dir):
+    py_files = []
+    for root, dirs, files in os.walk(backend_dir):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
+        for f in files:
+            if f.endswith('.py') and f != '__init__.py' and f != 'main.py' and not f.startswith('_cython_setup'):
+                py_files.append(os.path.join(root, f))
+    return py_files
 
-if not py_files:
-    print("No .py files to compile")
-    sys.exit(0)
+def compile_and_encrypt(backend_dir):
+    py_files = collect_py_files(backend_dir)
+    if not py_files:
+        print("No .py files to compile")
+        return
 
-print(f"Compiling {len(py_files)} .py files to .pyd...")
+    print(f"Compiling {len(py_files)} .py files to .pyd...")
 
-from setuptools import setup, Extension
-from Cython.Build import cythonize
+    from setuptools import setup, Extension
+    from Cython.Build import cythonize
 
-try:
-    ext_modules = cythonize(
-        py_files,
-        compiler_directives={
-            "language_level": "3",
-            "boundscheck": False,
-            "wraparound": False,
-        },
-        nthreads=min(os.cpu_count() or 4, 8),
-    )
+    try:
+        ext_modules = cythonize(
+            py_files,
+            compiler_directives={
+                "language_level": "3",
+                "boundscheck": False,
+                "wraparound": False,
+            },
+            nthreads=min(os.cpu_count() or 4, 8),
+        )
 
-    setup(
-        ext_modules=ext_modules,
-        script_args=["build_ext", "--inplace"],
-    )
-except Exception as e:
-    print(f"Cython compilation error: {e}")
-    traceback.print_exc()
-    sys.exit(1)
+        setup(
+            ext_modules=ext_modules,
+            script_args=["build_ext", "--inplace"],
+        )
+    except Exception as e:
+        print(f"Cython compilation error: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
-print("Compilation complete. Renaming .pyd files...")
+    print("Compilation complete. Renaming .pyd files...")
 
-for py_path in py_files:
-    py_file = Path(py_path)
-    base = py_file.stem
-    parent = py_file.parent
+    for py_path in py_files:
+        py_file = Path(py_path)
+        base = py_file.stem
+        parent = py_file.parent
 
-    pyd_candidates = list(parent.glob(f"{base}.cp*-win_amd64.pyd")) + list(parent.glob(f"{base}.*.pyd"))
-    if pyd_candidates:
-        tagged = pyd_candidates[0]
-        target = parent / f"{base}.pyd"
-        if target.exists():
-            target.unlink()
-        tagged.rename(target)
-        print(f"  {py_file.relative_to(backend_dir)} -> {target.relative_to(backend_dir)}")
+        pyd_candidates = list(parent.glob(f"{base}.cp*-win_amd64.pyd")) + list(parent.glob(f"{base}.*.pyd"))
+        if pyd_candidates:
+            tagged = pyd_candidates[0]
+            target = parent / f"{base}.pyd"
+            if target.exists():
+                target.unlink()
+            tagged.rename(target)
+            print(f"  {py_file.relative_to(backend_dir)} -> {target.relative_to(backend_dir)}")
 
-        py_file.unlink()
-        print(f"  removed {py_file.relative_to(backend_dir)}")
+            py_file.unlink()
+            print(f"  removed {py_file.relative_to(backend_dir)}")
 
-    build_dir = parent / "build"
-    if build_dir.exists():
-        shutil.rmtree(build_dir, ignore_errors=True)
+        build_dir = parent / "build"
+        if build_dir.exists():
+            shutil.rmtree(build_dir, ignore_errors=True)
 
-for py_path in py_files:
-    c_file = Path(str(py_path)[:-3] + ".c")
-    if c_file.exists():
-        c_file.unlink()
+    for py_path in py_files:
+        c_file = Path(str(py_path)[:-3] + ".c")
+        if c_file.exists():
+            c_file.unlink()
 
-print("Encryption complete.")
+    print("Encryption complete.")
+
+if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
+    compile_and_encrypt(sys.argv[1])
 '@
 
   $setupPyPath = Join-Path $backendDir "_cython_setup.py"

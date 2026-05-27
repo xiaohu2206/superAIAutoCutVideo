@@ -4,6 +4,7 @@ import type { OmniSelectableShot, OmniShotOptionsResponse, OmniShotOptionsSegmen
 import type { Project, ScriptSegment, VideoScript } from "../../types/project";
 import {
   computeTtsTextHash,
+  getEffectiveDuration,
   getOmniSegmentsTextSignature,
   getSegmentPlayEndTime,
   isOriginalAudio,
@@ -155,9 +156,9 @@ export function useOmniScriptWorkspace({
 
     container.scrollTo({
       top: Math.max(0, nextScrollTop),
-      behavior: isSequencePlaying ? "smooth" : "auto",
+      behavior: "auto",
     });
-  }, [isSequencePlaying, selectedIndex]);
+  }, [selectedIndex]);
 
   useEffect(() => {
     if (!segments.length && isSequencePlaying) {
@@ -202,10 +203,6 @@ export function useOmniScriptWorkspace({
     segments.forEach((s) => {
       if (isOriginalAudio(s)) return;
       const text = (s.text || "").trim();
-      const storedHash = String(s.tts_text_hash || "").trim();
-      if (storedHash && text) {
-        textHashByContentRef.current.set(text, storedHash);
-      }
       if (textHashByContentRef.current.has(text)) return;
       void computeTtsTextHash(text).then((hash) => {
         if (cancelled) return;
@@ -416,6 +413,37 @@ export function useOmniScriptWorkspace({
     [mutateSegments]
   );
 
+  const duplicateSegment = useCallback(
+    (index: number) => {
+      mutateSegments((segments) => {
+        const source = segments[index];
+        if (!source) return segments;
+        const copy: ScriptSegment = {
+          ...source,
+          id: `${source.id}_copy_${Date.now()}`,
+          tts_audio_path: undefined,
+          tts_audio_duration: undefined,
+          tts_source: undefined,
+          tts_text_hash: undefined,
+          tts_updated_at: undefined,
+        };
+        const next = [...segments];
+        next.splice(index + 1, 0, copy);
+        return next;
+      }, { syncImmediately: true });
+      setSelectedIndex((current) => {
+        if (current > index) return current + 1;
+        return current;
+      });
+      setPickerIndex((current) => {
+        if (current == null) return null;
+        if (current > index) return current + 1;
+        return current;
+      });
+    },
+    [mutateSegments]
+  );
+
   const deleteSegment = useCallback(
     (index: number) => {
       mutateSegments((segments) => segments.filter((_, i) => i !== index), { syncImmediately: true });
@@ -585,10 +613,19 @@ export function useOmniScriptWorkspace({
 
   const updateSegmentTimeRange = useCallback(
     (index: number, range: { start_time: number; end_time: number }) => {
-      setScriptSegment(index, (segment) => ({
-        ...segment,
-        ...clampSegmentTimes(range.start_time, range.end_time, videoDuration),
-      }));
+      setScriptSegment(index, (segment) => {
+        const effectiveDuration = getEffectiveDuration(
+          videoDuration,
+          segment.start_time,
+          segment.end_time,
+          range.start_time,
+          range.end_time
+        );
+        return {
+          ...segment,
+          ...clampSegmentTimes(range.start_time, range.end_time, effectiveDuration),
+        };
+      });
     },
     [setScriptSegment, videoDuration]
   );
@@ -622,6 +659,7 @@ export function useOmniScriptWorkspace({
     setPlaybackRate,
     setScriptSegment,
     deleteSegment,
+    duplicateSegment,
     moveSegment,
     toggleSegmentType,
     playSegment,
