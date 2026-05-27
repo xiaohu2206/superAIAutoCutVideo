@@ -81,14 +81,6 @@ NARRATION_TYPE_CONFIG: Dict[str, NarrationTypeConfig] = {
         source_label="原片",
         work_kind="通用内容",
     ),
-    "自定义解说": NarrationTypeConfig(
-        value="自定义解说",
-        category="custom_narration",
-        default_script_length="30～40条",
-        output_format="short_drama",
-        source_label="原片",
-        work_kind="自定义内容",
-    ),
 }
 
 

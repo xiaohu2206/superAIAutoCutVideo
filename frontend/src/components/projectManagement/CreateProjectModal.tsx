@@ -425,7 +425,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </div> */}
 
             {/* 解说类型 */}
-            <div>
+            {/* <div>
               <label
                 htmlFor="narration-type"
                 className="block text-sm font-medium text-gray-700 mb-2"
@@ -446,7 +446,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   </option>
                 ))}
               </AppSelect>
-            </div>
+            </div> */}
 
             {/* 按钮组 */}
             <div className="flex items-center justify-end space-x-3 pt-4">

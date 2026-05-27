@@ -14,7 +14,6 @@ export const NARRATION_TYPE_OPTIONS: NarrationTypeOption[] = [
   { label: "纪录片解说", value: NarrationType.DOCUMENTARY, promptCategory: "documentary_narration" },
   { label: "体育解说", value: NarrationType.SPORTS, promptCategory: "sports_narration" },
   { label: "通用解说", value: NarrationType.GENERAL, promptCategory: "general_narration" },
-  { label: "自定义解说", value: NarrationType.CUSTOM, promptCategory: "custom_narration" },
 ];
 
 export function getPromptCategoryByNarrationType(narrationType?: NarrationType): string {

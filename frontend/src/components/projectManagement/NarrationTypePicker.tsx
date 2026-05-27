@@ -10,8 +10,8 @@ import {
   Sparkles,
   Trophy,
   Tv2,
-  Wand2,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { NarrationType } from "../../types/project";
 
 interface NarrationTypePickerProps {
@@ -27,7 +27,7 @@ interface NarrationTypeCard {
   type: NarrationType;
   title: string;
   description: string;
-  Icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  Icon: LucideIcon;
   /** 卡片 hover 边框颜色 */
   hoverBorder: string;
   /** 图标底色与文字色 */
@@ -40,17 +40,7 @@ interface NarrationTypeCard {
 }
 
 const NARRATION_TYPE_CARDS: NarrationTypeCard[] = [
-  {
-    type: NarrationType.SHORT_DRAMA,
-    title: "短剧解说",
-    description: "节奏紧凑，适合竖屏短剧/微剧",
-    Icon: Tv2,
-    hoverBorder: "hover:border-rose-300",
-    iconBg: "bg-rose-100",
-    iconColor: "text-rose-600",
-    bgGradient: "from-rose-50/70 via-white to-white",
-    ringHover: "hover:ring-rose-200/60",
-  },
+ 
   {
     type: NarrationType.MOVIE,
     title: "电影解说",
@@ -61,6 +51,28 @@ const NARRATION_TYPE_CARDS: NarrationTypeCard[] = [
     iconColor: "text-blue-600",
     bgGradient: "from-blue-50/70 via-white to-white",
     ringHover: "hover:ring-blue-200/60",
+  },
+  {
+    type: NarrationType.TV_DRAMA,
+    title: "电视剧解说",
+    description: "适合长剧集、单集剧情与人物关系",
+    Icon: Tv2,
+    hoverBorder: "hover:border-indigo-300",
+    iconBg: "bg-indigo-100",
+    iconColor: "text-indigo-600",
+    bgGradient: "from-indigo-50/70 via-white to-white",
+    ringHover: "hover:ring-indigo-200/60",
+  },
+  {
+    type: NarrationType.SHORT_DRAMA,
+    title: "短剧解说",
+    description: "节奏紧凑，适合竖屏短剧/微剧",
+    Icon: Tv2,
+    hoverBorder: "hover:border-rose-300",
+    iconBg: "bg-rose-100",
+    iconColor: "text-rose-600",
+    bgGradient: "from-rose-50/70 via-white to-white",
+    ringHover: "hover:ring-rose-200/60",
   },
   {
     type: NarrationType.VARIETY,
@@ -105,17 +117,6 @@ const NARRATION_TYPE_CARDS: NarrationTypeCard[] = [
     iconColor: "text-slate-600",
     bgGradient: "from-slate-50/70 via-white to-white",
     ringHover: "hover:ring-slate-200/60",
-  },
-  {
-    type: NarrationType.CUSTOM,
-    title: "自定义解说",
-    description: "使用自定义提示词模板创作",
-    Icon: Wand2,
-    hoverBorder: "hover:border-violet-300",
-    iconBg: "bg-violet-100",
-    iconColor: "text-violet-600",
-    bgGradient: "from-violet-50/70 via-white to-white",
-    ringHover: "hover:ring-violet-200/60",
   },
 ];
 

@@ -11,7 +11,6 @@ export enum NarrationType {
   DOCUMENTARY = "纪录片解说",
   SPORTS = "体育解说",
   GENERAL = "通用解说",
-  CUSTOM = "自定义解说",
 }
 
 export type ScriptLengthOption =

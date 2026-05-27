@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 from ..base import TextPrompt, PromptMetadata, ModelType, OutputFormat
 
@@ -177,6 +177,45 @@ def _adapt_markdown_for_short_drama(body: str) -> str:
     return out
 
 
+def _category_info(category: str, label: str) -> Tuple[str, str]:
+    try:
+        from modules.narration_types import get_config_by_category
+
+        cfg = get_config_by_category(category)
+        return cfg.work_kind or label, cfg.source_label or "原片"
+    except Exception:
+        return label, "原片" if label == "电影" else "原剧"
+
+
+def _adapt_markdown_for_category(body: str, *, category: str, label: str) -> str:
+    """将 common 下默认偏电影的模板适配到目标解说类型。"""
+    if label == "电影":
+        return body
+    adapted = _adapt_markdown_for_short_drama(body)
+    if label == "短剧":
+        return adapted
+
+    work_kind, source_label = _category_info(category, label)
+    replacements = [
+        ("短剧解说", f"{work_kind}解说"),
+        ("短剧", work_kind),
+        ("原剧", source_label),
+        ("剧集", work_kind if work_kind not in {"短剧", "电视剧"} else "剧集"),
+        ("剧名", "作品名" if work_kind in {"通用内容", "自定义内容"} else f"{work_kind}名"),
+    ]
+    out = adapted
+    for old, new in replacements:
+        out = out.replace(old, new)
+    return out
+
+
+def _read_non_empty(path: Path) -> Optional[str]:
+    if not path.exists() or not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    return text if text.strip() else None
+
+
 _STYLE_ENTRIES: List[dict] = [
     {
         "id": "behind_the_scenes_intro",
@@ -328,11 +367,14 @@ class CommonStyleScriptPrompt(TextPrompt):
         self._relative_md_path = relative_md_path
 
     def get_template(self) -> str:
-        base = Path(__file__).resolve().parent
-        p = base / self._relative_md_path
-        body = p.read_text(encoding="utf-8")
-        if self._label == "短剧":
-            body = _adapt_markdown_for_short_drama(body)
+        common_base = Path(__file__).resolve().parent
+        prompts_base = common_base.parent
+        override_path = prompts_base / self.metadata.category / "styles" / self._relative_md_path
+        body = _read_non_empty(override_path)
+        if body is None:
+            p = common_base / self._relative_md_path
+            body = p.read_text(encoding="utf-8")
+            body = _adapt_markdown_for_category(body, category=self.metadata.category, label=self._label)
         return body.rstrip() + "\n" + _MATERIAL_SUFFIX
 
 
