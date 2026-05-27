@@ -1,7 +1,6 @@
-// 解说类型选择器：以卡片网格形式列出全部解说类型，点击即触发创建项目流程
-
-import React from "react";
+import type { LucideIcon } from "lucide-react";
 import {
+  Clapperboard,
   Film,
   Mic,
   Mountain,
@@ -11,137 +10,96 @@ import {
   Trophy,
   Tv2,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import React from "react";
 import { NarrationType } from "../../types/project";
 
 interface NarrationTypePickerProps {
-  /** 用户点击某个解说类型卡片时触发，传入对应类型 */
   onSelect: (narrationType: NarrationType) => void;
 }
 
-/**
- * 单个解说类型卡片的视觉配置
- * 将「颜色 + 图标 + 描述」集中在这里，便于按需调整不影响主流程
- */
 interface NarrationTypeCard {
   type: NarrationType;
   title: string;
   description: string;
   Icon: LucideIcon;
-  /** 卡片 hover 边框颜色 */
-  hoverBorder: string;
-  /** 图标底色与文字色 */
-  iconBg: string;
-  iconColor: string;
-  /** 卡片背景渐变 */
-  bgGradient: string;
-  /** hover 时的微光圆环 */
-  ringHover: string;
+  accentClassName: string;
+  iconClassName: string;
 }
 
 const NARRATION_TYPE_CARDS: NarrationTypeCard[] = [
- 
   {
     type: NarrationType.MOVIE,
     title: "电影解说",
-    description: "适合院线电影、长片剧情梳理",
+    description: "院线电影、长片剧情梳理",
     Icon: Film,
-    hoverBorder: "hover:border-blue-300",
-    iconBg: "bg-blue-100",
-    iconColor: "text-blue-600",
-    bgGradient: "from-blue-50/70 via-white to-white",
-    ringHover: "hover:ring-blue-200/60",
+    accentClassName: "hover:border-blue-200 hover:bg-blue-50/30",
+    iconClassName: "bg-blue-50 text-blue-600",
   },
   {
     type: NarrationType.TV_DRAMA,
     title: "电视剧解说",
-    description: "适合长剧集、单集剧情与人物关系",
+    description: "剧集人物关系与单集剧情",
     Icon: Tv2,
-    hoverBorder: "hover:border-indigo-300",
-    iconBg: "bg-indigo-100",
-    iconColor: "text-indigo-600",
-    bgGradient: "from-indigo-50/70 via-white to-white",
-    ringHover: "hover:ring-indigo-200/60",
+    accentClassName: "hover:border-violet-200 hover:bg-violet-50/30",
+    iconClassName: "bg-violet-50 text-violet-600",
   },
   {
     type: NarrationType.SHORT_DRAMA,
     title: "短剧解说",
-    description: "节奏紧凑，适合竖屏短剧/微剧",
-    Icon: Tv2,
-    hoverBorder: "hover:border-rose-300",
-    iconBg: "bg-rose-100",
-    iconColor: "text-rose-600",
-    bgGradient: "from-rose-50/70 via-white to-white",
-    ringHover: "hover:ring-rose-200/60",
+    description: "竖屏短剧、微剧情高节奏拆解",
+    Icon: Clapperboard,
+    accentClassName: "hover:border-rose-200 hover:bg-rose-50/30",
+    iconClassName: "bg-rose-50 text-rose-600",
   },
   {
     type: NarrationType.VARIETY,
     title: "综艺解说",
-    description: "明星综艺、真人秀亮点提炼",
+    description: "真人秀、热点片段和看点提炼",
     Icon: Music2,
-    hoverBorder: "hover:border-amber-300",
-    iconBg: "bg-amber-100",
-    iconColor: "text-amber-600",
-    bgGradient: "from-amber-50/70 via-white to-white",
-    ringHover: "hover:ring-amber-200/60",
+    accentClassName: "hover:border-orange-200 hover:bg-orange-50/30",
+    iconClassName: "bg-orange-50 text-orange-500",
   },
   {
     type: NarrationType.DOCUMENTARY,
     title: "纪录片解说",
-    description: "自然、人文等纪实影像叙述",
+    description: "自然、人文和纪实影像叙事",
     Icon: Mountain,
-    hoverBorder: "hover:border-emerald-300",
-    iconBg: "bg-emerald-100",
-    iconColor: "text-emerald-600",
-    bgGradient: "from-emerald-50/70 via-white to-white",
-    ringHover: "hover:ring-emerald-200/60",
+    accentClassName: "hover:border-emerald-200 hover:bg-emerald-50/30",
+    iconClassName: "bg-emerald-50 text-emerald-600",
   },
   {
     type: NarrationType.SPORTS,
     title: "体育解说",
-    description: "赛事集锦、激情瞬间复盘",
+    description: "赛事集锦、关键瞬间复盘",
     Icon: Trophy,
-    hoverBorder: "hover:border-orange-300",
-    iconBg: "bg-orange-100",
-    iconColor: "text-orange-600",
-    bgGradient: "from-orange-50/70 via-white to-white",
-    ringHover: "hover:ring-orange-200/60",
+    accentClassName: "hover:border-orange-200 hover:bg-orange-50/30",
+    iconClassName: "bg-orange-50 text-orange-500",
   },
   {
     type: NarrationType.GENERAL,
     title: "通用解说",
     description: "适用于多数视频的通用模式",
     Icon: Mic,
-    hoverBorder: "hover:border-slate-300",
-    iconBg: "bg-slate-100",
-    iconColor: "text-slate-600",
-    bgGradient: "from-slate-50/70 via-white to-white",
-    ringHover: "hover:ring-slate-200/60",
+    accentClassName: "hover:border-sky-200 hover:bg-sky-50/30",
+    iconClassName: "bg-sky-50 text-sky-600",
   },
 ];
 
-/**
- * 解说类型选择器组件
- *
- * 设计要点：
- * - 顶部 hint 行说明该区域作为创建项目的入口
- * - 卡片按 3 列网格排布（小屏自适应为 1/2 列），按解说类型分配色调
- * - 每张卡片右上角带 Plus 提示「点击创建」
- */
 const NarrationTypePicker: React.FC<NarrationTypePickerProps> = ({
   onSelect,
 }) => {
   return (
-    <section className="px-1">
-      <div className="mb-3 flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-blue-500" aria-hidden />
-        <h3 className="text-sm font-semibold text-gray-700">
-          选择解说类型创建项目
-        </h3>
-        <span className="text-xs text-gray-400">点击下方任意类型快速开始</span>
+    <section className="shrink-0 rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkles className="h-4 w-4 shrink-0 text-blue-600" aria-hidden />
+          <h3 className="truncate text-sm font-semibold text-slate-950">
+            选择解说类型创建项目
+          </h3>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {NARRATION_TYPE_CARDS.map((card) => {
           const { Icon } = card;
           return (
@@ -149,27 +107,25 @@ const NarrationTypePicker: React.FC<NarrationTypePickerProps> = ({
               key={card.type}
               type="button"
               onClick={() => onSelect(card.type)}
-              className={`group relative flex items-center gap-3 rounded-xl border border-gray-200 bg-gradient-to-br ${card.bgGradient} px-4 py-3 text-left shadow-sm ring-0 transition-all hover:-translate-y-0.5 hover:shadow-md ${card.hoverBorder} hover:ring-2 ${card.ringHover} focus:outline-none focus:ring-2 focus:ring-blue-300`}
+              className={`group flex min-h-[66px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-100 ${card.accentClassName}`}
             >
               <div
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${card.iconBg} ${card.iconColor}`}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${card.iconClassName}`}
               >
                 <Icon className="h-5 w-5" aria-hidden />
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold text-gray-900">
-                    {card.title}
-                  </span>
+                <div className="truncate text-sm font-semibold text-slate-950">
+                  {card.title}
                 </div>
-                <p className="mt-0.5 truncate text-xs text-gray-500">
+                <p className="mt-1 line-clamp-1 text-xs text-slate-500">
                   {card.description}
                 </p>
               </div>
 
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/90 text-gray-400 shadow-sm ring-1 ring-gray-200 transition-colors group-hover:bg-blue-600 group-hover:text-white group-hover:ring-blue-500">
-                <Plus className="h-4 w-4" aria-hidden />
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors group-hover:border-blue-200 group-hover:text-blue-600">
+                <Plus className="h-4 w-4 stroke-[2.4]" aria-hidden />
               </div>
             </button>
           );

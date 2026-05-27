@@ -1,18 +1,25 @@
-// 项目卡片组件
-
 import {
   Calendar,
-  CheckCircle,
-  Clock,
-  Edit,
-  FileText,
-  MoreHorizontal,
-  Trash2,
-  XCircle,
+  CheckCircle2,
+  Clapperboard,
+  Clock3,
+  Edit3,
   Eye,
+  FileText,
+  Film,
+  Mic,
+  MoreHorizontal,
+  Mountain,
+  Music2,
+  PenLine,
+  Trash2,
+  Trophy,
+  Tv2,
+  XCircle,
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/project";
+import { NarrationType } from "../../types/project";
 import { ProjectStatus } from "../../types/project";
 
 interface ProjectCardProps {
@@ -21,9 +28,6 @@ interface ProjectCardProps {
   onDelete: (project: Project) => void;
 }
 
-/**
- * 项目卡片组件
- */
 const ProjectCard: React.FC<ProjectCardProps> = ({
   project,
   onEdit,
@@ -33,9 +37,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
+    if (!menuOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) {
@@ -58,91 +60,92 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
     };
   }, [menuOpen]);
 
-  /**
-   * 获取状态样式
-   */
   const getStatusConfig = (status: ProjectStatus) => {
     const configs = {
       [ProjectStatus.DRAFT]: {
-        icon: Edit,
+        icon: PenLine,
         label: "草稿",
-        color: "text-gray-600",
-        bg: "bg-gray-100",
-        darkBg: "dark:bg-gray-700",
-        darkColor: "dark:text-gray-300",
+        className: "border-blue-100 bg-blue-50 text-blue-600",
       },
       [ProjectStatus.PROCESSING]: {
-        icon: Clock,
+        icon: Clock3,
         label: "处理中",
-        color: "text-blue-600",
-        bg: "bg-blue-100",
-        darkBg: "dark:bg-blue-900/30",
-        darkColor: "dark:text-blue-400",
+        className: "border-amber-100 bg-amber-50 text-amber-600",
       },
       [ProjectStatus.COMPLETED]: {
-        icon: CheckCircle,
+        icon: CheckCircle2,
         label: "已完成",
-        color: "text-green-600",
-        bg: "bg-green-100",
-        darkBg: "dark:bg-green-900/30",
-        darkColor: "dark:text-green-400",
+        className: "border-emerald-100 bg-emerald-50 text-emerald-600",
       },
       [ProjectStatus.FAILED]: {
         icon: XCircle,
         label: "失败",
-        color: "text-red-600",
-        bg: "bg-red-100",
-        darkBg: "dark:bg-red-900/30",
-        darkColor: "dark:text-red-400",
+        className: "border-rose-100 bg-rose-50 text-rose-600",
       },
     };
     return configs[status] || configs[ProjectStatus.DRAFT];
   };
 
-  const statusConfig = getStatusConfig(project.status);
-  const StatusIcon = statusConfig.icon;
-
-  /**
-   * 项目类型标签
-   */
   const getTypeConfig = (type?: string) => {
     if (type === "omni") {
       return {
         icon: Eye,
         label: "全感知推理",
-        color: "text-fuchsia-700",
-        bg: "bg-fuchsia-100",
-        darkBg: "dark:bg-fuchsia-900/30",
-        darkColor: "dark:text-fuchsia-400",
+        iconClassName: "text-fuchsia-600",
       };
     }
     if (type === "visual") {
       return {
         icon: Eye,
         label: "视觉推理",
-        color: "text-purple-700",
-        bg: "bg-purple-100",
-        darkBg: "dark:bg-purple-900/30",
-        darkColor: "dark:text-purple-400",
+        iconClassName: "text-violet-600",
       };
     }
     return {
       icon: FileText,
       label: "字幕推理",
-      color: "text-amber-700",
-      bg: "bg-amber-100",
-      darkBg: "dark:bg-amber-900/30",
-      darkColor: "dark:text-amber-400",
+      iconClassName: "text-amber-600",
     };
   };
-  const typeConfig = getTypeConfig(project.project_type);
-  const TypeIcon = typeConfig.icon;
 
-  /**
-   * 格式化日期
-   */
+  const getNarrationTypeConfig = (type?: NarrationType) => {
+    const configs = {
+      [NarrationType.MOVIE]: {
+        icon: Film,
+        iconClassName: "text-blue-600",
+      },
+      [NarrationType.TV_DRAMA]: {
+        icon: Tv2,
+        iconClassName: "text-violet-600",
+      },
+      [NarrationType.SHORT_DRAMA]: {
+        icon: Clapperboard,
+        iconClassName: "text-rose-600",
+      },
+      [NarrationType.VARIETY]: {
+        icon: Music2,
+        iconClassName: "text-orange-500",
+      },
+      [NarrationType.DOCUMENTARY]: {
+        icon: Mountain,
+        iconClassName: "text-emerald-600",
+      },
+      [NarrationType.SPORTS]: {
+        icon: Trophy,
+        iconClassName: "text-orange-500",
+      },
+      [NarrationType.GENERAL]: {
+        icon: Mic,
+        iconClassName: "text-sky-600",
+      },
+    };
+    return configs[type || NarrationType.GENERAL] || configs[NarrationType.GENERAL];
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return "未知时间";
+
     return date.toLocaleDateString("zh-CN", {
       year: "numeric",
       month: "2-digit",
@@ -152,9 +155,16 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
     });
   };
 
+  const statusConfig = getStatusConfig(project.status);
+  const typeConfig = getTypeConfig(project.project_type);
+  const narrationTypeConfig = getNarrationTypeConfig(project.narration_type);
+  const StatusIcon = statusConfig.icon;
+  const TypeIcon = typeConfig.icon;
+  const NarrationTypeIcon = narrationTypeConfig.icon;
+
   return (
-    <div
-      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700"
+    <article
+      className="group relative flex h-full min-h-[112px] cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm transition-colors hover:border-blue-200 hover:shadow-md focus-within:border-blue-300 dark:border-gray-700 dark:bg-gray-900"
       onClick={() => onEdit(project)}
       role="button"
       tabIndex={0}
@@ -165,99 +175,92 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         }
       }}
     >
+      <div className="flex flex-1 flex-col px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 pr-8">
+            <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950">
+              {project.name}
+            </h3>
+            <div className="mt-1 flex items-center text-[11px] text-slate-500">
+              <Calendar className="mr-1 h-3 w-3 text-slate-400" />
+              <span className="truncate">{formatDate(project.created_at)}</span>
+            </div>
+          </div>
 
-      <div className="flex flex-1 flex-col p-5">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex items-start gap-2">
-              <h3 className="line-clamp-2 flex-1 text-base font-semibold leading-6 text-gray-900 dark:text-gray-100">
-                {project.name}
-              </h3>
-              <div className="relative flex-shrink-0" ref={menuRef}>
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              aria-label="更多操作"
+              aria-expanded={menuOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((prev) => !prev);
+              }}
+              className="flex h-5 w-6 items-center justify-center rounded border border-transparent text-slate-500 transition-colors hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 top-6 z-10 w-32 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <button
                   type="button"
-                  aria-label="更多操作"
-                  aria-expanded={menuOpen}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setMenuOpen((prev) => !prev);
+                    setMenuOpen(false);
+                    onEdit(project);
                   }}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-400 transition-colors hover:border-gray-200 hover:bg-gray-100 hover:text-gray-700 dark:hover:border-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
                 >
-                  <MoreHorizontal className="h-4 w-4" />
+                  <Edit3 className="h-4 w-4" />
+                  编辑
                 </button>
-
-                {menuOpen && (
-                  <div className="absolute right-0 top-10 z-10 w-32 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setMenuOpen(false);
-                        onEdit(project);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
-                    >
-                      <Edit className="h-4 w-4" />
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setMenuOpen(false);
-                        onDelete(project);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      删除
-                    </button>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                    onDelete(project);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除
+                </button>
               </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.darkBg} ${statusConfig.darkColor}`}
-              >
-                <StatusIcon className="mr-1 h-3.5 w-3.5" />
-                {statusConfig.label}
-              </span>
-              <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
-                <Calendar className="mr-1 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
-                <span>{formatDate(project.created_at)}</span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* {project.description ? (
-          <p className="mb-4 line-clamp-2 min-h-[2.75rem] text-sm leading-5 text-gray-500">
-            {project.description}
-          </p>
-        ) : (
-          <div className="mb-4 min-h-[2.75rem] rounded-xl border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2 text-sm text-gray-400">
-            暂无项目描述
-          </div>
-        )} */}
 
-        <div className="mt-auto flex items-center gap-2 overflow-hidden">
-          <div
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${typeConfig.bg} ${typeConfig.color} ${typeConfig.darkBg} ${typeConfig.darkColor}`}
-          >
-            <TypeIcon className="mr-1.5 h-3.5 w-3.5" />
-            <span className="truncate">{typeConfig.label}</span>
+        <div className="mt-auto pt-3">
+          <div className="absolute right-4 bottom-9">
+            <span
+              className={`inline-flex max-w-[96px] items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusConfig.className}`}
+            >
+              <StatusIcon className="mr-1 h-3 w-3 shrink-0" />
+              <span className="truncate">{statusConfig.label}</span>
+            </span>
           </div>
 
-          <div className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600">
-            <FileText className="mr-1.5 h-3.5 w-3.5 text-gray-400" />
-            <span className="truncate">{project.narration_type}</span>
+          <div className="flex min-w-0 items-center gap-3 text-[11px] text-slate-500">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <TypeIcon className={`h-3.5 w-3.5 shrink-0 ${typeConfig.iconClassName}`} />
+              <span className="truncate">
+                {typeConfig.label}
+              </span>
+            </div>
+            <div className="h-3 w-px shrink-0 bg-slate-200" />
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <NarrationTypeIcon className={`h-3.5 w-3.5 shrink-0 ${narrationTypeConfig.iconClassName}`} />
+              <span className="truncate">
+                {project.narration_type}
+              </span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </article>
   );
 };
 
