@@ -49,7 +49,11 @@ class HumorScriptGenerationPrompt(TextPrompt):
 
     def get_template(self) -> str:
         body = load_humor_markdown()
-        # 与 movie/short_drama 的 script_generation 用语对齐：电影用「原片」，短剧用「原剧」
-        source_label = "原片" if self._label == "电影" else "原剧"
+        try:
+            from modules.narration_types import get_config_by_category
+
+            source_label = get_config_by_category(self.metadata.category).source_label
+        except Exception:
+            source_label = "原片" if self._label == "电影" else "原剧"
         body = body.replace("__WORK_KIND__", self._label).replace("__SOURCE_LABEL__", source_label)
         return body.rstrip() + "\n" + _MATERIAL_SUFFIX

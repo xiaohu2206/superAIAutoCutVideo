@@ -10,6 +10,7 @@ export const NARRATION_TYPE_OPTIONS: NarrationTypeOption[] = [
   { label: "短剧解说", value: NarrationType.SHORT_DRAMA, promptCategory: "short_drama_narration" },
   { label: "电影解说", value: NarrationType.MOVIE, promptCategory: "movie_narration" },
   { label: "电视剧解说", value: NarrationType.TV_DRAMA, promptCategory: "tv_drama_narration" },
+  { label: "动漫解说", value: NarrationType.ANIME, promptCategory: "anime_narration" },
   { label: "综艺解说", value: NarrationType.VARIETY, promptCategory: "variety_narration" },
   { label: "纪录片解说", value: NarrationType.DOCUMENTARY, promptCategory: "documentary_narration" },
   { label: "体育解说", value: NarrationType.SPORTS, promptCategory: "sports_narration" },

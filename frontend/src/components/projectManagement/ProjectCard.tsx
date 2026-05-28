@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Mountain,
   Music2,
+  Palette,
   Trash2,
   Trophy,
   Tv2,
@@ -95,6 +96,11 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         icon: Clapperboard,
         label: NarrationType.SHORT_DRAMA,
         iconClassName: "text-rose-500 dark:text-rose-400",
+      },
+      [NarrationType.ANIME]: {
+        icon: Palette,
+        label: NarrationType.ANIME,
+        iconClassName: "text-fuchsia-500 dark:text-fuchsia-400",
       },
       [NarrationType.VARIETY]: {
         icon: Music2,

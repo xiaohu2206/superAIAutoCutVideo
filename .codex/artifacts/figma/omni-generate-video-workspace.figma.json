@@ -1,0 +1,454 @@
+{
+  "version": "1.0",
+  "page": {
+    "name": "OmniGenerateVideoWorkspace",
+    "viewport": { "w": 1833, "h": 1035, "unit": "px" }
+  },
+  "assets": {
+    "colors": {
+      "appBg": "#020814",
+      "panelBg": "#061326",
+      "panelBgSoft": "#081a33",
+      "panelBgDeep": "#030b18",
+      "border": "#0E3E78",
+      "borderBright": "#1683FF",
+      "primary": "#2E8CFF",
+      "primarySoft": "#102F66",
+      "violet": "#5F45D9",
+      "violetBright": "#8C7CFF",
+      "text": "#F5F9FF",
+      "muted": "#A9B7C8",
+      "subtle": "#6F8198",
+      "success": "#18C778",
+      "danger": "#FF3356"
+    },
+    "icons": [
+      { "name": "arrow-left", "src": "lucide:arrow-left" },
+      { "name": "folder", "src": "lucide:folder" },
+      { "name": "mic", "src": "lucide:mic" },
+      { "name": "trash", "src": "lucide:trash-2" },
+      { "name": "chevron-up", "src": "lucide:chevron-up" },
+      { "name": "chevron-down", "src": "lucide:chevron-down" }
+    ],
+    "images": [
+      { "name": "videoPreviewFrame", "src": "screenshot:video-preview", "inferred": true }
+    ],
+    "fonts": [
+      { "family": "Inter, PingFang SC, Microsoft YaHei, sans-serif", "weight": [400, 500, 600, 700] }
+    ],
+    "tokens": {
+      "radius.sm": 6,
+      "radius.md": 8,
+      "radius.lg": 12,
+      "space.sm": 8,
+      "space.md": 16,
+      "space.lg": 24,
+      "shadow.panel": "0 0 0 1px rgba(22,131,255,.45), 0 14px 48px rgba(0,102,255,.18)",
+      "shadow.active": "0 0 0 1px rgba(140,124,255,.72), 0 0 24px rgba(87,65,255,.45)",
+      "shadow.glow": "0 0 18px rgba(46,140,255,.6)"
+    }
+  },
+  "nodes": [
+    {
+      "id": "n_001",
+      "name": "GenerateVideoShell",
+      "type": "frame",
+      "bbox": { "x": 94, "y": 16, "w": 1721, "h": 1004, "unit": "px" },
+      "style": {
+        "bg": "@assets.colors.appBg",
+        "color": "@assets.colors.text",
+        "fontFamily": "@assets.fonts[0].family",
+        "fontSize": 14,
+        "fontWeight": 400,
+        "radius": "@assets.tokens.radius.lg",
+        "border": "@assets.colors.border",
+        "shadow": "@assets.tokens.shadow.panel",
+        "padding": [16, 16, 16, 16],
+        "align": "start",
+        "opacity": 1
+      },
+      "asset": null,
+      "inferred": true,
+      "children": [
+        {
+          "id": "n_002",
+          "name": "GenerateVideoHeader",
+          "type": "frame",
+          "bbox": { "x": 0, "y": 0, "w": 1721, "h": 78, "unit": "px" },
+          "style": {
+            "bg": "@assets.colors.panelBg",
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 20,
+            "fontWeight": 700,
+            "radius": "@assets.tokens.radius.lg",
+            "border": "@assets.colors.border",
+            "shadow": "0 8px 30px rgba(0,0,0,.28)",
+            "padding": [16, 18, 16, 18],
+            "align": "center",
+            "opacity": 1
+          },
+          "asset": null,
+          "inferred": true,
+          "children": [
+            {
+              "id": "n_003",
+              "name": "ProjectTitle",
+              "type": "text",
+              "bbox": { "x": 76, "y": 20, "w": 220, "h": 34, "unit": "px" },
+              "text": "白日梦想家",
+              "style": {
+                "bg": null,
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 28,
+                "fontWeight": 700,
+                "radius": null,
+                "border": null,
+                "shadow": null,
+                "padding": [0, 0, 0, 0],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": null,
+              "children": []
+            },
+            {
+              "id": "n_004",
+              "name": "StepButtons",
+              "type": "custom:stepper",
+              "bbox": { "x": 1224, "y": 18, "w": 448, "h": 44, "unit": "px" },
+              "style": {
+                "bg": "transparent",
+                "color": "@assets.colors.muted",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 16,
+                "fontWeight": 600,
+                "radius": "@assets.tokens.radius.md",
+                "border": "@assets.colors.border",
+                "shadow": null,
+                "padding": [0, 0, 0, 0],
+                "align": "center",
+                "opacity": 1
+              },
+              "asset": null,
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "n_005",
+          "name": "GenerateVideoPanel",
+          "type": "frame",
+          "bbox": { "x": 0, "y": 86, "w": 1721, "h": 220, "unit": "px" },
+          "style": {
+            "bg": "@assets.colors.panelBg",
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 16,
+            "fontWeight": 600,
+            "radius": "@assets.tokens.radius.lg",
+            "border": "@assets.colors.borderBright",
+            "shadow": "@assets.tokens.shadow.panel",
+            "padding": [20, 18, 18, 18],
+            "align": "start",
+            "opacity": 1
+          },
+          "asset": null,
+          "inferred": true,
+          "children": [
+            {
+              "id": "n_006",
+              "name": "GenerateVideoTitle",
+              "type": "text",
+              "bbox": { "x": 34, "y": 24, "w": 120, "h": 28, "unit": "px" },
+              "text": "生成视频",
+              "style": {
+                "bg": null,
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 24,
+                "fontWeight": 700,
+                "radius": null,
+                "border": null,
+                "shadow": null,
+                "padding": [0, 0, 0, 0],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": null,
+              "children": []
+            },
+            {
+              "id": "n_007",
+              "name": "OperationPanel",
+              "type": "frame",
+              "bbox": { "x": 16, "y": 78, "w": 1688, "h": 94, "unit": "px" },
+              "style": {
+                "bg": "@assets.colors.panelBgDeep",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 14,
+                "fontWeight": 500,
+                "radius": "@assets.tokens.radius.md",
+                "border": "@assets.colors.border",
+                "shadow": "inset 0 1px 0 rgba(255,255,255,.04)",
+                "padding": [14, 14, 14, 14],
+                "align": "start",
+                "opacity": 1
+              },
+              "asset": null,
+              "inferred": true,
+              "children": [
+                {
+                  "id": "n_008",
+                  "name": "ScriptButton",
+                  "type": "button",
+                  "bbox": { "x": 0, "y": 0, "w": 192, "h": 46, "unit": "px" },
+                  "text": "生成解说脚本",
+                  "style": {
+                    "bg": "@assets.colors.violet",
+                    "color": "@assets.colors.text",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 14,
+                    "fontWeight": 700,
+                    "radius": "@assets.tokens.radius.sm",
+                    "border": "@assets.colors.violetBright",
+                    "shadow": "@assets.tokens.shadow.active",
+                    "padding": [12, 18, 12, 18],
+                    "align": "center",
+                    "opacity": 1
+                  },
+                  "asset": null,
+                  "children": []
+                },
+                {
+                  "id": "n_009",
+                  "name": "DraftPath",
+                  "type": "custom:path-bar",
+                  "bbox": { "x": 0, "y": 60, "w": 1660, "h": 40, "unit": "px" },
+                  "text": "草稿路径： C:\\Users\\Administrator\\AppData\\Local\\JianyingPro\\User Data\\Projects\\com.lveditor.draft\\auto_bc214000",
+                  "style": {
+                    "bg": "@assets.colors.panelBg",
+                    "color": "@assets.colors.muted",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 14,
+                    "fontWeight": 400,
+                    "radius": "@assets.tokens.radius.md",
+                    "border": "@assets.colors.border",
+                    "shadow": null,
+                    "padding": [9, 14, 9, 14],
+                    "align": "left",
+                    "opacity": 1
+                  },
+                  "asset": "@assets.icons[folder]",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "n_010",
+          "name": "OmniWorkspacePanel",
+          "type": "frame",
+          "bbox": { "x": 0, "y": 320, "w": 1721, "h": 690, "unit": "px" },
+          "style": {
+            "bg": "@assets.colors.panelBg",
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 14,
+            "fontWeight": 400,
+            "radius": "@assets.tokens.radius.lg",
+            "border": "@assets.colors.borderBright",
+            "shadow": "@assets.tokens.shadow.panel",
+            "padding": [24, 18, 18, 18],
+            "align": "start",
+            "opacity": 1
+          },
+          "asset": null,
+          "inferred": true,
+          "children": [
+            {
+              "id": "n_011",
+              "name": "WorkspaceTitle",
+              "type": "text",
+              "bbox": { "x": 26, "y": 24, "w": 260, "h": 28, "unit": "px" },
+              "text": "Omni 镜头校对工作区",
+              "style": {
+                "bg": null,
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 22,
+                "fontWeight": 700,
+                "radius": null,
+                "border": null,
+                "shadow": "@assets.tokens.shadow.glow",
+                "padding": [0, 0, 0, 0],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": null,
+              "inferred": true,
+              "children": []
+            },
+            {
+              "id": "n_012",
+              "name": "WorkspaceToolbar",
+              "type": "frame",
+              "bbox": { "x": 1218, "y": 28, "w": 454, "h": 42, "unit": "px" },
+              "style": {
+                "bg": "transparent",
+                "color": "@assets.colors.muted",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 14,
+                "fontWeight": 600,
+                "radius": "@assets.tokens.radius.md",
+                "border": null,
+                "shadow": null,
+                "padding": [0, 0, 0, 0],
+                "align": "right",
+                "opacity": 1
+              },
+              "asset": null,
+              "children": []
+            },
+            {
+              "id": "n_013",
+              "name": "PreviewPanel",
+              "type": "frame",
+              "bbox": { "x": 16, "y": 120, "w": 532, "h": 520, "unit": "px" },
+              "style": {
+                "bg": "@assets.colors.panelBgDeep",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 14,
+                "fontWeight": 500,
+                "radius": "@assets.tokens.radius.md",
+                "border": "@assets.colors.borderBright",
+                "shadow": "0 0 20px rgba(22,131,255,.18)",
+                "padding": [8, 8, 8, 8],
+                "align": "start",
+                "opacity": 1
+              },
+              "asset": null,
+              "inferred": true,
+              "children": [
+                {
+                  "id": "n_014",
+                  "name": "VideoPreview",
+                  "type": "image",
+                  "bbox": { "x": 8, "y": 48, "w": 516, "h": 298, "unit": "px" },
+                  "style": {
+                    "bg": "#000000",
+                    "color": "@assets.colors.text",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 14,
+                    "fontWeight": 400,
+                    "radius": "@assets.tokens.radius.md",
+                    "border": null,
+                    "shadow": null,
+                    "padding": [0, 0, 0, 0],
+                    "align": "center",
+                    "opacity": 1
+                  },
+                  "asset": "@assets.images[videoPreviewFrame]",
+                  "inferred": true,
+                  "children": []
+                },
+                {
+                  "id": "n_015",
+                  "name": "CaptionBox",
+                  "type": "text",
+                  "bbox": { "x": 0, "y": 372, "w": 532, "h": 120, "unit": "px" },
+                  "text": "主人公沃特在杂志社一干就是16年，常年窝在不见天日的地下室里，日复一日冲洗、整理那些传奇摄影师从世界各地寄回来的胶卷底片。",
+                  "style": {
+                    "bg": "@assets.colors.panelBg",
+                    "color": "@assets.colors.text",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 15,
+                    "fontWeight": 500,
+                    "radius": "@assets.tokens.radius.md",
+                    "border": "@assets.colors.border",
+                    "shadow": null,
+                    "padding": [22, 24, 22, 24],
+                    "align": "center",
+                    "opacity": 1
+                  },
+                  "asset": null,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "n_016",
+              "name": "SegmentTable",
+              "type": "list",
+              "bbox": { "x": 568, "y": 120, "w": 1134, "h": 540, "unit": "px" },
+              "style": {
+                "bg": "@assets.colors.panelBgDeep",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 13,
+                "fontWeight": 400,
+                "radius": "@assets.tokens.radius.md",
+                "border": "@assets.colors.border",
+                "shadow": null,
+                "padding": [0, 0, 0, 0],
+                "align": "start",
+                "opacity": 1
+              },
+              "asset": null,
+              "inferred": true,
+              "children": [
+                {
+                  "id": "n_017",
+                  "name": "SegmentTableHeader",
+                  "type": "frame",
+                  "bbox": { "x": 0, "y": 0, "w": 1134, "h": 42, "unit": "px" },
+                  "style": {
+                    "bg": "@assets.colors.panelBgSoft",
+                    "color": "@assets.colors.muted",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 12,
+                    "fontWeight": 600,
+                    "radius": "@assets.tokens.radius.md",
+                    "border": null,
+                    "shadow": null,
+                    "padding": [12, 14, 12, 14],
+                    "align": "left",
+                    "opacity": 1
+                  },
+                  "asset": null,
+                  "children": []
+                },
+                {
+                  "id": "n_018",
+                  "name": "SelectedSegmentRow",
+                  "type": "frame",
+                  "bbox": { "x": 4, "y": 44, "w": 1126, "h": 52, "unit": "px" },
+                  "style": {
+                    "bg": "@assets.colors.primarySoft",
+                    "color": "@assets.colors.text",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 13,
+                    "fontWeight": 500,
+                    "radius": "@assets.tokens.radius.sm",
+                    "border": "@assets.colors.violetBright",
+                    "shadow": "@assets.tokens.shadow.active",
+                    "padding": [8, 12, 8, 12],
+                    "align": "left",
+                    "opacity": 1
+                  },
+                  "asset": null,
+                  "inferred": true,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -150,7 +150,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                           setTrimPath(vp);
                           setTrimOpen(true);
                         }}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-violet-100 text-violet-800 border border-violet-200 rounded hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-700 dark:hover:bg-violet-900/50"
+                        className="video-source-action--trim inline-flex items-center gap-1 px-2 py-1 text-xs bg-violet-100 text-violet-800 border border-violet-200 rounded hover:bg-violet-200"
                         title="裁剪"
                       >
                         <Scissors className="h-3.5 w-3.5" />
@@ -159,7 +159,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onDeleteVideoItem(vp); }}
-                        className="px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/50"
+                        className="video-source-action--delete px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
                         title="删除"
                       >
                         删除

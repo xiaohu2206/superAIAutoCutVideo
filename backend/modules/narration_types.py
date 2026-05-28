@@ -49,6 +49,14 @@ NARRATION_TYPE_CONFIG: Dict[str, NarrationTypeConfig] = {
         source_label="原剧",
         work_kind="电视剧",
     ),
+    "动漫解说": NarrationTypeConfig(
+        value="动漫解说",
+        category="anime_narration",
+        default_script_length="40～60条",
+        output_format="short_drama",
+        source_label="原动画",
+        work_kind="动漫",
+    ),
     "综艺解说": NarrationTypeConfig(
         value="综艺解说",
         category="variety_narration",

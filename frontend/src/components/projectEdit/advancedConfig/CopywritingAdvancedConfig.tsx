@@ -207,6 +207,7 @@ const CopywritingAdvancedConfig: React.FC<CopywritingAdvancedConfigProps> = ({
           onEditUserTemplate={(id_or_key) => void handleEditUserTemplate(id_or_key)}
           onDeleteUserTemplate={(id, name) => void openDeleteModal(id, name)}
           onCreateTemplate={openCreateTemplateModal}
+          variant="light"
         />
       )}
       <PreviewModal

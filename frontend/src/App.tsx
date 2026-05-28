@@ -771,10 +771,20 @@ const App: React.FC = () => {
     setActiveTab("home");
   };
 
-  const contentSurfaceClass = theme === "dark" ? "bg-[#121212]" : "bg-slate-50/70";
+  const isDarkTheme = theme === "dark";
+  const contentSurfaceClass = isDarkTheme ? "bg-[#121212]" : "bg-slate-50/70";
+  const titlebarStyle: React.CSSProperties = isDarkTheme
+    ? {
+        backgroundColor: "rgba(31, 31, 31, 0.96)",
+        borderBottomColor: "#2a2a2a",
+        boxShadow: "0 1px 0 rgba(0, 0, 0, 0.4)",
+      }
+    : {
+        backgroundColor: "rgba(255, 255, 255, 0.88)",
+      };
 
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5 dark:border-[#2a2a2a] dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:ring-[#2a2a2a]">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-slate-300/70 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-slate-900/5 dark:!border-0 dark:!border-transparent dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:!ring-0">
       <Navigation
         activeTab={showProfile ? "profile" : activeTab}
         onTabChange={(tab) => {
@@ -787,9 +797,12 @@ const App: React.FC = () => {
         onToggleTheme={handleToggleTheme}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.10),_transparent_28%),linear-gradient(to_bottom,_#181818,_#121212)]">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-r-[18px] bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.10),_transparent_28%),linear-gradient(to_bottom,_#181818,_#121212)]">
         {isTauri && (
-          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-[#2a2a2a] dark:bg-[#181818]/88">
+          <header
+            className="sticky top-0 z-50 border-b border-slate-200/80 backdrop-blur-xl dark:border-[#2a2a2a]"
+            style={titlebarStyle}
+          >
             <div
               className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
               onPointerDown={handleTitlebarPointerDown}
@@ -830,7 +843,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => void TauriCommands.closeWindow()}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-500 hover:text-white dark:text-zinc-500"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-500 hover:text-white dark:text-zinc-500 dark:hover:bg-rose-500 dark:hover:text-white"
                   title="关闭"
                   aria-label="关闭窗口"
                 >

@@ -8,11 +8,13 @@
     scroll-behavior: smooth;
     color-scheme: light;
     background: transparent;
+    overflow: hidden;
+    border-radius: 18px;
   }
 
   html.dark {
     color-scheme: dark;
-    background: rgb(18, 18, 18);
+    background: transparent;
   }
 
   body {
@@ -20,12 +22,12 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     background: transparent;
     overflow: hidden;
+    border-radius: 18px;
   }
 
   .dark body {
     @apply text-zinc-100;
-    background: rgb(18, 18, 18);
-    --tw-ring-offset-color: #121212;
+    border-radius: 18px;
   }
 
   #root {
@@ -33,10 +35,11 @@
     min-height: 100vh;
     overflow: hidden;
     background: transparent;
+    border-radius: 18px;
   }
 
   .dark #root {
-    background: rgb(18, 18, 18);
+    border-radius: 18px;
   }
 
   /* Native controls need explicit dark colors when no utility class is present. */
@@ -243,13 +246,25 @@
     position: relative;
   }
 
+  .dark .window-shell {
+    border: 0 !important;
+    outline: 0 !important;
+  }
+
   .window-shell::before {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+
+  .dark .window-shell::before {
+    border: 0;
+    box-shadow: none;
   }
 
   .main-scroll-hidden::-webkit-scrollbar {
@@ -637,6 +652,30 @@ html::-webkit-scrollbar {
   .dark .dark\:hover\:bg-gray-800\/60:hover,
   .dark .dark\:hover\:bg-slate-700:hover {
     @apply bg-white/10;
+  }
+
+  .dark .video-source-action--trim {
+    background-color: #1f1f1f !important;
+    border-color: #4c3b7a !important;
+    color: #c4b5fd !important;
+  }
+
+  .dark .video-source-action--trim:hover {
+    background-color: #2b2142 !important;
+    border-color: #7c5cff !important;
+    color: #ddd6fe !important;
+  }
+
+  .dark .video-source-action--delete {
+    background-color: #1f1f1f !important;
+    border-color: #7a3b3b !important;
+    color: #fca5a5 !important;
+  }
+
+  .dark .video-source-action--delete:hover {
+    background-color: #3a1f1f !important;
+    border-color: #ef6b6b !important;
+    color: #fecaca !important;
   }
 }
 
