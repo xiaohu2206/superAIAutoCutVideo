@@ -175,9 +175,9 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
       {/* 模态框内容 */}
       <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/50">
           {/* 头部 */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-white/10">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-[#2a2a2a]">
             <div className="flex items-center space-x-3">
               <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-lg dark:bg-blue-500/10">
                 <Folder className="h-5 w-5 text-blue-600 dark:text-blue-300" />
@@ -218,7 +218,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="必须填影视名称"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:border-white/10 dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-blue-500/30"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-blue-500/30"
                 disabled={loading}
                 required
               />
@@ -236,7 +236,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
                     projectType === "subtitle"
                       ? "border-green-500 bg-green-50 dark:border-green-600 dark:bg-green-900/20"
-                      : "border-gray-200 bg-white hover:border-green-300 dark:border-white/10 dark:bg-[#242424] dark:hover:border-green-400/40"
+                      : "border-gray-200 bg-white hover:border-green-300 dark:border-[#2a2a2a] dark:bg-[#242424] dark:hover:border-green-400/40"
                   }`}
                 >
                   {projectType === "subtitle" && (
@@ -260,7 +260,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
                     projectType === "visual"
                       ? "border-blue-500 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20"
-                      : "border-gray-200 bg-white hover:border-blue-300 dark:border-white/10 dark:bg-[#242424] dark:hover:border-blue-400/40"
+                      : "border-gray-200 bg-white hover:border-blue-300 dark:border-[#2a2a2a] dark:bg-[#242424] dark:hover:border-blue-400/40"
                   }`}
                 >
                   {projectType === "visual" && (
@@ -295,7 +295,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50 dark:border-gray-700 dark:bg-gray-800"
                       : projectType === "omni"
                         ? "cursor-pointer border-purple-500 bg-gradient-to-br from-purple-50 via-amber-50/60 to-fuchsia-50 ring-1 ring-purple-400/40 dark:border-purple-500 dark:from-purple-950/50 dark:via-amber-950/35 dark:to-fuchsia-950/25 dark:ring-purple-500/30"
-                        : "cursor-pointer border-gray-200 bg-gradient-to-br from-white via-amber-50/25 to-purple-50/40 hover:border-amber-400/55 hover:ring-1 hover:ring-amber-300/40 dark:border-white/10 dark:from-[#242424] dark:via-amber-950/20 dark:to-purple-950/25 dark:hover:border-amber-400/40"
+                        : "cursor-pointer border-gray-200 bg-gradient-to-br from-white via-amber-50/25 to-purple-50/40 hover:border-amber-400/55 hover:ring-1 hover:ring-amber-300/40 dark:border-[#2a2a2a] dark:from-[#242424] dark:via-amber-950/20 dark:to-purple-950/25 dark:hover:border-amber-400/40"
                   }`}
                 >
                   {projectType === "omni" && !isMoondreamEnabled && (
@@ -378,7 +378,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       className={`relative p-3 border-2 rounded-lg cursor-pointer transition-all ${
                         omniEffectTier === opt.tier
                           ? `${opt.activeBorder} ${opt.activeBg}`
-                          : `border-gray-200 bg-white ${opt.hoverBorder} dark:border-white/10 dark:bg-[#242424]`
+                          : `border-gray-200 bg-white ${opt.hoverBorder} dark:border-[#2a2a2a] dark:bg-[#242424]`
                       }`}
                     >
                       {omniEffectTier === opt.tier && (

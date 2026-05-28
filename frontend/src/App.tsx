@@ -771,8 +771,10 @@ const App: React.FC = () => {
     setActiveTab("home");
   };
 
+  const contentSurfaceClass = theme === "dark" ? "bg-[#121212]" : "bg-slate-50/70";
+
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5 dark:border-white/10 dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:ring-white/10">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5 dark:border-[#2a2a2a] dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:ring-[#2a2a2a]">
       <Navigation
         activeTab={showProfile ? "profile" : activeTab}
         onTabChange={(tab) => {
@@ -787,7 +789,7 @@ const App: React.FC = () => {
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.10),_transparent_28%),linear-gradient(to_bottom,_#181818,_#121212)]">
         {isTauri && (
-          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-white/10 dark:bg-[#181818]/88">
+          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-[#2a2a2a] dark:bg-[#181818]/88">
             <div
               className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
               onPointerDown={handleTitlebarPointerDown}
@@ -842,15 +844,15 @@ const App: React.FC = () => {
         <main
           className={
             activeTab === "settings"
-              ? "main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-hidden"
-              : "main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+              ? `main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-hidden ${contentSurfaceClass}`
+              : `main-scroll-hidden flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden ${contentSurfaceClass}`
           }
         >
           <div
             className={
               activeTab === "settings"
-                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 dark:bg-[#121212]"
-                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 dark:bg-[#121212]"
+                ? `scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 ${contentSurfaceClass}`
+                : `scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 ${contentSurfaceClass}`
             }
           >
             {isTauri && showBackendStartupBanner && (

@@ -125,7 +125,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">文案生成</h2>
           <button
@@ -145,7 +145,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
           />
         )}
 
-        <div className="pt-4 border-t border-gray-200 flex flex-wrap items-start gap-3 dark:border-white/10">
+        <div className="pt-4 border-t border-gray-200 flex flex-wrap items-start gap-3 dark:border-[#2a2a2a]">
           <div className="flex flex-col items-start space-y-2">
             <button
               onClick={handleGenerateCopywriting}
@@ -169,7 +169,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
                       hasFilmContextSaved
                         ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-400/20 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
-                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-white/10 dark:bg-[#242424] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-zinc-100"
                     }`}
                     title="设置影片脉络与人物简介"
                   >
@@ -182,7 +182,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                   className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
                     hasReferenceCopywritingSaved
                       ? "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-400/20 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
-                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-white/10 dark:bg-[#242424] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-zinc-100"
                   }`}
                   title="设置洗稿文案"
                 >
@@ -204,7 +204,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                     onClick={handleStopGenerateCopywriting}
                     disabled={isStoppingCopywriting}
                     title="停止生成"
-                    className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                    className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                   >
                     {isStoppingCopywriting ? (
                       <Loader className="h-3 w-3 animate-spin" />
@@ -241,7 +241,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
       </div>
 
       {/* 文案编辑区 */}
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-4 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-4 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <CopywritingSection
           editedCopywriting={editedCopywriting}
           setEditedCopywriting={setEditedCopywriting}
@@ -251,7 +251,7 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
 
         {/* 进入下一步按钮 */}
         {hasCopywriting && (
-          <div className="pt-4 border-t border-gray-200 flex justify-end dark:border-white/10">
+          <div className="pt-4 border-t border-gray-200 flex justify-end dark:border-[#2a2a2a]">
             <button
               onClick={onGoToGenerateStep}
               className="flex items-center px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium shadow-sm hover:bg-blue-700 transition-all"
@@ -269,10 +269,10 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setFilmModalOpen(false)} />
           <div className="flex items-center justify-center min-h-screen p-4">
             <div
-              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:ring-white/10 dark:shadow-black/50"
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:ring-[#2a2a2a] dark:shadow-black/50"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0 dark:border-white/10">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0 dark:border-[#2a2a2a]">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">附加影片信息</h3>
                 <button
                   type="button"
@@ -305,20 +305,20 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                   </a>
                   的网页对话，将模型回复的影片信息粘贴到下方输入框，保存后即可在生成解说文案时自动带上。
                 </p>
-                <div className="bg-gray-50/50 rounded-lg p-4 border border-gray-100 dark:border-white/10 dark:bg-[#181818]">
+                <div className="bg-gray-50/50 rounded-lg p-4 border border-gray-100 dark:border-[#2a2a2a] dark:bg-[#181818]">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700 dark:text-zinc-200">可复制提示词</span>
                     <button
                       type="button"
                       onClick={handleCopyFilmPrompt}
                       disabled={copyingFilmPrompt}
-                      className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
+                      className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 shadow-sm dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
                     >
                       {copyingFilmPrompt ? <Loader className="h-4 w-4 animate-spin" /> : null}
                       复制提示词
                     </button>
                   </div>
-                  <pre className="text-sm bg-white border border-gray-200 rounded-md p-3.5 whitespace-pre-wrap break-words max-h-40 overflow-y-auto text-gray-600 font-mono shadow-sm dark:border-white/10 dark:bg-[#242424] dark:text-zinc-300">
+                  <pre className="text-sm bg-white border border-gray-200 rounded-md p-3.5 whitespace-pre-wrap break-words max-h-40 overflow-y-auto text-gray-600 font-mono shadow-sm dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-300">
                     {filmExtractPrompt}
                   </pre>
                 </div>
@@ -329,15 +329,15 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                     onChange={(e) => setFilmDraft(e.target.value)}
                     rows={12}
                     placeholder="将豆包 / ChatGPT 返回的影片脉络与人物简介粘贴到这里…"
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y dark:border-white/10 dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-indigo-500/30"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-indigo-500/30"
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0 dark:border-white/10 dark:bg-[#181818]">
+              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0 dark:border-[#2a2a2a] dark:bg-[#181818]">
                 <button
                   type="button"
                   onClick={() => setFilmModalOpen(false)}
-                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
                 >
                   取消
                 </button>
@@ -362,10 +362,10 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setReferenceModalOpen(false)} />
           <div className="flex items-center justify-center min-h-screen p-4">
             <div
-              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:ring-white/10 dark:shadow-black/50"
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:ring-[#2a2a2a] dark:shadow-black/50"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0 dark:border-white/10">
+              <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0 dark:border-[#2a2a2a]">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">洗稿</h3>
                 <button
                   type="button"
@@ -389,15 +389,15 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
                     onChange={(e) => setReferenceDraft(e.target.value)}
                     rows={16}
                     placeholder="粘贴参考文案…"
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y dark:border-white/10 dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-indigo-500/30"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm placeholder:text-gray-400 resize-y dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-indigo-500/30"
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0 dark:border-white/10 dark:bg-[#181818]">
+              <div className="flex justify-end gap-3 p-5 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0 dark:border-[#2a2a2a] dark:bg-[#181818]">
                 <button
                   type="button"
                   onClick={() => setReferenceModalOpen(false)}
-                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
                 >
                   取消
                 </button>

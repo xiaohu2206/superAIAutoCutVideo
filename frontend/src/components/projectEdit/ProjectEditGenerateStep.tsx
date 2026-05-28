@@ -98,7 +98,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">生成视频</h2>
           <button
@@ -184,7 +184,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
       {/* 脚本编辑区 */}
       {project.project_type === "omni" ? (
-        <div className="bg-white dark:bg-[#1f1f1f] rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-white/10 dark:shadow-black/30">
+        <div className="bg-white dark:bg-[#1f1f1f] rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-[#2a2a2a] dark:shadow-black/30">
           <OmniFullNarrationScriptWorkspace
             project={project}
             editedScript={omniNarration.omniEditedScript}
@@ -199,7 +199,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           />
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+        <div className="bg-white rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
           <ScriptJsonEditor
             editedScript={editedScript}
             setEditedScript={setEditedScript}

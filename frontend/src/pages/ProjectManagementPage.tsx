@@ -98,7 +98,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-50/60 dark:bg-[#121212]">
+    <div className="flex h-full min-h-0 flex-col gap-4 dark:bg-[#121212]">
       <NarrationTypePicker
         onSelect={(narrationType) => {
           setCreateInitialNarrationType(narrationType);
@@ -107,14 +107,12 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="project-list-scrollbar min-h-0 flex-1 overflow-y-auto">
-          <ProjectList
-            projects={projects}
-            loading={loading}
-            onEdit={handleEditProject}
-            onDelete={handleDeleteProject}
-          />
-        </div>
+        <ProjectList
+          projects={projects}
+          loading={loading}
+          onEdit={handleEditProject}
+          onDelete={handleDeleteProject}
+        />
       </div>
 
       <CreateProjectModal

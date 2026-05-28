@@ -249,7 +249,7 @@ export const VideoModelSettings: React.FC<VideoModelSettingsProps> = ({
             </p>
           </div>
 
-          <div className="pt-4 border-t">
+          <div className="pt-4">
             <button
               onClick={testModelConnection}
               disabled={

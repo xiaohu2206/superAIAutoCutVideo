@@ -65,7 +65,7 @@ const Navigation: React.FC<NavigationProps> = ({
   return (
     <>
       <aside
-        className={`flex h-full w-[40px] shrink-0 flex-col items-center border-r border-slate-200/80 bg-white/90 py-3 shadow-[10px_0_30px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-[#181818]/90 dark:shadow-[10px_0_30px_-24px_rgba(0,0,0,0.85)] ${className}`}
+        className={`flex h-full w-[40px] shrink-0 flex-col items-center bg-white/90 py-3 shadow-[10px_0_30px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl  dark:bg-[#181818]/90 dark:shadow-[10px_0_30px_-24px_rgba(0,0,0,0.85)] ${className}`}
       >
         <div className="flex items-center justify-center">
           <img src={Logo} alt="SuperAI" className="h-6 w-6 object-contain" />
@@ -100,7 +100,7 @@ const Navigation: React.FC<NavigationProps> = ({
           })}
         </div>
 
-        <div className="border-t border-slate-200/80 pt-3 dark:border-white/10">
+        <div className="border-slate-200/80 pt-3 dark:border-[#2a2a2a]">
           <div className="flex flex-col items-center gap-2">
             <button
               onClick={onToggleTheme}

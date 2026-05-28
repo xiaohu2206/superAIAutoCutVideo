@@ -152,6 +152,70 @@
     transition: background-color 0.2s ease;
   }
 
+  .dark .project-list-card {
+    background: linear-gradient(145deg, rgba(23, 33, 46, 0.88), rgba(12, 19, 30, 0.98)) !important;
+    border-color: rgba(71, 92, 120, 0.46) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 24px rgba(0, 0, 0, 0.2) !important;
+  }
+
+  .dark .project-list-card:hover {
+    background: linear-gradient(145deg, rgba(29, 42, 58, 0.92), rgba(15, 24, 37, 0.98)) !important;
+    border-color: rgba(86, 120, 164, 0.68) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 14px 30px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .project-view-switch__divider {
+    display: none;
+  }
+
+  .dark .project-view-switch {
+    background: #050a14 !important;
+    border-color: rgba(34, 211, 238, 0.28) !important;
+    padding: 0 !important;
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0.08),
+      0 0 22px rgba(34, 211, 238, 0.22),
+      inset 0 0 12px rgba(34, 211, 238, 0.08) !important;
+  }
+
+  .dark .project-view-switch__btn {
+    height: 100% !important;
+    width: 44px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #52606d !important;
+  }
+
+  .dark .project-view-switch__btn:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: #d4d4d8 !important;
+  }
+
+  .dark .project-view-switch__btn[data-active="true"] {
+    background:
+      linear-gradient(180deg, rgba(34, 211, 238, 0.18), rgba(34, 211, 238, 0.04)) !important;
+    color: #67e8f9 !important;
+    box-shadow:
+      inset 0 0 18px rgba(34, 211, 238, 0.38),
+      inset 0 -1px 0 rgba(34, 211, 238, 0.6) !important;
+    text-shadow: 0 0 8px rgba(34, 211, 238, 0.85);
+  }
+
+  .dark .project-view-switch__btn[data-active="true"] svg {
+    filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.85));
+  }
+
+  .dark .project-view-switch__divider {
+    display: block;
+    width: 1px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      rgba(34, 211, 238, 0.45),
+      transparent
+    );
+  }
+
   .project-list-scrollbar.scrollbar-visible {
     scrollbar-width: thin;
   }
@@ -241,15 +305,15 @@ html::-webkit-scrollbar {
 
 /* Dark mode support */
 .dark .card {
-  @apply border-white/10 bg-[#1f1f1f] text-zinc-100 shadow-black/30;
+  @apply border-[#2a2a2a] bg-[#1f1f1f] text-zinc-100 shadow-black/30;
 }
 
 .dark .input {
-  @apply border-white/10 bg-[#242424] text-zinc-100 placeholder:text-zinc-500 focus:ring-blue-500/30;
+  @apply border-[#2a2a2a] bg-[#242424] text-zinc-100 placeholder:text-zinc-500 focus:ring-blue-500/30;
 }
 
 .dark .select {
-  @apply border-white/10 bg-[#242424] text-zinc-100 placeholder:text-zinc-500 hover:border-white/20 focus:border-blue-400 focus:ring-blue-500/20 disabled:bg-white/5 disabled:text-zinc-500;
+  @apply border-[#2a2a2a] bg-[#242424] text-zinc-100 placeholder:text-zinc-500 hover:border-[#3a3a3a] focus:border-[#3a3a3a] focus:ring-blue-500/20 disabled:bg-white/5 disabled:text-zinc-500;
 }
 
 .dark .btn {
@@ -261,7 +325,7 @@ html::-webkit-scrollbar {
 }
 
 .dark .btn-outline {
-  @apply border-white/10 text-zinc-100 hover:bg-white/10;
+  @apply border-[#2a2a2a] text-zinc-100 hover:bg-white/10;
 }
 
 .dark .btn-ghost {
@@ -373,7 +437,7 @@ html::-webkit-scrollbar {
   .dark .border-gray-200,
   .dark .border-slate-100,
   .dark .border-slate-200 {
-    @apply border-white/10;
+    @apply border-[#2a2a2a];
   }
 
   .dark .border-blue-100,
@@ -407,7 +471,7 @@ html::-webkit-scrollbar {
 
   .dark .border-gray-300,
   .dark .border-slate-300 {
-    @apply border-white/15;
+    @apply border-[#333333];
   }
 
   .dark .text-gray-900,
@@ -532,7 +596,7 @@ html::-webkit-scrollbar {
   .dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
   .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
   .dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-    @apply border-white/10;
+    @apply border-[#2a2a2a];
   }
 
   .dark .dark\:bg-gray-900,
@@ -564,7 +628,7 @@ html::-webkit-scrollbar {
   .dark .dark\:border-slate-600,
   .dark .dark\:border-slate-700,
   .dark .dark\:border-slate-700\/80 {
-    @apply border-white/10;
+    @apply border-[#2a2a2a];
   }
 
   .dark .dark\:hover\:bg-gray-700:hover,

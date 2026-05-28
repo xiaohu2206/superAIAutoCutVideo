@@ -196,7 +196,7 @@ export const ContentModelSettings: React.FC<ContentModelSettingsProps> = ({
       </div>
 
       {/* 测试连接 */}
-      <div className="pt-4 border-t">
+      <div className="pt-4">
         <button
           onClick={testContentModelConnection}
           disabled={testingContentConnection || !currentContentConfig.api_key}

@@ -278,7 +278,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-md p-3 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-3 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button

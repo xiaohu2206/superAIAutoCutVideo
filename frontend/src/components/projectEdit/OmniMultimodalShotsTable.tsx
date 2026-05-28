@@ -79,7 +79,7 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
         </div>
 
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-5 flex items-center justify-center transition-all rounded-lg pointer-events-none">
-          <div className="opacity-0 group-hover:opacity-100 bg-white shadow-sm border border-gray-200 px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 flex items-center dark:border-white/10 dark:bg-[#242424] dark:text-zinc-200">
+          <div className="opacity-0 group-hover:opacity-100 bg-white shadow-sm border border-gray-200 px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 flex items-center dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-200">
             <Eye className="w-3 h-3 mr-1.5" />
             查看详情
           </div>
@@ -94,8 +94,8 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={() => setIsModalOpen(false)} />
           <div className="flex items-center justify-center min-h-screen p-4">
-            <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full flex flex-col max-h-[90vh] dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-white rounded-t-lg sticky top-0 z-10 dark:border-white/10 dark:bg-[#1f1f1f]">
+            <div className="relative bg-white rounded-lg shadow-xl max-w-6xl w-full flex flex-col max-h-[90vh] dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/50">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-white rounded-t-lg sticky top-0 z-10 dark:border-[#2a2a2a] dark:bg-[#1f1f1f]">
                 <div className="flex items-center gap-4 flex-wrap">
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-zinc-100">Omni 多模态详情</h3>
                   <div className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded dark:bg-white/10 dark:text-zinc-400">共 {shots.length} 段</div>
@@ -112,7 +112,7 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
                 </button>
               </div>
 
-              <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 font-medium text-sm text-gray-700 grid grid-cols-12 gap-4 sticky top-[72px] z-0 dark:border-white/10 dark:bg-[#181818] dark:text-zinc-300">
+              <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 font-medium text-sm text-gray-700 grid grid-cols-12 gap-4 sticky top-[72px] z-0 dark:border-[#2a2a2a] dark:bg-[#181818] dark:text-zinc-300">
                 <div className="col-span-1">序号</div>
                 <div className="col-span-2">操作</div>
                 <div className="col-span-2">时间段</div>
@@ -129,7 +129,7 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
                   return (
                     <div
                       key={`${id}-${idx}`}
-                      className="px-6 py-3 border-b border-gray-100 text-sm text-gray-600 grid grid-cols-12 gap-4 items-start hover:bg-fuchsia-50/40 transition-colors dark:border-white/10 dark:text-zinc-400 dark:hover:bg-fuchsia-500/10"
+                      className="px-6 py-3 border-b border-gray-100 text-sm text-gray-600 grid grid-cols-12 gap-4 items-start hover:bg-fuchsia-50/40 transition-colors dark:border-[#2a2a2a] dark:text-zinc-400 dark:hover:bg-fuchsia-500/10"
                     >
                       <div className="col-span-1 font-medium text-gray-900 dark:text-zinc-100">{id}</div>
                       <div className="col-span-2">

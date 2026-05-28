@@ -131,7 +131,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                 {videoOrder.map((vp, idx) => (
                   <div
                     key={vp}
-                    className={`flex items-center justify-between text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2 dark:border-white/10 dark:bg-[#242424] ${dragIndex===idx?"ring-2 ring-violet-300":""}`}
+                    className={`flex items-center justify-between text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2 dark:border-[#2a2a2a] dark:bg-[#242424] ${dragIndex===idx?"ring-2 ring-violet-300":""}`}
                     draggable
                     onDragStart={() => onItemDragStart(idx)}
                     onDragOver={(e) => onItemDragOver(e, idx)}

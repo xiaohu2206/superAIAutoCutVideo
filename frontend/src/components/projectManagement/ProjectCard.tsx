@@ -1,21 +1,15 @@
+import type { LucideIcon } from "lucide-react";
 import {
-  Calendar,
-  CheckCircle2,
   Clapperboard,
-  Clock3,
   Edit3,
-  Eye,
-  FileText,
   Film,
   Mic,
   MoreHorizontal,
   Mountain,
   Music2,
-  PenLine,
   Trash2,
   Trophy,
   Tv2,
-  XCircle,
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/project";
@@ -61,82 +55,66 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   }, [menuOpen]);
 
   const getStatusConfig = (status: ProjectStatus) => {
-    const configs = {
+    const configs: Record<ProjectStatus, { label: string; className: string }> = {
       [ProjectStatus.DRAFT]: {
-        icon: PenLine,
         label: "草稿",
-        className: "border-blue-100 bg-blue-50 text-blue-600 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300",
+        className: "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300",
       },
       [ProjectStatus.PROCESSING]: {
-        icon: Clock3,
         label: "处理中",
-        className: "border-amber-100 bg-amber-50 text-amber-600 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300",
+        className: "border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-300",
       },
       [ProjectStatus.COMPLETED]: {
-        icon: CheckCircle2,
         label: "已完成",
-        className: "border-emerald-100 bg-emerald-50 text-emerald-600 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300",
+        className: "border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300",
       },
       [ProjectStatus.FAILED]: {
-        icon: XCircle,
         label: "失败",
-        className: "border-rose-100 bg-rose-50 text-rose-600 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300",
+        className: "border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-300",
       },
     };
     return configs[status] || configs[ProjectStatus.DRAFT];
   };
 
-  const getTypeConfig = (type?: string) => {
-    if (type === "omni") {
-      return {
-        icon: Eye,
-        label: "全感知推理",
-        iconClassName: "text-fuchsia-600",
-      };
-    }
-    if (type === "visual") {
-      return {
-        icon: Eye,
-        label: "视觉推理",
-        iconClassName: "text-violet-600",
-      };
-    }
-    return {
-      icon: FileText,
-      label: "字幕推理",
-      iconClassName: "text-amber-600",
-    };
-  };
-
   const getNarrationTypeConfig = (type?: NarrationType) => {
-    const configs = {
+    const configs: Record<
+      NarrationType,
+      { icon: LucideIcon; label: string; iconClassName: string }
+    > = {
       [NarrationType.MOVIE]: {
         icon: Film,
-        iconClassName: "text-blue-600",
+        label: NarrationType.MOVIE,
+        iconClassName: "text-blue-500 dark:text-blue-400",
       },
       [NarrationType.TV_DRAMA]: {
         icon: Tv2,
-        iconClassName: "text-violet-600",
+        label: NarrationType.TV_DRAMA,
+        iconClassName: "text-violet-500 dark:text-violet-400",
       },
       [NarrationType.SHORT_DRAMA]: {
         icon: Clapperboard,
-        iconClassName: "text-rose-600",
+        label: NarrationType.SHORT_DRAMA,
+        iconClassName: "text-rose-500 dark:text-rose-400",
       },
       [NarrationType.VARIETY]: {
         icon: Music2,
-        iconClassName: "text-orange-500",
+        label: NarrationType.VARIETY,
+        iconClassName: "text-orange-500 dark:text-orange-400",
       },
       [NarrationType.DOCUMENTARY]: {
         icon: Mountain,
-        iconClassName: "text-emerald-600",
+        label: NarrationType.DOCUMENTARY,
+        iconClassName: "text-emerald-500 dark:text-emerald-400",
       },
       [NarrationType.SPORTS]: {
         icon: Trophy,
-        iconClassName: "text-orange-500",
+        label: NarrationType.SPORTS,
+        iconClassName: "text-amber-500 dark:text-amber-400",
       },
       [NarrationType.GENERAL]: {
         icon: Mic,
-        iconClassName: "text-sky-600",
+        label: NarrationType.GENERAL,
+        iconClassName: "text-sky-500 dark:text-sky-400",
       },
     };
     return configs[type || NarrationType.GENERAL] || configs[NarrationType.GENERAL];
@@ -146,25 +124,17 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return "未知时间";
 
-    return date.toLocaleDateString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const pad = (value: number) => value.toString().padStart(2, "0");
+    return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
   const statusConfig = getStatusConfig(project.status);
-  const typeConfig = getTypeConfig(project.project_type);
   const narrationTypeConfig = getNarrationTypeConfig(project.narration_type);
-  const StatusIcon = statusConfig.icon;
-  const TypeIcon = typeConfig.icon;
   const NarrationTypeIcon = narrationTypeConfig.icon;
 
   return (
     <article
-      className="group relative flex h-full min-h-[112px] cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm transition-colors hover:border-blue-200 hover:shadow-md focus-within:border-blue-300 dark:border-white/10 dark:bg-[#1f1f1f] dark:hover:border-blue-400/30 dark:hover:bg-[#242424] dark:hover:shadow-black/30 dark:focus-within:border-blue-400/40"
+      className="project-list-card group relative flex h-[95px] cursor-pointer flex-col rounded-md  bg-white/95 shadow-sm transition-all duration-200 hover:border-blue-200 hover:bg-white hover:shadow-md focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/20"
       onClick={() => onEdit(project)}
       role="button"
       tabIndex={0}
@@ -175,19 +145,30 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
         }
       }}
     >
-      <div className="flex flex-1 flex-col px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1 pr-8">
-            <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950 dark:text-zinc-100">
-              {project.name}
-            </h3>
-            <div className="mt-1 flex items-center text-[11px] text-slate-500 dark:text-zinc-400">
-              <Calendar className="mr-1 h-3 w-3 text-slate-400 dark:text-zinc-500" />
+      <div className="flex h-full flex-col px-3 py-2.5">
+        <div className="min-w-0">
+          <h3 className="truncate text-[13px] font-semibold leading-5 text-slate-950 dark:text-zinc-100" title={project.name}>
+            {project.name}
+          </h3>
+          <div className="mt-1 mb-1 flex min-w-0 items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center text-[10px] leading-none text-slate-500 dark:text-zinc-400">
               <span className="truncate">{formatDate(project.created_at)}</span>
             </div>
+            <span
+              className={`inline-flex h-5 max-w-[72px] shrink-0 items-center rounded-full border px-2 text-[10px] font-medium leading-none ${statusConfig.className}`}
+            >
+              <span className="truncate">{statusConfig.label}</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-white/[0.06]">
+          <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-none text-slate-500 dark:text-zinc-400">
+            <NarrationTypeIcon className={`h-3.5 w-3.5 shrink-0 ${narrationTypeConfig.iconClassName}`} />
+            <span className="truncate">{narrationTypeConfig.label}</span>
           </div>
 
-          <div className="relative shrink-0" ref={menuRef}>
+          <div className="relative shrink-0 self-center" ref={menuRef}>
             <button
               type="button"
               aria-label="更多操作"
@@ -196,13 +177,13 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                 event.stopPropagation();
                 setMenuOpen((prev) => !prev);
               }}
-              className="flex h-5 w-6 items-center justify-center rounded border border-transparent text-slate-500 transition-colors hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:text-zinc-400 dark:hover:border-white/10 dark:hover:bg-white/10 dark:hover:text-zinc-100 dark:focus:ring-blue-500/30"
+              className="flex h-5 w-7 items-center justify-center rounded-md border border-transparent text-slate-500 transition-colors hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:text-zinc-400 dark:hover:border-white/10 dark:hover:bg-white/[0.08] dark:hover:text-zinc-100 dark:focus:ring-blue-500/30"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-6 z-10 w-32 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-white/10 dark:bg-[#242424] dark:shadow-black/40">
+              <div className="absolute bottom-7 right-0 z-20 w-32 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-[#2a2a2a] dark:bg-[#242424] dark:shadow-black/40">
                 <button
                   type="button"
                   onClick={(event) => {
@@ -229,34 +210,6 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
                 </button>
               </div>
             )}
-          </div>
-        </div>
-
-
-        <div className="mt-auto pt-3">
-          <div className="absolute right-4 bottom-9">
-            <span
-              className={`inline-flex max-w-[96px] items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusConfig.className}`}
-            >
-              <StatusIcon className="mr-1 h-3 w-3 shrink-0" />
-              <span className="truncate">{statusConfig.label}</span>
-            </span>
-          </div>
-
-          <div className="flex min-w-0 items-center gap-3 text-[11px] text-slate-500 dark:text-zinc-400">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <TypeIcon className={`h-3.5 w-3.5 shrink-0 ${typeConfig.iconClassName}`} />
-              <span className="truncate">
-                {typeConfig.label}
-              </span>
-            </div>
-            <div className="h-3 w-px shrink-0 bg-slate-200 dark:bg-white/10" />
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <NarrationTypeIcon className={`h-3.5 w-3.5 shrink-0 ${narrationTypeConfig.iconClassName}`} />
-              <span className="truncate">
-                {project.narration_type}
-              </span>
-            </div>
           </div>
         </div>
       </div>

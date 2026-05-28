@@ -192,7 +192,7 @@ export const LogConsolePanel: React.FC<LogConsolePanelProps> = ({ enabled, proje
                         {visibleLines.map((line) => (
                           <div
                             key={String(line.id)}
-                            className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2 font-mono hover:bg-white/[0.04]"
+                            className="flex items-start gap-3 rounded-xl border border-[#1f2937] bg-white/[0.02] px-3 py-2 font-mono hover:bg-white/[0.04]"
                           >
                             <span className="shrink-0 pt-0.5 text-[11px] text-slate-500">{formatTime(line.timestamp)}</span>
                             <span

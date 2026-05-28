@@ -225,7 +225,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">项目配置</h2>
           <p className="text-xs text-gray-500 mb-2 dark:text-zinc-400">
@@ -256,7 +256,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         />
       </div>
 
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-3 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-3 dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100"></h2>
           <button
@@ -451,7 +451,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   onClick={onStopSceneExtraction}
                   disabled={isStoppingSceneExtraction}
                   title="停止镜头提取"
-                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                 >
                   {isStoppingSceneExtraction ? (
                     <Loader className="h-3 w-3 animate-spin" />
@@ -488,7 +488,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                       onClick={onStopOmniPipeline}
                       disabled={isStoppingOmniPipeline}
                       title="停止 Omni 管线"
-                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                     >
                       {isStoppingOmniPipeline ? (
                         <Loader className="h-3 w-3 animate-spin" />

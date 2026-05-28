@@ -71,7 +71,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
       <p className="text-sm text-gray-600 dark:text-zinc-400">点击下方区域可编辑字幕内容。</p>
 
       <div className="relative group cursor-pointer" onClick={() => setIsModalOpen(true)}>
-        <div className="w-full h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-violet-400 hover:ring-1 hover:ring-violet-400 transition-all flex items-center justify-between dark:border-white/10 dark:bg-[#242424] dark:text-zinc-300 dark:hover:border-violet-400/50 dark:hover:ring-violet-400/40">
+        <div className="w-full h-10 px-4 py-2 font-mono text-sm border border-gray-300 rounded-lg bg-gray-50 overflow-hidden text-gray-700 hover:border-violet-400 hover:ring-1 hover:ring-violet-400 transition-all flex items-center justify-between dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-300 dark:hover:border-violet-400/50 dark:hover:ring-violet-400/40">
           {segments.length === 0 ? (
             <span className="text-gray-400 dark:text-zinc-500">暂无字幕内容，请先提取字幕或上传字幕。</span>
           ) : (
@@ -82,7 +82,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
           )}
         </div>
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-5 flex items-center justify-center transition-all rounded-lg pointer-events-none">
-          <div className="opacity-0 group-hover:opacity-100 bg-white shadow-sm border border-gray-200 px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 flex items-center dark:border-white/10 dark:bg-[#242424] dark:text-zinc-200">
+          <div className="opacity-0 group-hover:opacity-100 bg-white shadow-sm border border-gray-200 px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 flex items-center dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-200">
             <Edit3 className="w-3 h-3 mr-1.5" />
             点击编辑
           </div>
@@ -98,8 +98,8 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={() => setIsModalOpen(false)} />
           <div className="flex items-center justify-center min-h-screen p-4">
-            <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[90vh] dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-white/10">
+            <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[90vh] dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/50">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-[#2a2a2a]">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-zinc-100">编辑字幕</h3>
                   {segments.length > 0 && (
@@ -156,9 +156,9 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
                 {segments.length === 0 ? (
                   <div className="text-sm text-gray-600 dark:text-zinc-400">暂无字幕内容，请先提取字幕或上传字幕。</div>
                 ) : (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden dark:border-white/10">
+                  <div className="border border-gray-200 rounded-lg overflow-hidden dark:border-[#2a2a2a]">
                     <div className="max-h-[60vh] overflow-auto">
-                      <div className="divide-y divide-gray-100 dark:divide-white/10">
+                      <div className="divide-y divide-gray-100 dark:divide-[#2a2a2a]">
                         {segments.map((seg, idx) => (
                           <div key={seg.id || `${idx}`} className="p-3 dark:bg-[#1f1f1f]">
                             <div className="flex items-center justify-between gap-2">
@@ -188,7 +188,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
                                 const next = segments.map((s, i) => (i === idx ? { ...s, text: e.target.value } : s));
                                 onChange(next);
                               }}
-                              className="mt-2 w-full min-h-[54px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none dark:border-white/10 dark:bg-[#242424] dark:text-zinc-100 dark:focus:ring-violet-500/30"
+                              className="mt-2 w-full min-h-[54px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none dark:border-[#2a2a2a] dark:bg-[#242424] dark:text-zinc-100 dark:focus:ring-violet-500/30"
                             />
                           </div>
                         ))}

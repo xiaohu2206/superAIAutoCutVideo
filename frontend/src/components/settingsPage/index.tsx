@@ -121,10 +121,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         {/* 左侧：分区导航（md+ 固定宽度；长页滚动时侧栏 sticky） */}
         <aside
           className={`
-            shrink-0 self-stretch border-b border-slate-200/80 bg-slate-50/90 md:sticky md:top-0 md:z-10 md:w-[232px] md:border-b-0 md:border-r dark:border-white/10 dark:bg-[#181818]/90
+            shrink-0 self-stretch border-b border-slate-100 bg-slate-50/90 md:sticky md:top-0 md:z-10 md:w-[232px] md:border-b-0 md:border-r dark:border-[#262626] dark:bg-[#151515]
           `}
         >
-          <div className="border-b border-slate-200/60 px-4 py-4 dark:border-white/10">
+          <div className="border-b border-slate-100 px-4 py-4 dark:border-[#262626]">
             <div className="flex items-center gap-3">
               <div className="min-w-0">
                 <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-zinc-100">
@@ -146,17 +146,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                   onClick={() => setActiveSection(section.id)}
                   aria-current={isActive ? "page" : undefined}
                   className={`
-                    flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors
+                    group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors
                     ${
                       isActive
-                        ? "bg-blue-50 text-blue-800 ring-1 ring-blue-200/80 dark:bg-blue-900/20 dark:text-blue-300 dark:ring-blue-700"
-                        : "text-slate-600 hover:bg-white/80 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+                        ? "bg-blue-50 text-blue-800 ring-1 ring-blue-200/80 dark:bg-blue-500/10 dark:text-blue-200 dark:ring-blue-400/20"
+                        : "text-slate-600 hover:bg-white/80 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-200"
                     }
                   `}
                 >
                   <Icon
                     className={`h-4 w-4 shrink-0 ${
-                      isActive ? "text-blue-600" : "text-slate-400"
+                      isActive ? "text-blue-600 dark:text-blue-300" : "text-slate-400 dark:text-zinc-500 dark:group-hover:text-zinc-300"
                     }`}
                     aria-hidden
                   />
@@ -169,7 +169,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
 
         {/* 右侧：分区标题 + 表单内容（与 App 主区域共用外层滚动） */}
         <section className="scrollbar-hidden flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-white/70 dark:bg-[#121212]">
-          <header className="border-b border-slate-100 px-5 py-4 sm:px-6 dark:border-white/10">
+          <header className="border-b border-slate-100 px-5 py-4 sm:px-6 dark:border-[#2a2a2a]">
             <h3 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-zinc-100">
               {activeLabel}
             </h3>

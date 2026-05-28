@@ -22,27 +22,29 @@ const ProjectList: React.FC<ProjectListProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 pb-3">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div
-            key={i}
-            className="min-h-[112px] overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#1f1f1f]"
-          >
-            <div className="animate-pulse p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="h-4 w-3/4 rounded bg-gray-200 dark:bg-white/10" />
-                  <div className="h-3 w-1/2 rounded bg-gray-200 dark:bg-white/10" />
+      <div className="flex h-full min-h-0 flex-col pb-3">
+        <div className="project-list-scrollbar min-h-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2.5">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
+              <div
+                key={i}
+                className="project-list-card h-[95px] overflow-hidden rounded-md border border-slate-200/80 bg-white/95 shadow-sm"
+              >
+                <div className="flex h-full animate-pulse flex-col px-3 py-2.5">
+                  <div className="h-3.5 w-3/4 rounded bg-slate-200 dark:bg-white/10" />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="h-3 w-24 rounded bg-slate-200 dark:bg-white/10" />
+                    <div className="h-5 w-12 rounded-full bg-slate-200 dark:bg-white/10" />
+                  </div>
+                  <div className="mt-auto flex items-center justify-between border-t border-slate-200/70 pt-2 dark:border-white/[0.06]">
+                    <div className="h-3 w-20 rounded bg-slate-200 dark:bg-white/10" />
+                    <div className="h-3 w-5 rounded bg-slate-200 dark:bg-white/10" />
+                  </div>
                 </div>
-                <div className="h-5 w-6 rounded bg-gray-200 dark:bg-white/10" />
               </div>
-              <div className="mt-5 flex gap-2">
-                <div className="h-3 w-16 rounded bg-gray-200 dark:bg-white/10" />
-                <div className="h-3 w-20 rounded bg-gray-200 dark:bg-white/10" />
-              </div>
-            </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     );
   }
@@ -52,7 +54,7 @@ const ProjectList: React.FC<ProjectListProps> = ({
     const EmptyIcon = isSearching ? SearchX : FolderOpen;
 
     return (
-      <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center dark:border-white/15 dark:bg-[#1f1f1f]/70">
+      <div className="flex h-full min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center dark:border-[#333333] dark:bg-[#1f1f1f]/70">
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-zinc-400">
           <EmptyIcon className="h-7 w-7" aria-hidden />
         </div>
@@ -74,56 +76,50 @@ const ProjectList: React.FC<ProjectListProps> = ({
   );
 
   return (
-    <div className="pb-3">
+    <div className="flex h-full min-h-0 flex-col pb-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-100">最近项目</h3>
-        <div className="flex items-center gap-4">
-          <div className="inline-flex h-8 overflow-hidden rounded-md border border-slate-200 bg-white p-0.5 shadow-sm dark:border-white/10 dark:bg-[#1f1f1f]">
+        <h3 className="text-base font-semibold text-slate-950 dark:text-zinc-100">最近项目</h3>
+        <div className="flex items-center gap-5">
+          <div className="project-view-switch inline-flex h-7 items-stretch overflow-hidden rounded-lg border border-slate-200/80 bg-white/85 p-0.5 shadow-sm">
             <button
               type="button"
               title="网格视图"
               onClick={() => setViewMode("grid")}
-              className={`flex h-7 w-8 items-center justify-center rounded text-xs transition-colors ${
-                viewMode === "grid"
-                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
-                  : "text-slate-500 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-white/10"
-              }`}
+              data-active={viewMode === "grid"}
+              className="project-view-switch__btn flex h-6 w-10 items-center justify-center rounded-md text-xs transition-colors data-[active=true]:bg-blue-50 data-[active=true]:text-blue-600 data-[active=true]:shadow-sm data-[active=false]:text-slate-500 hover:data-[active=false]:bg-slate-50"
             >
               <LayoutGrid className="h-4 w-4" aria-hidden />
             </button>
+            <span className="project-view-switch__divider" aria-hidden />
             <button
               type="button"
               title="列表视图"
               onClick={() => setViewMode("list")}
-              className={`flex h-7 w-8 items-center justify-center rounded text-xs transition-colors ${
-                viewMode === "list"
-                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
-                  : "text-slate-500 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-white/10"
-              }`}
+              data-active={viewMode === "list"}
+              className="project-view-switch__btn flex h-6 w-10 items-center justify-center rounded-md text-xs transition-colors data-[active=true]:bg-blue-50 data-[active=true]:text-blue-600 data-[active=true]:shadow-sm data-[active=false]:text-slate-500 hover:data-[active=false]:bg-slate-50"
             >
               <List className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <span className="whitespace-nowrap text-xs text-slate-500 dark:text-zinc-400">
-            共 {sortedProjects.length} 个项目
-          </span>
         </div>
       </div>
-      <div
-        className={
-          viewMode === "grid"
-            ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3"
-            : "grid grid-cols-1 gap-3"
-        }
-      >
-        {sortedProjects.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        ))}
+      <div className="project-list-scrollbar min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={
+            viewMode === "grid"
+              ? "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2.5"
+              : "grid grid-cols-1 gap-2.5"
+          }
+        >
+          {sortedProjects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

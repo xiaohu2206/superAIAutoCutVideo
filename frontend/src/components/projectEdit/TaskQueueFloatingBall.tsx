@@ -225,12 +225,12 @@ const TaskQueueFloatingBall: React.FC = () => {
       {isOpen && (
         <div className="fixed inset-0 z-[60]" onClick={() => setIsOpen(false)}>
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm dark:bg-black/55" />
-          <div className="fixed right-6 bottom-24 z-[61] w-[420px] max-h-[70vh] overflow-hidden rounded-xl bg-white shadow-[0_24px_80px_-12px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/80 animate-slide-up dark:bg-[#1f1f1f] dark:shadow-black/50 dark:ring-white/10">
+          <div className="fixed right-6 bottom-24 z-[61] w-[420px] max-h-[70vh] overflow-hidden rounded-xl bg-white shadow-[0_24px_80px_-12px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/80 animate-slide-up dark:bg-[#1f1f1f] dark:shadow-black/50 dark:ring-[#2a2a2a]">
             <div
               className="flex flex-col max-h-[70vh]"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 dark:border-white/10">
+              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 dark:border-[#2a2a2a]">
                 <div className="flex items-center gap-2">
                   <Layers className="h-5 w-5 text-blue-600" />
                   <h3 className="text-base font-semibold text-slate-900 dark:text-zinc-100">任务队列</h3>
@@ -332,7 +332,7 @@ const TaskQueueFloatingBall: React.FC = () => {
                 )}
               </div>
 
-              <div className="border-t border-slate-200 px-5 py-2.5 dark:border-white/10">
+              <div className="border-t border-slate-200 px-5 py-2.5 dark:border-[#2a2a2a]">
                 <p className="text-xs text-slate-400 dark:text-zinc-500">
                   每 {POLL_INTERVAL_MS / 1000}s 自动刷新 · 点击外部关闭
                 </p>

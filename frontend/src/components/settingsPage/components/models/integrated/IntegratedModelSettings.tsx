@@ -125,7 +125,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         <div
           role="tablist"
           aria-label="整合模型子页"
-          className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-gray-800"
+          className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-[#242424]"
         >
           <button
             type="button"
@@ -133,8 +133,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             aria-selected={subTab === "content"}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
               subTab === "content"
-                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-gray-700 dark:text-blue-400 dark:ring-gray-600"
-                : "text-slate-500 hover:text-slate-800 dark:text-gray-400 dark:hover:text-gray-200"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-white/10 dark:text-zinc-100 dark:ring-[#2a2a2a]"
+                : "text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-100"
             }`}
             onClick={() => setSubTab("content")}
           >
@@ -146,8 +146,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
             aria-selected={subTab === "video"}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 ${
               subTab === "video"
-                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-gray-700 dark:text-blue-400 dark:ring-gray-600"
-                : "text-slate-500 hover:text-slate-800 dark:text-gray-400 dark:hover:text-gray-200"
+                ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/60 dark:bg-white/10 dark:text-zinc-100 dark:ring-[#2a2a2a]"
+                : "text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-100"
             }`}
             onClick={() => setSubTab("video")}
           >

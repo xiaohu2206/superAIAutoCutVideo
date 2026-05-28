@@ -310,7 +310,7 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
               <button
                 onClick={runVisionTest}
                 disabled={visionTesting || !status?.valid || Boolean(isDownloading)}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {visionTesting ? <Loader className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 {visionTesting ? "测试中…" : "开始测试"}
@@ -361,7 +361,7 @@ export const UnifiedModelSettings: React.FC<UnifiedModelSettingsProps> = ({
             <p className="text-xs text-gray-500 mt-1">具体的模型版本名称</p>
           </div>
 
-          <div className="pt-4 border-t">
+          <div className="pt-4">
             <button
               onClick={testModelConnection}
               disabled={testingConnection || !currentConfig.api_key}

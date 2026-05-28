@@ -303,7 +303,7 @@ export const MoondreamLocalModelPanel: React.FC = () => {
           <button
             onClick={() => void runVisionTest()}
             disabled={visionTesting || !status?.valid || Boolean(isDownloading)}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {visionTesting ? (
               <Loader className="h-4 w-4 animate-spin" />

@@ -1,0 +1,340 @@
+{
+  "version": "1.0",
+  "page": {
+    "name": "CopywritingPromptTemplateList",
+    "viewport": { "w": 1920, "h": 1080, "unit": "px" }
+  },
+  "assets": {
+    "colors": {
+      "panelBg": "#071326",
+      "panelBgSoft": "#0a1830",
+      "cardBg": "#0b172b",
+      "cardBgSelected": "#161b3e",
+      "border": "#243756",
+      "borderSelected": "#6f58ff",
+      "primary": "#7b61ff",
+      "primaryBright": "#9a7cff",
+      "text": "#eef3ff",
+      "textMuted": "#a7b3cf",
+      "textSubtle": "#71809e",
+      "link": "#6f7dff"
+    },
+    "icons": [
+      { "name": "film", "src": "lucide:film" },
+      { "name": "mic", "src": "lucide:mic" },
+      { "name": "user-round", "src": "lucide:user-round" },
+      { "name": "star", "src": "lucide:star" },
+      { "name": "message-circle", "src": "lucide:message-circle" },
+      { "name": "globe", "src": "lucide:globe" },
+      { "name": "target", "src": "lucide:target" },
+      { "name": "megaphone", "src": "lucide:megaphone" },
+      { "name": "audio-waveform", "src": "lucide:audio-waveform" },
+      { "name": "crown", "src": "lucide:crown" },
+      { "name": "syringe", "src": "lucide:syringe" },
+      { "name": "theater", "src": "lucide:theater" },
+      { "name": "zap", "src": "lucide:zap" },
+      { "name": "shield", "src": "lucide:shield" },
+      { "name": "send", "src": "lucide:send" },
+      { "name": "check", "src": "lucide:check" },
+      { "name": "chevron-right", "src": "lucide:chevron-right" },
+      { "name": "plus", "src": "lucide:plus" },
+      { "name": "trash", "src": "lucide:trash-2" }
+    ],
+    "images": [],
+    "fonts": [
+      { "family": "Inter, PingFang SC, Microsoft YaHei, sans-serif", "weight": [400, 500, 600, 700] }
+    ],
+    "tokens": {
+      "radius.panel": 8,
+      "radius.card": 8,
+      "radius.icon": 999,
+      "space.gridGap": 18,
+      "shadow.panel": "inset 0 1px 0 rgba(255,255,255,.04), 0 18px 48px rgba(0,0,0,.32)",
+      "shadow.selected": "0 0 0 1px rgba(123,97,255,.75), 0 0 26px rgba(123,97,255,.42), inset 0 0 28px rgba(123,97,255,.12)",
+      "shadow.button": "0 0 24px rgba(123,97,255,.55), inset 0 1px 0 rgba(255,255,255,.28)"
+    }
+  },
+  "nodes": [
+    {
+      "id": "n_001",
+      "name": "TemplatePanel",
+      "type": "frame",
+      "bbox": { "x": 96, "y": 360, "w": 1768, "h": 620, "unit": "px" },
+      "style": {
+        "bg": "@assets.colors.panelBg",
+        "color": "@assets.colors.text",
+        "fontFamily": "@assets.fonts[0].family",
+        "fontSize": 14,
+        "fontWeight": 400,
+        "radius": "@assets.tokens.radius.panel",
+        "border": "@assets.colors.border",
+        "shadow": "@assets.tokens.shadow.panel",
+        "padding": [0, 0, 0, 0],
+        "align": "left",
+        "opacity": 1
+      },
+      "asset": null,
+      "inferred": true,
+      "children": [
+        {
+          "id": "n_002",
+          "name": "SectionTitle",
+          "type": "text",
+          "bbox": { "x": 0, "y": 0, "w": 180, "h": 24, "unit": "px" },
+          "text": "解说风格（超强表现）",
+          "style": {
+            "bg": null,
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 16,
+            "fontWeight": 700,
+            "radius": null,
+            "border": null,
+            "shadow": null,
+            "padding": [0, 0, 0, 0],
+            "align": "left",
+            "opacity": 1
+          },
+          "asset": null,
+          "inferred": false,
+          "children": []
+        },
+        {
+          "id": "n_003",
+          "name": "TemplateGrid",
+          "type": "list",
+          "bbox": { "x": 0, "y": 36, "w": 1768, "h": 498, "unit": "px" },
+          "style": {
+            "bg": null,
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 14,
+            "fontWeight": 400,
+            "radius": null,
+            "border": null,
+            "shadow": null,
+            "padding": [0, 0, 0, 0],
+            "align": "left",
+            "opacity": 1
+          },
+          "asset": null,
+          "inferred": false,
+          "children": [
+            {
+              "id": "n_004",
+              "name": "SelectedTemplateCard",
+              "type": "button",
+              "bbox": { "x": 0, "y": 0, "w": 418, "h": 148, "unit": "px" },
+              "text": "默认风格",
+              "style": {
+                "bg": "@assets.colors.cardBgSelected",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 16,
+                "fontWeight": 700,
+                "radius": "@assets.tokens.radius.card",
+                "border": "@assets.colors.borderSelected",
+                "shadow": "@assets.tokens.shadow.selected",
+                "padding": [20, 22, 20, 22],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": null,
+              "state": ["selected", "hover"],
+              "inferred": true,
+              "children": [
+                {
+                  "id": "n_005",
+                  "name": "TemplateIcon",
+                  "type": "icon",
+                  "bbox": { "x": 20, "y": 24, "w": 58, "h": 58, "unit": "px" },
+                  "style": {
+                    "bg": "@assets.colors.primary",
+                    "color": "@assets.colors.primaryBright",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 24,
+                    "fontWeight": 400,
+                    "radius": "@assets.tokens.radius.icon",
+                    "border": null,
+                    "shadow": "0 0 20px rgba(123,97,255,.35)",
+                    "padding": [14, 14, 14, 14],
+                    "align": "center",
+                    "opacity": 0.2
+                  },
+                  "asset": "@assets.icons[film]",
+                  "inferred": true,
+                  "children": []
+                },
+                {
+                  "id": "n_006",
+                  "name": "TemplateDescription",
+                  "type": "text",
+                  "bbox": { "x": 96, "y": 58, "w": 270, "h": 48, "unit": "px" },
+                  "text": "通用的百科认知类文案生成选项，适用各类主题且易于平台审核和推荐",
+                  "style": {
+                    "bg": null,
+                    "color": "@assets.colors.textMuted",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 14,
+                    "fontWeight": 400,
+                    "radius": null,
+                    "border": null,
+                    "shadow": null,
+                    "padding": [0, 0, 0, 0],
+                    "align": "left",
+                    "opacity": 1
+                  },
+                  "asset": null,
+                  "inferred": false,
+                  "children": []
+                },
+                {
+                  "id": "n_007",
+                  "name": "SelectedCheck",
+                  "type": "icon",
+                  "bbox": { "x": 374, "y": 20, "w": 28, "h": 28, "unit": "px" },
+                  "style": {
+                    "bg": "@assets.colors.primary",
+                    "color": "@assets.colors.text",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 16,
+                    "fontWeight": 600,
+                    "radius": "@assets.tokens.radius.icon",
+                    "border": null,
+                    "shadow": "0 0 16px rgba(123,97,255,.45)",
+                    "padding": [6, 6, 6, 6],
+                    "align": "center",
+                    "opacity": 1
+                  },
+                  "asset": "@assets.icons[check]",
+                  "inferred": true,
+                  "children": []
+                },
+                {
+                  "id": "n_008",
+                  "name": "PreviewLink",
+                  "type": "button",
+                  "bbox": { "x": 342, "y": 116, "w": 52, "h": 18, "unit": "px" },
+                  "text": "预览",
+                  "style": {
+                    "bg": null,
+                    "color": "@assets.colors.link",
+                    "fontFamily": "@assets.fonts[0].family",
+                    "fontSize": 13,
+                    "fontWeight": 600,
+                    "radius": null,
+                    "border": null,
+                    "shadow": null,
+                    "padding": [0, 0, 0, 0],
+                    "align": "right",
+                    "opacity": 1
+                  },
+                  "asset": "@assets.icons[chevron-right]",
+                  "state": ["default", "hover"],
+                  "inferred": false,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "n_009",
+              "name": "TemplateCard",
+              "type": "button",
+              "bbox": { "x": 436, "y": 0, "w": 418, "h": 148, "unit": "px" },
+              "text": "幽默搞笑",
+              "style": {
+                "bg": "@assets.colors.cardBg",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 16,
+                "fontWeight": 700,
+                "radius": "@assets.tokens.radius.card",
+                "border": "@assets.colors.border",
+                "shadow": null,
+                "padding": [20, 22, 20, 22],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": "@assets.icons[mic]",
+              "state": ["default", "hover"],
+              "inferred": true,
+              "children": []
+            },
+            {
+              "id": "n_010",
+              "name": "TemplateCard",
+              "type": "button",
+              "bbox": { "x": 872, "y": 0, "w": 418, "h": 148, "unit": "px" },
+              "text": "台前幕后引人",
+              "style": {
+                "bg": "@assets.colors.cardBg",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 16,
+                "fontWeight": 700,
+                "radius": "@assets.tokens.radius.card",
+                "border": "@assets.colors.border",
+                "shadow": null,
+                "padding": [20, 22, 20, 22],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": "@assets.icons[user-round]",
+              "state": ["default", "hover"],
+              "inferred": true,
+              "children": []
+            },
+            {
+              "id": "n_011",
+              "name": "TemplateCard",
+              "type": "button",
+              "bbox": { "x": 1308, "y": 0, "w": 418, "h": 148, "unit": "px" },
+              "text": "第一人称独白",
+              "style": {
+                "bg": "@assets.colors.cardBg",
+                "color": "@assets.colors.text",
+                "fontFamily": "@assets.fonts[0].family",
+                "fontSize": 16,
+                "fontWeight": 700,
+                "radius": "@assets.tokens.radius.card",
+                "border": "@assets.colors.border",
+                "shadow": null,
+                "padding": [20, 22, 20, 22],
+                "align": "left",
+                "opacity": 1
+              },
+              "asset": "@assets.icons[star]",
+              "state": ["default", "hover"],
+              "inferred": true,
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "n_012",
+          "name": "GenerateButton",
+          "type": "button",
+          "bbox": { "x": 0, "y": 558, "w": 264, "h": 64, "unit": "px" },
+          "text": "生成解说文案",
+          "style": {
+            "bg": "@assets.colors.primary",
+            "color": "@assets.colors.text",
+            "fontFamily": "@assets.fonts[0].family",
+            "fontSize": 18,
+            "fontWeight": 700,
+            "radius": "@assets.tokens.radius.card",
+            "border": "@assets.colors.borderSelected",
+            "shadow": "@assets.tokens.shadow.button",
+            "padding": [18, 24, 18, 24],
+            "align": "center",
+            "opacity": 1
+          },
+          "asset": "@assets.icons[plus]",
+          "state": ["default", "hover", "disabled"],
+          "inferred": true,
+          "children": []
+        }
+      ]
+    }
+  ]
+}

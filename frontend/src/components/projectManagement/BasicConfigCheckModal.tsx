@@ -295,8 +295,8 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
       <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={running ? undefined : onClose} />
 
       <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-white/10">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full dark:border dark:border-[#2a2a2a] dark:bg-[#1f1f1f] dark:shadow-black/50">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-[#2a2a2a]">
             <div className="flex items-center space-x-3">
               <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-lg dark:bg-blue-500/10">
                 <Loader2 className={`h-5 w-5 text-blue-600 dark:text-blue-300 ${running ? "animate-spin" : ""}`} />
@@ -330,7 +330,7 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
               </div>
             </div>
 
-            <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg px-4 dark:divide-white/10 dark:border-white/10">
+            <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg px-4 dark:divide-[#2a2a2a] dark:border-[#2a2a2a]">
               {unifiedYunwuDeck ? (
                 <>
                   <StepRow title="1) 测试聚合模型" result={unifiedModelsResult} />
@@ -362,12 +362,12 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
             )}
           </div>
 
-          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200 dark:border-white/10 dark:bg-[#181818]">
+          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200 dark:border-[#2a2a2a] dark:bg-[#181818]">
             <button
               type="button"
               onClick={onClose}
               disabled={running}
-              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
+              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50 dark:border-[#2a2a2a] dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
             >
               关闭
             </button>
