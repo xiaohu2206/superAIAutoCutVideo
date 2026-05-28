@@ -225,10 +225,10 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">项目配置</h2>
-          <p className="text-xs text-gray-500 mb-2">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">项目配置</h2>
+          <p className="text-xs text-gray-500 mb-2 dark:text-zinc-400">
             {subtitleAsr.provider === "bcut" ? "内置 API 识别字幕仅支持中文" : "FunASR 可选择语言（需先下载模型）"}
           </p>
         </div>
@@ -256,14 +256,14 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         />
       </div>
 
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-3">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-3 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900"></h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100"></h2>
           <button
             onClick={() => setShowAdvancedConfig((v) => !v)}
-            className="text-blue-600 hover:text-blue-800 text-sm"
+            className="text-blue-600 hover:text-blue-800 text-sm dark:text-blue-300 dark:hover:text-blue-200"
           >
-            <span className="text-xs text-gray-500">（可选-上传字幕）</span>
+            <span className="text-xs text-gray-500 dark:text-zinc-400">（可选-上传字幕）</span>
             高级配置
           </button>
         </div>
@@ -283,7 +283,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">
               {project.project_type === "subtitle"
                 ? "字幕提取"
                 : project.project_type === "omni"
@@ -291,17 +291,17 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   : "镜头与字幕提取"}
             </h2>
             {project.subtitle_source === "user" && project.subtitle_path ? (
-              <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100">
+              <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                 已上传字幕
               </span>
             ) : null}
             {project.subtitle_source === "extracted" && project.subtitle_path ? (
-              <span className="text-xs px-2.5 py-1 bg-violet-50 text-violet-700 font-medium rounded-full border border-violet-100">
+              <span className="text-xs px-2.5 py-1 bg-violet-50 text-violet-700 font-medium rounded-full border border-violet-100 dark:border-violet-400/20 dark:bg-violet-500/10 dark:text-violet-300">
                 已提取字幕
               </span>
             ) : null}
             {project.subtitle_updated_by_user ? (
-              <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 font-medium rounded-full border border-amber-100">
+              <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 font-medium rounded-full border border-amber-100 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300">
                 已编辑
               </span>
             ) : null}
@@ -309,11 +309,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           
           {project.project_type === "visual" ? (
             <div className="flex flex-col gap-2 items-end">
-              <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded">
+              <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded dark:bg-[#242424] dark:text-zinc-300">
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <span className="text-gray-600 select-none">{visionScopeLabel}</span>
-                  <span className="text-gray-300 hidden sm:inline">|</span>
-                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                  <span className="text-gray-600 select-none dark:text-zinc-400">{visionScopeLabel}</span>
+                  <span className="text-gray-300 hidden sm:inline dark:text-white/20">|</span>
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-300">
                     <input
                       type="radio"
                       name="visionMode"
@@ -325,7 +325,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                     />
                     仅无字幕镜头
                   </label>
-                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600">
+                  <label className="flex items-center gap-1 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-300">
                     <input
                       type="radio"
                       name="visionMode"
@@ -423,18 +423,18 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
         {(extractingSubtitle ||
           (subtitleExtractProgress > 0 && subtitleExtractProgress < 100)) && (
           <div className="w-full">
-            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-1 dark:text-zinc-400">
               <span>字幕提取进度</span>
               <span>{Math.round(subtitleExtractProgress)}%</span>
             </div>
-            <div className="w-full h-2 bg-gray-200 rounded">
+            <div className="w-full h-2 bg-gray-200 rounded dark:bg-white/10">
               <div
                 className="h-2 bg-blue-600 rounded transition-all"
                 style={{ width: `${Math.round(subtitleExtractProgress)}%` }}
               />
             </div>
             {subtitleExtractLogs.length > 0 ? (
-              <div className="mt-2 text-xs text-gray-700 break-all">
+              <div className="mt-2 text-xs text-gray-700 break-all dark:text-zinc-300">
                 {subtitleExtractLogs.slice(-1)[0]?.message}
               </div>
             ) : null}
@@ -443,7 +443,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
         {project.project_type === "visual" && extractingScene && (
           <div className="w-full mt-4">
-             <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1">
+             <div className="flex items-center justify-between gap-3 text-xs text-gray-600 mb-1 dark:text-zinc-400">
               <span>镜头提取进度 </span>
               <div className="flex items-center gap-2">
                 <span>{Math.round(sceneExtractProgress)}%</span>
@@ -451,7 +451,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   onClick={onStopSceneExtraction}
                   disabled={isStoppingSceneExtraction}
                   title="停止镜头提取"
-                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                 >
                   {isStoppingSceneExtraction ? (
                     <Loader className="h-3 w-3 animate-spin" />
@@ -462,14 +462,14 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                 </button>
               </div>
             </div>
-            <div className="w-full h-2 bg-gray-200 rounded">
+            <div className="w-full h-2 bg-gray-200 rounded dark:bg-white/10">
               <div
                 className="h-2 bg-green-600 rounded transition-all"
                 style={{ width: `${Math.round(sceneExtractProgress)}%` }}
               />
             </div>
             {sceneExtractMessage ? (
-              <div className="mt-2 text-xs text-gray-700 break-all">
+              <div className="mt-2 text-xs text-gray-700 break-all dark:text-zinc-300">
                 {sceneExtractMessage}
               </div>
             ) : null}
@@ -478,7 +478,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
 
         {project.project_type === "omni" && omniPipelineShowProgressBar && (
             <div className="w-full mt-4">
-              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1 dark:text-zinc-400">
                 <span>Omni 管线进度</span>
                 <div className="flex items-center gap-2">
                   <span>{Math.round(omniPipelineProgress)}%</span>
@@ -488,7 +488,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                       onClick={onStopOmniPipeline}
                       disabled={isStoppingOmniPipeline}
                       title="停止 Omni 管线"
-                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-gray-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-zinc-400 dark:hover:border-red-400/30 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                     >
                       {isStoppingOmniPipeline ? (
                         <Loader className="h-3 w-3 animate-spin" />
@@ -500,27 +500,27 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   ) : null}
                 </div>
               </div>
-              <div className="w-full h-2 bg-gray-200 rounded">
+              <div className="w-full h-2 bg-gray-200 rounded dark:bg-white/10">
                 <div
                   className="h-2 bg-fuchsia-600 rounded transition-all"
                   style={{ width: `${Math.round(omniPipelineProgress)}%` }}
                 />
               </div>
               {omniPipelineMessage ? (
-                <div className="mt-2 text-xs text-gray-700 break-all">{omniPipelineMessage}</div>
+                <div className="mt-2 text-xs text-gray-700 break-all dark:text-zinc-300">{omniPipelineMessage}</div>
               ) : null}
             </div>
           )}
 
         {project.project_type === "visual" && !extractingScene && sceneExtractMessage ? (
           <div className="w-full mt-4">
-            <div className="text-xs text-gray-700 break-all">{sceneExtractMessage}</div>
+            <div className="text-xs text-gray-700 break-all dark:text-zinc-300">{sceneExtractMessage}</div>
           </div>
         ) : null}
 
         {project.project_type === "omni" && !omniPipelineShowProgressBar && omniPipelineMessage ? (
           <div className="w-full mt-4">
-            <div className="text-xs text-gray-700 break-all">{omniPipelineMessage}</div>
+            <div className="text-xs text-gray-700 break-all dark:text-zinc-300">{omniPipelineMessage}</div>
           </div>
         ) : null}
       </div>
@@ -543,7 +543,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                     ? project.omni_multimodal_json_path
                     : project.scenes_path)
                   ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5"
-                  : "bg-gray-300 cursor-not-allowed opacity-60"
+                  : "bg-gray-300 cursor-not-allowed opacity-60 dark:bg-white/10 dark:text-zinc-500"
               }
             `}
           >

@@ -58,25 +58,25 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* 遮罩层 */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        className="fixed inset-0 bg-black/50 transition-opacity dark:bg-black/70"
         onClick={loading ? undefined : onClose}
       />
 
       {/* 模态框内容 */}
       <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
           {/* 头部 */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-red-100 rounded-lg">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
+              <div className="flex items-center justify-center w-10 h-10 bg-red-100 rounded-lg dark:bg-rose-500/10">
+                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-rose-300" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900">确认删除</h3>
             </div>
             <button
               onClick={onClose}
               disabled={loading}
-              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 dark:text-zinc-500 dark:hover:text-zinc-100"
             >
               <X className="h-6 w-6" />
             </button>
@@ -85,7 +85,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           {/* 内容 */}
           <div className="p-6">
             {error && (
-              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm mb-4 dark:bg-rose-500/10 dark:text-rose-300">
                 {error}
               </div>
             )}
@@ -99,12 +99,12 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           </div>
 
           {/* 按钮组 */}
-          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200">
+          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200 dark:border-white/10 dark:bg-[#181818]">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
             >
               取消
             </button>

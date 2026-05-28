@@ -98,7 +98,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-50/60">
+    <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-50/60 dark:bg-[#121212]">
       <NarrationTypePicker
         onSelect={(narrationType) => {
           setCreateInitialNarrationType(narrationType);

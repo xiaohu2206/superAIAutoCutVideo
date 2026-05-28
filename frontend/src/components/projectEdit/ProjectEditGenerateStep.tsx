@@ -98,14 +98,14 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
+      <div className="bg-white rounded-lg shadow-md p-6 space-y-6 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">生成视频</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">生成视频</h2>
           <button
             onClick={() => setShowAdvancedConfig((v) => !v)}
-            className="text-blue-600 hover:text-blue-800 text-sm"
+            className="text-blue-600 hover:text-blue-800 text-sm dark:text-blue-300 dark:hover:text-blue-200"
           >
-             <span className="text-xs text-gray-500">（原片占比范围、生成语言）</span>
+             <span className="text-xs text-gray-500 dark:text-zinc-400">（原片占比范围、生成语言）</span>
             高级配置
           </button>
         </div>
@@ -184,7 +184,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
       {/* 脚本编辑区 */}
       {project.project_type === "omni" ? (
-        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-md p-6 space-y-8">
+        <div className="bg-white dark:bg-[#1f1f1f] rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-white/10 dark:shadow-black/30">
           <OmniFullNarrationScriptWorkspace
             project={project}
             editedScript={omniNarration.omniEditedScript}
@@ -199,7 +199,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
           />
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-md p-6 space-y-8">
+        <div className="bg-white rounded-lg shadow-md p-6 space-y-8 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
           <ScriptJsonEditor
             editedScript={editedScript}
             setEditedScript={setEditedScript}

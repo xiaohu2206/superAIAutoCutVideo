@@ -224,25 +224,25 @@ const TaskQueueFloatingBall: React.FC = () => {
 
       {isOpen && (
         <div className="fixed inset-0 z-[60]" onClick={() => setIsOpen(false)}>
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-          <div className="fixed right-6 bottom-24 z-[61] w-[420px] max-h-[70vh] overflow-hidden rounded-xl bg-white shadow-[0_24px_80px_-12px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/80 animate-slide-up">
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm dark:bg-black/55" />
+          <div className="fixed right-6 bottom-24 z-[61] w-[420px] max-h-[70vh] overflow-hidden rounded-xl bg-white shadow-[0_24px_80px_-12px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/80 animate-slide-up dark:bg-[#1f1f1f] dark:shadow-black/50 dark:ring-white/10">
             <div
               className="flex flex-col max-h-[70vh]"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 dark:border-white/10">
                 <div className="flex items-center gap-2">
                   <Layers className="h-5 w-5 text-blue-600" />
-                  <h3 className="text-base font-semibold text-slate-900">任务队列</h3>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-zinc-100">任务队列</h3>
                   {activeCount > 0 && (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
                       {activeCount} 个任务运行中
                     </span>
                   )}
                 </div>
                 <button
                   onClick={() => setIsOpen(false)}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-zinc-100"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -255,13 +255,13 @@ const TaskQueueFloatingBall: React.FC = () => {
                       <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                       {queueData.active_project ? "正在执行" : "进行中"}
                     </div>
-                    <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3">
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3 dark:border-blue-400/20 dark:bg-blue-500/10">
                       {queueData.active_project ? (
-                        <div className="mb-2 text-sm font-medium text-slate-800">
+                        <div className="mb-2 text-sm font-medium text-slate-800 dark:text-zinc-100">
                           项目: {queueData.active_project_name || queueData.active_project}
                         </div>
                       ) : (
-                        <div className="mb-2 text-xs text-slate-500">
+                        <div className="mb-2 text-xs text-slate-500 dark:text-zinc-400">
                           当前未占用全局项目队列；以下为后台运行中的任务。
                         </div>
                       )}
@@ -269,21 +269,21 @@ const TaskQueueFloatingBall: React.FC = () => {
                         {queueData.active_tasks.map((t, i) => (
                           <div
                             key={`${t.scope}-${t.task_id || i}`}
-                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-white px-3 py-2 text-xs shadow-sm"
+                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-white px-3 py-2 text-xs shadow-sm dark:bg-[#242424] dark:shadow-black/30"
                           >
                             {statusIcon(t.status)}
                             {!queueData.active_project && (
-                              <span className="font-medium text-slate-600 max-w-[140px] truncate" title={t.project_name || t.project_id}>
+                              <span className="font-medium text-slate-600 max-w-[140px] truncate dark:text-zinc-300" title={t.project_name || t.project_id}>
                                 {t.project_name || t.project_id}
                               </span>
                             )}
-                            <span className="font-medium text-slate-700">{scopeLabel(t.scope)}</span>
-                            <span className="text-slate-400">{statusText(t.status)}</span>
+                            <span className="font-medium text-slate-700 dark:text-zinc-200">{scopeLabel(t.scope)}</span>
+                            <span className="text-slate-400 dark:text-zinc-500">{statusText(t.status)}</span>
                             {t.progress != null && t.progress > 0 && t.progress < 100 && (
-                              <span className="ml-auto text-slate-500">{Math.round(t.progress)}%</span>
+                              <span className="ml-auto text-slate-500 dark:text-zinc-400">{Math.round(t.progress)}%</span>
                             )}
                             {t.message && (
-                              <span className="truncate text-slate-400 max-w-[140px] basis-full sm:basis-auto" title={t.message}>
+                              <span className="truncate text-slate-400 max-w-[140px] basis-full sm:basis-auto dark:text-zinc-500" title={t.message}>
                                 - {t.message}
                               </span>
                             )}
@@ -301,18 +301,18 @@ const TaskQueueFloatingBall: React.FC = () => {
                       <Clock className="h-3 w-3" />
                       排队中 · 第 {wp.queue_position} 位
                     </div>
-                    <div className="rounded-lg border border-amber-100 bg-amber-50/50 px-4 py-3">
-                      <div className="mb-2 text-sm font-medium text-slate-800">
+                    <div className="rounded-lg border border-amber-100 bg-amber-50/50 px-4 py-3 dark:border-amber-400/20 dark:bg-amber-500/10">
+                      <div className="mb-2 text-sm font-medium text-slate-800 dark:text-zinc-100">
                         项目: {wp.project_name || wp.project_id}
                       </div>
                       <div className="space-y-1.5">
                         {wp.tasks.map((t, i) => (
                           <div
                             key={t.task_id || i}
-                            className="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-xs shadow-sm"
+                            className="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-xs shadow-sm dark:bg-[#242424] dark:shadow-black/30"
                           >
                             <Clock className="h-3.5 w-3.5 text-amber-500" />
-                            <span className="font-medium text-slate-700">{scopeLabel(t.scope)}</span>
+                            <span className="font-medium text-slate-700 dark:text-zinc-200">{scopeLabel(t.scope)}</span>
                             <span className="text-amber-600">等待中</span>
                           </div>
                         ))}
@@ -325,15 +325,15 @@ const TaskQueueFloatingBall: React.FC = () => {
                 {!queueData?.active_project &&
                   queueData?.waiting_projects.length === 0 &&
                   (queueData.active_tasks?.length ?? 0) === 0 && (
-                  <div className="py-8 text-center text-sm text-slate-400">
+                  <div className="py-8 text-center text-sm text-slate-400 dark:text-zinc-500">
                     <Layers className="mx-auto mb-2 h-8 w-8 opacity-40" />
                     当前没有排队的任务
                   </div>
                 )}
               </div>
 
-              <div className="border-t border-slate-200 px-5 py-2.5">
-                <p className="text-xs text-slate-400">
+              <div className="border-t border-slate-200 px-5 py-2.5 dark:border-white/10">
+                <p className="text-xs text-slate-400 dark:text-zinc-500">
                   每 {POLL_INTERVAL_MS / 1000}s 自动刷新 · 点击外部关闭
                 </p>
               </div>

@@ -251,23 +251,23 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   // 步骤标签样式
   const stepButtonClass = (step: StepKey, isReady: boolean) => {
     const isActive = currentStep === step;
-    if (isActive) return "bg-white text-gray-900 shadow-sm";
-    if (!isReady) return "text-gray-400 cursor-not-allowed";
-    return "text-gray-500 hover:text-gray-700";
+    if (isActive) return "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100";
+    if (!isReady) return "text-gray-400 cursor-not-allowed dark:text-zinc-500";
+    return "text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-100";
   };
 
   if (loading && !project) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="ml-3 text-gray-600">加载项目中...</span>
+        <span className="ml-3 text-gray-600 dark:text-zinc-300">加载项目中...</span>
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-300">
         项目不存在或加载失败
       </div>
     );
@@ -278,23 +278,23 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-md p-3">
+      <div className="bg-white rounded-lg shadow-md p-3 dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
               onClick={onBack}
-              className="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors dark:bg-white/10 dark:hover:bg-white/15"
               title="返回"
             >
-              <ArrowLeft className="h-5 w-5 text-gray-600" />
+              <ArrowLeft className="h-5 w-5 text-gray-600 dark:text-zinc-300" />
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
-              <p className="text-sm text-gray-600 mt-1">{project.description}</p>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-zinc-100">{project.name}</h1>
+              <p className="text-sm text-gray-600 mt-1 dark:text-zinc-400">{project.description}</p>
             </div>
           </div>
 
-          <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex bg-gray-100 rounded-lg p-1 dark:bg-[#242424]">
             <button
               onClick={() => handleStepClick("upload")}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("upload", true)}`}

@@ -243,12 +243,12 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
 
     const badgeCls =
       result.status === "running"
-        ? "bg-blue-50 text-blue-700"
+        ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
         : result.status === "success"
-          ? "bg-green-50 text-green-700"
+          ? "bg-green-50 text-green-700 dark:bg-emerald-500/10 dark:text-emerald-300"
           : result.status === "failed"
-            ? "bg-red-50 text-red-700"
-            : "bg-gray-50 text-gray-700";
+            ? "bg-red-50 text-red-700 dark:bg-rose-500/10 dark:text-rose-300"
+            : "bg-gray-50 text-gray-700 dark:bg-white/10 dark:text-zinc-300";
 
     return (
       <div className="flex items-start justify-between gap-4 py-3">
@@ -295,11 +295,11 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
       <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" onClick={running ? undefined : onClose} />
 
       <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full dark:border dark:border-white/10 dark:bg-[#1f1f1f] dark:shadow-black/50">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-lg">
-                <Loader2 className={`h-5 w-5 text-blue-600 ${running ? "animate-spin" : ""}`} />
+              <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-lg dark:bg-blue-500/10">
+                <Loader2 className={`h-5 w-5 text-blue-600 dark:text-blue-300 ${running ? "animate-spin" : ""}`} />
               </div>
               <div>
                 <h3 className="text-xl font-semibold text-gray-900">基础连通检测</h3>
@@ -313,7 +313,7 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
             <button
               onClick={onClose}
               disabled={running}
-              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 dark:text-zinc-500 dark:hover:text-zinc-100"
             >
               <X className="h-6 w-6" />
             </button>
@@ -325,12 +325,12 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
                 <div className="text-sm font-medium text-gray-700">进度</div>
                 <div className="text-sm text-gray-600">{progress}%</div>
               </div>
-              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden dark:bg-white/10">
                 <div className="h-2 bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
               </div>
             </div>
 
-            <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg px-4">
+            <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg px-4 dark:divide-white/10 dark:border-white/10">
               {unifiedYunwuDeck ? (
                 <>
                   <StepRow title="1) 测试聚合模型" result={unifiedModelsResult} />
@@ -362,12 +362,12 @@ const BasicConfigCheckModal: React.FC<BasicConfigCheckModalProps> = ({ isOpen, o
             )}
           </div>
 
-          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200">
+          <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-200 dark:border-white/10 dark:bg-[#181818]">
             <button
               type="button"
               onClick={onClose}
               disabled={running}
-              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition-colors disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:hover:bg-white/10"
             >
               关闭
             </button>

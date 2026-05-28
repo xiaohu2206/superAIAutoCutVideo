@@ -26,19 +26,19 @@ const ProjectList: React.FC<ProjectListProps> = ({
         {[1, 2, 3, 4, 5, 6].map((i) => (
           <div
             key={i}
-            className="min-h-[112px] overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
+            className="min-h-[112px] overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#1f1f1f]"
           >
             <div className="animate-pulse p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 space-y-2">
-                  <div className="h-4 w-3/4 rounded bg-gray-200" />
-                  <div className="h-3 w-1/2 rounded bg-gray-200" />
+                  <div className="h-4 w-3/4 rounded bg-gray-200 dark:bg-white/10" />
+                  <div className="h-3 w-1/2 rounded bg-gray-200 dark:bg-white/10" />
                 </div>
-                <div className="h-5 w-6 rounded bg-gray-200" />
+                <div className="h-5 w-6 rounded bg-gray-200 dark:bg-white/10" />
               </div>
               <div className="mt-5 flex gap-2">
-                <div className="h-3 w-16 rounded bg-gray-200" />
-                <div className="h-3 w-20 rounded bg-gray-200" />
+                <div className="h-3 w-16 rounded bg-gray-200 dark:bg-white/10" />
+                <div className="h-3 w-20 rounded bg-gray-200 dark:bg-white/10" />
               </div>
             </div>
           </div>
@@ -52,14 +52,14 @@ const ProjectList: React.FC<ProjectListProps> = ({
     const EmptyIcon = isSearching ? SearchX : FolderOpen;
 
     return (
-      <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+      <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center dark:border-white/15 dark:bg-[#1f1f1f]/70">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-zinc-400">
           <EmptyIcon className="h-7 w-7" aria-hidden />
         </div>
-        <h3 className="text-base font-semibold text-gray-900">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-zinc-100">
           {isSearching ? "没有匹配的项目" : "暂无项目"}
         </h3>
-        <p className="mt-2 max-w-md text-sm leading-6 text-gray-500">
+        <p className="mt-2 max-w-md text-sm leading-6 text-gray-500 dark:text-zinc-400">
           {isSearching
             ? "换一个关键词试试，或清空搜索查看全部项目。"
             : "从上方选择一种解说类型，即可创建第一个视频剪辑项目。"}
@@ -76,17 +76,17 @@ const ProjectList: React.FC<ProjectListProps> = ({
   return (
     <div className="pb-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-950">最近项目</h3>
+        <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-100">最近项目</h3>
         <div className="flex items-center gap-4">
-          <div className="inline-flex h-8 overflow-hidden rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
+          <div className="inline-flex h-8 overflow-hidden rounded-md border border-slate-200 bg-white p-0.5 shadow-sm dark:border-white/10 dark:bg-[#1f1f1f]">
             <button
               type="button"
               title="网格视图"
               onClick={() => setViewMode("grid")}
               className={`flex h-7 w-8 items-center justify-center rounded text-xs transition-colors ${
                 viewMode === "grid"
-                  ? "bg-blue-50 text-blue-600"
-                  : "text-slate-500 hover:bg-slate-50"
+                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
+                  : "text-slate-500 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-white/10"
               }`}
             >
               <LayoutGrid className="h-4 w-4" aria-hidden />
@@ -97,14 +97,14 @@ const ProjectList: React.FC<ProjectListProps> = ({
               onClick={() => setViewMode("list")}
               className={`flex h-7 w-8 items-center justify-center rounded text-xs transition-colors ${
                 viewMode === "list"
-                  ? "bg-blue-50 text-blue-600"
-                  : "text-slate-500 hover:bg-slate-50"
+                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
+                  : "text-slate-500 hover:bg-slate-50 dark:text-zinc-400 dark:hover:bg-white/10"
               }`}
             >
               <List className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <span className="whitespace-nowrap text-xs text-slate-500">
+          <span className="whitespace-nowrap text-xs text-slate-500 dark:text-zinc-400">
             共 {sortedProjects.length} 个项目
           </span>
         </div>

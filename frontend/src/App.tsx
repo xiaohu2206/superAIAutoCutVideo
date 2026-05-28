@@ -31,6 +31,33 @@ interface BackendStatus {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+type ThemeMode = "light" | "dark";
+
+const THEME_STORAGE_KEY = "sacv_theme";
+
+const getInitialTheme = (): ThemeMode => {
+  if (typeof window === "undefined") return "dark";
+
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "light" || savedTheme === "dark") {
+      return savedTheme;
+    }
+  } catch {
+    /* localStorage may be unavailable in restricted webviews */
+  }
+
+  return "dark";
+};
+
+const applyTheme = (theme: ThemeMode) => {
+  if (typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  root.classList.toggle("dark", theme === "dark");
+  root.style.colorScheme = theme;
+};
+
 /** 与 tauri.conf 首屏 loading 小窗一致（逻辑像素） */
 const TAURI_LOADING_WINDOW_INNER = { width: 800, height: 350 } as const;
 
@@ -244,10 +271,24 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const { appVersion } = useAppVersion();
   const [isTauri, setIsTauri] = useState<boolean>(() => detectTauriEnvironment());
   const [isMaximized, setIsMaximized] = useState(false);
   const startupInitStartedRef = useRef(false);
+
+  useEffect(() => {
+    applyTheme(theme);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      /* ignore storage failures */
+    }
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
+  };
 
   // 初始化应用
   useEffect(() => {
@@ -731,7 +772,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 dark:border-slate-700 dark:bg-gray-900 shadow-[0_24px_80px_rgba(15,23,42,0.28)] dark:shadow-[0_24px_80px_rgba(0,0,0,0.5)] ring-1 ring-slate-900/5 dark:ring-slate-700/50">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-white/55 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/5 dark:border-white/10 dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:ring-white/10">
       <Navigation
         activeTab={showProfile ? "profile" : activeTab}
         onTabChange={(tab) => {
@@ -740,22 +781,24 @@ const App: React.FC = () => {
         }}
         onHomeClick={handleHomeClick}
         onProfileClick={() => setShowProfile(true)}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-gray-900">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_30%),linear-gradient(to_bottom,_rgba(255,255,255,0.86),_rgba(248,250,252,0.95))] dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.10),_transparent_28%),linear-gradient(to_bottom,_#181818,_#121212)]">
         {isTauri && (
-          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-slate-700/80 dark:bg-gray-900/88">
+          <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/88 backdrop-blur-xl dark:border-white/10 dark:bg-[#181818]/88">
             <div
               className="titlebar-drag flex h-[48px] items-center gap-3 px-1 sm:px-2 lg:px-3"
               onPointerDown={handleTitlebarPointerDown}
             >
               <div className="min-w-0 flex-1 select-none">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 dark:text-gray-100 sm:text-[15px]">
+                  <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-slate-900 dark:text-zinc-100 sm:text-[15px]">
                     SuperAI 影视剪辑
                   </h1>
                   {!!appVersion && (
-                    <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium leading-none text-blue-700 md:inline-flex">
+                    <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium leading-none text-blue-700 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300 md:inline-flex">
                       v{appVersion}
                     </span>
                   )}
@@ -765,7 +808,7 @@ const App: React.FC = () => {
               <div className="titlebar-no-drag hidden shrink-0 items-center gap-1 sm:flex">
                 <button
                   onClick={() => void TauriCommands.minimizeWindow()}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-zinc-100"
                   title="最小化"
                   aria-label="最小化窗口"
                 >
@@ -773,7 +816,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={handleToggleMaximize}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-zinc-100"
                   title={isMaximized ? "还原" : "最大化"}
                   aria-label={isMaximized ? "还原窗口" : "最大化窗口"}
                 >
@@ -785,7 +828,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => void TauriCommands.closeWindow()}
-                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-500 hover:text-white"
+                  className="titlebar-no-drag inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-500 hover:text-white dark:text-zinc-500"
                   title="关闭"
                   aria-label="关闭窗口"
                 >
@@ -806,13 +849,13 @@ const App: React.FC = () => {
           <div
             className={
               activeTab === "settings"
-                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 dark:bg-gray-900"
-                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 dark:bg-gray-900"
+                ? "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col p-0 dark:bg-[#121212]"
+                : "scrollbar-hidden flex min-h-0 w-full flex-1 flex-col px-4 pb-2 pt-2 sm:px-5 lg:px-6 dark:bg-[#121212]"
             }
           >
             {isTauri && showBackendStartupBanner && (
               <div
-                className="mb-3 flex flex-col gap-2 rounded-xl border border-amber-200/90 bg-amber-50/95 px-3 py-2.5 text-amber-950 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"
+                className="mb-3 flex flex-col gap-2 rounded-xl border border-amber-200/90 bg-amber-50/95 px-3 py-2.5 text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"
                 role="alert"
               >
                 <div className="flex min-w-0 gap-2">
@@ -837,7 +880,7 @@ const App: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    className="titlebar-no-drag rounded-lg border border-amber-300/80 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100/80 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-50 dark:hover:bg-amber-900/80"
+                    className="titlebar-no-drag rounded-lg border border-amber-300/80 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100/80 dark:border-amber-400/30 dark:bg-white/5 dark:text-amber-50 dark:hover:bg-amber-500/15"
                     onClick={() => setShowBackendStartupBanner(false)}
                   >
                     关闭提示

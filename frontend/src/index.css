@@ -1,13 +1,18 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 全局样式 */
+/* 鍏ㄥ眬鏍峰紡 */
 @layer base {
   html {
     scroll-behavior: smooth;
     color-scheme: light;
     background: transparent;
+  }
+
+  html.dark {
+    color-scheme: dark;
+    background: rgb(18, 18, 18);
   }
 
   body {
@@ -17,6 +22,12 @@
     overflow: hidden;
   }
 
+  .dark body {
+    @apply text-zinc-100;
+    background: rgb(18, 18, 18);
+    --tw-ring-offset-color: #121212;
+  }
+
   #root {
     height: 100vh;
     min-height: 100vh;
@@ -24,27 +35,29 @@
     background: transparent;
   }
 
-  @media (prefers-color-scheme: dark) {
-    html {
-      color-scheme: dark;
-    }
-
-    /* 无显式 bg/text 类时，原生控件否则会保持 UA 白底黑字 */
-    textarea,
-    input[type="text"],
-    input[type="search"],
-    input[type="password"],
-    input[type="email"],
-    input[type="url"],
-    input[type="tel"],
-    input[type="number"],
-    select {
-      @apply bg-gray-800 text-gray-100 placeholder:text-gray-400;
-    }
+  .dark #root {
+    background: rgb(18, 18, 18);
   }
+
+  /* Native controls need explicit dark colors when no utility class is present. */
+  .dark textarea {
+    @apply bg-[#242424] text-zinc-100 placeholder:text-zinc-500;
+  }
+
+  .dark input[type="text"],
+  .dark input[type="search"],
+  .dark input[type="password"],
+  .dark input[type="email"],
+  .dark input[type="url"],
+  .dark input[type="tel"],
+  .dark input[type="number"],
+  .dark select {
+    @apply bg-[#242424] text-zinc-100 placeholder:text-zinc-500;
+  }
+
 }
 
-/* 自定义组件样式 */
+/* 鑷畾涔夌粍浠舵牱寮?*/
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
@@ -103,7 +116,7 @@
   }
 }
 
-/* 工具类 */
+/* 宸ュ叿绫?*/
 @layer utilities {
   .text-balance {
     text-wrap: balance;
@@ -200,7 +213,7 @@
   }
 }
 
-/* 滚动条样式 */
+/* 婊氬姩鏉℃牱寮?*/
 body::-webkit-scrollbar,
 html::-webkit-scrollbar {
   width: 0;
@@ -226,139 +239,343 @@ html::-webkit-scrollbar {
   background: #a8a8a8;
 }
 
-/* 深色模式支持 */
-@media (prefers-color-scheme: dark) {
-  body {
-    @apply bg-gray-900 text-white;
-    --tw-ring-offset-color: #111827;
-  }
+/* Dark mode support */
+.dark .card {
+  @apply border-white/10 bg-[#1f1f1f] text-zinc-100 shadow-black/30;
+}
 
-  .card {
-    @apply bg-gray-800 border-gray-700;
-  }
-  
-  .input {
-    @apply bg-gray-800 border-gray-600 text-white;
-  }
+.dark .input {
+  @apply border-white/10 bg-[#242424] text-zinc-100 placeholder:text-zinc-500 focus:ring-blue-500/30;
+}
 
-  .select {
-    @apply bg-gray-800 border-gray-600 text-white placeholder:text-gray-400;
-  }
-  
-  .btn-secondary {
-    @apply bg-gray-700 text-white hover:bg-gray-600;
-  }
-  
-  .progress-bar {
-    @apply bg-gray-700;
-  }
-  
-  ::-webkit-scrollbar-track {
-    background: #374151;
-  }
-  
-  ::-webkit-scrollbar-thumb {
-    background: #6b7280;
-  }
-  
-  ::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
-  }
+.dark .select {
+  @apply border-white/10 bg-[#242424] text-zinc-100 placeholder:text-zinc-500 hover:border-white/20 focus:border-blue-400 focus:ring-blue-500/20 disabled:bg-white/5 disabled:text-zinc-500;
+}
+
+.dark .btn {
+  @apply focus:ring-blue-500/40 focus:ring-offset-[#121212];
+}
+
+.dark .btn-secondary {
+  @apply bg-white/10 text-zinc-100 hover:bg-white/15;
+}
+
+.dark .btn-outline {
+  @apply border-white/10 text-zinc-100 hover:bg-white/10;
+}
+
+.dark .btn-ghost {
+  @apply text-zinc-100 hover:bg-white/10;
+}
+
+.dark .progress-bar {
+  @apply bg-white/10;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #181818;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
 }
 
 @layer utilities {
-  @media (prefers-color-scheme: dark) {
-    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
-      background: #374151;
-    }
+  .dark .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-track {
+    background: #181818;
+  }
 
-    .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
-      background: #6b7280;
-    }
+  .dark .project-list-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+  }
 
-    .bg-white {
-      @apply bg-gray-800;
-    }
+  .dark .bg-white {
+    @apply bg-[#1f1f1f];
+  }
 
-    .bg-white\/80 {
-      @apply bg-gray-800/80;
-    }
+  .dark .bg-white\/80 {
+    @apply bg-[#1f1f1f]/80;
+  }
 
-    .bg-white\/90 {
-      @apply bg-gray-800/90;
-    }
+  .dark .bg-white\/90 {
+    @apply bg-[#1f1f1f]/90;
+  }
 
-    .bg-gray-50 {
-      @apply bg-gray-900;
-    }
+  .dark .bg-white\/50,
+  .dark .bg-white\/60,
+  .dark .bg-white\/70 {
+    @apply bg-[#1f1f1f]/70;
+  }
 
-    .bg-gray-100 {
-      @apply bg-gray-800;
-    }
+  .dark .bg-gray-50 {
+    @apply bg-[#181818];
+  }
 
-    .bg-gray-200 {
-      @apply bg-gray-700;
-    }
+  .dark .bg-gray-50\/50,
+  .dark .bg-slate-50\/40,
+  .dark .bg-slate-50\/60,
+  .dark .bg-slate-50\/90 {
+    @apply bg-[#181818]/80;
+  }
 
-    .bg-gray-300 {
-      @apply bg-gray-600;
-    }
+  .dark .bg-slate-50,
+  .dark .bg-slate-100 {
+    @apply bg-[#242424];
+  }
 
-    .border-gray-100 {
-      @apply border-gray-800;
-    }
+  .dark .bg-gray-100 {
+    @apply bg-[#242424];
+  }
 
-    .border-gray-200 {
-      @apply border-gray-700;
-    }
+  .dark .bg-gray-200 {
+    @apply bg-zinc-700;
+  }
 
-    .border-gray-300 {
-      @apply border-gray-600;
-    }
+  .dark .bg-gray-300 {
+    @apply bg-zinc-600;
+  }
 
-    .text-gray-900 {
-      @apply text-gray-100;
-    }
+  .dark .bg-blue-50,
+  .dark .bg-blue-50\/40,
+  .dark .bg-blue-50\/50 {
+    @apply bg-blue-500/10;
+  }
 
-    .text-gray-800 {
-      @apply text-gray-100;
-    }
+  .dark .bg-indigo-50,
+  .dark .bg-violet-50,
+  .dark .bg-violet-50\/40,
+  .dark .bg-fuchsia-50,
+  .dark .bg-fuchsia-50\/40 {
+    @apply bg-violet-500/10;
+  }
 
-    .text-gray-700 {
-      @apply text-gray-200;
-    }
+  .dark .bg-green-50,
+  .dark .bg-emerald-50 {
+    @apply bg-emerald-500/10;
+  }
 
-    .text-gray-600 {
-      @apply text-gray-300;
-    }
+  .dark .bg-amber-50,
+  .dark .bg-amber-50\/50,
+  .dark .bg-orange-50 {
+    @apply bg-amber-500/10;
+  }
 
-    .text-gray-500 {
-      @apply text-gray-400;
-    }
+  .dark .bg-red-50,
+  .dark .bg-rose-50 {
+    @apply bg-rose-500/10;
+  }
 
-    .placeholder\:text-gray-500::placeholder {
-      @apply text-gray-400;
-    }
+  .dark .border-gray-100,
+  .dark .border-gray-200,
+  .dark .border-slate-100,
+  .dark .border-slate-200 {
+    @apply border-white/10;
+  }
 
-    .hover\:bg-gray-50:hover {
-      @apply bg-gray-800;
-    }
+  .dark .border-blue-100,
+  .dark .border-blue-200,
+  .dark .border-indigo-200,
+  .dark .border-violet-100,
+  .dark .border-violet-200,
+  .dark .border-fuchsia-200 {
+    @apply border-blue-400/20;
+  }
 
-    .hover\:bg-gray-100:hover {
-      @apply bg-gray-700;
-    }
+  .dark .border-green-100,
+  .dark .border-green-200,
+  .dark .border-emerald-100,
+  .dark .border-emerald-200 {
+    @apply border-emerald-400/20;
+  }
 
-    .hover\:bg-gray-200:hover {
-      @apply bg-gray-600;
-    }
+  .dark .border-amber-100,
+  .dark .border-amber-200,
+  .dark .border-orange-200 {
+    @apply border-amber-400/20;
+  }
 
-    .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
-      @apply border-gray-700;
-    }
+  .dark .border-red-100,
+  .dark .border-red-200,
+  .dark .border-rose-100,
+  .dark .border-rose-200 {
+    @apply border-rose-400/20;
+  }
+
+  .dark .border-gray-300,
+  .dark .border-slate-300 {
+    @apply border-white/15;
+  }
+
+  .dark .text-gray-900,
+  .dark .text-slate-950,
+  .dark .text-slate-900,
+  .dark .text-gray-800,
+  .dark .text-slate-800 {
+    @apply text-zinc-100;
+  }
+
+  .dark .text-gray-700,
+  .dark .text-slate-700 {
+    @apply text-zinc-200;
+  }
+
+  .dark .text-gray-600,
+  .dark .text-slate-600 {
+    @apply text-zinc-300;
+  }
+
+  .dark .text-gray-500,
+  .dark .text-slate-500 {
+    @apply text-zinc-400;
+  }
+
+  .dark .text-slate-400 {
+    @apply text-zinc-500;
+  }
+
+  .dark .text-blue-800,
+  .dark .text-blue-900 {
+    @apply text-blue-200;
+  }
+
+  .dark .text-indigo-700,
+  .dark .text-indigo-800,
+  .dark .text-violet-700,
+  .dark .text-violet-800,
+  .dark .text-fuchsia-700,
+  .dark .text-fuchsia-800 {
+    @apply text-violet-300;
+  }
+
+  .dark .text-green-700,
+  .dark .text-emerald-700 {
+    @apply text-emerald-300;
+  }
+
+  .dark .text-amber-700,
+  .dark .text-orange-700 {
+    @apply text-amber-300;
+  }
+
+  .dark .text-red-700,
+  .dark .text-rose-700 {
+    @apply text-rose-300;
+  }
+
+  .dark .placeholder\:text-gray-500::placeholder,
+  .dark .placeholder\:text-slate-400::placeholder {
+    @apply text-zinc-500;
+  }
+
+  .dark .focus-within\:bg-white:focus-within {
+    @apply bg-[#242424];
+  }
+
+  .dark .focus-within\:ring-blue-100:focus-within,
+  .dark .focus\:ring-blue-100:focus,
+  .dark .focus\:ring-blue-200:focus {
+    @apply ring-blue-500/30;
+  }
+
+  .dark .hover\:bg-gray-50:hover,
+  .dark .hover\:bg-slate-50:hover,
+  .dark .hover\:bg-gray-100:hover,
+  .dark .hover\:bg-slate-100:hover {
+    @apply bg-white/10;
+  }
+
+  .dark .hover\:bg-gray-200:hover,
+  .dark .hover\:bg-slate-200:hover {
+    @apply bg-white/15;
+  }
+
+  .dark .hover\:bg-blue-50:hover,
+  .dark .hover\:bg-blue-100:hover {
+    @apply bg-blue-500/15;
+  }
+
+  .dark .hover\:bg-indigo-50:hover,
+  .dark .hover\:bg-indigo-100:hover,
+  .dark .hover\:bg-violet-50:hover,
+  .dark .hover\:bg-violet-100:hover,
+  .dark .hover\:bg-fuchsia-50:hover,
+  .dark .hover\:bg-fuchsia-100:hover {
+    @apply bg-violet-500/15;
+  }
+
+  .dark .hover\:bg-green-50:hover,
+  .dark .hover\:bg-green-100:hover,
+  .dark .hover\:bg-emerald-50:hover,
+  .dark .hover\:bg-emerald-100:hover {
+    @apply bg-emerald-500/15;
+  }
+
+  .dark .hover\:bg-amber-50:hover,
+  .dark .hover\:bg-amber-100:hover,
+  .dark .hover\:bg-orange-50:hover,
+  .dark .hover\:bg-orange-100:hover {
+    @apply bg-amber-500/15;
+  }
+
+  .dark .hover\:bg-red-50:hover,
+  .dark .hover\:bg-red-100:hover,
+  .dark .hover\:bg-rose-50:hover,
+  .dark .hover\:bg-rose-100:hover {
+    @apply bg-rose-500/15;
+  }
+
+  .dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+    @apply border-white/10;
+  }
+
+  .dark .dark\:bg-gray-900,
+  .dark .dark\:bg-gray-900\/80,
+  .dark .dark\:bg-gray-900\/85,
+  .dark .dark\:bg-gray-900\/90,
+  .dark .dark\:bg-slate-900,
+  .dark .dark\:bg-slate-900\/80 {
+    @apply bg-[#1f1f1f];
+  }
+
+  .dark .dark\:bg-gray-800,
+  .dark .dark\:bg-gray-800\/50,
+  .dark .dark\:bg-gray-800\/60,
+  .dark .dark\:bg-gray-800\/70,
+  .dark .dark\:bg-gray-800\/80,
+  .dark .dark\:bg-slate-800,
+  .dark .dark\:bg-slate-800\/80 {
+    @apply bg-[#242424];
+  }
+
+  .dark .dark\:bg-gray-700,
+  .dark .dark\:bg-slate-700 {
+    @apply bg-white/10;
+  }
+
+  .dark .dark\:border-gray-600,
+  .dark .dark\:border-gray-700,
+  .dark .dark\:border-slate-600,
+  .dark .dark\:border-slate-700,
+  .dark .dark\:border-slate-700\/80 {
+    @apply border-white/10;
+  }
+
+  .dark .dark\:hover\:bg-gray-700:hover,
+  .dark .dark\:hover\:bg-gray-800:hover,
+  .dark .dark\:hover\:bg-gray-800\/50:hover,
+  .dark .dark\:hover\:bg-gray-800\/60:hover,
+  .dark .dark\:hover\:bg-slate-700:hover {
+    @apply bg-white/10;
   }
 }
 
-/* 动画关键帧 */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -388,7 +605,7 @@ html::-webkit-scrollbar {
   }
 }
 
-/* 响应式设计 */
+/* 鍝嶅簲寮忚璁?*/
 @media (max-width: 768px) {
   .card {
     @apply p-4;
@@ -399,7 +616,7 @@ html::-webkit-scrollbar {
   }
 }
 
-/* 打印样式 */
+/* 鎵撳嵃鏍峰紡 */
 @media print {
   .no-print {
     display: none !important;
