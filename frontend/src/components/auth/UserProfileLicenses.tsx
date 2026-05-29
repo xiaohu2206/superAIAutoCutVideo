@@ -20,6 +20,7 @@ import {
   selfUnbindLicense,
   type LicenseRecord,
 } from "./licenseApi";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 const PLAN_LABEL: Record<string, string> = {
   monthly: "月付",
@@ -116,6 +117,7 @@ interface UserProfileLicensesProps {
 }
 
 export default function UserProfileLicenses({ accessToken }: UserProfileLicensesProps) {
+  const isDark = useThemeMode() === "dark";
   const [list, setList] = useState<LicenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -207,7 +209,11 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/80 shadow-sm">
+    <div
+      className={`overflow-hidden rounded-2xl shadow-sm ${
+        isDark ? "bg-gray-900/80" : "border border-slate-200/80 bg-white/80"
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
         <h3 className="flex items-center text-sm font-semibold text-slate-900">
           <span>我的 License</span>
@@ -232,7 +238,7 @@ export default function UserProfileLicenses({ accessToken }: UserProfileLicenses
         </button>
       </div>
 
-      <div className="border-b border-slate-100 px-5 py-4">
+      <div className="px-5 py-4">
     
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

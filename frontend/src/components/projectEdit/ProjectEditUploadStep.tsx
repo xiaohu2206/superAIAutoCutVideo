@@ -16,6 +16,7 @@ import { projectService } from "../../services/projectService";
 import { useAuth } from "../auth/AuthContext";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
 import { videoModelService } from "@/services/videoModelService";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface ProjectEditUploadStepProps {
   projectId: string;
@@ -179,6 +180,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onOmniMultimodalChoiceCancel,
 }) => {
   const { isAuthenticated } = useAuth();
+  const isDark = useThemeMode() === "dark";
   const canReExtractSubtitle =
     project.subtitle_source === "extracted" &&
     Boolean(project.subtitle_path) &&
@@ -291,17 +293,35 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                   : "镜头与字幕提取"}
             </h2>
             {project.subtitle_source === "user" && project.subtitle_path ? (
-              <span className="text-xs px-2.5 py-1 bg-green-50 text-green-700 font-medium rounded-full border border-green-100 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+              <span
+                className={`text-xs px-2.5 py-1 font-medium rounded-full border ${
+                  isDark
+                    ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+                    : "border-green-100 bg-green-50 text-green-700"
+                }`}
+              >
                 已上传字幕
               </span>
             ) : null}
             {project.subtitle_source === "extracted" && project.subtitle_path ? (
-              <span className="text-xs px-2.5 py-1 bg-violet-50 text-violet-700 font-medium rounded-full border border-violet-100 dark:border-violet-400/20 dark:bg-violet-500/10 dark:text-violet-300">
+              <span
+                className={`text-xs px-2.5 py-1 font-medium rounded-full border ${
+                  isDark
+                    ? "border-violet-400/20 bg-violet-500/10 text-violet-300"
+                    : "border-violet-100 bg-violet-50 text-violet-700"
+                }`}
+              >
                 已提取字幕
               </span>
             ) : null}
             {project.subtitle_updated_by_user ? (
-              <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 font-medium rounded-full border border-amber-100 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-300">
+              <span
+                className={`text-xs px-2.5 py-1 font-medium rounded-full border ${
+                  isDark
+                    ? "border-amber-400/20 bg-amber-500/10 text-amber-300"
+                    : "border-amber-100 bg-amber-50 text-amber-700"
+                }`}
+              >
                 已编辑
               </span>
             ) : null}

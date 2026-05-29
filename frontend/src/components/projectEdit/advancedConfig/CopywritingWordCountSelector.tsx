@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 
 interface Props {
   copywritingWordCount: number | null;
@@ -18,6 +19,7 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
   saving,
   setCopywritingWordCountAndPersist,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const isAuto = copywritingWordCount === null || copywritingWordCount === undefined;
   const sliderValue = isAuto ? 0 : Math.max(MIN_COUNT, Math.min(MAX_COUNT, copywritingWordCount));
 
@@ -85,15 +87,20 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
   };
 
   return (
-    <div className="border-t border-gray-200 pt-4">
+    <div className={`border-t pt-4 ${isDark ? "border-[#2a2a2a]" : "border-gray-200"}`}>
       <div className="flex items-center justify-between mb-2">
-        <label className="block text-sm font-medium text-gray-700">解说文案字数<span className="text-xs text-gray-400">（字数是否稳定，由模型决定）</span></label>
+        <label className={`block text-sm font-medium ${isDark ? "text-zinc-200" : "text-gray-700"}`}>
+          解说文案字数
+          <span className={`text-xs ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
+            （字数是否稳定，由模型决定）
+          </span>
+        </label>
         {loading ? (
-          <span className="text-xs text-gray-500">加载中</span>
+          <span className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-500"}`}>加载中</span>
         ) : saving ? (
-          <span className="text-xs text-gray-500">保存中</span>
+          <span className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-500"}`}>保存中</span>
         ) : (
-          <span className="text-xs text-gray-500">
+          <span className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
             {isAuto ? "自动（由模型决定）" : `${sliderValue.toLocaleString()} 字`}
           </span>
         )}
@@ -106,8 +113,12 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
             shrink-0 px-3 py-1.5 text-xs rounded-md border transition-all duration-200
             ${
               isAuto
-                ? "border-violet-600 bg-violet-50 text-violet-700 ring-1 ring-violet-600"
-                : "border-gray-200 bg-white text-gray-600 hover:border-violet-300"
+                ? isDark
+                  ? "border-violet-400/40 bg-violet-500/10 text-violet-300"
+                  : "border-violet-600 bg-violet-50 text-violet-700 ring-1 ring-violet-600"
+                : isDark
+                  ? "border-[#2a2a2a] bg-[#242424] text-zinc-300 hover:border-violet-400/40 hover:bg-violet-500/10"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-violet-300"
             }
           `}
         >
@@ -120,7 +131,9 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
           step={STEP}
           value={isAuto ? 0 : sliderValue}
           onChange={handleSliderChange}
-          className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-violet-600"
+          className={`flex-1 h-2 rounded-lg appearance-none cursor-pointer accent-violet-600 ${
+            isDark ? "bg-[#2a2a2a] accent-violet-400" : "bg-gray-200"
+          }`}
         />
         <div className="relative shrink-0">
           <input
@@ -130,11 +143,19 @@ const CopywritingWordCountSelector: React.FC<Props> = ({
             onChange={handleInputChange}
             onBlur={handleInputBlur}
             placeholder="自动"
-            className="w-20 px-2 py-1.5 text-xs text-center border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500"
+            className={`w-20 px-2 py-1.5 text-xs text-center border rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500 ${
+              isDark
+                ? "border-[#2a2a2a] bg-[#242424] text-zinc-200 placeholder:text-zinc-500"
+                : "border-gray-200 bg-white text-gray-900"
+            }`}
           />
         </div>
       </div>
-      <div className="flex justify-between text-[10px] text-gray-400 mt-1 px-[52px]">
+      <div
+        className={`flex justify-between text-[10px] mt-1 px-[52px] ${
+          isDark ? "text-zinc-500" : "text-gray-400"
+        }`}
+      >
         {MARKS.map((v) => (
           <span key={v}>{v.toLocaleString()}</span>
         ))}

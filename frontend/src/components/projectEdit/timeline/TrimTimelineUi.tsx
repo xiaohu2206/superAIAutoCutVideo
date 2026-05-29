@@ -2,6 +2,7 @@ import { Minus, Plus, RotateCcw } from "lucide-react";
 import React from "react";
 
 import { clamp } from "./timelineMath";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 
 export type TimelineToolbarProps = {
   disabled: boolean;
@@ -26,6 +27,8 @@ export const TrimTimelineToolbar: React.FC<TimelineToolbarProps> = ({
   onToggleSnap,
   onAddRange,
 }) => {
+  const isDark = useThemeMode() === "dark";
+
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-2">
@@ -60,10 +63,30 @@ export const TrimTimelineToolbar: React.FC<TimelineToolbarProps> = ({
           type="button"
           onClick={onToggleSnap}
           disabled={disabled}
-          className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg border ${snapEnabled ? "border-violet-200 bg-violet-50 text-violet-700" : "border-gray-200 bg-white text-gray-700"} hover:bg-gray-50 disabled:opacity-50`}
+          className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg border disabled:opacity-50 ${
+            snapEnabled
+              ? isDark
+                ? "border-violet-500/40 bg-violet-500/15 text-violet-300 hover:bg-violet-500/25"
+                : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+              : isDark
+                ? "border-[#2a2a2a] bg-[#242424] text-gray-200 hover:bg-[#2d2d2d]"
+                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+          }`}
         >
           <span className="text-sm">吸附</span>
-          <span className={`text-xs ${snapEnabled ? "text-violet-700" : "text-gray-500"}`}>{snapEnabled ? "开" : "关"}</span>
+          <span
+            className={`text-xs ${
+              snapEnabled
+                ? isDark
+                  ? "text-violet-300"
+                  : "text-violet-700"
+                : isDark
+                  ? "text-gray-400"
+                  : "text-gray-500"
+            }`}
+          >
+            {snapEnabled ? "开" : "关"}
+          </span>
         </button>
         <button
           type="button"

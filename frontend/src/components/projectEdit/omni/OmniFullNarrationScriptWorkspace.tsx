@@ -1,8 +1,9 @@
-import { Loader, Mic } from "lucide-react";
+import { Info, Loader, Mic } from "lucide-react";
 import React, { useCallback, useState } from "react";
 import type { Project, VideoScript } from "../../../types/project";
 import { useOmniScriptTts } from "../../../hooks/omni/useOmniScriptTts";
 import { useOmniScriptWorkspace } from "../../../hooks/omni/useOmniScriptWorkspace";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 import BulkTtsChoiceModal from "./BulkTtsChoiceModal";
 import OmniScriptPreviewPanel from "./OmniScriptPreviewPanel";
 import OmniScriptSegmentList from "./OmniScriptSegmentList";
@@ -33,6 +34,7 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
   isSaving,
   refreshProject,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const workspace = useOmniScriptWorkspace({
     project,
     editedScript,
@@ -155,8 +157,12 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
               className={
                 "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs " +
                 (scriptTts.allDubbed
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                  : "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300")
+                  ? isDark
+                    ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : isDark
+                    ? "border-violet-400/20 bg-violet-500/10 text-violet-300"
+                    : "border-violet-200 bg-violet-50 text-violet-700")
               }
             >
               已配音 {scriptTts.validDubbedCount} / {scriptTts.dubbableCount}
@@ -182,12 +188,21 @@ const OmniFullNarrationScriptWorkspace: React.FC<OmniFullNarrationScriptWorkspac
           />
         </div>
       ) : null}
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        {scriptTts.hasAnyDubbed
-          ? "已存在部分配音，点击批量配音可选择「补全未完成」或「全部重新」。"
-          : "尚无配音，点击批量配音将为所有解说段生成配音。"}
-        生成视频/剪映草稿时会自动复用已有配音，仅对未配音段按需补齐，不会重复配音。播放镜头时以配音时长为准。
-      </p>
+      <div className="flex items-start gap-2 px-3 py-2 text-xs leading-relaxed text-violet-800 dark:border-violet-800/40 dark:bg-violet-950/20 dark:text-violet-200">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          {scriptTts.hasAnyDubbed
+            ? "已有部分配音，批量配音可选择「补全未完成」或「全部重新」"
+            : "尚无配音，批量配音将为所有解说段生成"}
+          <span
+            className="ml-1 cursor-help text-violet-600/80 underline decoration-dotted underline-offset-2 dark:text-violet-300/80"
+            title="生成视频/剪映草稿时会自动复用已有配音，仅对未配音段按需补齐；以音频时长为准，自动延长或裁剪视频镜头"
+          >
+            生成时以音频时长为准
+          </span>
+        </span>
+      </div>
+
 
       <div className="grid grid-cols-1 md:grid-cols-[35%_minmax(0,1fr)] gap-5">
         <OmniScriptPreviewPanel

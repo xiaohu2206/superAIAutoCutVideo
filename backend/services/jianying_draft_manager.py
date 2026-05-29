@@ -21,7 +21,7 @@ from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
-from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
+from services.narration_ost_overlap import ORIGINAL_SEGMENT_EXTRA_DURATION_S, resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
 
@@ -1083,6 +1083,7 @@ class JianyingDraftManager:
 
             ost_skipped: Set[int] = set()
             ost_start_override: Dict[int, float] = {}
+            pending_original_occupied_until: Optional[float] = None
 
             for idx, seg in enumerate(segments, start=1):
                 if cancel_event and cancel_event.is_set():
@@ -1093,15 +1094,27 @@ class JianyingDraftManager:
                 et = float(seg.get("end_time") or 0.0)
                 if idx in ost_start_override:
                     st = float(ost_start_override[idx])
-                if et <= st:
-                    continue
-                dur = max(0.0, et - st)
                 text = str(seg.get("text") or "").strip()
                 subtitle = str(seg.get("subtitle") or "").strip()
                 ost_flag = seg.get("OST")
                 is_original = (ost_flag == 1) or text.startswith("播放原")
+                if pending_original_occupied_until is not None and st < pending_original_occupied_until:
+                    st = min(float(video_dur), pending_original_occupied_until) if video_dur > 0.0 else pending_original_occupied_until
+                    et = max(et, st)
+                pending_original_occupied_until = None
+                if et <= st and is_original:
+                    continue
+                dur = max(0.0, et - st)
 
                 if is_original:
+                    extra_duration = max(0.0, float(ORIGINAL_SEGMENT_EXTRA_DURATION_S or 0.0))
+                    if extra_duration > 0.0:
+                        dur = (
+                            max(0.0, min(float(video_dur), et + extra_duration) - st)
+                            if video_dur > 0.0
+                            else dur + extra_duration
+                        )
+                    pending_original_occupied_until = st + dur
                     timeline_items.append({
                         "kind": "original",
                         "duration_us": _s_to_us(dur),

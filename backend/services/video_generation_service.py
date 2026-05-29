@@ -22,7 +22,7 @@ from modules.ws_manager import manager
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 
 from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
-from services.narration_ost_overlap import resolve_narration_extend_vs_following_play_original
+from services.narration_ost_overlap import ORIGINAL_SEGMENT_EXTRA_DURATION_S, resolve_narration_extend_vs_following_play_original
 
 logger = logging.getLogger(__name__)
 
@@ -321,6 +321,7 @@ class VideoGenerationService:
             except Exception:
                 pass
             segment_items: List[Dict[str, Any]] = []
+            pending_original_occupied_until: Optional[float] = None
             for idx, seg in enumerate(segments, start=1):
                 if cancel_event.is_set():
                     raise asyncio.CancelledError()
@@ -342,6 +343,17 @@ class VideoGenerationService:
                 text = str(seg.get("text", "") or "").strip()
                 ost_flag = seg.get("OST")
                 is_original = (ost_flag == 1) or text.startswith("播放原")
+                if pending_original_occupied_until is not None and start < pending_original_occupied_until:
+                    start = min(float(input_dur), pending_original_occupied_until) if input_dur > 0.0 else pending_original_occupied_until
+                    end = max(end, start)
+                    duration = max(0.0, end - start)
+                pending_original_occupied_until = None
+                if is_original:
+                    extra_duration = max(0.0, float(ORIGINAL_SEGMENT_EXTRA_DURATION_S or 0.0))
+                    if extra_duration > 0.0:
+                        end = min(float(input_dur), end + extra_duration) if input_dur > 0.0 else end + extra_duration
+                        duration = max(0.0, end - start)
+                    pending_original_occupied_until = start + duration
                 logger.info(
                     "DEBUG segment_init idx=%s start=%.3f end=%.3f duration=%.3f ost=%s text_len=%s is_original=%s",
                     idx,
@@ -353,22 +365,25 @@ class VideoGenerationService:
                     is_original,
                 )
 
-                ok = await video_processor.cut_video_segment(
-                    str(input_abs),
-                    str(clip_abs),
-                    start,
-                    duration,
-                    scope="generate_video",
-                    project_id=project_id,
-                    task_id=task_id,
-                    cancel_event=cancel_event,
-                )
-                if not ok:
-                    last_err = getattr(video_processor, "last_cut_error", "") or ""
-                    raise RuntimeError(
-                        f"剪切片段失败: idx={idx} start={start:.3f} end={end:.3f} duration={duration:.3f}"
-                        + (f" reason={last_err}" if last_err else "")
+                if duration > 0.0:
+                    ok = await video_processor.cut_video_segment(
+                        str(input_abs),
+                        str(clip_abs),
+                        start,
+                        duration,
+                        scope="generate_video",
+                        project_id=project_id,
+                        task_id=task_id,
+                        cancel_event=cancel_event,
                     )
+                    if not ok:
+                        last_err = getattr(video_processor, "last_cut_error", "") or ""
+                        raise RuntimeError(
+                            f"剪切片段失败: idx={idx} start={start:.3f} end={end:.3f} duration={duration:.3f}"
+                            + (f" reason={last_err}" if last_err else "")
+                        )
+                elif is_original:
+                    continue
 
                 try:
                     clip_size = clip_abs.stat().st_size

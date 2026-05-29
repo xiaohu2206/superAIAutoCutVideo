@@ -1,4 +1,5 @@
 import React from "react";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 
 interface Props {
   scriptLanguage: "zh" | "en";
@@ -13,6 +14,7 @@ const ScriptLanguageSelector: React.FC<Props> = ({
   saving,
   setScriptLanguageAndPersist,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const options: Array<{ value: "zh" | "en"; title: string; subtitle: string }> = [
     { value: "zh", title: "中文", subtitle: "生成中文解说文本" },
     { value: "en", title: "English", subtitle: "Generate English narration" },
@@ -38,18 +40,50 @@ const ScriptLanguageSelector: React.FC<Props> = ({
               key={opt.value}
               className={`relative flex flex-col justify-between p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
                 isSelected
-                  ? "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm dark:border-violet-500 dark:bg-violet-900/20 dark:ring-violet-500"
-                  : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-violet-600"
+                  ? isDark
+                    ? "border-violet-400/40 bg-violet-500/10 text-violet-300"
+                    : "border-violet-600 bg-violet-50 ring-1 ring-violet-600 shadow-sm"
+                  : isDark
+                    ? "border-[#2a2a2a] bg-[#242424] hover:border-violet-400/40 hover:bg-[#2d2d2d]"
+                    : "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm"
               }`}
               onClick={() => void setScriptLanguageAndPersist(opt.value)}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className={`text-sm font-medium ${isSelected ? "text-violet-900 dark:text-violet-200" : "text-gray-900 dark:text-gray-200"}`}>
+                <span
+                  className={`text-sm font-medium ${
+                    isSelected
+                      ? isDark
+                        ? "text-violet-200"
+                        : "text-violet-900"
+                      : isDark
+                        ? "text-gray-200"
+                        : "text-gray-900"
+                  }`}
+                >
                   {opt.title}
                 </span>
-                {isSelected && <div className="h-4 w-4 rounded-full bg-violet-600" />}
+                {isSelected && (
+                  <div
+                    className={`h-4 w-4 rounded-full ${
+                      isDark ? "bg-violet-400" : "bg-violet-600"
+                    }`}
+                  />
+                )}
               </div>
-              <span className={`text-xs ${isSelected ? "text-violet-700 dark:text-violet-300" : "text-gray-500 dark:text-gray-400"}`}>{opt.subtitle}</span>
+              <span
+                className={`text-xs ${
+                  isSelected
+                    ? isDark
+                      ? "text-violet-300"
+                      : "text-violet-700"
+                    : isDark
+                      ? "text-gray-400"
+                      : "text-gray-500"
+                }`}
+              >
+                {opt.subtitle}
+              </span>
             </div>
           );
         })}

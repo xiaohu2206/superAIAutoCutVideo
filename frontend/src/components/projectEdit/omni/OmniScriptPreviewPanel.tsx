@@ -1,4 +1,4 @@
-import { Play, SkipBack, SkipForward, Square } from "lucide-react";
+import { Play, SkipBack, SkipForward, Square, Volume2 } from "lucide-react";
 import React from "react";
 import type { ScriptSegment } from "../../../types/project";
 import SegmentDurationControl from "./SegmentDurationControl";
@@ -80,9 +80,22 @@ const OmniScriptPreviewPanel: React.FC<OmniScriptPreviewPanelProps> = ({
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between text-sm">
           <span className="font-medium text-gray-900 dark:text-gray-100">第 {selectedIndex + 1} 条片段</span>
-          <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
-            {durationLabel(selectedSegment.start_time, selectedSegment.end_time)}
-          </span>
+          <div className="flex items-center gap-3">
+            {canPlayTts && onPlaySegmentTts ? (
+              <button
+                type="button"
+                onClick={onPlaySegmentTts}
+                title="播放配音"
+                className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-violet-600 dark:hover:text-violet-300 transition-colors"
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+                配音
+              </button>
+            ) : null}
+            <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
+              {durationLabel(selectedSegment.start_time, selectedSegment.end_time)}
+            </span>
+          </div>
         </div>
         <div className="space-y-2 pt-1">
           
@@ -139,15 +152,6 @@ const OmniScriptPreviewPanel: React.FC<OmniScriptPreviewPanelProps> = ({
               </select>
             </label>
           </div>
-          {canPlayTts && onPlaySegmentTts ? (
-            <button
-              type="button"
-              onClick={onPlaySegmentTts}
-              className="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg text-sm border border-violet-300 dark:border-violet-600 text-violet-700 dark:text-violet-200 hover:bg-violet-50 dark:hover:bg-violet-950/40"
-            >
-              播放配音
-            </button>
-          ) : null}
         </div>
         {onRangeChange ? (
           <SegmentDurationControl

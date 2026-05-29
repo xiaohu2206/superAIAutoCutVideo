@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Edit3, Loader, RefreshCcw, Save, Trash2, X } from "lucide-react";
 import type { SubtitleMeta, SubtitleSegment } from "../../types/project";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface SubtitleEditorProps {
   segments: SubtitleSegment[];
@@ -27,8 +28,12 @@ const formatTime = (seconds: number) => {
   return `${pad2(hour)}:${pad2(min)}:${pad2(sec)}.${pad3(ms)}`;
 };
 
-const buildBadge = (text: string, className: string) => (
-  <span className={`text-xs px-2.5 py-1 font-medium rounded-full border ${className}`}>
+const buildBadge = (text: string, lightCls: string, darkCls: string, isDark: boolean) => (
+  <span
+    className={`text-xs px-2.5 py-1 font-medium rounded-full border ${
+      isDark ? darkCls : lightCls
+    }`}
+  >
     {text}
   </span>
 );
@@ -42,6 +47,7 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
   onSave,
   onChange,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const canSave = segments.length > 0 && !saving && !loading;
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -53,18 +59,50 @@ const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">字幕（可编辑）</h2>
           {subtitleMeta?.source === "user"
-            ? buildBadge("已上传", "bg-green-50 text-green-700 border-green-100")
+            ? buildBadge(
+                "已上传",
+                "bg-green-50 text-green-700 border-green-100",
+                "bg-emerald-500/10 text-emerald-300 border-emerald-400/20",
+                isDark,
+              )
             : subtitleMeta?.source === "extracted"
-              ? buildBadge("已提取", "bg-violet-50 text-violet-700 border-violet-100")
+              ? buildBadge(
+                  "已提取",
+                  "bg-violet-50 text-violet-700 border-violet-100",
+                  "bg-violet-500/10 text-violet-300 border-violet-400/20",
+                  isDark,
+                )
               : null}
           {subtitleMeta?.status === "extracting"
-            ? buildBadge("提取中", "bg-blue-50 text-blue-700 border-blue-100")
+            ? buildBadge(
+                "提取中",
+                "bg-blue-50 text-blue-700 border-blue-100",
+                "bg-blue-500/10 text-blue-300 border-blue-400/20",
+                isDark,
+              )
             : subtitleMeta?.status === "failed"
-              ? buildBadge("失败", "bg-red-50 text-red-700 border-red-100")
+              ? buildBadge(
+                  "失败",
+                  "bg-red-50 text-red-700 border-red-100",
+                  "bg-red-500/10 text-red-300 border-red-400/20",
+                  isDark,
+                )
               : subtitleMeta?.status === "ready"
-                ? buildBadge("就绪", "bg-gray-50 text-gray-700 border-gray-200")
+                ? buildBadge(
+                    "就绪",
+                    "bg-gray-50 text-gray-700 border-gray-200",
+                    "bg-[#242424] text-zinc-300 border-[#2a2a2a]",
+                    isDark,
+                  )
                 : null}
-          {subtitleMeta?.updated_by_user ? buildBadge("已编辑", "bg-amber-50 text-amber-700 border-amber-100") : null}
+          {subtitleMeta?.updated_by_user
+            ? buildBadge(
+                "已编辑",
+                "bg-amber-50 text-amber-700 border-amber-100",
+                "bg-amber-500/10 text-amber-300 border-amber-400/20",
+                isDark,
+              )
+            : null}
         </div>
       </div>
 

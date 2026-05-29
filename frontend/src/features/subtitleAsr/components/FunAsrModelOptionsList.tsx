@@ -4,6 +4,7 @@ import AppSelect from "@/components/ui/AppSelect";
 import type { FunAsrDownloadProvider } from "../types";
 import FunAsrDownloadProgress from "./FunAsrDownloadProgress";
 import { TauriCommands } from "@/services/clients";
+import { useThemeMode } from "@/hooks/useThemeMode";
 
 type OptionItem = { id: string; label: string; keys: string[]; description?: string };
 
@@ -50,6 +51,7 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
   onOpenDir,
   copiedOptionId,
 }) => {
+  const isDark = useThemeMode() === "dark";
   console.log("options222: ", options)
   const keyUsage = React.useMemo(() => {
     const usage: Record<string, string[]> = {};
@@ -65,11 +67,21 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
   }, [options]);
   return (
     <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300">
-        <Info className="w-5 h-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+      <div
+        className={`rounded-lg border p-3 text-sm flex gap-2 ${
+          isDark
+            ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+            : "border-blue-200 bg-blue-50 text-blue-800"
+        }`}
+      >
+        <Info className={`w-5 h-5 flex-shrink-0 ${isDark ? "text-blue-300" : "text-blue-600"}`} />
         <div className="space-y-1">
           <p className="font-medium">模型下载说明：</p>
-          <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1 dark:text-blue-300">
+          <ul
+            className={`list-disc list-inside space-y-0.5 ml-1 ${
+              isDark ? "text-blue-300" : "text-blue-700"
+            }`}
+          >
             <li>每个选项包含 ASR 模型 + VAD 模型；两者都可用才算“就绪”。</li>
             <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\FunASR)。</li>
             <li>
@@ -77,7 +89,9 @@ const FunAsrModelOptionsList: React.FC<FunAsrModelOptionsListProps> = ({
               <button
                 type="button"
                 onClick={() => TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc")}
-                className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-200"
+                className={`ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 underline ${
+                  isDark ? "text-blue-300 hover:text-blue-200" : "text-blue-700 hover:text-blue-900"
+                }`}
               >
                 网盘下载
               </button>

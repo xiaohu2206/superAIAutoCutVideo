@@ -1,6 +1,7 @@
 import React from "react";
 import type { InterleaveMode } from "../../../types/project";
 import { DEFAULT_ORIGINAL_RATIO, ORIGINAL_RATIO_MIN, ORIGINAL_RATIO_MAX } from "./utils";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 
 interface Props {
   interleaveMode: InterleaveMode;
@@ -23,9 +24,17 @@ const OriginalRatioSlider: React.FC<Props> = ({
   saving,
   setOriginalRatioAndPersist,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const isAuto = originalRatio === null || originalRatio === undefined;
   const displayedRatio = originalRatio ?? DEFAULT_ORIGINAL_RATIO;
   const isSmart = interleaveMode === "smart_interleave";
+  const selectedButtonClass = isDark
+    ? "bg-violet-500/10 text-violet-300"
+    : "bg-violet-50 text-violet-700";
+  const idleButtonClass = isDark
+    ? "bg-[#242424] text-zinc-300 hover:bg-[#2d2d2d]"
+    : "bg-white text-gray-700 hover:bg-gray-50";
+  const groupBorderClass = isDark ? "border-[#2a2a2a]" : "border-gray-200";
 
   return (
     <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
@@ -36,13 +45,11 @@ const OriginalRatioSlider: React.FC<Props> = ({
         ) : null}
       </div>
       <div className="flex items-center gap-2 mb-3">
-        <div className="inline-flex rounded-md border border-gray-200 overflow-hidden dark:border-gray-600">
+        <div className={`inline-flex overflow-hidden rounded-md border ${groupBorderClass}`}>
           <button
             type="button"
             className={`px-3 py-1 text-xs ${
-              isSmart
-                ? "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
-                : "bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              isSmart ? selectedButtonClass : idleButtonClass
             }`}
             onClick={() => void setInterleaveModeAndPersist("smart_interleave")}
             disabled={interleaveModeLoading || interleaveModeSaving}
@@ -51,10 +58,8 @@ const OriginalRatioSlider: React.FC<Props> = ({
           </button>
           <button
             type="button"
-            className={`px-3 py-1 text-xs border-l border-gray-200 dark:border-gray-600 ${
-              !isSmart
-                ? "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
-                : "bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+            className={`border-l px-3 py-1 text-xs ${groupBorderClass} ${
+              !isSmart ? selectedButtonClass : idleButtonClass
             }`}
             onClick={() => void setInterleaveModeAndPersist("original_interleave")}
             disabled={interleaveModeLoading || interleaveModeSaving}
@@ -77,11 +82,11 @@ const OriginalRatioSlider: React.FC<Props> = ({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <div className="inline-flex rounded-md border border-gray-200 overflow-hidden dark:border-gray-600">
+            <div className={`inline-flex overflow-hidden rounded-md border ${groupBorderClass}`}>
               <button
                 type="button"
                 className={`px-3 py-1 text-xs ${
-                  isAuto ? "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300" : "bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                  isAuto ? selectedButtonClass : idleButtonClass
                 }`}
                 onClick={() => void setOriginalRatioAndPersist(null)}
                 disabled={loading || saving}
@@ -90,8 +95,8 @@ const OriginalRatioSlider: React.FC<Props> = ({
               </button>
               <button
                 type="button"
-                className={`px-3 py-1 text-xs border-l border-gray-200 dark:border-gray-600 ${
-                  !isAuto ? "bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300" : "bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                className={`border-l px-3 py-1 text-xs ${groupBorderClass} ${
+                  !isAuto ? selectedButtonClass : idleButtonClass
                 }`}
                 onClick={() => void setOriginalRatioAndPersist(isAuto ? DEFAULT_ORIGINAL_RATIO : displayedRatio)}
                 disabled={loading || saving}

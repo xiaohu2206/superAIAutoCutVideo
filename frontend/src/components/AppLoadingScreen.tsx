@@ -1,6 +1,7 @@
 import React from "react";
 import type { BackendResourceStatus } from "../services/clients";
 import logoSrc from "../assets/logo.png";
+import { useThemeMode } from "../hooks/useThemeMode";
 
 interface AppLoadingScreenProps {
   appVersion?: string;
@@ -35,6 +36,7 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
   showSkipAfterMs = 45_000,
   onSkipToMain,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const showAntivirusHint = elapsedSeconds >= antivirusHintAfterSec;
   const showSkip =
     typeof onSkipToMain === "function" &&
@@ -127,17 +129,45 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
     : [];
 
   return (
-    <div className="relative grid h-screen min-h-0 w-full select-none grid-rows-[1fr_auto] overflow-hidden rounded-[18px] bg-white">
-      <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-gradient-to-br from-blue-100/50 via-violet-100/30 to-transparent blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 -right-12 h-56 w-56 rounded-full bg-gradient-to-tl from-sky-100/40 via-indigo-50/25 to-transparent blur-3xl" />
+    <div
+      className={`relative grid h-screen min-h-0 w-full select-none grid-rows-[1fr_auto] overflow-hidden rounded-[18px] ${
+        isDark ? "bg-[#141414]" : "bg-white"
+      }`}
+    >
+      <div
+        className={`pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-gradient-to-br to-transparent blur-3xl ${
+          isDark
+            ? "from-blue-500/15 via-violet-500/10"
+            : "from-blue-100/50 via-violet-100/30"
+        }`}
+      />
+      <div
+        className={`pointer-events-none absolute -bottom-28 -right-12 h-56 w-56 rounded-full bg-gradient-to-tl to-transparent blur-3xl ${
+          isDark
+            ? "from-sky-500/10 via-indigo-500/10"
+            : "from-sky-100/40 via-indigo-50/25"
+        }`}
+      />
 
       <div className="relative z-10 flex min-h-0 flex-col items-center justify-center px-5 py-4">
         <div className="flex w-full min-w-0 max-w-md flex-col items-center gap-4">
           <div className="flex shrink-0 items-center gap-3">
             <img src={logoSrc} alt="SuperAI" className="h-11 w-11 shrink-0 rounded-xl object-contain" />
             <div className="min-w-0">
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">SuperAI</h1>
-              <p className="text-xs tracking-wide text-slate-400">智能影视剪辑</p>
+              <h1
+                className={`text-xl font-bold tracking-tight ${
+                  isDark ? "text-gray-100" : "text-slate-900"
+                }`}
+              >
+                SuperAI
+              </h1>
+              <p
+                className={`text-xs tracking-wide ${
+                  isDark ? "text-gray-500" : "text-slate-400"
+                }`}
+              >
+                智能影视剪辑
+              </p>
             </div>
           </div>
 
@@ -151,7 +181,12 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
               />
             </div>
 
-            <p className="line-clamp-2 text-center text-xs leading-snug text-slate-500" aria-live="polite">
+            <p
+              className={`line-clamp-2 text-center text-xs leading-snug ${
+                isDark ? "text-gray-400" : "text-slate-500"
+              }`}
+              aria-live="polite"
+            >
               {statusLine}
             </p>
 
@@ -185,14 +220,22 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
             )} */}
 
             {!compactMode && (
-              <p className="text-center text-[11px] leading-snug text-slate-400">
+              <p
+                className={`text-center text-[11px] leading-snug ${
+                  isDark ? "text-gray-500" : "text-slate-400"
+                }`}
+              >
                 首次启动或 GPU 版本解压可能较慢
               </p>
             )}
 
             {showAntivirusHint && (
               <p
-                className="line-clamp-2 rounded-lg border border-amber-200/80 bg-amber-50/90 px-2.5 py-1.5 text-center text-[10px] leading-snug text-amber-900"
+                className={`line-clamp-2 rounded-lg border px-2.5 py-1.5 text-center text-[10px] leading-snug ${
+                  isDark
+                    ? "border-amber-400/30 bg-amber-500/10 text-amber-200"
+                    : "border-amber-200/80 bg-amber-50/90 text-amber-900"
+                }`}
                 role="status"
                 aria-live="polite"
               >
@@ -203,13 +246,23 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
             )}
 
             {!!updateVersion && (
-              <p className="text-center text-[11px] text-emerald-500">可更新至 v{updateVersion}</p>
+              <p
+                className={`text-center text-[11px] ${
+                  isDark ? "text-emerald-300" : "text-emerald-500"
+                }`}
+              >
+                可更新至 v{updateVersion}
+              </p>
             )}
 
             {showSkip && (
               <button
                 type="button"
-                className="titlebar-no-drag mx-auto rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                className={`titlebar-no-drag mx-auto rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                  isDark
+                    ? "border-[#2a2a2a] bg-[#242424] text-gray-200 hover:bg-[#2d2d2d]"
+                    : "border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                }`}
                 onClick={() => onSkipToMain?.()}
               >
                 跳过等待，进入主界面
@@ -221,7 +274,9 @@ const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
 
       {!!appVersion && (
         <p
-          className="pointer-events-none shrink-0 pb-4 text-center text-[11px] tabular-nums text-slate-400/90"
+          className={`pointer-events-none shrink-0 pb-4 text-center text-[11px] tabular-nums ${
+            isDark ? "text-gray-600" : "text-slate-400/90"
+          }`}
           aria-label={`应用版本 ${appVersion}`}
         >
           v{appVersion}

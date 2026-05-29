@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Play, Eye, X } from "lucide-react";
 import { SceneResult } from "../../types/scene";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface SceneListTableProps {
   sceneResult: SceneResult | null;
@@ -8,6 +9,7 @@ interface SceneListTableProps {
 }
 
 const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScene }) => {
+  const isDark = useThemeMode() === "dark";
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   /** 仅 vision_status === "ok" 视为画面分析成功；error / empty / 缺字段等不计入「已分析」 */
@@ -66,11 +68,17 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
             <span>
               共 {sceneResult.scenes.length} 个镜头，已成功分析画面 {analyzedVisionCount} 个
               {visionErrorCount > 0 && (
-                <span className="text-amber-600">（分析失败 {visionErrorCount} 个）</span>
+                <span className={isDark ? "text-amber-300" : "text-amber-600"}>
+                  （分析失败 {visionErrorCount} 个）
+                </span>
               )}
             </span>
             {nonErrorNotOkCount > 0 && (
-              <span className="text-red-500 text-xs font-medium">
+              <span
+                className={`text-xs font-medium ${
+                  isDark ? "text-red-300" : "text-red-500"
+                }`}
+              >
                 还有 {nonErrorNotOkCount} 个镜头未成功完成画面分析
               </span>
             )}
@@ -132,7 +140,11 @@ const SceneListTable: React.FC<SceneListTableProps> = ({ sceneResult, onPlayScen
                     <div className="col-span-2">
                         <button 
                             onClick={() => onPlayScene(scene.start_time, scene.end_time)}
-                            className="flex items-center text-blue-600 hover:text-blue-800 transition-colors bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md text-xs font-medium border border-blue-200"
+                            className={`flex items-center transition-colors px-2 py-1 rounded-md text-xs font-medium border ${
+                              isDark
+                                ? "border-blue-400/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200"
+                                : "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800"
+                            }`}
                         >
                             <Play className="w-3 h-3 mr-1 fill-current" />
                             播放镜头

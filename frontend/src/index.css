@@ -429,7 +429,7 @@ html::-webkit-scrollbar {
   .dark .bg-violet-50\/40,
   .dark .bg-fuchsia-50,
   .dark .bg-fuchsia-50\/40 {
-    @apply bg-violet-500/10;
+    
   }
 
   .dark .bg-green-50,

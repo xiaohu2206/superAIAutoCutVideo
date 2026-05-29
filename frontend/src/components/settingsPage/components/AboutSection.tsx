@@ -4,6 +4,7 @@ import { exit, relaunch } from "@tauri-apps/plugin-process";
 import { TauriCommands } from "../../../services/tauriService";
 import { useAppVersion } from "../../../hooks/useAppVersion";
 import { useRuntimeUpdater } from "../../../hooks/useRuntimeUpdater";
+import { useThemeMode } from "../../../hooks/useThemeMode";
 import {
   formatBytes,
   isTauriRuntime,
@@ -12,6 +13,7 @@ import {
 } from "../../../services/runtimeUpdaterService";
 
 const AboutSection: React.FC = () => {
+  const isDark = useThemeMode() === "dark";
   const { appVersion } = useAppVersion();
   const {
     checking: rtChecking,
@@ -82,55 +84,88 @@ const AboutSection: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">关于应用</h2>
         </div>
 
-        <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-gray-800/80">
+        <div
+          className={`mb-6 rounded-xl border p-4 ${
+            isDark ? "border-[#2a2a2a] bg-[#1f1f1f]" : "border-slate-200 bg-slate-50/80"
+          }`}
+        >
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-gray-100">离线更新（壳 + 后端）</h3>
+                <Layers className={`h-4 w-4 ${isDark ? "text-indigo-300" : "text-indigo-500"}`} />
+                <h3
+                  className={`text-sm font-semibold ${
+                    isDark ? "text-gray-100" : "text-slate-900"
+                  }`}
+                >
+                  离线更新（壳 + 后端）
+                </h3>
               </div>
-              <p className="text-xs text-slate-500 dark:text-gray-400">
+              <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
                 从网盘将 zip、runtime-manifest.json、安装包与总清单放到<strong>同一文件夹</strong>。此处<strong>必须</strong>选择名为{" "}
-                <code className="rounded bg-slate-200/80 px-1 dark:bg-gray-600/80 dark:text-gray-200">offline-bundle-manifest.json</code> 的文件。
+                <code
+                  className={`rounded px-1 ${
+                    isDark ? "bg-[#2a2a2a] text-gray-200" : "bg-slate-200/80"
+                  }`}
+                >
+                  offline-bundle-manifest.json
+                </code>{" "}
+                的文件。
               </p>
               {!!rtManifestPath && !bundleError && !rtChecking && (
-                <p className="text-xs text-slate-600 dark:text-gray-300">已解析总清单并定位后端 runtime-manifest。</p>
+                <p className={`text-xs ${isDark ? "text-gray-300" : "text-slate-600"}`}>
+                  已解析总清单并定位后端 runtime-manifest。
+                </p>
               )}
               {shellBasename ? (
-                <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                <p
+                  className={`text-xs ${
+                    isDark ? "text-emerald-300" : "text-emerald-700"
+                  }`}
+                >
                   壳安装包：{shellBasename}
                 </p>
               ) : rtManifestPath ? (
-                <p className="text-xs text-slate-500 dark:text-gray-400">壳安装包：未指定（仅更新后端运行时）</p>
+                <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
+                  壳安装包：未指定（仅更新后端运行时）
+                </p>
               ) : null}
 
               {rtInstalled && rtInstalled.runtime_version ? (
-                <p className="text-xs text-slate-500 dark:text-gray-400">
+                <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
                   已安装运行时：{rtInstalled.runtime_version}
                   {rtInstalled.variant ? ` (${rtInstalled.variant})` : ""}
                   {rtInstalled.chunks ? ` · ${Object.keys(rtInstalled.chunks).length} 个分块` : ""}
                 </p>
               ) : (
-                <p className="text-xs text-slate-400 dark:text-gray-500">尚无已安装运行时状态记录</p>
+                <p className={`text-xs ${isDark ? "text-gray-500" : "text-slate-400"}`}>
+                  尚无已安装运行时状态记录
+                </p>
               )}
 
               {rtUpdate?.available ? (
                 <>
-                  <p className="text-sm text-emerald-600 dark:text-emerald-400">
+                  <p
+                    className={`text-sm ${
+                      isDark ? "text-emerald-300" : "text-emerald-600"
+                    }`}
+                  >
                     后端：发现 {rtUpdate.remote_version}，需处理 {rtUpdate.chunks_to_update.length} 个分块
                     {rtUpdate.skip_chunks.length > 0 ? `，跳过 ${rtUpdate.skip_chunks.length} 个` : ""}
                   </p>
-                  <p className="text-xs text-slate-500 dark:text-gray-400">
+                  <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
                     本次需解压/校验约：{formatBytes(rtUpdate.total_download_size)}
                   </p>
                 </>
               ) : rtUpdate?.available === false ? (
-                <p className="text-xs text-slate-500 dark:text-gray-400">后端运行时已是最新（若仍要重装壳，可保留总清单中的安装包并安装）</p>
+                <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
+                  后端运行时已是最新（若仍要重装壳，可保留总清单中的安装包并安装）
+                </p>
               ) : null}
 
               {rtInstalling && rtProgress && (
                 <div className="mt-1 space-y-1">
-                  <p className="text-xs text-slate-500 dark:text-gray-400">
+                  <p className={`text-xs ${isDark ? "text-gray-400" : "text-slate-500"}`}>
                     {rtProgress.phase === "verifying"
                       ? `校验 SHA256：${rtProgress.chunk_name} — ${formatBytes(rtProgress.downloaded)} / ${formatBytes(rtProgress.total)}`
                       : rtProgress.phase === "downloading"
@@ -141,17 +176,31 @@ const AboutSection: React.FC = () => {
                             ? "完成"
                             : "处理中"}
                   </p>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                  <div
+                    className={`h-1.5 w-full overflow-hidden rounded-full ${
+                      isDark ? "bg-indigo-500/15" : "bg-indigo-100"
+                    }`}
+                  >
                     <div
-                      className="h-full rounded-full bg-indigo-500 transition-[width] duration-200"
+                      className={`h-full rounded-full transition-[width] duration-200 ${
+                        isDark ? "bg-indigo-400" : "bg-indigo-500"
+                      }`}
                       style={{ width: `${rtProgressPct}%` }}
                     />
                   </div>
                 </div>
               )}
 
-              {!!bundleError && <p className="text-xs text-rose-600 dark:text-rose-400">{bundleError}</p>}
-              {!!rtError && <p className="text-xs text-rose-600 dark:text-rose-400">{rtError}</p>}
+              {!!bundleError && (
+                <p className={`text-xs ${isDark ? "text-rose-300" : "text-rose-600"}`}>
+                  {bundleError}
+                </p>
+              )}
+              {!!rtError && (
+                <p className={`text-xs ${isDark ? "text-rose-300" : "text-rose-600"}`}>
+                  {rtError}
+                </p>
+              )}
             </div>
 
             <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
@@ -159,7 +208,11 @@ const AboutSection: React.FC = () => {
                 type="button"
                 onClick={() => void pickOfflineUpdateBundle()}
                 disabled={rtChecking || rtInstalling}
-                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isDark
+                    ? "border-[#2a2a2a] bg-[#242424] text-gray-200 hover:bg-[#2d2d2d]"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
               >
                 {rtChecking ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5 shrink-0" />}
                 选择总清单
@@ -168,14 +221,22 @@ const AboutSection: React.FC = () => {
                 type="button"
                 onClick={() => void installOfflineAndContinue()}
                 disabled={!canInstall}
-                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300 dark:hover:bg-indigo-500 dark:disabled:bg-indigo-800"
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium text-white transition disabled:cursor-not-allowed ${
+                  isDark
+                    ? "bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-500/30 disabled:text-indigo-200/60"
+                    : "bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300"
+                }`}
               >
                 {rtInstalling ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 shrink-0" />}
                 {shellInstallerPath ? "安装并处理壳" : "安装并重启"}
               </button>
             </div>
           </div>
-          <p className="mt-3 text-[11px] leading-relaxed text-slate-500 dark:text-gray-400">
+          <p
+            className={`mt-3 text-[11px] leading-relaxed ${
+              isDark ? "text-gray-400" : "text-slate-500"
+            }`}
+          >
             若总清单包含壳安装包：将先解压后端到用户目录，再自动以被动升级方式运行与本应用配套的 NSIS 安装包（无需在安装向导里逐步点击），装好后会自动启动桌面壳，本应用随即退出；若安装到系统目录仍可能出现一次 UAC 提权确认。
             若仅后端：安装完成后将自动重启以加载新运行时。
           </p>

@@ -225,17 +225,17 @@ export const VisionModelSettings: React.FC = () => {
                     )}
                     
                     {!status?.valid && !isDownloading && (
-                         <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2">
-                            <Info className="w-5 h-5 flex-shrink-0 text-blue-600" />
+                         <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex gap-2 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300">
+                            <Info className="w-5 h-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
                             <div className="space-y-1">
                                 <p className="font-medium">模型下载说明：</p>
-                                <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1">
+                                <ul className="list-disc list-inside text-blue-700 space-y-0.5 ml-1 dark:text-blue-300">
                                     <li>支持点击按钮在线下载，也支持手动下载后复制到对应目录(\uploads\models\Moondream)。</li>
                                     <li>
                                         手动下载入口：
                                         <button 
                                             onClick={() => TauriCommands.openExternalLink("https://my.feishu.cn/wiki/NI0qwbHftith0kkxhHJcjGlJnRc")}
-                                            className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900"
+                                            className="ml-1 inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-blue-700 underline hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-200"
                                             type="button"
                                         >
                                             网盘下载
@@ -245,7 +245,7 @@ export const VisionModelSettings: React.FC = () => {
                                     <li>点击“目录”打开文件夹，将下载的文件放入其中；再点击“校验”确认安装成功。</li>
                                 </ul>
                             {status?.missing && status.missing.length > 0 && (
-                                <div className="mt-2 text-red-600 text-xs">
+                                <div className="mt-2 text-red-600 text-xs dark:text-red-400">
                                     缺失文件: {status.missing.join(", ")}
                                 </div>
                             )}

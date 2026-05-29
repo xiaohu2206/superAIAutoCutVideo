@@ -7,7 +7,7 @@ import type { OmniSegmentOpState } from "../../../hooks/omni/useOmniScriptSessio
 
 import NarrationTextField from "./NarrationTextField";
 
-import SegmentTypeToggle from "./SegmentTypeToggle";
+import { SegmentTypeToggle } from "./SegmentTypeToggle";
 
 import {
 

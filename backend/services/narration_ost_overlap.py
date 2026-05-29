@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 
+ORIGINAL_SEGMENT_EXTRA_DURATION_S = 1.0
+
+
 def segment_is_play_original(seg: Optional[Dict[str, Any]]) -> bool:
     if not seg or not isinstance(seg, dict):
         return False

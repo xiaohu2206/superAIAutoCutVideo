@@ -8,6 +8,7 @@ import unifiedYunwuModelService from "../../services/unifiedYunwuModelService";
 import videoModelService from "../../services/videoModelService";
 import { useAuth } from "../auth/AuthContext";
 import { message } from "../../services/message";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -31,6 +32,8 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   initialNarrationType,
 }) => {
   const { isAuthenticated } = useAuth();
+  const themeMode = useThemeMode();
+  const isDark = themeMode === "dark";
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [narrationType, setNarrationType] = useState<NarrationType>(
@@ -292,10 +295,16 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   }}
                   className={`relative overflow-hidden p-4 pt-5 border-2 rounded-lg transition-all ${
                     isMoondreamEnabled
-                      ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50 dark:border-gray-700 dark:bg-gray-800"
+                      ? isDark
+                        ? "border-gray-700 bg-gray-800 cursor-not-allowed opacity-50"
+                        : "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50"
                       : projectType === "omni"
-                        ? "cursor-pointer border-purple-500 bg-gradient-to-br from-purple-50 via-amber-50/60 to-fuchsia-50 ring-1 ring-purple-400/40 dark:border-purple-500 dark:from-purple-950/50 dark:via-amber-950/35 dark:to-fuchsia-950/25 dark:ring-purple-500/30"
-                        : "cursor-pointer border-gray-200 bg-gradient-to-br from-white via-amber-50/25 to-purple-50/40 hover:border-amber-400/55 hover:ring-1 hover:ring-amber-300/40 dark:border-[#2a2a2a] dark:from-[#242424] dark:via-amber-950/20 dark:to-purple-950/25 dark:hover:border-amber-400/40"
+                        ? isDark
+                          ? "cursor-pointer border-purple-500 bg-purple-950/35"
+                          : "cursor-pointer border-purple-500 bg-gradient-to-br from-purple-50 via-amber-50/60 to-fuchsia-50 ring-1 ring-purple-400/40"
+                        : isDark
+                          ? "cursor-pointer border-[#2a2a2a] bg-[#242424] hover:border-amber-400/40"
+                          : "cursor-pointer border-gray-200 bg-gradient-to-br from-white via-amber-50/25 to-purple-50/40 hover:border-amber-400/55 hover:ring-1 hover:ring-amber-300/40"
                   }`}
                 >
                   {projectType === "omni" && !isMoondreamEnabled && (
@@ -306,16 +315,20 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       <h4
                         className={`text-lg font-bold ${
                           projectType === "omni" && !isMoondreamEnabled
-                            ? "bg-gradient-to-r from-purple-700 via-amber-700 to-purple-700 bg-clip-text text-transparent dark:from-purple-300 dark:via-amber-300 dark:to-fuchsia-300"
-                            : "text-gray-700 dark:text-gray-300"
+                            ? isDark
+                              ? "text-purple-300"
+                              : "bg-gradient-to-r from-purple-700 via-amber-700 to-purple-700 bg-clip-text text-transparent"
+                            : isDark
+                              ? "text-gray-300"
+                              : "text-gray-700"
                         }`}
                       >
                         全感知推理
                       </h4>
                       <span
-                        className={`inline-flex shrink-0 items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm ring-1 ring-amber-400/60 ${
-                          isMoondreamEnabled ? "opacity-70" : ""
-                        }`}
+                        className={`inline-flex shrink-0 items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm ${
+                          isDark ? "" : "ring-1 ring-amber-400/60"
+                        } ${isMoondreamEnabled ? "opacity-70" : ""}`}
                       >
                         <Sparkles className="h-3 w-3" aria-hidden />
                         付费

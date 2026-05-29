@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Eye, Play, X } from "lucide-react";
 import type { OmniMultimodalResult, OmniMultimodalShot } from "../../types/omniMultimodal";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface OmniMultimodalShotsTableProps {
   result: OmniMultimodalResult | null;
@@ -37,6 +38,7 @@ function isOmniStep2Error(s: OmniMultimodalShot): boolean {
 }
 
 const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ result, onPlayShot }) => {
+  const isDark = useThemeMode() === "dark";
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const shots = useMemo(() => (Array.isArray(result?.shots) ? result!.shots! : []), [result]);
@@ -64,14 +66,20 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
             <span>
               共 {shots.length} 个语义镜头段，已成功分析画面 {analyzedVisionCount} 个
               {visionErrorCount > 0 && (
-                <span className="text-amber-600">（分析失败 {visionErrorCount} 个）</span>
+                <span className={isDark ? "text-amber-300" : "text-amber-600"}>
+                  （分析失败 {visionErrorCount} 个）
+                </span>
               )}
               {typeof result.total_duration === "number" ? (
                 <span className="text-gray-500 dark:text-zinc-400">（视频约 {result.total_duration.toFixed(1)}s）</span>
               ) : null}
             </span>
             {nonErrorNotOkCount > 0 && (
-              <span className="text-red-500 text-xs font-medium">
+              <span
+                className={`text-xs font-medium ${
+                  isDark ? "text-red-300" : "text-red-500"
+                }`}
+              >
                 还有 {nonErrorNotOkCount} 个镜头未成功完成画面分析
               </span>
             )}
@@ -136,7 +144,11 @@ const OmniMultimodalShotsTable: React.FC<OmniMultimodalShotsTableProps> = ({ res
                         <button
                           type="button"
                           onClick={() => onPlayShot(Number(shot.start), Number(shot.end))}
-                          className="flex items-center text-fuchsia-700 hover:text-fuchsia-900 transition-colors bg-fuchsia-50 hover:bg-fuchsia-100 px-2 py-1 rounded-md text-xs font-medium border border-fuchsia-200"
+                          className={`flex items-center transition-colors px-2 py-1 rounded-md text-xs font-medium border ${
+                            isDark
+                              ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-300 hover:bg-fuchsia-500/20 hover:text-fuchsia-200"
+                              : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 hover:text-fuchsia-900"
+                          }`}
                         >
                           <Play className="w-3 h-3 mr-1 fill-current" />
                           播放片段

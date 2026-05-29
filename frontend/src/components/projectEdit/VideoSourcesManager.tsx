@@ -4,6 +4,7 @@ import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
 import type { Project } from "../../types/project";
 import { TrimVideoModal } from "./TrimVideoModal";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface VideoSourcesManagerProps {
   project: Project;
@@ -51,6 +52,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
   onDeleteVideoItem,
   onRefreshProject,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const [trimOpen, setTrimOpen] = React.useState(false);
   const [trimPath, setTrimPath] = React.useState<string | null>(null);
 
@@ -85,18 +87,38 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
             onDrop={onVideoDrop}
             className={`flex-1 flex flex-col items-center justify-center text-center rounded-lg p-8 border border-dashed transition-colors ${
               isDraggingVideo
-                ? "border-violet-500 bg-violet-50 dark:border-violet-400 dark:bg-violet-900/20"
-                : "border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-900/10"
+                ? isDark
+                  ? "border-violet-400/70 bg-violet-500/15"
+                  : "border-violet-500 bg-violet-50"
+                : isDark
+                  ? "border-violet-500/30 bg-violet-500/5"
+                  : "border-violet-300 bg-violet-50"
             }`}
             aria-label="点击或拖拽视频至此"
           >
-            <Upload className="h-12 w-12 text-violet-500 mb-4" />
-            <div className="text-base font-semibold text-violet-600">点击或拖拽视频至此</div>
-            <div className="text-xs text-gray-500 mt-2 dark:text-zinc-400">支持多文件上传，自动排序</div>
+            <Upload
+              className={`h-12 w-12 mb-4 ${isDark ? "text-violet-300" : "text-violet-500"}`}
+            />
+            <div
+              className={`text-base font-semibold ${
+                isDark ? "text-violet-300" : "text-violet-600"
+              }`}
+            >
+              点击或拖拽视频至此
+            </div>
+            <div
+              className={`text-xs mt-2 ${isDark ? "text-zinc-400" : "text-gray-500"}`}
+            >
+              支持多文件上传，自动排序
+            </div>
             <button
               onClick={() => videoInputRef.current?.click()}
               disabled={uploadingVideo}
-              className="mt-4 px-6 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`mt-4 px-6 py-2 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                isDark
+                  ? "bg-violet-500 hover:bg-violet-400"
+                  : "bg-violet-600 hover:bg-violet-700"
+              }`}
             >
               选择文件
             </button>

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useThemeMode } from "@/hooks/useThemeMode";
 
 export type OmniVoiceTtsSectionProps = {
   configId: string | null;
@@ -48,6 +49,7 @@ export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
   testResult,
   testDurationMs,
 }) => {
+  const isDark = useThemeMode() === "dark";
   const [host, setHost] = useState("127.0.0.1");
   const [port, setPort] = useState(8970);
   const [scanBack, setScanBack] = useState(10);
@@ -461,7 +463,11 @@ export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
               <div
                 key={v.id}
                 className={`flex flex-wrap items-center gap-2 px-3 py-2 text-sm ${
-                  active ? "bg-blue-50/80" : ""
+                  active
+                    ? isDark
+                      ? "bg-blue-500/10 ring-1 ring-inset ring-blue-500/30"
+                      : "bg-blue-50/80"
+                    : ""
                 }`}
               >
                 <span className="font-medium text-gray-900 truncate flex-1 min-w-[120px]">
@@ -474,8 +480,12 @@ export const OmniVoiceTtsSection: React.FC<OmniVoiceTtsSectionProps> = ({
                   type="button"
                   className={`text-xs px-2 py-1 rounded border ${
                     active
-                      ? "border-blue-300 bg-blue-100 text-blue-800"
-                      : "border-gray-200 hover:bg-gray-50"
+                      ? isDark
+                        ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                        : "border-blue-300 bg-blue-100 text-blue-800"
+                      : isDark
+                        ? "border-[#2a2a2a] text-gray-300 hover:bg-[#2a2a2a]"
+                        : "border-gray-200 hover:bg-gray-50"
                   }`}
                   disabled={!connected}
                   onClick={() => void handleSelectAndActivate(v.id)}
