@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "super-auto-cut-video"
-version = "1.3.3"
+version = "1.3.4"
 description = "AI智能视频剪辑应用 - 基于深度学习的自动视频编辑工具"
 readme = "README.md"
 license = {file = "LICENSE"}
