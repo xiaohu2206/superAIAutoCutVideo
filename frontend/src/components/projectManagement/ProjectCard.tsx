@@ -12,10 +12,14 @@ import {
   Trophy,
   Tv2,
 } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Project } from "../../types/project";
 import { NarrationType } from "../../types/project";
 import { ProjectStatus } from "../../types/project";
+
+const MENU_WIDTH = 128;
+const MENU_GAP = 6;
 
 interface ProjectCardProps {
   project: Project;
@@ -29,15 +33,36 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
   onDelete,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const updateMenuPosition = () => {
+    const btn = triggerRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    let left = rect.right - MENU_WIDTH;
+    if (left < 8) left = 8;
+    if (left + MENU_WIDTH > window.innerWidth - 8) {
+      left = window.innerWidth - MENU_WIDTH - 8;
+    }
+    const top = rect.top - MENU_GAP;
+    setMenuPos({ top, left });
+  };
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    updateMenuPosition();
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setMenuOpen(false);
     };
 
     const handleEscape = (event: KeyboardEvent) => {
@@ -46,12 +71,20 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
       }
     };
 
+    const handleReposition = () => {
+      setMenuOpen(false);
+    };
+
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleEscape);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
     };
   }, [menuOpen]);
 
@@ -174,8 +207,9 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
             <span className="truncate">{narrationTypeConfig.label}</span>
           </div>
 
-          <div className="relative shrink-0 self-center" ref={menuRef}>
+          <div className="relative shrink-0 self-center">
             <button
+              ref={triggerRef}
               type="button"
               aria-label="更多操作"
               aria-expanded={menuOpen}
@@ -188,34 +222,48 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
               <MoreHorizontal className="h-4 w-4" />
             </button>
 
-            {menuOpen && (
-              <div className="absolute bottom-7 right-0 z-20 w-32 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-[#2a2a2a] dark:bg-[#242424] dark:shadow-black/40">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setMenuOpen(false);
-                    onEdit(project);
+            {menuOpen && menuPos &&
+              createPortal(
+                <div
+                  ref={menuRef}
+                  role="menu"
+                  style={{
+                    position: "fixed",
+                    top: menuPos.top,
+                    left: menuPos.left,
+                    width: MENU_WIDTH,
+                    transform: "translateY(-100%)",
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-zinc-200 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                  className="z-[1000] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-[#2a2a2a] dark:bg-[#242424] dark:shadow-black/40"
+                  onClick={(event) => event.stopPropagation()}
                 >
-                  <Edit3 className="h-4 w-4" />
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setMenuOpen(false);
-                    onDelete(project);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-rose-300 dark:hover:bg-rose-500/10 dark:hover:text-rose-200"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  删除
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuOpen(false);
+                      onEdit(project);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-zinc-200 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuOpen(false);
+                      onDelete(project);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-rose-300 dark:hover:bg-rose-500/10 dark:hover:text-rose-200"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除
+                  </button>
+                </div>,
+                document.body
+              )}
           </div>
         </div>
       </div>

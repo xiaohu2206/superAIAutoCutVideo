@@ -335,7 +335,7 @@ export class ProjectService {
 
   async getMergeStatus(projectId: string, taskId: string): Promise<{
     task_id: string;
-    status: string;
+    status: "pending" | "processing" | "completed" | "failed";
     progress: number;
     message: string;
     file_path?: string;
@@ -343,7 +343,6 @@ export class ProjectService {
     const response = await apiClient.get<{ data: any }>(
       `/api/projects/${projectId}/merge/videos/status/${taskId}`
     );
-    console.log("getMergeStatus: ", response)
     return response.data;
   }
 

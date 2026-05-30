@@ -5,6 +5,7 @@
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Literal
@@ -28,15 +29,19 @@ from .project_routes import (
     TrimVideoRequest,
     TrimTaskStatus,
     MERGE_TASKS,
+    _merge_lock,
+    _active_merge_keys,
     TRIM_TASKS,
     _trim_lock,
     _active_trim_keys,
 )
 from modules.projects_store import projects_store
+from modules.task_cancel_store import task_cancel_store
 from modules.video_processor import video_processor, _trim_log_tag, _trim_timeout_label
 from modules.ws_manager import manager
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
+logger = logging.getLogger(__name__)
 
 
 def _merge_ranges(ranges: List[List[int]]) -> List[List[int]]:
@@ -106,95 +111,99 @@ async def merge_videos(project_id: str):
     if not p.video_paths or len(p.video_paths) < 2:
         raise HTTPException(status_code=400, detail="需要至少两个视频进行合并")
 
+    source_paths = [str(path).strip() for path in p.video_paths if path and str(path).strip()]
+    if len(source_paths) < 2:
+        raise HTTPException(status_code=400, detail="需要至少两个有效视频进行合并")
+
     old_merged_path = (p.merged_video_path or "").strip()
-    task_id = f"merge_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    MERGE_TASKS[task_id] = MergeTaskStatus(task_id=task_id, status="pending", progress=0.0, message="准备合并")
+    merge_key = str(project_id)
+    with _merge_lock:
+        active = _active_merge_keys.get(merge_key)
+        if active:
+            active_task = MERGE_TASKS.get(active)
+            status = (active_task.status if active_task else "").strip().lower()
+            if status in {"pending", "processing", "running"}:
+                raise HTTPException(status_code=409, detail="该项目正在合并视频（合并比较慢,如果可以建议外部合并），请稍后")
+
+        task_id = f"merge_{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+        _active_merge_keys[merge_key] = task_id
+        MERGE_TASKS[task_id] = MergeTaskStatus(
+            task_id=task_id,
+            status="pending",
+            progress=0.0,
+            message="准备合并",
+        )
+
+    async def _broadcast(payload: Dict[str, Any]) -> None:
+        try:
+            await manager.broadcast(json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            pass
 
     async def _run():
+        out_path: Optional[Path] = None
+        cancel_event = task_cancel_store.get_event("merge_videos", project_id, task_id)
         try:
             MERGE_TASKS[task_id].status = "processing"
             MERGE_TASKS[task_id].message = "正在合并"
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "progress",
-                    "scope": "merge_videos",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "message": "开始合并视频",
-                    "progress": 0,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
+            await _broadcast({
+                "type": "progress",
+                "scope": "merge_videos",
+                "project_id": project_id,
+                "task_id": task_id,
+                "message": "开始合并视频",
+                "progress": 0,
+                "timestamp": now_ts(),
+            })
 
             inputs: List[Path] = []
-            for path_str in p.video_paths:
+            for path_str in source_paths:
                 s = path_str.strip()
                 abs_path = resolve_abs_path(s)
-                if not abs_path.exists():
-                    MERGE_TASKS[task_id].status = "failed"
-                    MERGE_TASKS[task_id].message = f"源视频不存在: {s}"
-                    try:
-                        await manager.broadcast(json.dumps({
-                            "type": "error",
-                            "scope": "merge_videos",
-                            "project_id": project_id,
-                            "task_id": task_id,
-                            "message": f"源视频不存在: {s}",
-                            "progress": 0,
-                            "timestamp": now_ts(),
-                        }))
-                    except Exception:
-                        pass
-                    return
+                if not abs_path.is_file() or abs_path.stat().st_size <= 0:
+                    raise RuntimeError(f"源视频不存在或为空: {s}")
                 inputs.append(abs_path)
 
             project_dir_name = safe_dir_name(p.name or p.id, p.id)
             out_dir = uploads_dir() / "videos" / "merged" / project_dir_name
             out_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             out_name = f"{p.id}_merged_{ts}.mp4"
             out_path = out_dir / out_name
 
             async def on_progress(pct: float):
-                MERGE_TASKS[task_id].progress = float(f"{pct:.2f}")
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "progress",
-                        "scope": "merge_videos",
-                        "project_id": project_id,
-                        "task_id": task_id,
-                        "message": "正在合并",
-                        "progress": MERGE_TASKS[task_id].progress,
-                        "timestamp": now_ts(),
-                    }))
-                except Exception:
-                    pass
+                current = float(MERGE_TASKS[task_id].progress or 0.0)
+                next_progress = max(current, min(99.0, max(0.0, float(pct))))
+                MERGE_TASKS[task_id].progress = float(f"{next_progress:.2f}")
+                await _broadcast({
+                    "type": "progress",
+                    "scope": "merge_videos",
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "message": "正在合并",
+                    "progress": MERGE_TASKS[task_id].progress,
+                    "timestamp": now_ts(),
+                })
 
             ok = await video_processor.concat_videos(
                 [str(x) for x in inputs],
                 str(out_path),
                 on_progress,
+                scope="merge_videos",
+                project_id=project_id,
+                task_id=task_id,
+                cancel_event=cancel_event,
             )
-            if not ok:
-                MERGE_TASKS[task_id].status = "failed"
-                err = getattr(video_processor, "last_concat_error", None) or ""
-                MERGE_TASKS[task_id].message = ("合并失败: " + str(err).strip()[:400]) if err else "合并失败"
-                try:
-                    await manager.broadcast(json.dumps({
-                        "type": "error",
-                        "scope": "merge_videos",
-                        "project_id": project_id,
-                        "task_id": task_id,
-                        "message": MERGE_TASKS[task_id].message,
-                        "progress": MERGE_TASKS[task_id].progress,
-                        "timestamp": now_ts(),
-                    }))
-                except Exception:
-                    pass
-                return
+            if not ok or not out_path.is_file() or out_path.stat().st_size <= 0:
+                err = video_processor.get_last_concat_error(
+                    scope="merge_videos",
+                    project_id=project_id,
+                    task_id=task_id,
+                ) or ""
+                raise RuntimeError(("合并失败: " + str(err).strip()[:400]) if err else "合并失败")
 
             web_path = to_web_path(out_path)
+            projects_store.set_merged_video_path(project_id, web_path, out_name)
             if old_merged_path and old_merged_path != web_path:
                 try:
                     old_abs = resolve_abs_path(old_merged_path)
@@ -205,33 +214,54 @@ async def merge_videos(project_id: str):
             MERGE_TASKS[task_id].progress = 100.0
             MERGE_TASKS[task_id].status = "completed"
             MERGE_TASKS[task_id].message = "合并完成"
-            projects_store.set_merged_video_path(project_id, web_path, out_name)
-            try:
-                await manager.broadcast(json.dumps({
-                    "type": "completed",
-                    "scope": "merge_videos",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "message": "合并完成",
-                    "progress": 100,
-                    "file_path": web_path,
-                    "timestamp": now_ts(),
-                }))
-            except Exception:
-                pass
-        except Exception:
+            await _broadcast({
+                "type": "completed",
+                "scope": "merge_videos",
+                "project_id": project_id,
+                "task_id": task_id,
+                "message": "合并完成",
+                "progress": 100,
+                "file_path": web_path,
+                "timestamp": now_ts(),
+            })
+            logger.info("[merge_videos][project=%s][task=%s] completed output=%s", project_id, task_id, out_path)
+        except asyncio.CancelledError:
             MERGE_TASKS[task_id].status = "failed"
-            MERGE_TASKS[task_id].message = "合并异常"
+            MERGE_TASKS[task_id].message = "合并已取消"
+            await _broadcast({
+                "type": "error",
+                "scope": "merge_videos",
+                "project_id": project_id,
+                "task_id": task_id,
+                "message": MERGE_TASKS[task_id].message,
+                "progress": MERGE_TASKS[task_id].progress,
+                "timestamp": now_ts(),
+            })
+        except Exception as e:
+            error_text = str(e).strip() or "合并异常"
+            MERGE_TASKS[task_id].status = "failed"
+            MERGE_TASKS[task_id].message = error_text[:500]
+            logger.exception("[merge_videos][project=%s][task=%s] failed: %s", project_id, task_id, error_text)
+            await _broadcast({
+                "type": "error",
+                "scope": "merge_videos",
+                "project_id": project_id,
+                "task_id": task_id,
+                "message": MERGE_TASKS[task_id].message,
+                "progress": MERGE_TASKS[task_id].progress,
+                "timestamp": now_ts(),
+            })
+        finally:
+            if MERGE_TASKS[task_id].status != "completed" and out_path:
+                try:
+                    if out_path.exists():
+                        out_path.unlink()
+                except Exception:
+                    pass
             try:
-                await manager.broadcast(json.dumps({
-                    "type": "error",
-                    "scope": "merge_videos",
-                    "project_id": project_id,
-                    "task_id": task_id,
-                    "message": "合并异常",
-                    "progress": MERGE_TASKS[task_id].progress,
-                    "timestamp": now_ts(),
-                }))
+                with _merge_lock:
+                    if _active_merge_keys.get(merge_key) == task_id:
+                        del _active_merge_keys[merge_key]
             except Exception:
                 pass
 
@@ -249,7 +279,7 @@ async def merge_videos(project_id: str):
 @router.get("/{project_id}/merge/videos/status/{task_id}")
 async def merge_videos_status(project_id: str, task_id: str):
     t = MERGE_TASKS.get(task_id)
-    if not t:
+    if not t or not task_id.startswith(f"merge_{project_id}_"):
         raise HTTPException(status_code=404, detail="任务不存在")
     return {
         "message": "获取合并进度",
@@ -458,8 +488,16 @@ async def trim_video(project_id: str, req: TrimVideoRequest):
                 timeout=concat_timeout,
             )
             if not ok or not out_tmp.exists():
-                err = getattr(video_processor, "last_concat_error", None) or ""
-                last_cmd = getattr(video_processor, "last_concat_cmd", None) or []
+                err = video_processor.get_last_concat_error(
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                ) or ""
+                last_cmd = video_processor.get_last_concat_cmd(
+                    scope="trim_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                ) or []
                 logger.error(
                     "%s concat failed ok=%s out_exists=%s err=%s cmd=%s",
                     trim_tag,

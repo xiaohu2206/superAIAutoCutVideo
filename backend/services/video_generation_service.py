@@ -20,6 +20,7 @@ from modules.tts_service import tts_service
 from modules.config.tts_config import tts_engine_config_manager
 from modules.ws_manager import manager
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from modules.filename_utils import safe_filename_component
 
 from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import ORIGINAL_SEGMENT_EXTRA_DURATION_S, resolve_narration_extend_vs_following_play_original
@@ -96,13 +97,8 @@ class VideoGenerationService:
     @staticmethod
     def _safe_dir_name(name: str, fallback: str) -> str:
         # 过滤Windows非法字符并简化为安全文件夹名
-        invalid = '<>:"/\\|?*'
-        safe = ''.join('_' if ch in invalid else ch for ch in (name or '').strip())
-        safe = safe.strip()
-        if not safe:
-            safe = f"project_{fallback}"
+        safe = safe_filename_component(name, fallback=f"project_{fallback}", max_length=80)
         # 避免极端情况产生前后点或空格
-        safe = safe.replace('.', '_').strip()
         return safe
 
     @staticmethod
@@ -162,7 +158,8 @@ class VideoGenerationService:
         project_dir_name = VideoGenerationService._safe_dir_name(p.name or p.id, p.id)
         outputs_dir = uploads_root / "videos" / "outputs" / project_dir_name
         outputs_dir.mkdir(parents=True, exist_ok=True)
-        output_name = f"{p.id}_output_{ts}.mp4"
+        export_project_name = safe_filename_component(p.name, fallback=p.id)
+        output_name = f"{p.id}_output_{export_project_name}_{ts}.mp4"
         output_abs = outputs_dir / output_name
 
         # 片段临时目录：uploads/videos/tmp/{project_id}_{ts}
@@ -853,7 +850,11 @@ class VideoGenerationService:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
                 except Exception:
                     pass
-                err = getattr(video_processor, "last_concat_error", None) or ""
+                err = video_processor.get_last_concat_error(
+                    scope="generate_video",
+                    project_id=project_id,
+                    task_id=task_id,
+                ) or ""
                 if err:
                     raise RuntimeError(f"拼接视频失败: {str(err).strip()[:400]}")
                 raise RuntimeError("拼接视频失败")

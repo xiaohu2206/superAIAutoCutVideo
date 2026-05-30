@@ -19,6 +19,7 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from modules.filename_utils import safe_filename_component
 
 from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import ORIGINAL_SEGMENT_EXTRA_DURATION_S, resolve_narration_extend_vs_following_play_original
@@ -282,10 +283,13 @@ class JianyingDraftManager:
         return []
 
     @staticmethod
-    def _init_new_draft_dir(base_dir: Path) -> Path:
+    def _init_new_draft_dir(base_dir: Path, project_name: str, timestamp: str) -> Path:
         base_dir.mkdir(parents=True, exist_ok=True)
-        name = f"auto_{uuid.uuid4().hex[:8]}"
+        safe_project_name = safe_filename_component(project_name)
+        name = f"{safe_project_name}_{timestamp}"
         draft_dir = base_dir / name
+        if draft_dir.exists():
+            draft_dir = base_dir / f"{name}_{uuid.uuid4().hex[:8]}"
         draft_dir.mkdir(parents=True, exist_ok=True)
         return draft_dir
 
@@ -391,7 +395,12 @@ class JianyingDraftManager:
         }
 
     @staticmethod
-    def _build_draft_info(draft_dir: Path, source_video: Path, timeline_items: Sequence[Dict[str, Any]]) -> None:
+    def _build_draft_info(
+        draft_dir: Path,
+        source_video: Path,
+        timeline_items: Sequence[Dict[str, Any]],
+        draft_name: Optional[str] = None,
+    ) -> None:
         draft_path = draft_dir / "draft_info.json"
         now_us = int(time.time() * 1_000_000)
         original_meta = _probe_video_meta(source_video)
@@ -666,7 +675,7 @@ class JianyingDraftManager:
             },
             "materials": materials,
             "mutable_config": None,
-            "name": source_video.stem,
+            "name": draft_name or source_video.stem,
             "new_version": "110.0.0",
             "relationships": [],
             "render_index_track_mode_on": True,
@@ -742,7 +751,7 @@ class JianyingDraftManager:
             "draft_is_invisible": False,
             "draft_materials": [{"type": t, "value": []} for t in [0, 1, 2, 3, 6, 7, 8]],
             "draft_materials_copied_info": [],
-            "draft_name": source_video.stem,
+            "draft_name": draft_name or source_video.stem,
             "draft_need_rename_folder": False,
             "draft_new_version": "",
             "draft_removable_storage_device": "",
@@ -938,7 +947,9 @@ class JianyingDraftManager:
                 "progress": 20,
                 "timestamp": _now_ts(),
             })
-            draft_dir = JianyingDraftManager._init_new_draft_dir(tmp_dir)
+            export_project_name = safe_filename_component(p.name, fallback=project_id)
+            draft_display_name = f"{export_project_name}_{ts}"
+            draft_dir = JianyingDraftManager._init_new_draft_dir(tmp_dir, export_project_name, ts)
             assets_video_dir = draft_dir / "assets" / "video"
             copied_video = await _to_thread(JianyingDraftManager._copy_unique, input_abs, assets_video_dir)
             assets_audio_dir = draft_dir / "assets" / "audio"
@@ -1212,7 +1223,13 @@ class JianyingDraftManager:
                 "progress": 65,
                 "timestamp": _now_ts(),
             })
-            await _to_thread(JianyingDraftManager._build_draft_info, draft_dir, copied_video, timeline_items)
+            await _to_thread(
+                JianyingDraftManager._build_draft_info,
+                draft_dir,
+                copied_video,
+                timeline_items,
+                draft_display_name,
+            )
             await JianyingDraftManager._broadcast({
                 "type": "progress",
                 "scope": JianyingDraftManager.SCOPE,

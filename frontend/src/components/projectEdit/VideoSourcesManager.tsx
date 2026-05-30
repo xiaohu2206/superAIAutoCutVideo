@@ -55,6 +55,16 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
   const isDark = useThemeMode() === "dark";
   const [trimOpen, setTrimOpen] = React.useState(false);
   const [trimPath, setTrimPath] = React.useState<string | null>(null);
+  const safeMergeProgress = Math.max(0, Math.min(100, mergeProgress));
+  const visibleMergeProgress = merging ? Math.max(3, safeMergeProgress) : safeMergeProgress;
+  const mergeStageLabel =
+    safeMergeProgress < 8
+      ? "正在检查素材"
+      : safeMergeProgress < 20
+        ? "正在准备视频流"
+        : safeMergeProgress < 99
+          ? "正在合并视频"
+          : "正在写入文件";
 
   const handleOpenMergedVideoInExplorer = async () => {
     if (!project.merged_video_path) {
@@ -82,9 +92,9 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
         </div>
         <div className="flex gap-6">
           <div
-            onDragOver={onVideoDragOver}
-            onDragLeave={onVideoDragLeave}
-            onDrop={onVideoDrop}
+            onDragOver={merging ? undefined : onVideoDragOver}
+            onDragLeave={merging ? undefined : onVideoDragLeave}
+            onDrop={merging ? undefined : onVideoDrop}
             className={`flex-1 flex flex-col items-center justify-center text-center rounded-lg p-8 border border-dashed transition-colors ${
               isDraggingVideo
                 ? isDark
@@ -113,7 +123,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
             </div>
             <button
               onClick={() => videoInputRef.current?.click()}
-              disabled={uploadingVideo}
+              disabled={uploadingVideo || merging}
               className={`mt-4 px-6 py-2 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 isDark
                   ? "bg-violet-500 hover:bg-violet-400"
@@ -127,6 +137,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
               type="file"
               accept="video/*"
               multiple
+              disabled={merging}
               onChange={onVideoFileChange}
               className="hidden"
             />
@@ -140,10 +151,11 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
               {Array.isArray(project.video_paths) && project.video_paths.length >= 2 && (
                 <button
                   onClick={onMergeClick}
-                  disabled={uploadingVideo}
+                  disabled={uploadingVideo || merging}
+                  aria-busy={merging}
                   className="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  合并视频
+                  {merging ? "正在合并..." : "合并视频"}
                 </button>
               )}
             </div>
@@ -154,7 +166,7 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                   <div
                     key={vp}
                     className={`flex items-center justify-between text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2 dark:border-[#2a2a2a] dark:bg-[#242424] ${dragIndex===idx?"ring-2 ring-violet-300":""}`}
-                    draggable
+                    draggable={!merging}
                     onDragStart={() => onItemDragStart(idx)}
                     onDragOver={(e) => onItemDragOver(e, idx)}
                     onDrop={onItemDrop}
@@ -172,7 +184,8 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                           setTrimPath(vp);
                           setTrimOpen(true);
                         }}
-                        className="video-source-action--trim inline-flex items-center gap-1 px-2 py-1 text-xs bg-violet-100 text-violet-800 border border-violet-200 rounded hover:bg-violet-200"
+                        disabled={merging}
+                        className="video-source-action--trim inline-flex items-center gap-1 px-2 py-1 text-xs bg-violet-100 text-violet-800 border border-violet-200 rounded hover:bg-violet-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="裁剪"
                       >
                         <Scissors className="h-3.5 w-3.5" />
@@ -181,7 +194,8 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onDeleteVideoItem(vp); }}
-                        className="video-source-action--delete px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200"
+                        disabled={merging}
+                        className="video-source-action--delete px-2 py-1 text-xs bg-red-100 text-red-700 border border-red-300 rounded hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="删除"
                       >
                         删除
@@ -198,15 +212,40 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
       </div>
 
       {merging && Array.isArray(project.video_paths) && project.video_paths.length >= 2 && mergeProgress >= 0 && mergeProgress < 100 && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-xs text-gray-600 mb-1 dark:text-zinc-400">
-            <span>合并进度（预计2分钟）</span>
-            <span>{mergeProgress}%</span>
+        <div
+          className={`mt-3 rounded-md px-3 py-2 ${
+            isDark ? "" : "border border-purple-200 bg-purple-50"
+          }`}
+        >
+          <div
+            className={`flex items-center justify-between text-xs mb-1 ${
+              isDark ? "text-zinc-300" : "text-gray-600"
+            }`}
+          >
+            <span>{mergeStageLabel}，建议只合成短小视频，大视频可能要几十分钟，请稍候...</span>
+            <span
+              className={`font-medium ${
+                isDark ? "text-purple-300" : "text-purple-700"
+              }`}
+            >
+              {safeMergeProgress.toFixed(1)}%
+            </span>
           </div>
-          <div className="w-full h-2 bg-gray-200 rounded dark:bg-white/10">
+          <div
+            className={`w-full h-2 overflow-hidden rounded ${
+              isDark ? "bg-white/10" : "bg-gray-200"
+            }`}
+            role="progressbar"
+            aria-label="视频合并进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={safeMergeProgress}
+          >
             <div
-              className="h-2 bg-purple-600 rounded transition-all"
-              style={{ width: `${mergeProgress}%` }}
+              className={`h-2 rounded transition-all duration-500 ease-out animate-pulse ${
+                isDark ? "bg-purple-400" : "bg-purple-600"
+              }`}
+              style={{ width: `${visibleMergeProgress}%` }}
             />
           </div>
         </div>
@@ -224,21 +263,6 @@ const VideoSourcesManager: React.FC<VideoSourcesManagerProps> = ({
             >
               {project.merged_video_path}
             </button>
-          </div>
-        </div>
-      )}
-
-      {merging && project.merged_video_path && mergeProgress >= 0 && mergeProgress < 100 && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-xs text-gray-600 mb-1 dark:text-zinc-400">
-            <span>合并进度（预计2分钟）</span>
-            <span>{mergeProgress}%</span>
-          </div>
-          <div className="w-full h-2 bg-gray-200 rounded dark:bg-white/10">
-            <div
-              className="h-2 bg-purple-600 rounded transition-all"
-              style={{ width: `${mergeProgress}%` }}
-            />
           </div>
         </div>
       )}

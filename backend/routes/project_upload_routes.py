@@ -14,6 +14,7 @@ import asyncio
 import uuid
 import subprocess
 from threading import RLock
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body, Request, Query
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
@@ -34,6 +35,13 @@ from .project_routes import (
 )
 from modules.projects_store import projects_store
 from modules.ffmpeg_utils import resolve_ffmpeg_bin
+
+
+def _content_disposition(disposition: str, filename: str) -> str:
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "output.mp4"
+    ascii_fallback = ascii_fallback.replace("\\", "_").replace('"', "_")
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"
+
 
 router = APIRouter(prefix="/api/projects", tags=["项目管理"])
 
@@ -529,7 +537,7 @@ async def get_output_video(project_id: str):
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0",
-        "Content-Disposition": f"inline; filename=\"{filename}\"",
+        "Content-Disposition": _content_disposition("inline", filename),
     }
     return FileResponse(
         path=str(abs_path),
@@ -557,7 +565,7 @@ async def download_output_video_attachment(project_id: str):
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0",
-        "Content-Disposition": f"attachment; filename=\"{filename}\"",
+        "Content-Disposition": _content_disposition("attachment", filename),
     }
     return FileResponse(
         path=str(abs_path),

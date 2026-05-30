@@ -12,7 +12,7 @@ import re
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 import json
 
 import cv2
@@ -28,6 +28,29 @@ WIN_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 def _concat_list_file_encoding() -> str:
     """concat 列表必须用无 BOM 的 UTF-8：带 BOM 时首行会变成「\ufefffile ...」，ffmpeg 报 unknown keyword file。"""
     return "utf-8"
+
+
+def _ffmpeg_concat_file_line(path: str) -> str:
+    """Build one concat-demuxer entry, including FFmpeg's single-quote escaping."""
+    escaped = Path(path).as_posix().replace("'", "'\\''")
+    return f"file '{escaped}'"
+
+
+def _is_nonempty_file(path: Union[str, Path]) -> bool:
+    try:
+        p = Path(path)
+        return p.is_file() and p.stat().st_size > 0
+    except Exception:
+        return False
+
+
+def _unlink_quietly(path: Union[str, Path]) -> None:
+    try:
+        p = Path(path)
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
 
 
 def _trim_log_tag(project_id: Optional[str], task_id: Optional[str]) -> str:
@@ -97,10 +120,84 @@ class VideoProcessor:
         self.audio_normalizer = AudioNormalizer()
         self.last_concat_error: Optional[str] = None
         self.last_concat_cmd: Optional[List[str]] = None
+        self._concat_errors: Dict[Tuple[str, str, str], str] = {}
+        self._concat_cmds: Dict[Tuple[str, str, str], List[str]] = {}
         self.last_cut_error: Optional[str] = None
         self._encoder_usable_cache: Dict[str, bool] = {}
         self._ffmpeg_bin = resolve_ffmpeg_bin()
         self._ffprobe_bin = resolve_ffprobe_bin()
+
+    @staticmethod
+    def _concat_context_key(
+        scope: Optional[str],
+        project_id: Optional[str],
+        task_id: Optional[str],
+    ) -> Optional[Tuple[str, str, str]]:
+        if not scope or not project_id or not task_id:
+            return None
+        return str(scope), str(project_id), str(task_id)
+
+    def _set_concat_error(
+        self,
+        message: Optional[str],
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> None:
+        text = str(message or "").strip()
+        self.last_concat_error = text or None
+        key = self._concat_context_key(scope, project_id, task_id)
+        if key:
+            if text:
+                if len(self._concat_errors) >= 256 and key not in self._concat_errors:
+                    self._concat_errors.pop(next(iter(self._concat_errors)), None)
+                self._concat_errors[key] = text
+            else:
+                self._concat_errors.pop(key, None)
+
+    def get_last_concat_error(
+        self,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> Optional[str]:
+        key = self._concat_context_key(scope, project_id, task_id)
+        if key:
+            return self._concat_errors.get(key)
+        return self.last_concat_error
+
+    def _set_concat_cmd(
+        self,
+        cmd: Optional[List[str]],
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> None:
+        value = list(cmd or [])
+        self.last_concat_cmd = value or None
+        key = self._concat_context_key(scope, project_id, task_id)
+        if key:
+            if value:
+                if len(self._concat_cmds) >= 256 and key not in self._concat_cmds:
+                    self._concat_cmds.pop(next(iter(self._concat_cmds)), None)
+                self._concat_cmds[key] = value
+            else:
+                self._concat_cmds.pop(key, None)
+
+    def get_last_concat_cmd(
+        self,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> Optional[List[str]]:
+        key = self._concat_context_key(scope, project_id, task_id)
+        if key:
+            return self._concat_cmds.get(key)
+        return self.last_concat_cmd
 
     def _should_track(self, scope: Optional[str], project_id: Optional[str], task_id: Optional[str], cancel_event: Optional[asyncio.Event]) -> bool:
         return bool(scope and project_id and task_id and cancel_event)
@@ -148,6 +245,8 @@ class VideoProcessor:
         wait_task = asyncio.create_task(proc.wait())
         cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
         timeout_task = asyncio.create_task(asyncio.sleep(float(timeout))) if timeout and timeout > 0 else None
+        stdout_task = asyncio.create_task(proc.stdout.read()) if capture_output and proc.stdout else None
+        stderr_task = asyncio.create_task(proc.stderr.read()) if proc.stderr else None
 
         wait_set = {wait_task}
         if cancel_task:
@@ -208,15 +307,14 @@ class VideoProcessor:
                 raise asyncio.TimeoutError(timeout_message or "子进程执行超时")
 
             await wait_task
-            if capture_output:
+            if stdout_task:
                 try:
-                    if proc.stdout:
-                        stdout = await proc.stdout.read()
+                    stdout = await stdout_task
                 except Exception:
                     pass
+            if stderr_task:
                 try:
-                    if proc.stderr:
-                        stderr = await proc.stderr.read()
+                    stderr = await stderr_task
                 except Exception:
                     pass
             return stdout, stderr
@@ -231,6 +329,10 @@ class VideoProcessor:
                     timeout_task.cancel()
                 except Exception:
                     pass
+            if stdout_task and not stdout_task.done():
+                stdout_task.cancel()
+            if stderr_task and not stderr_task.done():
+                stderr_task.cancel()
 
     async def _run_subprocess_exec_communicate(
         self,
@@ -510,13 +612,62 @@ class VideoProcessor:
         """
         """
         try:
-            self.last_concat_error = None
-            self.last_concat_cmd = None
+            self._set_concat_error(
+                None,
+                scope=scope,
+                project_id=project_id,
+                task_id=task_id,
+            )
+            self._set_concat_cmd(
+                None,
+                scope=scope,
+                project_id=project_id,
+                task_id=task_id,
+            )
             if not inputs:
                 logger.error("拼接视频失败: 输入列表为空")
+                self._set_concat_error(
+                    "输入列表为空",
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
+                return False
+            if not self._ffmpeg_bin:
+                logger.error("拼接视频失败: ffmpeg 不可用")
+                self._set_concat_error(
+                    "ffmpeg 不可用",
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
                 return False
 
+            invalid_inputs = [str(p) for p in inputs if not _is_nonempty_file(p)]
+            if invalid_inputs:
+                message = f"源视频不存在或为空: {invalid_inputs[0]}"
+                logger.error("拼接视频失败: %s", message)
+                self._set_concat_error(
+                    message,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
+                return False
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            _unlink_quietly(output_path)
             n = len(inputs)
+
+            async def _report_progress(pct: float) -> None:
+                if not on_progress:
+                    return
+                try:
+                    await on_progress(max(0.0, min(100.0, float(pct))))
+                except Exception:
+                    pass
+
+            await _report_progress(1.0)
 
             async def _concat_in_batches(batch_size: int = 20) -> bool:
                 if n <= 1:
@@ -586,12 +737,18 @@ class VideoProcessor:
                 src = str(inputs[0])
                 cmd = [
                     self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                    "-nostdin",
                     "-i", src,
                     "-c", "copy",
                     "-movflags", "+faststart",
                     "-y", output_path,
                 ]
-                self.last_concat_cmd = cmd
+                self._set_concat_cmd(
+                    cmd,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
                 rc, _, stderr = await self._run_subprocess_exec_communicate(
                     cmd,
                     scope=scope,
@@ -600,7 +757,7 @@ class VideoProcessor:
                     cancel_event=cancel_event,
                     sync_timeout=3600.0,
                 )
-                if rc == 0:
+                if rc == 0 and _is_nonempty_file(output_path):
                     if on_progress:
                         try:
                             await on_progress(100.0)
@@ -608,7 +765,13 @@ class VideoProcessor:
                             pass
                     return True
                 err = stderr.decode(errors="ignore")
-                self.last_concat_error = err.strip() or "单段重封装失败"
+                _unlink_quietly(output_path)
+                self._set_concat_error(
+                    err.strip() or "单段重封装失败",
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
                 logger.error(f"视频拼接失败: {err}")
                 return False
 
@@ -618,21 +781,45 @@ class VideoProcessor:
             ainfo_list: List[Optional[Dict[str, Any]]] = []
             format_names: List[str] = []
             keyframe_starts: List[bool] = []
-            for p in inputs:
+            for input_index, p in enumerate(inputs):
                 d = await self._ffprobe_video_duration(p)
                 if d is None:
                     d = await self._ffprobe_duration(p, "format")
                 d = d or 0.0
                 durations.append(max(d, 0.0))
-                a_dur = await self._ffprobe_duration(p, "audio")
-                has_audio.append(a_dur is not None and a_dur > 0.0)
                 vi, ai = await self._probe_stream_info(p)
                 vinfo_list.append(vi or {})
                 ainfo_list.append(ai)
+                has_audio.append(ai is not None)
                 fmt = await self._ffprobe_format_name(p)
                 format_names.append(fmt or "")
                 kf = await self._first_frame_is_keyframe(p)
                 keyframe_starts.append(bool(kf))
+                await _report_progress(1.0 + (7.0 * float(input_index + 1) / float(n)))
+
+            if any(duration <= 0 for duration in durations):
+                bad_index = next(i for i, duration in enumerate(durations) if duration <= 0)
+                message = f"无法获取源视频时长: {inputs[bad_index]}"
+                logger.error("拼接视频失败: %s", message)
+                self._set_concat_error(
+                    message,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
+                return False
+
+            if any(not info for info in vinfo_list):
+                bad_index = next(i for i, info in enumerate(vinfo_list) if not info)
+                message = f"无法读取源视频轨道: {inputs[bad_index]}"
+                logger.error("拼接视频失败: %s", message)
+                self._set_concat_error(
+                    message,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
+                return False
 
             def _fr_to_float(s: Optional[str]) -> Optional[float]:
                 if not s:
@@ -679,6 +866,8 @@ class VideoProcessor:
                         ):
                             copy_possible = False
                             break
+            if not all(keyframe_starts):
+                copy_possible = False
             if force_reencode:
                 copy_possible = False
             token = uuid.uuid4().hex[:10]
@@ -707,12 +896,18 @@ class VideoProcessor:
                     or "文件名或扩展名太长" in text
                 )
 
-            async def _consume_progress_stream(process: asyncio.subprocess.Process) -> None:
+            async def _consume_progress_stream(
+                process: asyncio.subprocess.Process,
+                progress_start: float = 8.0,
+                progress_end: float = 99.0,
+            ) -> None:
                 if not on_progress:
                     return
                 try:
                     last_bucket = -1
+                    last_reported = -1.0
                     seen_end = False
+                    has_out_time_us = False
                     while True:
                         if cancel_event and cancel_event.is_set():
                             raise asyncio.CancelledError()
@@ -736,18 +931,24 @@ class VideoProcessor:
                         if not line:
                             break
                         s = line.decode(errors="ignore").strip()
-                        if s.startswith("out_time_ms="):
+                        if s.startswith("out_time_us=") or (
+                            s.startswith("out_time_ms=") and not has_out_time_us
+                        ):
                             try:
-                                ms = float(s.split("=", 1)[1])
+                                elapsed_us = float(s.split("=", 1)[1])
+                                if s.startswith("out_time_us="):
+                                    has_out_time_us = True
                                 if total_duration > 0:
-                                    pct = (ms / (total_duration * 1000.0)) * 100.0
-                                    if pct < 0:
-                                        pct = 0.0
-                                    if pct > 100:
-                                        pct = 100.0
-                                    if not seen_end and pct >= 100.0:
-                                        pct = 99.0
-                                    await on_progress(pct)
+                                    media_pct = (elapsed_us / (total_duration * 1000000.0)) * 100.0
+                                    media_pct = max(0.0, min(100.0, media_pct))
+                                    pct = progress_start + (
+                                        media_pct * (progress_end - progress_start) / 100.0
+                                    )
+                                    if not seen_end:
+                                        pct = min(progress_end, pct)
+                                    if pct - last_reported >= 0.1:
+                                        await _report_progress(pct)
+                                        last_reported = pct
                                     bucket = int(pct // 5)
                                     if bucket > last_bucket:
                                         logger.info(f"拼接进度: {pct:.1f}%")
@@ -756,7 +957,8 @@ class VideoProcessor:
                                 pass
                         elif s.startswith("progress=") and s.endswith("end"):
                             seen_end = True
-                            logger.info("拼接进度: 99.0% (等待完成)")
+                            await _report_progress(progress_end)
+                            logger.info("拼接进度: %.1f%% (等待完成)", progress_end)
                 except Exception as e:
                     logger.warning("拼接进度读取异常: %s", e)
 
@@ -764,10 +966,7 @@ class VideoProcessor:
             list_path = Path(output_path).with_suffix(f".{token}.concat.txt")
             if copy_possible:
                 try:
-                    lines = []
-                    for p in inputs:
-                        q = Path(p).as_posix()
-                        lines.append(f"file '{q}'")
+                    lines = [_ffmpeg_concat_file_line(p) for p in inputs]
                     list_path.write_text("\n".join(lines), encoding=_concat_list_file_encoding())
                     can_concat_demuxer = True
                 except Exception:
@@ -781,17 +980,19 @@ class VideoProcessor:
             can_concat_ts = copy_possible and is_mp4_like and is_h264_hevc and (acodec0 in {None, "aac"}) and audio_all_same_codec
 
             if can_concat_ts:
+                tmp_dir = Path(output_path).parent
+                ts_files: List[Path] = []
+                ts_list_path = tmp_dir / f".concat_{token}.ts.concat.txt"
                 try:
+                    await _report_progress(10.0)
                     bsfilter_v = "h264_mp4toannexb" if vcodec0 == "h264" else "hevc_mp4toannexb"
-                    tmp_dir = Path(output_path).parent
-                    ts_files: List[Path] = []
-                    ts_list_path = tmp_dir / f".concat_{token}.ts.concat.txt"
                     procs = []
                     for idx, p in enumerate(inputs):
                         ts_path = tmp_dir / f".concat_{token}_{idx}.ts"
                         ts_files.append(ts_path)
                         cmd_ts = [
                             self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                            "-nostdin",
                             "-i", str(p),
                             "-c", "copy",
                             "-bsf:v", bsfilter_v,
@@ -823,16 +1024,9 @@ class VideoProcessor:
                             except Exception:
                                 pass
                     else:
+                        await _report_progress(20.0)
                         try:
-                            if on_progress:
-                                await on_progress(5.0)
-                        except Exception:
-                            pass
-                        try:
-                            lines = []
-                            for f in ts_files:
-                                q = f.as_posix()
-                                lines.append(f"file '{q}'")
+                            lines = [_ffmpeg_concat_file_line(str(f)) for f in ts_files]
                             ts_list_path.write_text("\n".join(lines), encoding=_concat_list_file_encoding())
                         except Exception:
                             can_concat_ts = False
@@ -851,14 +1045,20 @@ class VideoProcessor:
 
                         cmd = [
                             self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                            "-nostdin",
                             "-f", "concat", "-safe", "0",
                             "-i", str(ts_list_path),
                             "-c", "copy",
                         ]
                         if acodec0 == "aac":
                             cmd.extend(["-bsf:a", "aac_adtstoasc"])
-                        cmd.extend(["-progress", "pipe:1", "-y", output_path])
-                        self.last_concat_cmd = cmd
+                        cmd.extend(["-movflags", "+faststart", "-progress", "pipe:1", "-y", output_path])
+                        self._set_concat_cmd(
+                            cmd,
+                            scope=scope,
+                            project_id=project_id,
+                            task_id=task_id,
+                        )
                         process = await asyncio.create_subprocess_exec(
                             *cmd,
                             stdout=asyncio.subprocess.PIPE,
@@ -869,7 +1069,9 @@ class VideoProcessor:
                         if tracking:
                             self._register_proc(str(scope), str(project_id), str(task_id), process)
                         total_duration = sum(durations)
-                        progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
+                        progress_task = asyncio.create_task(
+                            _consume_progress_stream(process, 20.0, 99.0)
+                        ) if on_progress else None
                         try:
                             stdout, stderr = await self._wait_process_with_cancel(
                                 process,
@@ -895,78 +1097,117 @@ class VideoProcessor:
                                 ts_list_path.unlink()
                         except Exception:
                             pass
-                        if process.returncode == 0:
+                        if process.returncode == 0 and _is_nonempty_file(output_path):
                             if on_progress:
                                 try:
                                     await on_progress(100.0)
                                 except Exception:
                                     pass
+                            self._set_concat_error(
+                                None,
+                                scope=scope,
+                                project_id=project_id,
+                                task_id=task_id,
+                            )
+                            _unlink_quietly(list_path)
                             logger.info(f"视频拼接成功: {output_path}")
                             return True
-                        else:
-                            err = stderr.decode(errors="ignore")
-                            self.last_concat_error = err.strip() or "concat(ts) 失败"
-                            logger.error(f"视频拼接失败: {err}")
-                            return False
-                except Exception:
+                        err = stderr.decode(errors="ignore")
+                        _unlink_quietly(output_path)
+                        self._set_concat_error(
+                            err.strip() or "concat(ts) 失败",
+                            scope=scope,
+                            project_id=project_id,
+                            task_id=task_id,
+                        )
+                        logger.warning("concat(ts) 失败，进入标准化回退: %s", err)
+                        can_concat_ts = False
+                except Exception as e:
+                    _unlink_quietly(output_path)
+                    for ts_file in ts_files:
+                        _unlink_quietly(ts_file)
+                    _unlink_quietly(ts_list_path)
+                    logger.warning("concat(ts) 异常，进入标准化回退: %s", e)
                     can_concat_ts = False
 
             if can_concat_demuxer and not can_concat_ts:
-                cmd = [
-                    self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
-                    "-f", "concat", "-safe", "0",
-                    "-i", str(list_path),
-                    "-c", "copy",
-                    "-progress", "pipe:1",
-                    "-y", output_path,
-                ]
-                self.last_concat_cmd = cmd
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=WIN_NO_WINDOW
-                )
-                tracking = self._should_track(scope, project_id, task_id, cancel_event)
-                if tracking:
-                    self._register_proc(str(scope), str(project_id), str(task_id), process)
-                total_duration = sum(durations)
-                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
                 try:
-                    stdout, stderr = await self._wait_process_with_cancel(
-                        process,
-                        cancel_event,
-                        capture_output=not bool(on_progress),
+                    await _report_progress(10.0)
+                    cmd = [
+                        self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                        "-nostdin",
+                        "-f", "concat", "-safe", "0",
+                        "-i", str(list_path),
+                        "-c", "copy",
+                        "-movflags", "+faststart",
+                        "-progress", "pipe:1",
+                        "-y", output_path,
+                    ]
+                    self._set_concat_cmd(
+                        cmd,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
                     )
-                finally:
-                    if progress_task:
-                        try:
-                            await progress_task
-                        except Exception:
-                            pass
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        creationflags=WIN_NO_WINDOW
+                    )
+                    tracking = self._should_track(scope, project_id, task_id, cancel_event)
                     if tracking:
-                        self._unregister_proc(str(scope), str(project_id), str(task_id), process)
-                try:
-                    if list_path.exists():
-                        list_path.unlink()
-                except Exception:
-                    pass
-                if process.returncode == 0:
-                    if on_progress:
-                        try:
-                            await on_progress(100.0)
-                        except Exception:
-                            pass
-                    logger.info(f"视频拼接成功: {output_path}")
-                    return True
-                else:
+                        self._register_proc(str(scope), str(project_id), str(task_id), process)
+                    total_duration = sum(durations)
+                    progress_task = asyncio.create_task(
+                        _consume_progress_stream(process, 10.0, 99.0)
+                    ) if on_progress else None
+                    try:
+                        stdout, stderr = await self._wait_process_with_cancel(
+                            process,
+                            cancel_event,
+                            capture_output=not bool(on_progress),
+                        )
+                    finally:
+                        if progress_task:
+                            try:
+                                await progress_task
+                            except Exception:
+                                pass
+                        if tracking:
+                            self._unregister_proc(str(scope), str(project_id), str(task_id), process)
+                    if process.returncode == 0 and _is_nonempty_file(output_path):
+                        if on_progress:
+                            try:
+                                await on_progress(100.0)
+                            except Exception:
+                                pass
+                        self._set_concat_error(
+                            None,
+                            scope=scope,
+                            project_id=project_id,
+                            task_id=task_id,
+                        )
+                        logger.info(f"视频拼接成功: {output_path}")
+                        return True
                     err = stderr.decode(errors="ignore")
-                    self.last_concat_error = err.strip() or "concat(demuxer) 失败"
-                    logger.error(f"视频拼接失败: {err}")
-                    return False
+                    _unlink_quietly(output_path)
+                    self._set_concat_error(
+                        err.strip() or "concat(demuxer) 失败",
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                    )
+                    logger.warning("concat(demuxer) 失败，进入标准化回退: %s", err)
+                except Exception as e:
+                    _unlink_quietly(output_path)
+                    logger.warning("concat(demuxer) 异常，进入标准化回退: %s", e)
+                finally:
+                    _unlink_quietly(list_path)
 
             cmd: List[str] = [
                 self._ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                "-nostdin",
             ]
             for p in inputs:
                 cmd.extend(["-i", str(p)])
@@ -990,27 +1231,34 @@ class VideoProcessor:
             tw = tw - (tw % 2)
             th = th - (th % 2)
 
+            fps_values = [
+                value
+                for value in (_fr_to_float(info.get("r_frame_rate")) for info in vinfo_list)
+                if value is not None and value > 0
+            ]
+            output_fps = max(fps_values) if fps_values else 30.0
+
             vf_parts = []
             for i in range(n):
-                base_fr_val = _fr_to_float(vinfo_list[0].get("r_frame_rate")) if vinfo_list and vinfo_list[0] else None
                 v_norm = (
                     f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,"
+                    f"setsar=1,fps={output_fps:.6f},format=yuv420p"
                 )
-                if base_fr_val is not None:
-                    vf_parts.append(
-                        f"[{i}:v:0]{v_norm},fps={base_fr_val},setpts=PTS-STARTPTS[v{i}]"
-                    )
-                else:
-                    vf_parts.append(
-                        f"[{i}:v:0]{v_norm},setpts=PTS-STARTPTS[v{i}]"
-                    )
+                vf_parts.append(
+                    f"[{i}:v:0]{v_norm},setpts=PTS-STARTPTS[v{i}]"
+                )
                 if has_audio[i]:
-                    vf_parts.append(f"[{i}:a:0]aresample=48000,asetpts=PTS-STARTPTS[a{i}]")
+                    vf_parts.append(
+                        f"[{i}:a:0]aresample=48000,"
+                        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                        f"asetpts=PTS-STARTPTS[a{i}]"
+                    )
                 else:
                     dur = durations[i]
                     vf_parts.append(
-                        f"anullsrc=r=48000:cl=stereo,atrim=0:{dur},asetpts=PTS-STARTPTS[a{i}]"
+                        f"anullsrc=r=48000:cl=stereo,atrim=0:{dur},"
+                        f"asetpts=PTS-STARTPTS[a{i}]"
                     )
 
             concat_inputs = "".join([f"[v{i}][a{i}]" for i in range(n)])
@@ -1018,6 +1266,7 @@ class VideoProcessor:
 
             encoder_sets = await self._get_encoder_priority_list()
             last_err = None
+            await _report_progress(10.0)
             for vcodec_args in encoder_sets:
                 enc_name = self._encoder_name_from_args(vcodec_args)
                 pix_fmt = self._preferred_pix_fmt(enc_name)
@@ -1035,7 +1284,12 @@ class VideoProcessor:
                     "-progress", "pipe:1",
                     "-y", output_path
                 ])
-                self.last_concat_cmd = cmd_try
+                self._set_concat_cmd(
+                    cmd_try,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
                 cmdline_len = _windows_cmdline_len(cmd_try)
                 if os.name == "nt" and cmdline_len > 28000 and n > 1:
                     logger.warning(
@@ -1084,12 +1338,18 @@ class VideoProcessor:
                     raise
 
                 if use_sync_concat:
-                    if sync_rc == 0:
+                    if sync_rc == 0 and _is_nonempty_file(output_path):
                         if on_progress:
                             try:
                                 await on_progress(100.0)
                             except Exception:
                                 pass
+                        self._set_concat_error(
+                            None,
+                            scope=scope,
+                            project_id=project_id,
+                            task_id=task_id,
+                        )
                         logger.info(f"视频拼接成功: {output_path}")
                         return True
                     err = sync_stderr.decode(errors="ignore")
@@ -1104,14 +1364,15 @@ class VideoProcessor:
                         except Exception:
                             pass
                         return await _concat_in_batches(max(1, n // 2))
-                    self.last_concat_error = err.strip() or "filter_complex 拼接失败(sync)"
+                    self._set_concat_error(
+                        err.strip() or "filter_complex 拼接失败(sync)",
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                    )
                     last_err = err
                     logger.error(f"视频拼接失败: {err}")
-                    try:
-                        if Path(output_path).exists():
-                            Path(output_path).unlink()
-                    except Exception:
-                        pass
+                    _unlink_quietly(output_path)
                     continue
 
                 tracking = self._should_track(scope, project_id, task_id, cancel_event)
@@ -1119,7 +1380,9 @@ class VideoProcessor:
                     self._register_proc(str(scope), str(project_id), str(task_id), process)
 
                 total_duration = sum(durations)
-                progress_task = asyncio.create_task(_consume_progress_stream(process)) if on_progress else None
+                progress_task = asyncio.create_task(
+                    _consume_progress_stream(process, 10.0, 99.0)
+                ) if on_progress else None
 
                 try:
                     stdout, stderr = await self._wait_process_with_cancel(
@@ -1140,35 +1403,55 @@ class VideoProcessor:
                         list_path.unlink()
                 except Exception:
                     pass
-                if process.returncode == 0:
+                if process.returncode == 0 and _is_nonempty_file(output_path):
                     if on_progress:
                         try:
                             await on_progress(100.0)
                         except Exception:
                             pass
+                    self._set_concat_error(
+                        None,
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                    )
                     logger.info(f"视频拼接成功: {output_path}")
                     return True
                 else:
                     err = stderr.decode(errors="ignore")
-                    self.last_concat_error = err.strip() or "filter_complex 拼接失败"
+                    self._set_concat_error(
+                        err.strip() or "filter_complex 拼接失败",
+                        scope=scope,
+                        project_id=project_id,
+                        task_id=task_id,
+                    )
                     last_err = err
                     logger.error(f"视频拼接失败: {err}")
-                    try:
-                        if Path(output_path).exists():
-                            Path(output_path).unlink()
-                    except Exception:
-                        pass
+                    _unlink_quietly(output_path)
 
             if last_err:
                 logger.error(f"视频拼接失败: {last_err}")
-                self.last_concat_error = str(last_err).strip() or self.last_concat_error
+                self._set_concat_error(
+                    str(last_err).strip() or self.last_concat_error,
+                    scope=scope,
+                    project_id=project_id,
+                    task_id=task_id,
+                )
+            _unlink_quietly(list_path)
+            _unlink_quietly(output_path)
             return False
 
         except Exception as e:
             exc_type = type(e).__name__
             exc_msg = str(e) or "(无消息)"
             logger.error("拼接视频时出错: type=%s msg=%s", exc_type, exc_msg)
-            self.last_concat_error = f"{exc_type}: {exc_msg}"
+            _unlink_quietly(output_path)
+            self._set_concat_error(
+                f"{exc_type}: {exc_msg}",
+                scope=scope,
+                project_id=project_id,
+                task_id=task_id,
+            )
             return False
 
     def _parse_ffprobe_streams_json(self, out: bytes) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -1718,8 +2001,8 @@ class VideoProcessor:
                 self._ffprobe_bin, "-v", "error",
                 "-select_streams", "v:0",
                 "-skip_frame", "nokey",
-                "-show_entries", "frame=pkt_pts_time",
-                "-of", "csv=p=0",
+                "-show_entries", "frame=best_effort_timestamp_time",
+                "-of", "default=nk=1:nw=1",
                 "-read_intervals", "%+0.2",
                 path,
             ]

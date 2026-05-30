@@ -189,6 +189,8 @@ test_data/
 **/test_*.html
 **/*_test.py
 **/*_test.html
+!backend/tests/
+!backend/tests/test_video_processor_concat.py
 .venv_pack_cpu
 backend/.venv_pack_gpu
 # 文档生成

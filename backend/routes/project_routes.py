@@ -322,6 +322,8 @@ class MergeTaskStatus(BaseModel):
 
 
 MERGE_TASKS: Dict[str, MergeTaskStatus] = {}
+_merge_lock = RLock()
+_active_merge_keys: Dict[str, str] = {}
 DRAFT_TASKS: Dict[str, MergeTaskStatus] = {}
 VIDEO_TASKS: Dict[str, MergeTaskStatus] = {}
 

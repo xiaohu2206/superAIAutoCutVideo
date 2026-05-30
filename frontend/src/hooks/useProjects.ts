@@ -18,8 +18,6 @@ import type {
 import { ProjectStatus } from "../types/project";
 import { TASK_SUBMITTED_EVENT } from "../components/projectEdit/TaskQueueFloatingBall";
 
-import { message as uiMessage } from "../services/message";
-
 // 统一提取错误信息，优先使用后端提供的 detail/message
 const getErrorMessage = (err: unknown, fallback: string): string => {
   if (err && typeof err === "object") {
@@ -36,6 +34,9 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   }
   return fallback;
 };
+
+const normalizeProgress = (progress: number): number =>
+  Math.round(Math.max(0, Math.min(100, progress)) * 10) / 10;
 
 /**
  * 项目管理Hook返回类型
@@ -967,12 +968,58 @@ export const useProjectDetail = (
     try {
       setMergeProgress(0);
       setMerging(true);
-      setProject((prev) => (prev ? { ...prev, merged_video_path: undefined } : prev));
       const start = await projectService.startMergeVideos(project.id);
       const taskId = start.task_id;
 
-      // 通过 WebSocket 监听该任务的进度与完成事件
+      // WebSocket 提供实时体验，轮询负责在断线或消息丢失时收敛最终状态。
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let polling = false;
+        let pollTimer: number | undefined;
+
+        const cleanup = () => {
+          wsClient.off("*", handler);
+          if (pollTimer !== undefined) {
+            window.clearInterval(pollTimer);
+          }
+        };
+
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          setMerging(false);
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        };
+
+        const applyStatus = (status: {
+          type?: string;
+          status?: string;
+          progress?: number;
+          message?: string;
+          file_path?: string;
+        }) => {
+          if (typeof status.progress === "number") {
+            setMergeProgress(normalizeProgress(status.progress));
+            setMerging(true);
+          }
+
+          if (status.type === "completed" || status.status === "completed") {
+            const fp = status.file_path;
+            if (fp) {
+              const fileName = fp.split("/").pop();
+              setProject((prev) => (prev ? { ...prev, merged_video_path: fp, video_path: fp, video_current_name: fileName } : null));
+            }
+            finish();
+          } else if (status.type === "error" || status.status === "failed") {
+            finish(new Error(status.message || "合并失败"));
+          }
+        };
+
         const handler = (message: WebSocketMessage & { [key: string]: any }) => {
           if (
             message &&
@@ -981,29 +1028,25 @@ export const useProjectDetail = (
             (message as any).project_id === project.id &&
             (message as any).task_id === taskId
           ) {
-            if (typeof message.progress === "number") {
-              setMergeProgress(Math.max(0, Math.min(100, Math.round(message.progress))));
-              setMerging(true);
-            }
-            if (message.type === "completed") {
-              const fp = (message as any).file_path as string | undefined;
-              if (fp) {
-                const fileName = fp.split("/").pop();
-                setProject((prev) => (prev ? { ...prev, merged_video_path: fp, video_path: fp, video_current_name: fileName } : null));
-              }
-              setMerging(false);
-              wsClient.off("*", handler);
-              resolve();
-            }
-            if (message.type === "error") {
-              const msg = message.message || "合并失败";
-              setMerging(false);
-              wsClient.off("*", handler);
-              reject(new Error(msg));
-            }
+            applyStatus(message);
           }
         };
+
+        const poll = async () => {
+          if (settled || polling) return;
+          polling = true;
+          try {
+            applyStatus(await projectService.getMergeStatus(project.id, taskId));
+          } catch {
+            // Temporary request failures are expected during backend startup or reconnect.
+          } finally {
+            polling = false;
+          }
+        };
+
         wsClient.on("*", handler);
+        pollTimer = window.setInterval(() => void poll(), 1000);
+        void poll();
       });
     } catch (err) {
       setError(getErrorMessage(err, "合并视频失败"));
@@ -1018,12 +1061,6 @@ export const useProjectDetail = (
   // 订阅 WebSocket 消息以更新合并进度（页面存在时持续监听）
   useEffect(() => {
     const handler = (message: WebSocketMessage & { [key: string]: any }) => {
-      // 调试日志：打印收到的所有相关消息
-      if ((message as any).scope === "merge_videos") {
-        console.log("WebSocket [merge_videos] received:", message);
-        console.log("Current Project ID:", project?.id);
-      }
-
       if (
         message &&
         (message.type === "progress" || message.type === "completed" || message.type === "error") &&
@@ -1031,11 +1068,10 @@ export const useProjectDetail = (
         (message as any).project_id === project?.id
       ) {
         if (typeof message.progress === "number") {
-          setMergeProgress(Math.max(0, Math.min(100, Math.round(message.progress))));
+          setMergeProgress(normalizeProgress(message.progress));
           setMerging(true);
         }
         if (message.type === "completed") {
-          console.log("Merge completed, updating project state...");
           const fp = (message as any).file_path as string | undefined;
           if (fp) {
             const fileName = fp.split("/").pop();
@@ -1044,9 +1080,8 @@ export const useProjectDetail = (
           setMerging(false);
         }
         if (message.type === "error") {
-          console.error("Merge error:", message.message);
           const msg = message.message || "合并失败";
-          uiMessage.error(msg);
+          setError(msg);
           setMerging(false);
         }
       }

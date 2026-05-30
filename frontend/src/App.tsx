@@ -784,7 +784,7 @@ const App: React.FC = () => {
       };
 
   return (
-    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-slate-300/70 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-slate-900/5 dark:!border-0 dark:!border-transparent dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:!ring-0">
+    <div className="window-shell flex h-screen overflow-hidden rounded-[18px] border border-slate-300/70 bg-slate-100 shadow-[0_24px_80px_rgba(15,23,42,0.28)] ring-slate-900/5 dark:!border dark:!border-[#e5e7eb] dark:bg-[#121212] dark:shadow-[0_24px_80px_rgba(0,0,0,0.65)] dark:!ring-0">
       <Navigation
         activeTab={showProfile ? "profile" : activeTab}
         onTabChange={(tab) => {
