@@ -59,6 +59,37 @@ function Remove-DirWithRetry([string]$dirPath, [int]$retries = 6, [int]$delayMs 
   throw "failed to remove dir: $dirPath"
 }
 
+function Test-VenvPipHealthy([string]$pythonExe) {
+  if (-not (Test-Path $pythonExe)) { return $false }
+  try {
+    & $pythonExe "-c" "import pip; import pip._internal.cli.main; import pip._internal.commands.install; import pip._internal.operations.build.metadata; import pip._internal.req.req_install" | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Repair-VenvPip([string]$pythonExe, [string]$venvDir, [string]$variant) {
+  Step "Repair pip via ensurepip ($variant)"
+  & $pythonExe "-m" "ensurepip" "--upgrade" | Out-Null
+  if (Test-VenvPipHealthy $pythonExe) { return }
+
+  $sitePackages = Join-Path $venvDir 'Lib\site-packages'
+  if (Test-Path $sitePackages) {
+    Step "Remove broken pip files and reinstall ($variant)"
+    Get-ChildItem -LiteralPath $sitePackages -Force -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -eq 'pip' -or $_.Name -like 'pip-*.dist-info' } |
+      ForEach-Object {
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+      }
+  }
+
+  & $pythonExe "-m" "ensurepip" "--upgrade" | Out-Null
+  if (-not (Test-VenvPipHealthy $pythonExe)) {
+    throw "pip repair failed: pip install internals unavailable"
+  }
+}
+
 function Invoke-ProcessWithHeartbeat(
   [string]$filePath,
   [string[]]$argumentList,
@@ -399,6 +430,16 @@ function Patch-GpuNsisInstaller([string]$installerNsiPath) {
     ; 升级：保留旧版安装目录里的 resources zip（不强制同目录 zip）
     `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend.zip"
       DetailPrint "Keeping existing resources\superAutoCutVideoBackend.zip (upgrade)"
+      Goto gpu_backend_zip_ready
+    `${EndIf}
+
+    ; Runtime chunks may already have extracted the backend before launching the shell installer.
+    `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+      DetailPrint "Keeping existing extracted backend (runtime chunks)"
+      Goto gpu_backend_zip_ready
+    `${EndIf}
+    `${If} `${FileExists} "`$INSTDIR\resources\superAutoCutVideoBackend\superAutoCutVideoBackend\superAutoCutVideoBackend.exe"
+      DetailPrint "Keeping existing extracted backend (runtime chunks, nested layout)"
       Goto gpu_backend_zip_ready
     `${EndIf}
 
@@ -832,13 +873,8 @@ foreach ($variant in $variants) {
     if (-not (Test-Path $venvPy)) { throw "venv python not found: $venvPy" }
 
     Step "Ensure pip available in venv ($variant)"
-    $pipOk = $true
-    try { & $venvPy "-m" "pip" "--version" | Out-Null } catch { $pipOk = $false }
-    if ($LASTEXITCODE -ne 0) { $pipOk = $false }
-    if (-not $pipOk) {
-      Step "Bootstrap pip via ensurepip ($variant)"
-      & $venvPy "-m" "ensurepip" "--upgrade" | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "ensurepip failed (code $LASTEXITCODE)" }
+    if (-not (Test-VenvPipHealthy $venvPy)) {
+      Repair-VenvPip $venvPy $venvDir $variant
     }
 
     Step "Configure pip mirror ($variant)"

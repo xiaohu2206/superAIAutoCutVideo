@@ -33,7 +33,7 @@ SKIP_PREFIXES = (".venv", "venv", ".git", "node_modules", "serviceData", "__pyca
 
 SKIP_DIRS = {
     "__pycache__", ".git", "node_modules", "venv", ".venv", "env", "serviceData",
-    "scripts", "dist", ".venv_pack_gpu", ".venv_pack_cpu",
+    "scripts", "dist", "tests", ".venv_pack_gpu", ".venv_pack_cpu",
 }
 
 SAFE_IN_BLOCK_KEYWORDS = {
