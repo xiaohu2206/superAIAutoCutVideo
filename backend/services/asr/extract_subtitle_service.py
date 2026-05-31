@@ -413,10 +413,15 @@ class ExtractSubtitleService:
             utterances = u if isinstance(u, list) else None
         else:
             await _ws(project_id, "progress", "funasr_start", "FunASR 批量识别中", 55, task_id=run_id)
+            progress_tasks: List[asyncio.Task[None]] = []
 
             def _on_progress(pct: int, msg: str) -> None:
                 try:
-                    asyncio.create_task(_ws(project_id, "progress", "funasr_progress", msg, int(pct), task_id=run_id))
+                    progress_tasks.append(
+                        asyncio.create_task(
+                            _ws(project_id, "progress", "funasr_progress", msg, int(pct), task_id=run_id)
+                        )
+                    )
                 except Exception:
                     pass
 
@@ -436,6 +441,9 @@ class ExtractSubtitleService:
                 _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
                 await _ws(project_id, "error", "funasr_failed", f"FunASR 识别失败：{str(e)}", task_id=run_id)
                 raise HTTPException(status_code=500, detail="语音识别失败")
+            finally:
+                if progress_tasks:
+                    await asyncio.gather(*progress_tasks, return_exceptions=True)
 
         if not isinstance(utterances, list) or not utterances:
             _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})

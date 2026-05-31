@@ -191,6 +191,8 @@ test_data/
 **/*_test.html
 !backend/tests/
 !backend/tests/test_video_processor_concat.py
+!backend/tests/test_task_progress_store.py
+!backend/tests/test_auth_upstream.py
 .venv_pack_cpu
 backend/.venv_pack_gpu
 # 文档生成

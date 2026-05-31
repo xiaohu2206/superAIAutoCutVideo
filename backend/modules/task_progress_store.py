@@ -167,6 +167,11 @@ class TaskProgressStore:
         with self._lock:
             existing = self._states.get(key) or {}
             status = self._normalize_status(payload, existing)
+            existing_status = str(existing.get("status") or "").strip().lower()
+            if existing_status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
+                # Progress callbacks and WS broadcasts can arrive out of order.
+                # A late progress event must not revive an already finished task.
+                return
             progress = payload.get("progress")
             if not isinstance(progress, (int, float)):
                 progress = existing.get("progress", 0.0)

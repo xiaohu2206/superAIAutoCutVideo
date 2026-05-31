@@ -14,8 +14,7 @@ from typing import Any, Optional
 import httpx
 from fastapi import HTTPException
 
-from modules.auth.auth_upstream import get_auth_upstream_base
-from modules.httpx_trust_env import async_client_no_proxy_env
+from modules.auth.auth_upstream import get_auth_upstream_base, request_auth_upstream
 from modules.auth.device_id_crypto import encrypt_device_id
 from modules.auth.license_device_id import get_host_device_fingerprint
 
@@ -87,10 +86,18 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
     auth = authorization.strip()
     base = get_auth_upstream_base()
     list_url = f"{base}/api/licenses"
-    async with async_client_no_proxy_env(timeout=_TIMEOUT) as client:
-        r = await client.get(
+    try:
+        r = await request_auth_upstream(
+            "GET",
             list_url,
+            timeout=_TIMEOUT,
             headers={"Accept": "application/json", "Authorization": auth},
+        )
+    except httpx.RequestError:
+        logger.warning("omni license gate: GET /api/licenses network error")
+        raise HTTPException(
+            status_code=503,
+            detail="无法连接 License 服务，请稍后重试。",
         )
     if r.status_code == 401:
         raise HTTPException(
@@ -150,14 +157,22 @@ async def require_valid_license_for_omni(authorization: Optional[str]) -> None:
             "deviceId": encrypted_device_id,
             "deviceName": device_name,
         }
-        async with async_client_no_proxy_env(timeout=_TIMEOUT) as client:
-            vr = await client.post(
+        try:
+            vr = await request_auth_upstream(
+                "POST",
                 verify_url,
+                timeout=_TIMEOUT,
                 json=payload,
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },
+            )
+        except httpx.RequestError:
+            logger.warning("omni license gate: POST /api/license/verify network error")
+            raise HTTPException(
+                status_code=503,
+                detail="无法连接 License 服务，请稍后重试。",
             )
         vbody: Any
         try:

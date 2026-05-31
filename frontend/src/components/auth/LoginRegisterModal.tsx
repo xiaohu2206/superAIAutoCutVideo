@@ -7,6 +7,7 @@ import {
   resetPassword,
 } from "./api";
 import { useAuth } from "./AuthContext";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 type ModalTab = "login" | "register" | "reset";
 
@@ -17,6 +18,15 @@ interface LoginRegisterModalProps {
 
 export default function LoginRegisterModal({ open, onClose }: LoginRegisterModalProps) {
   const { loginAction } = useAuth();
+  const isDark = useThemeMode() === "dark";
+  const fieldLabelClass = isDark ? "text-gray-400" : "text-slate-600";
+  const fieldWrapperClass = isDark
+    ? "border-[#2a2a2a] bg-[#242424] focus-within:border-blue-500/50 focus-within:bg-[#2a2a2a] focus-within:ring-2 focus-within:ring-blue-500/20"
+    : "border-slate-200 bg-slate-50/60 focus-within:border-blue-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100";
+  const fieldIconClass = isDark ? "text-gray-500" : "text-slate-400";
+  const fieldInputClass = isDark
+    ? "text-gray-100 placeholder:text-gray-500"
+    : "text-slate-900 placeholder:text-slate-400";
   const [tab, setTab] = useState<ModalTab>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -246,14 +256,16 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
         <div className="flex flex-col gap-4 px-7 pt-4 pb-7">
           {/* 邮箱 */}
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-slate-600">邮箱地址</span>
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 ring-inset transition-colors focus-within:border-blue-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
-              <Mail className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className={`text-xs font-medium ${fieldLabelClass}`}>邮箱地址</span>
+            <div
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ring-inset transition-colors ${fieldWrapperClass}`}
+            >
+              <Mail className={`h-4 w-4 shrink-0 ${fieldIconClass}`} />
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${fieldInputClass}`}
                 placeholder="请输入邮箱"
                 disabled={loading}
               />
@@ -295,14 +307,16 @@ export default function LoginRegisterModal({ open, onClose }: LoginRegisterModal
           {/* 密码（登录/注册） */}
           {(tab === "login" || tab === "register") && (
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-slate-600">密码</span>
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 ring-inset transition-colors focus-within:border-blue-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
-                <Lock className="h-4 w-4 shrink-0 text-slate-400" />
+              <span className={`text-xs font-medium ${fieldLabelClass}`}>密码</span>
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ring-inset transition-colors ${fieldWrapperClass}`}
+              >
+                <Lock className={`h-4 w-4 shrink-0 ${fieldIconClass}`} />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                  className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${fieldInputClass}`}
                   placeholder={tab === "register" ? "至少6位密码" : "请输入密码"}
                   disabled={loading}
                 />
