@@ -508,6 +508,8 @@ export function useProjectEditGenerateStep(
       } else if (project.script) {
         setEditedScriptSafe(JSON.stringify(project.script, null, 2));
       }
+      setScriptGenProgress(100);
+      void options.refreshProject();
       options.showSuccess("解说脚本生成成功！");
     } catch (err) {
       options.showError(err, "生成脚本失败");
