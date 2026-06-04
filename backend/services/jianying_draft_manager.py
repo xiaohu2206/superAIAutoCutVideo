@@ -19,7 +19,9 @@ from modules.config.jianying_config import jianying_config_manager
 from modules.config.tts_config import tts_engine_config_manager
 from modules.tts_service import tts_service
 from modules.app_paths import normalize_path_str, uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
+from modules.ffmpeg_utils import resolve_ffprobe_bin
 from modules.filename_utils import safe_filename_component
+from modules.subprocess_no_console import run_no_console
 
 from modules.omni_script_tts import is_valid_segment_tts, segment_tts_abs_path
 from services.narration_ost_overlap import ORIGINAL_SEGMENT_EXTRA_DURATION_S, resolve_narration_extend_vs_following_play_original
@@ -71,49 +73,92 @@ def _try_parse_float(v: Any) -> float:
     return 0.0
 
 
+def _decode_process_output(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return str(value).strip()
+
+
+def _clip_process_output(value: Any, limit: int = 600) -> str:
+    text = _decode_process_output(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
+def _ffprobe_bin_or_raise() -> str:
+    ffprobe_bin = resolve_ffprobe_bin()
+    if not ffprobe_bin:
+        raise RuntimeError("未找到 ffprobe，请先安装 ffmpeg/ffprobe，或将 ffprobe 放到 PATH / resources 目录。")
+    return ffprobe_bin
+
+
 def _probe_video_meta(video_path: Path) -> Dict[str, Any]:
+    ffprobe_bin = _ffprobe_bin_or_raise()
+    cmd = [
+        ffprobe_bin,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate,duration",
+        "-of",
+        "json",
+        str(video_path),
+    ]
     try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height,r_frame_rate,duration",
-            "-of",
-            "json",
-            str(video_path),
-        ]
-        if os.name == "nt":
-            result = subprocess.check_output(
-                cmd,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)  # noqa: subprocess-window
-    except FileNotFoundError as exc:
-        raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
-    data = json.loads(result)
-    stream = data["streams"][0]
-    width = int(stream["width"])
-    height = int(stream["height"])
+        proc = run_no_console(cmd, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        raise RuntimeError(f"执行 ffprobe 失败: {exc}，视频路径: {video_path}") from exc
+
+    stdout_text = _decode_process_output(proc.stdout)
+    stderr_text = _clip_process_output(proc.stderr)
+    if proc.returncode != 0:
+        detail = stderr_text or _clip_process_output(stdout_text)
+        raise RuntimeError(f"ffprobe 探测视频失败: {detail or '无错误输出'}，视频路径: {video_path}")
+    if not stdout_text:
+        detail = stderr_text or "ffprobe 无输出"
+        raise RuntimeError(f"ffprobe 未返回视频元信息: {detail}，视频路径: {video_path}")
+
+    try:
+        data = json.loads(stdout_text)
+    except json.JSONDecodeError as exc:
+        detail = _clip_process_output(stdout_text) or stderr_text or "空输出"
+        raise RuntimeError(f"ffprobe 返回的元信息不是 JSON: {detail}，视频路径: {video_path}") from exc
+
+    streams = data.get("streams") if isinstance(data, dict) else None
+    if not streams:
+        detail = stderr_text or _clip_process_output(stdout_text)
+        raise RuntimeError(f"ffprobe 未探测到视频流: {detail or 'streams 为空'}，视频路径: {video_path}")
+
+    stream = streams[0]
+    try:
+        width = int(stream["width"])
+        height = int(stream["height"])
+    except Exception as exc:
+        raise RuntimeError(f"ffprobe 视频流缺少宽高信息，视频路径: {video_path}") from exc
     rate_str = stream.get("r_frame_rate", "0/1")
-    if "/" in rate_str:
-        num, denom = rate_str.split("/", 1)
-        fps = float(num) / float(denom) if float(denom) != 0 else 0.0
-    else:
-        fps = float(rate_str)
-    duration = float(stream.get("duration", 0.0))
+    try:
+        if "/" in rate_str:
+            num, denom = rate_str.split("/", 1)
+            fps = float(num) / float(denom) if float(denom) != 0 else 0.0
+        else:
+            fps = float(rate_str)
+    except Exception:
+        fps = 0.0
+    duration = _try_parse_float(stream.get("duration", 0.0))
     return {"width": width, "height": height, "fps": fps, "duration": duration}
 
 def _probe_audio_duration(audio_path: Path) -> float:
     try:
         if not audio_path.exists():
             return 0.0
+        ffprobe_bin = _ffprobe_bin_or_raise()
         cmd_a = [
-            "ffprobe",
+            ffprobe_bin,
             "-v",
             "error",
             "-select_streams",
@@ -124,20 +169,22 @@ def _probe_audio_duration(audio_path: Path) -> float:
             "default=nk=1:nw=1",
             str(audio_path),
         ]
-        if os.name == "nt":
-            out_a = subprocess.check_output(
-                cmd_a,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+        proc_a = run_no_console(cmd_a, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc_a.returncode == 0:
+            out_a = proc_a.stdout or b""
         else:
-            out_a = subprocess.check_output(cmd_a, stderr=subprocess.STDOUT)  # noqa: subprocess-window
+            logger.warning(
+                "ffprobe audio stream duration failed: path=%s error=%s",
+                audio_path,
+                _clip_process_output(proc_a.stderr or proc_a.stdout),
+            )
+            out_a = b""
         d_a = _try_parse_float(out_a.decode(errors="ignore"))
         if d_a > 0.0:
             return d_a
 
         cmd_f = [
-            "ffprobe",
+            ffprobe_bin,
             "-v",
             "error",
             "-show_entries",
@@ -146,18 +193,20 @@ def _probe_audio_duration(audio_path: Path) -> float:
             "default=nk=1:nw=1",
             str(audio_path),
         ]
-        if os.name == "nt":
-            out_f = subprocess.check_output(
-                cmd_f,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+        proc_f = run_no_console(cmd_f, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc_f.returncode != 0:
+            logger.warning(
+                "ffprobe format duration failed: path=%s error=%s",
+                audio_path,
+                _clip_process_output(proc_f.stderr or proc_f.stdout),
             )
-        else:
-            out_f = subprocess.check_output(cmd_f, stderr=subprocess.STDOUT)  # noqa: subprocess-window
+            return 0.0
+        out_f = proc_f.stdout or b""
         return _try_parse_float(out_f.decode(errors="ignore"))
-    except FileNotFoundError as exc:
-        raise RuntimeError("未找到 ffprobe，请先安装并放到 PATH。") from exc
+    except RuntimeError:
+        raise
     except Exception:
+        logger.exception("probe audio duration failed: path=%s", audio_path)
         return 0.0
 
 
