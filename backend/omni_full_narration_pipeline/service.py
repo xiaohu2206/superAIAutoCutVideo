@@ -129,6 +129,7 @@ class OmniFullNarrationPipelineService:
         global_path_search_options: Optional[Dict[str, Any]] = None,
         generate_script_options: Optional[Dict[str, Any]] = None,
         skip_global_path_search: bool = False,
+        skip_generate_script_llm: Optional[bool] = None,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
@@ -371,7 +372,8 @@ class OmniFullNarrationPipelineService:
                         step_label="全局路径搜索",
                     )
 
-                # 4) 解说脚本
+                # 4) 解说脚本（skip_generate_script_llm 为 true 时跳过大模型，直接用上一步候选拼装；
+                #    为 None 时由解说脚本服务跟随「使用本地模型」配置决定）
                 gs_gp = str(gs.get("input_global_path_web_path") or "").strip()
                 r4 = await omni_generate_script_service.submit_run(
                     project_id,
@@ -382,6 +384,7 @@ class OmniFullNarrationPipelineService:
                     generation_params=gs.get("generation_params") if isinstance(gs.get("generation_params"), dict) else None,
                     temperature=gs.get("temperature"),
                     chunk_llm_concurrency=int(gs.get("chunk_llm_concurrency") or 4),
+                    use_prev_result_directly=skip_generate_script_llm,
                 )
                 tid4 = str(r4.get("task_id") or "").strip()
                 if not tid4:

@@ -98,6 +98,31 @@ export interface UnifiedYunwuModelsPayload {
   platforms: Record<string, PlatformConfig>;
 }
 
+/** Omni Step2 本地模型低并发参数（omni_step2_pipeline_config.json） */
+export interface OmniStep2LocalSettings {
+  vl_batch_size: number;
+  infer_wall_sec: number;
+  api_concurrency: number;
+}
+
+export interface OmniStep2EffectiveParams {
+  source: "cloud" | "local";
+  vl_batch_size: number;
+  frames_per_shot: number;
+  vl_batch_images: number;
+  infer_wall_sec: number;
+  max_concurrency: number;
+  extract_concurrency: number;
+  api_concurrency: number;
+  bge_encode_concurrency: number | null;
+}
+
+export interface OmniStep2PipelinePayload {
+  use_local_model_pipeline: boolean;
+  local: OmniStep2LocalSettings;
+  effective?: OmniStep2EffectiveParams;
+}
+
 /**
  * TTS 引擎元信息
  */

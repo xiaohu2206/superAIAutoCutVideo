@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import List, Optional
 
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from .llm_client import call_llm_text
 from .prompts import build_wash_messages
 from .quoted_strip import remove_leading_quoted_subtitle_lines
@@ -11,8 +12,8 @@ from .splitter import pair_reference_and_subtitles
 
 logger = logging.getLogger(__name__)
 
-# 与 copywriting_builder 分段并发度一致
-_WASH_CONCURRENCY = 3
+# 与 copywriting_builder 分段并发度一致（本地模型模式为 1）
+_WASH_CONCURRENCY_DEFAULT = 3
 
 
 async def wash_reference_copywriting_pipeline(
@@ -36,7 +37,11 @@ async def wash_reference_copywriting_pipeline(
         return ""
 
     total = len(pairs)
-    sem = asyncio.Semaphore(_WASH_CONCURRENCY)
+    wash_concurrency = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(
+        default_cloud=_WASH_CONCURRENCY_DEFAULT
+    )
+    sem = asyncio.Semaphore(wash_concurrency)
+    logger.info("参考稿洗稿 LLM 并发=%s", wash_concurrency)
     section_texts: List[Optional[str]] = [None] * total
 
     async def run_one(idx: int, ref_chunk: str, sub_chunk: str) -> None:

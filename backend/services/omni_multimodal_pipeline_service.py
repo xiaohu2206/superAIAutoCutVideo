@@ -23,6 +23,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from modules.config.omni_step2_pipeline_config import (
+    OMNI_STEP2_FRAMES_PER_SHOT,
+    omni_step2_pipeline_config_manager,
+)
 from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 from modules.projects_store import projects_store
 from modules.subtitle_utils import parse_srt
@@ -51,27 +55,28 @@ logger = logging.getLogger(__name__)
 
 _SCOPE = "omni_multimodal"
 
-# Step2 在线视觉：一次请求最多 10 张图（每镜头 2 帧 → 5 个语义段，与 frame_analysis_multi_zh.md 一致）
-OMNI_STEP2_FRAMES_PER_SHOT = 2
+# Step2 在线视觉云端默认（关闭「本地模型」开关时由 omni_step2_pipeline_config 返回同等参数）
 OMNI_STEP2_VL_BATCH_IMAGES = 12
 OMNI_STEP2_VL_BATCH_SIZE = OMNI_STEP2_VL_BATCH_IMAGES // OMNI_STEP2_FRAMES_PER_SHOT
 
-_ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_openai_vision"})
 
-
-def _omni_step2_work_batch_size(api_concurrency: int) -> int:
+def _omni_step2_work_batch_size(api_concurrency: int, vl_batch_size: int) -> int:
     """Step2 流水处理窗口，避免大量语义段一次性抽帧/视觉/向量化撑爆内存。"""
     raw = (os.environ.get("OMNI_STEP2_WORK_BATCH_SIZE") or "").strip()
-    default = max(OMNI_STEP2_VL_BATCH_SIZE, min(64, max(1, int(api_concurrency or 1)) * OMNI_STEP2_VL_BATCH_SIZE))
+    eff_vl_batch = max(1, int(vl_batch_size or OMNI_STEP2_VL_BATCH_SIZE))
+    default = max(eff_vl_batch, min(64, max(1, int(api_concurrency or 1)) * eff_vl_batch))
     if not raw:
         return default
     try:
         n = int(raw, 10)
         if n <= 0:
             return default
-        return max(OMNI_STEP2_VL_BATCH_SIZE, min(n, 512))
+        return max(eff_vl_batch, min(n, 512))
     except Exception:
         return default
+
+
+_ONLINE_VL_PROVIDERS = frozenset({"yunwu", "302ai", "qwen", "doubao", "custom_openai_vision"})
 
 
 def _omni_step2_snapshot_every(pending_total: int) -> int:
@@ -819,13 +824,25 @@ class OmniMultimodalPipelineService:
                 except (FileNotFoundError, RuntimeError) as e:
                     raise ValueError(str(e)) from e
 
-                try:
-                    infer_wall_sec = 40
-                except Exception:
-                    infer_wall_sec = 30
+                step2_params = omni_step2_pipeline_config_manager.resolve_runtime_params()
+                infer_wall_sec = float(step2_params.infer_wall_sec)
                 if infer_wall_sec < 1.0:
-                    infer_wall_sec = 30
+                    infer_wall_sec = 40.0
                 effective_http_timeout = max(int(active_vl.timeout or 0), int(infer_wall_sec + 0.999))
+                vl_batch_size = int(step2_params.vl_batch_size)
+                max_concurrency = int(step2_params.max_concurrency)
+                extract_concurrency = int(step2_params.extract_concurrency)
+                api_concurrency = int(step2_params.api_concurrency)
+                step2_bge_cap = step2_params.bge_encode_concurrency
+                logger.info(
+                    "[omni-pipeline] Step2 参数 source=%s vl_batch_size=%s infer_wall_sec=%s api_concurrency=%s extract_concurrency=%s bge_cap=%s",
+                    step2_params.source,
+                    vl_batch_size,
+                    infer_wall_sec,
+                    api_concurrency,
+                    extract_concurrency,
+                    step2_bge_cap,
+                )
 
                 shots: List[Dict[str, Any]] = list(step1.get("shots") or [])
                 if not shots:
@@ -935,12 +952,9 @@ class OmniMultimodalPipelineService:
                     model_name=str(active_vl.model_name or ""),
                     timeout=effective_http_timeout,
                 )
-                # 与 vision_frame_analysis_service.analyze_scenes_online 默认参数一致：
-                # max_concurrency=128 -> extract_concurrency=8, api_concurrency=64
-                max_concurrency = 64
                 concurrency_cap = max(1, int(max_concurrency or 1))
-                extract_concurrency = min(8, concurrency_cap)
-                api_concurrency = min(64, concurrency_cap)
+                extract_concurrency = min(extract_concurrency, concurrency_cap)
+                api_concurrency = min(api_concurrency, concurrency_cap)
                 logger.info(
                     "[omni-pipeline] Step2 视觉模型调用入口 project_id=%s task_id=%s runner_id=%s provider=%s model=%s shots=%s pending=%s mma=%s extract_concurrency=%s api_concurrency=%s",
                     project_id,
@@ -1503,7 +1517,10 @@ class OmniMultimodalPipelineService:
                             for b in batch:
                                 _close_shot_pil_images(b[3])
 
-                _bge_cap = _omni_bge_embed_encode_concurrency_cap()
+                if step2_bge_cap is not None:
+                    _bge_cap = max(1, int(step2_bge_cap))
+                else:
+                    _bge_cap = _omni_bge_embed_encode_concurrency_cap()
                 _bge_embed_sem = asyncio.Semaphore(_bge_cap) if _bge_cap is not None else None
 
                 async def _commit_step2_after_vl(out: _Step2VlOutcome) -> None:
@@ -1537,7 +1554,7 @@ class OmniMultimodalPipelineService:
                     if _bge_cap is not None
                     else ""
                 )
-                work_batch_size = _omni_step2_work_batch_size(api_concurrency)
+                work_batch_size = _omni_step2_work_batch_size(api_concurrency, vl_batch_size)
                 snapshot_every = _omni_step2_snapshot_every(len(pending_idx))
                 snapshot_min_interval_sec = 10.0
                 last_snapshot_done = done_count
@@ -1577,7 +1594,7 @@ class OmniMultimodalPipelineService:
                     task_id,
                     len(pending_idx),
                     work_batch_size,
-                    OMNI_STEP2_VL_BATCH_SIZE,
+                    vl_batch_size,
                     api_concurrency,
                     extract_concurrency,
                     bge_note,
@@ -1631,8 +1648,8 @@ class OmniMultimodalPipelineService:
                         batch_bundles: List[Tuple[int, Dict[str, Any], List[str], List[Image.Image]]] = list(bundles)
 
                         vl_batches = [
-                            batch_bundles[i : i + OMNI_STEP2_VL_BATCH_SIZE]
-                            for i in range(0, len(batch_bundles), OMNI_STEP2_VL_BATCH_SIZE)
+                            batch_bundles[i : i + vl_batch_size]
+                            for i in range(0, len(batch_bundles), vl_batch_size)
                         ]
                         task_progress_store.set_state(
                             scope=self.SCOPE,

@@ -9,6 +9,11 @@ export interface OmniFullNarrationPipelineControlsProps {
   disabledReason?: string;
   omniPipelineBusy: boolean;
   omniStepTestPhase: OmniStepTestPhase | null;
+  /** 勾选后跳过解说脚本大模型生成，直接用上一步候选拼装以省成本 */
+  skipGenerateScriptLlm: boolean;
+  onToggleSkipGenerateScriptLlm: (value: boolean) => void;
+  /** 「使用本地模型」是否开启（用于复选框提示） */
+  localModelPipelineEnabled: boolean;
   onRun: () => void;
   onRunStepEmbed: () => void;
   onRunStepShotMatch: () => void;
@@ -24,6 +29,9 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
   disabledReason,
   omniPipelineBusy,
   omniStepTestPhase,
+  skipGenerateScriptLlm,
+  onToggleSkipGenerateScriptLlm,
+  localModelPipelineEnabled,
   onRun,
   onRunStepEmbed,
   onRunStepShotMatch,
@@ -73,6 +81,25 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
           </button>
         </div>
       </div> */}
+
+      <label
+        className="flex items-start gap-2 cursor-pointer select-none text-sm text-gray-600"
+        title="勾选后不调用大模型，直接用上一步镜头匹配候选每条 Top1 的时间拼装解说脚本，可显著节省成本"
+      >
+        <input
+          type="checkbox"
+          checked={skipGenerateScriptLlm}
+          disabled={busy}
+          onChange={(e) => onToggleSkipGenerateScriptLlm(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        />
+        <span>
+          跳过大模型（省成本）
+          {localModelPipelineEnabled ? (
+            <span className="ml-1 text-violet-600">· 已开启本地模型，默认勾选</span>
+          ) : null}
+        </span>
+      </label>
 
       <button
         type="button"

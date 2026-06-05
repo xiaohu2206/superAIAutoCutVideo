@@ -295,6 +295,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         </div>
       )}
 
+      <div className="flex flex-wrap items-end gap-3">
       {hideVisualGenerateScriptButton ? (
         omniScriptGenerateSlot ?? null
       ) : (
@@ -348,6 +349,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         ]}
       />
       }
+      </div>
       {/* 文案生成进度 */}
       {!hideCopywritingOperations && isGeneratingCopywriting && (
         <div className="w-full ml-0 mt-3">

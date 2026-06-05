@@ -26,6 +26,7 @@ from ._runner_core import (
     _filter_shots_by_time_window,
     _format_ts,
     _post_check_items,
+    _safe_float,
     _video_end_seconds,
 )
 from .prompt_options import (
@@ -263,6 +264,39 @@ def _build_prompts_for_chunk(
     user_prompt_c = user_prompt_template.format(**fmt_kw)
     user_prompt_c += chunk_suffix_c
     return "", user_prompt_c
+
+
+def build_items_from_results_directly(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    省成本路径：不调用大模型，直接用上一步（镜头匹配/全局路径搜索）的候选结果拼装解说脚本。
+    每条文案取其 Top1 镜头（matches[0]）的时间窗作为该条解说的时间轴，narration 即原文案文本。
+    返回与 LLM 单批输出同构的 items（timestamp / narration / OST），供 merge_chunk_items 复用。
+    """
+    items: List[Dict[str, Any]] = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        text = str(r.get("text", "") or "").strip()
+        if not text:
+            continue
+        matches = r.get("matches") or []
+        if not isinstance(matches, list) or not matches:
+            continue
+        top = matches[0] if isinstance(matches[0], dict) else None
+        if not top:
+            continue
+        start = _safe_float(top.get("start"))
+        end = _safe_float(top.get("end"))
+        if end <= start:
+            continue
+        items.append(
+            {
+                "timestamp": f"{_format_ts(start)}-{_format_ts(end)}",
+                "narration": text,
+                "OST": 0,
+            }
+        )
+    return items
 
 
 def post_check_chunk_items(items: List[Dict[str, Any]]) -> None:

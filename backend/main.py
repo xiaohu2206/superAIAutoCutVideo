@@ -58,6 +58,7 @@ from routes import health_router
 from routes.video_model_routes import router as video_model_router
 from routes.content_model_routes import router as content_model_router
 from routes.unified_yunwu_models_routes import router as unified_yunwu_models_router
+from routes.omni_step2_pipeline_routes import router as omni_step2_pipeline_router
 from routes.project_routes import router as project_router
 from routes.project_upload_routes import router as project_upload_router
 from routes.project_edit_routes import router as project_edit_router
@@ -417,6 +418,7 @@ app.include_router(health_router)
 app.include_router(video_model_router)
 app.include_router(content_model_router)
 app.include_router(unified_yunwu_models_router)
+app.include_router(omni_step2_pipeline_router)
 # 必须在 project_router 之前：project_routes 含 GET/POST /{project_id}，否则会吞掉
 # /generate-copywriting、/generate-script 等单段静态路径（误把 segment 当成 UUID）。
 app.include_router(project_ai_router)

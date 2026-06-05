@@ -43,6 +43,11 @@ class OmniGenerateScriptRunRequest(BaseModel):
     original_ratio: Optional[int] = Field(default=None, ge=0, le=100, description="原片占比 0-100；默认使用项目配置")
     temperature: Optional[float] = Field(default=None, description="覆盖当前文案模型温度")
     chunk_llm_concurrency: int = Field(default=4, ge=1, le=16, description="分块 LLM 并发数")
+    use_prev_result_directly: Optional[bool] = Field(
+        default=None,
+        description="为 true 时跳过大模型，直接用上一步镜头候选每条 Top1 的时间拼装解说脚本以省成本；"
+        "为 null 时跟随「使用本地模型」配置（开启本地模型默认跳过）",
+    )
 
 
 @router.post("/{project_id}/omni/generate-script/run")
@@ -62,6 +67,7 @@ async def omni_generate_script_run(
             original_ratio=req.original_ratio,
             temperature=req.temperature,
             chunk_llm_concurrency=req.chunk_llm_concurrency,
+            use_prev_result_directly=req.use_prev_result_directly,
         )
         return {"message": "任务已提交", "data": data, "timestamp": _now_ts()}
     except ValueError as e:

@@ -492,6 +492,21 @@ export class ApiClient {
     });
   }
 
+  async getOmniStep2PipelineConfig(): Promise<any> {
+    return this.request("/api/models/omni-step2-pipeline", {
+      method: "GET",
+      headers: this._authHeaders(),
+    });
+  }
+
+  async updateOmniStep2PipelineConfig(body: Record<string, unknown>): Promise<any> {
+    return this.request("/api/models/omni-step2-pipeline", {
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: this._authHeaders(),
+    });
+  }
+
   // ===== 向量模型 设置相关 API =====
   async getAiSearchShotModelConfig(): Promise<any> {
     return this.get("/api/settings/ai-search-shot");

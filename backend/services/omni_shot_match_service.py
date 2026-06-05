@@ -32,6 +32,7 @@ from modules.omni_shot_match import (
     parse_fine_llm_payload,
 )
 from modules.projects_store import projects_store
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
@@ -157,7 +158,8 @@ class OmniShotMatchService:
             phase="preparing",
         )
 
-        sem_n = _CONCURRENCY
+        sem_n = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=_CONCURRENCY)
+        logger.info("omni_shot_match 精排 LLM 并发=%s", sem_n)
 
         async def _run() -> None:
             await project_task_queue.acquire(project_id, self.SCOPE, task_id)

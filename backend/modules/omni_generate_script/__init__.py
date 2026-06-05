@@ -4,6 +4,7 @@
 from .pure import (
     OmniNarrationParams,
     build_chunk_metas_and_prompts,
+    build_items_from_results_directly,
     merge_chunk_items,
     normalize_items_for_validation,
     omni_items_to_video_script,
@@ -14,6 +15,7 @@ from .pure import (
 __all__ = [
     "OmniNarrationParams",
     "build_chunk_metas_and_prompts",
+    "build_items_from_results_directly",
     "merge_chunk_items",
     "normalize_items_for_validation",
     "omni_items_to_video_script",

@@ -19,6 +19,7 @@ from modules.ai import AIModelConfig, ChatMessage, get_provider_class
 from modules.ffmpeg_utils import get_ffmpeg_cuda_prefix, resolve_ffmpeg_bin
 from modules.moondream_model_manager import MoondreamPathManager
 from modules.moondream_inference_settings import resolve_moondream_runtime_config
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from modules.task_progress_store import task_progress_store
 from modules.task_cancel_store import task_cancel_store
 from services.ai_models.vision_scene_status import (
@@ -1513,23 +1514,39 @@ class VisionFrameAnalyzer:
         Analyze scenes using online vision models (302ai, yunwu, etc.).
         mode: "no_subtitles" or "all"
         vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
-        max_concurrency: 兼容旧参数；抽帧默认 8 并发，API 调用默认 32 并发，都会受该参数上限约束。
+        max_concurrency: 兼容旧参数；抽帧默认 8 并发，API 调用默认 64 并发，都会受该参数上限约束。
+        若设置页开启「本地模型」模式，则 api_concurrency / infer_wall_sec 改读 omni_step2_pipeline_config.json。
         """
-        try:
-            infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
-        except Exception:
-            infer_wall_sec = 60
-        if infer_wall_sec < 1.0:
-            infer_wall_sec = 60
+        step2_params = omni_step2_pipeline_config_manager.resolve_runtime_params()
+        if step2_params.source == "local":
+            infer_wall_sec = float(step2_params.infer_wall_sec)
+            if infer_wall_sec < 1.0:
+                infer_wall_sec = 1200.0
+            concurrency_cap = max(1, int(step2_params.max_concurrency))
+            extract_concurrency = min(int(step2_params.extract_concurrency), concurrency_cap)
+            api_concurrency = min(int(step2_params.api_concurrency), concurrency_cap)
+            logger.info(
+                "在线视觉：本地模型模式 infer_wall_sec=%s api_concurrency=%s extract_concurrency=%s",
+                infer_wall_sec,
+                api_concurrency,
+                extract_concurrency,
+            )
+        else:
+            try:
+                infer_wall_sec = float(str(os.environ.get("VISION_ONLINE_INFER_TIMEOUT_SEC") or "").strip() or "300")
+            except Exception:
+                infer_wall_sec = 60
+            if infer_wall_sec < 1.0:
+                infer_wall_sec = 60
+
+            concurrency_cap = max(1, int(max_concurrency or 1))
+            extract_concurrency = min(8, concurrency_cap)
+            api_concurrency = min(64, concurrency_cap)
 
         effective_http_timeout = max(int(timeout or 0), int(infer_wall_sec + 0.999))
         online_runner = await self._get_online_runner(
             provider, api_key, base_url, model_name, effective_http_timeout
         )
-
-        concurrency_cap = max(1, int(max_concurrency or 1))
-        extract_concurrency = min(8, concurrency_cap)
-        api_concurrency = min(64, concurrency_cap)
 
         video_abs = video_abs_for_vision_fp(video_path)
         video_fp_for_persist: Optional[Dict[str, int]] = None

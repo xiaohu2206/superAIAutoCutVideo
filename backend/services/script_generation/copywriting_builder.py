@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from modules.ai import ChatMessage
 from modules.prompts.prompt_manager import prompt_manager
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from services.ai_models.ai_service import ai_service
 from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 
@@ -685,7 +686,9 @@ async def _generate_segmented(
     )
     logger.info(f"大纲生成完成, 共{len(outline_items)}段")
 
-    sem = asyncio.Semaphore(3)
+    llm_concurrency = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=3)
+    sem = asyncio.Semaphore(llm_concurrency)
+    logger.info("文案分段 LLM 并发=%s", llm_concurrency)
     section_texts: List[Optional[str]] = [None] * len(outline_items)
 
     async def gen_one(idx: int):

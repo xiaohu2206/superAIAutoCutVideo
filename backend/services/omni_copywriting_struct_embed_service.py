@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.ai import AIModelConfig, ChatMessage, get_provider_class
-from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
+from services.ai_models.unified_model_usage import LlmModelUsage, resolve_video_model_for_online_vision
 from modules.omni_copywriting_struct_embed import (
     build_omni_embedding_input,
     load_structuring_prompt,
@@ -29,7 +30,7 @@ from modules.projects_store import projects_store
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
-from services.ai_models.ai_service import LLM_HTTP_TIMEOUT_SEC
+from services.ai_models.ai_service import LLM_HTTP_TIMEOUT_SEC, ai_service
 from services.asr.extract_subtitle_service import _to_web_path, _uploads_dir
 from services.ai_models.omni_local_bge_embedding import (
     LOCAL_BGE_MODEL_DISPLAY_NAME,
@@ -90,28 +91,45 @@ async def _call_structuring_chunk(
     prompt = prompt_template.replace("{copywriting}", chunk_text)
     messages = [ChatMessage(role="user", content=prompt)]
 
-    active_vl = resolve_video_model_for_online_vision()
-    if not active_vl or active_vl.provider not in _STRUCT_ONLINE_VL_PROVIDERS:
-        raise ValueError(
-            "文案结构化需与在线视觉分析共用「视频理解模型」：请在设置中选择 "
-            "yunwu / 302ai / qwen / doubao / custom_openai_vision 之一并配置密钥"
-        )
+    use_content_model = omni_step2_pipeline_config_manager.resolve_runtime_params().source == "local"
+    active_vl: Optional[Any] = None
+    if not use_content_model:
+        active_vl = resolve_video_model_for_online_vision()
+        if not active_vl or active_vl.provider not in _STRUCT_ONLINE_VL_PROVIDERS:
+            raise ValueError(
+                "文案结构化需与在线视觉分析共用「视频理解模型」：请在设置中选择 "
+                "yunwu / 302ai / qwen / doubao / custom_openai_vision 之一并配置密钥"
+            )
 
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
-            provider_cls = get_provider_class(active_vl.provider)
-            if not provider_cls:
-                raise RuntimeError(f"不支持的AI提供商: {active_vl.provider}")
-            ai_cfg = _video_cfg_to_ai_cfg(active_vl)
-            provider = provider_cls(ai_cfg)
-            try:
-                resp = await provider.chat_completion(
-                    messages,
-                    extra_params={"response_format": {"type": "json_object"}},
+            if use_content_model:
+                logger.info(
+                    "[omni_copywriting_embed] structuring chunk %s/%s 使用文案模型",
+                    chunk_index,
+                    total_chunks,
                 )
-            finally:
-                await provider.close()
+                resp = await ai_service.send_chat(
+                    messages,
+                    response_format={"type": "json_object"},
+                    usage=LlmModelUsage.COPYWRITING,
+                    timeout=LLM_HTTP_TIMEOUT_SEC,
+                )
+            else:
+                assert active_vl is not None
+                provider_cls = get_provider_class(active_vl.provider)
+                if not provider_cls:
+                    raise RuntimeError(f"不支持的AI提供商: {active_vl.provider}")
+                ai_cfg = _video_cfg_to_ai_cfg(active_vl)
+                provider = provider_cls(ai_cfg)
+                try:
+                    resp = await provider.chat_completion(
+                        messages,
+                        extra_params={"response_format": {"type": "json_object"}},
+                    )
+                finally:
+                    await provider.close()
             raw = (resp.content or "").strip()
             parsed = parse_model_json_array(raw)
             out: List[Dict[str, Any]] = []
@@ -212,8 +230,10 @@ class OmniCopywritingStructEmbedService:
             phase="preparing",
         )
 
-        sem_struct = max(1, int(structuring_concurrency or 1))
+        requested_struct = max(1, int(structuring_concurrency or 1))
+        sem_struct = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=requested_struct)
         sem_emb = max(1, int(embedding_concurrency or 1))
+        logger.info("[omni_copywriting_embed] 文案结构化 LLM 并发=%s", sem_struct)
         chunk_target = max(200, int(chunk_target_chars or 500))
         chunk_lookback = max(0, int(chunk_lookback_chars or 100))
         plang = str(prompt_language or "zh").strip().lower()

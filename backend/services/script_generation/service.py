@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from modules.json_sanitizer import validate_script_items
 from modules.projects_store import projects_store
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from services.ai_models.ai_service import ai_service
 from services.ai_models.unified_model_usage import LlmModelUsage, omni_effect_tier_for_project
 
@@ -215,7 +216,9 @@ class ScriptGenerationService:
         logger.info(f"📋 执行计划: 共 {len(chunks)} 个分段任务 | 目标总条数: {plan.final_target_count} | selection={plan.normalized_selection}")
         per_call_caps = allocate_output_counts(plan.final_target_count, len(chunks))
         per_call_caps = [min(int(MAX_SUBTITLE_ITEMS_PER_CALL), max(2, int(x))) for x in per_call_caps]
-        sem = asyncio.Semaphore(5)
+        llm_concurrency = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=5)
+        logger.info("脚本分段 LLM 并发=%s", llm_concurrency)
+        sem = asyncio.Semaphore(llm_concurrency)
         copywriting_segments = _split_copywriting_text(copywriting_text, len(chunks), script_language)
 
         async def generate_one(chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -338,7 +341,9 @@ class ScriptGenerationService:
         logger.info(f"📋 执行计划(visual): 共 {len(chunks)} 个分段任务 | 目标总条数: {plan.final_target_count} | selection={plan.normalized_selection}")
         per_call_caps = allocate_output_counts(plan.final_target_count, len(chunks))
         per_call_caps = [min(int(MAX_SUBTITLE_ITEMS_PER_CALL), max(2, int(x))) for x in per_call_caps]
-        sem = asyncio.Semaphore(5)
+        llm_concurrency = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=5)
+        logger.info("视觉脚本分段 LLM 并发=%s", llm_concurrency)
+        sem = asyncio.Semaphore(llm_concurrency)
         copywriting_segments = _split_copywriting_text(copywriting_text, len(chunks), script_language)
 
         async def generate_one(chunk: Dict[str, Any]) -> List[Dict[str, Any]]:

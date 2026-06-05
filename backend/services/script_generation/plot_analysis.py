@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List
 
 from modules.ai import ChatMessage
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from modules.json_sanitizer import sanitize_json_text_to_dict
 from services.ai_models.ai_service import ai_service
 from services.ai_models.unified_model_usage import LlmModelUsage
@@ -232,7 +233,9 @@ async def generate_plot_analysis_pipeline(
         overlap_ratio,
     )
     all_points: List[Dict[str, Any]] = []
-    sem = asyncio.Semaphore(4)
+    llm_concurrency = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=4)
+    logger.info("剧情分析分块 LLM 并发=%s", llm_concurrency)
+    sem = asyncio.Semaphore(llm_concurrency)
 
     async def run_one(i: int, ch: str) -> List[Dict[str, Any]]:
         async with sem:

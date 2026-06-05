@@ -9,6 +9,7 @@ import {
 import type { WebSocketMessage } from "../../services/clients";
 import { message } from "../../services/message";
 import { projectService } from "../../services/projectService";
+import omniStep2PipelineService from "../../services/omniStep2PipelineService";
 import {
   areOmniScriptsEquivalent,
   makeScriptJson,
@@ -110,6 +111,11 @@ export interface UseOmniFullNarrationPipelineReturn {
   omniPipelineLogs: WsProgressLog[];
   omniPipelineDisabled: boolean;
   omniPipelineDisabledReason?: string;
+  /** 勾选后第 4 步跳过大模型，直接用上一步镜头候选拼装解说脚本以省成本 */
+  skipGenerateScriptLlm: boolean;
+  setSkipGenerateScriptLlm: (value: boolean) => void;
+  /** 「使用本地模型」是否开启（用于复选框默认与提示） */
+  localModelPipelineEnabled: boolean;
   handleRunOmniFullNarrationPipeline: () => Promise<void>;
   handleRunOmniStepEmbed: () => Promise<void>;
   handleRunOmniStepShotMatch: () => Promise<void>;
@@ -166,6 +172,42 @@ export function useOmniFullNarrationPipeline(
   const [omniStepTestPhase, setOmniStepTestPhase] = useState<OmniStepTestPhase | null>(null);
   const [omniStepTestScope, setOmniStepTestScope] = useState<string | null>(null);
   const [omniStepTestTaskId, setOmniStepTestTaskId] = useState<string | null>(null);
+
+  const [localModelPipelineEnabled, setLocalModelPipelineEnabled] = useState(false);
+  const [skipGenerateScriptLlm, setSkipGenerateScriptLlmState] = useState(false);
+  const skipGenerateScriptLlmTouchedRef = useRef(false);
+  const skipGenerateScriptLlmRef = useRef(skipGenerateScriptLlm);
+
+  useEffect(() => {
+    skipGenerateScriptLlmRef.current = skipGenerateScriptLlm;
+  }, [skipGenerateScriptLlm]);
+
+  const setSkipGenerateScriptLlm = useCallback((value: boolean) => {
+    skipGenerateScriptLlmTouchedRef.current = true;
+    setSkipGenerateScriptLlmState(value);
+  }, []);
+
+  // 读取「使用本地模型」配置：开启本地模型时复选框默认勾选（用户未手动改过才跟随）
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await omniStep2PipelineService.get();
+        const data = res?.data as { use_local_model_pipeline?: boolean } | undefined;
+        if (cancelled || !data) return;
+        const enabled = Boolean(data.use_local_model_pipeline);
+        setLocalModelPipelineEnabled(enabled);
+        if (!skipGenerateScriptLlmTouchedRef.current) {
+          setSkipGenerateScriptLlmState(enabled);
+        }
+      } catch {
+        /* 配置读取失败时保持默认（不跳过） */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setOmniEditedScriptSafe = useCallback((raw: string) => {
     omniEditedScriptRef.current = raw;
@@ -406,7 +448,10 @@ export function useOmniFullNarrationPipeline(
     setOmniPipelineTaskId(null);
     try {
       await projectService.flushPendingUpdates(project.id);
-      const res = await projectService.runOmniFullNarrationPipeline(project.id, { force: false });
+      const res = await projectService.runOmniFullNarrationPipeline(project.id, {
+        force: false,
+        skip_generate_script_llm: skipGenerateScriptLlmRef.current,
+      });
       const tid = res?.task_id ? String(res.task_id) : "";
       if (!tid) {
         message.error(res?.message || "提交全链路任务失败");
@@ -690,6 +735,9 @@ export function useOmniFullNarrationPipeline(
     omniPipelineLogs,
     omniPipelineDisabled,
     omniPipelineDisabledReason,
+    skipGenerateScriptLlm,
+    setSkipGenerateScriptLlm,
+    localModelPipelineEnabled,
     handleRunOmniFullNarrationPipeline,
     handleRunOmniStepEmbed,
     handleRunOmniStepShotMatch,

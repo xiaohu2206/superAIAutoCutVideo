@@ -229,6 +229,7 @@ def ensure_defaults_migrated() -> None:
         "video_model_config.json",
         "tts_config.json",
         "jianying_config.json",
+        "omni_step2_pipeline_config.json",
         "prompts.json",
     ]:
         src = repo_cfg / name

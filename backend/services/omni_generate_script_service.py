@@ -21,6 +21,7 @@ from modules.json_sanitizer import sanitize_json_text_to_dict, validate_script_i
 from modules.omni_generate_script import (
     OmniNarrationParams,
     build_chunk_metas_and_prompts,
+    build_items_from_results_directly,
     merge_chunk_items,
     normalize_items_for_validation,
     omni_items_to_video_script,
@@ -28,6 +29,7 @@ from modules.omni_generate_script import (
 )
 from modules.omni_generate_script.prompt_options import normalize_original_ratio, normalize_script_language
 from modules.projects_store import projects_store
+from modules.config.omni_step2_pipeline_config import omni_step2_pipeline_config_manager
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
@@ -219,6 +221,69 @@ def _params_from_request_and_project(
 class OmniGenerateScriptService:
     SCOPE = _SCOPE
 
+    def _save_and_finish(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        script: Dict[str, Any],
+        items_final: List[Dict[str, Any]],
+        total_duration: float,
+        gp_web: str,
+        mm_web: str,
+        params: OmniNarrationParams,
+        chunk_batches: int,
+        preview0: str,
+        mode: str,
+    ) -> None:
+        """落盘解说脚本 artifact、保存脚本并置完成态（LLM 与直接拼装两条路径共用）。"""
+        work = _work_dir(project_id)
+        work.mkdir(parents=True, exist_ok=True)
+        artifact_path = work / "narration_script_artifact.json"
+        artifact = {
+            "meta": {
+                "source": "omni_generate_script",
+                "project_id": project_id,
+                "task_id": task_id,
+                "input_global_path_web_path": gp_web,
+                "input_multimodal_web_path": mm_web,
+                "chunk_batches": chunk_batches,
+                "generation_mode": mode,
+                "script_language": params.script_language,
+                "original_ratio": params.original_ratio,
+            },
+            "prompt_preview": preview0,
+            "video_duration_sec": total_duration,
+            "script": script,
+        }
+        artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+        out_web = _to_web_path(artifact_path)
+
+        projects_store.save_script(project_id, script)
+        projects_store.update_project(
+            project_id,
+            {
+                "status": "completed",
+                "omni_generate_script_path": out_web,
+                "omni_generate_script_updated_at": datetime.now().isoformat(),
+            },
+        )
+
+        done_msg = (
+            f"解说脚本生成完成（{len(items_final)} 条，已跳过大模型）"
+            if mode == "direct_prev_result"
+            else f"解说脚本生成完成（{len(items_final)} 条）"
+        )
+        task_progress_store.set_state(
+            scope=self.SCOPE,
+            project_id=project_id,
+            task_id=task_id,
+            status="completed",
+            progress=100,
+            message=done_msg,
+            phase="done",
+        )
+
     async def submit_run(
         self,
         project_id: str,
@@ -232,12 +297,20 @@ class OmniGenerateScriptService:
         original_ratio: Optional[int] = None,
         temperature: Optional[float] = None,
         chunk_llm_concurrency: int = 32,
+        use_prev_result_directly: Optional[bool] = None,
     ) -> Dict[str, Any]:
         p = projects_store.get_project(project_id)
         if not p:
             raise ValueError("项目不存在")
         if str(getattr(p, "project_type", "") or "").strip().lower() != "omni":
             raise ValueError("仅 omni 类型项目可生成解说脚本")
+
+        # 省成本开关：为 None 时跟随「使用本地模型」配置；本地模型默认跳过大模型直接拼装。
+        if use_prev_result_directly is None:
+            use_prev_result_directly = bool(
+                omni_step2_pipeline_config_manager.get_root().use_local_model_pipeline
+            )
+        skip_llm = bool(use_prev_result_directly)
 
         running = task_progress_store.get_latest_running(self.SCOPE, project_id)
         if running:
@@ -338,15 +411,54 @@ class OmniGenerateScriptService:
                     script_language=script_language,
                     original_ratio=original_ratio,
                 )
+
+                total_duration = await asyncio.to_thread(_read_video_duration, video_abs)
+
+                if skip_llm:
+                    # 省成本：直接用上一步候选每条 Top1 镜头时间拼装解说脚本，不调用大模型。
+                    task_progress_store.set_state(
+                        scope=self.SCOPE,
+                        project_id=project_id,
+                        task_id=task_id,
+                        status="processing",
+                        progress=40,
+                        message="跳过大模型，直接用上一步镜头候选拼装解说脚本…",
+                        phase="direct",
+                    )
+                    direct_items = build_items_from_results_directly(results)
+                    if not direct_items:
+                        raise ValueError("上一步候选缺少可用镜头时间，无法跳过大模型直接生成解说脚本")
+                    ordered: List[List[Dict[str, Any]]] = [direct_items]
+                    chunk_batches = 0
+                    preview0 = ""
+                    merged = merge_chunk_items(ordered)
+                    validated = validate_script_items(normalize_items_for_validation(merged))
+                    items_final = validated.get("items") or []
+                    script = omni_items_to_video_script(items_final, total_duration)
+                    self._save_and_finish(
+                        project_id=project_id,
+                        task_id=task_id,
+                        script=script,
+                        items_final=items_final,
+                        total_duration=total_duration,
+                        gp_web=str(gp_web),
+                        mm_web=str(mm_web),
+                        params=params,
+                        chunk_batches=chunk_batches,
+                        preview0=preview0,
+                        mode="direct_prev_result",
+                    )
+                    return
+
                 chunks = build_chunk_metas_and_prompts(results, all_shots, params)
                 if not chunks:
                     raise ValueError("分块为空")
 
-                total_duration = await asyncio.to_thread(_read_video_duration, video_abs)
-
                 temp = float(temperature) if temperature is not None else None
-                conc = max(1, int(chunk_llm_concurrency or 32))
+                requested_conc = max(1, int(chunk_llm_concurrency or 32))
+                conc = omni_step2_pipeline_config_manager.resolve_llm_api_concurrency(default_cloud=requested_conc)
                 omni_tier = omni_effect_tier_for_project(project_id)
+                logger.info("omni_generate_script 分块 LLM 并发=%s", conc)
 
                 task_progress_store.set_state(
                     scope=self.SCOPE,
@@ -438,50 +550,23 @@ class OmniGenerateScriptService:
                 items_final = validated.get("items") or []
                 script = omni_items_to_video_script(items_final, total_duration)
 
-                work = _work_dir(project_id)
-                work.mkdir(parents=True, exist_ok=True)
-                artifact_path = work / "narration_script_artifact.json"
                 preview0 = ""
                 if chunks:
                     c0 = chunks[0]
                     preview0 = (str(c0.get("system_prompt", ""))[:1200] + "\n---\n" + str(c0.get("user_prompt", ""))[:4000])
 
-                artifact = {
-                    "meta": {
-                        "source": "omni_generate_script",
-                        "project_id": project_id,
-                        "task_id": task_id,
-                        "input_global_path_web_path": str(gp_web),
-                        "input_multimodal_web_path": str(mm_web),
-                        "chunk_batches": len(chunks),
-                        "script_language": params.script_language,
-                        "original_ratio": params.original_ratio,
-                    },
-                    "prompt_preview": preview0,
-                    "video_duration_sec": total_duration,
-                    "script": script,
-                }
-                artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
-                out_web = _to_web_path(artifact_path)
-
-                projects_store.save_script(project_id, script)
-                projects_store.update_project(
-                    project_id,
-                    {
-                        "status": "completed",
-                        "omni_generate_script_path": out_web,
-                        "omni_generate_script_updated_at": datetime.now().isoformat(),
-                    },
-                )
-
-                task_progress_store.set_state(
-                    scope=self.SCOPE,
+                self._save_and_finish(
                     project_id=project_id,
                     task_id=task_id,
-                    status="completed",
-                    progress=100,
-                    message=f"解说脚本生成完成（{len(items_final)} 条）",
-                    phase="done",
+                    script=script,
+                    items_final=items_final,
+                    total_duration=total_duration,
+                    gp_web=str(gp_web),
+                    mm_web=str(mm_web),
+                    params=params,
+                    chunk_batches=len(chunks),
+                    preview0=preview0,
+                    mode="llm",
                 )
             except asyncio.CancelledError:
                 task_progress_store.set_state(

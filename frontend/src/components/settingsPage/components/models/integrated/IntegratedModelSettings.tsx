@@ -3,6 +3,7 @@ import { ExternalLink, Loader2 } from "lucide-react";
 import { TauriCommands } from "@/services/clients";
 import { ContentModelSettings } from "../content/ContentModelSettings";
 import { VideoModelSettings } from "../video/VideoModelSettings";
+import { OmniStep2LocalPipelineSettings } from "./OmniStep2LocalPipelineSettings";
 import { useUnifiedYunwuModelConfig } from "../../../hooks/useUnifiedYunwuModelConfig";
 import type { ContentModelConfig, TestResult, VideoModelConfig } from "../../../types";
 
@@ -318,6 +319,8 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
           />
         )}
       </div>
+
+      <OmniStep2LocalPipelineSettings />
 
       {useCustom && (
         <p className="text-xs text-slate-500">

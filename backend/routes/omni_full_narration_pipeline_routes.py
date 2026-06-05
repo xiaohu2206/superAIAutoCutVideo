@@ -30,6 +30,11 @@ class OmniFullNarrationPipelineRunRequest(BaseModel):
         description="为 true 时不执行全局路径搜索；解说脚本步骤默认使用本链路镜头重排或项目已保存的候选 JSON，"
         "也可在 generate_script_options 中显式传入 input_global_path_web_path（若指定则须存在）",
     )
+    skip_generate_script_llm: Optional[bool] = Field(
+        default=None,
+        description="为 true 时跳过解说脚本步骤的大模型生成，直接用上一步镜头候选每条 Top1 的时间拼装脚本以省成本；"
+        "为 null 时跟随「使用本地模型」配置（开启本地模型默认跳过）",
+    )
     copywriting_embed_options: Optional[Dict[str, Any]] = Field(
         default=None,
         description="透传给文案结构化+向量 submit_run 的可选字段",
@@ -65,6 +70,7 @@ async def omni_full_narration_pipeline_run(
             global_path_search_options=req.global_path_search_options,
             generate_script_options=req.generate_script_options,
             skip_global_path_search=True,
+            skip_generate_script_llm=req.skip_generate_script_llm,
         )
         return {"message": "任务已提交", "data": data, "timestamp": _now_ts()}
     except ValueError as e:
