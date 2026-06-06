@@ -84,7 +84,7 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
 
       <label
         className="flex items-start gap-2 cursor-pointer select-none text-sm text-gray-600"
-        title="勾选后不调用大模型，直接用上一步镜头匹配候选每条 Top1 的时间拼装解说脚本，可显著节省成本"
+        title="勾选后不调用生成解说脚本大模型，直接用上一步镜头匹配候选每条 Top1 的时间拼装解说脚本，可显著节省成本"
       >
         <input
           type="checkbox"
@@ -94,7 +94,7 @@ const OmniFullNarrationPipelineControls: React.FC<OmniFullNarrationPipelineContr
           className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <span>
-          跳过大模型（省成本）
+          跳过大模型，无原片片段（省成本）
           {localModelPipelineEnabled ? (
             <span className="ml-1 text-violet-600">· 已开启本地模型，默认勾选</span>
           ) : null}

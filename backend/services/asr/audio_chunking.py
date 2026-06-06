@@ -24,6 +24,38 @@ class AudioChunkPlan:
     end_ms: int
 
 
+async def probe_has_audio(path: Path | str) -> bool:
+    """探测媒体文件是否包含音频流。"""
+    ffprobe_bin = resolve_ffprobe_bin()
+    if not ffprobe_bin:
+        return False
+    try:
+        cmd = [
+            ffprobe_bin,
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "default=nk=1:nw=1",
+            str(path),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=WIN_NO_WINDOW,
+        )
+        out, _ = await proc.communicate()
+        if proc.returncode == 0:
+            return out.decode(errors="ignore").strip().lower() == "audio"
+        return False
+    except Exception:
+        return False
+
+
 async def get_audio_duration_ms(audio_path: Path) -> Optional[int]:
     ffprobe_bin = resolve_ffprobe_bin()
     if not ffprobe_bin:

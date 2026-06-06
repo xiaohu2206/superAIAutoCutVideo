@@ -320,7 +320,7 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         )}
       </div>
 
-      <OmniStep2LocalPipelineSettings />
+      {useCustom && <OmniStep2LocalPipelineSettings />}
 
       {useCustom && (
         <p className="text-xs text-slate-500">

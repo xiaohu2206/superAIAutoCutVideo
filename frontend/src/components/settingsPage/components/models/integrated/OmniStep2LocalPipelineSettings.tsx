@@ -76,7 +76,7 @@ export const OmniStep2LocalPipelineSettings: React.FC = () => {
             className="mt-1 text-xs text-slate-500 dark:text-gray-400"
           >
             默认关闭，使用云端/API 默认参数（批大小 6 段、API 并发 64、超时 40 秒）。
-            开启后降低 API 并发与超时，适用于 Omni Step2、镜头视觉分析与文案生成；抽帧仍与云端一致。
+            开启后降低 API 并发与超时,并发默认1，超时默认1200秒，本地会很慢。
           </p>
         </div>
       </div>

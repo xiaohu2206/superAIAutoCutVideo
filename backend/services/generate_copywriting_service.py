@@ -19,6 +19,7 @@ from services.reference_copywriting_wash import (
     build_subs_text_from_subtitle_file_content,
     wash_reference_copywriting_pipeline,
 )
+from services.omni_internal.multimodal_json_crypto import read_multimodal_json
 from modules.app_paths import uploads_dir as app_uploads_dir, resolve_uploads_path, to_uploads_web_path
 from modules.narration_types import supports_context, supports_reference_copywriting
 from services.ai_models.unified_model_usage import omni_effect_tier_for_project
@@ -87,6 +88,46 @@ def _narration_reference_copywriting(p: Project, narration_type: str) -> Optiona
     return s if s else None
 
 
+def _extract_vision_summary_text(text: Any) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    label = "摘要："
+    pos = s.find(label)
+    if pos < 0:
+        return s
+    start = pos + len(label)
+    end = len(s)
+    for marker in ("画面：", "物体：", "动作：", "场景：", "情绪："):
+        marker_pos = s.find(marker, start)
+        if marker_pos >= 0:
+            end = min(end, marker_pos)
+    summary = s[start:end].strip()
+    return f"{label}{summary}" if summary else ""
+
+
+def _normalize_scene_vision_to_summary_only(scene: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(scene)
+    vision = scene.get("vision")
+    if isinstance(vision, str):
+        summary = _extract_vision_summary_text(vision)
+        out["vision"] = [{"status": "ok", "text": summary}] if summary else []
+        return out
+    if not isinstance(vision, list):
+        return out
+
+    normalized = []
+    for item in vision:
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        if str(copied.get("status") or "").strip().lower() in {"ok", "success"}:
+            copied["text"] = _extract_vision_summary_text(copied.get("text"))
+        normalized.append(copied)
+    out["vision"] = normalized
+    return out
+
+
 def _load_scenes_data(p: Project, project_id: str) -> Dict[str, Any]:
     scenes_abs: Optional[Path] = None
     if getattr(p, "scenes_path", None):
@@ -107,7 +148,83 @@ def _load_scenes_data(p: Project, project_id: str) -> Dict[str, Any]:
         scenes_data = {}
     if not isinstance(scenes_data, dict) or not isinstance(scenes_data.get("scenes"), list) or not scenes_data.get("scenes"):
         raise HTTPException(status_code=400, detail="镜头数据无效，请重新提取镜头")
+    scenes_data = dict(scenes_data)
+    scenes_data["scenes"] = [
+        _normalize_scene_vision_to_summary_only(scene) if isinstance(scene, dict) else scene
+        for scene in scenes_data.get("scenes", [])
+    ]
     return scenes_data
+
+
+def _format_time_range(start_s: float, end_s: float) -> str:
+    return f"{start_s:.3f}-{end_s:.3f}s"
+
+
+def _omni_visual_text(shot: Dict[str, Any]) -> str:
+    visual = shot.get("visual")
+    if isinstance(visual, dict):
+        return str(visual.get("brief") or "").strip()
+    return ""
+
+
+def _load_omni_scenes_data(p: Project, project_id: str) -> Dict[str, Any]:
+    mm_abs: Optional[Path] = None
+    if getattr(p, "omni_multimodal_json_path", None):
+        cand = _resolve_path(str(getattr(p, "omni_multimodal_json_path", None) or ""))
+        if cand.exists():
+            mm_abs = cand
+    if not mm_abs:
+        cand = _uploads_dir() / "omni_multimodal" / project_id / "shots_multimodal.json"
+        if cand.exists():
+            mm_abs = cand
+    if not mm_abs:
+        raise HTTPException(status_code=400, detail="Omni 多模态镜头数据不存在，请先运行 Omni 管线")
+
+    try:
+        payload = read_multimodal_json(mm_abs)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Omni 多模态镜头数据读取失败: {e}") from e
+
+    shots = payload.get("shots") if isinstance(payload, dict) else None
+    if not isinstance(shots, list) or not shots:
+        raise HTTPException(status_code=400, detail="Omni 多模态镜头数据无效，请重新运行 Omni 管线")
+
+    scenes = []
+    for idx, shot in enumerate(shots, start=1):
+        if not isinstance(shot, dict):
+            continue
+        try:
+            start_s = float(shot.get("start") or 0.0)
+            end_s = float(shot.get("end") or start_s)
+        except Exception:
+            continue
+        if end_s <= 0 and start_s <= 0:
+            continue
+        subtitle = str(shot.get("subtitle_full_text") or "").strip()
+        sub_obj = shot.get("subtitle")
+        if not subtitle and isinstance(sub_obj, dict):
+            subtitle = str(sub_obj.get("full_text") or "").strip()
+        vision_text = _omni_visual_text(shot)
+        scene: Dict[str, Any] = {
+            "id": shot.get("shot_id") or idx,
+            "start_time": start_s,
+            "end_time": end_s,
+            "time_range": _format_time_range(start_s, end_s),
+            "subtitle": subtitle,
+            "vision": [{"status": "ok", "text": vision_text}] if vision_text else [],
+        }
+        scenes.append(scene)
+
+    if not scenes:
+        raise HTTPException(status_code=400, detail="Omni 多模态镜头数据缺少可用镜头，请重新运行 Omni 管线")
+
+    return {
+        "version": str(payload.get("version") or "omni"),
+        "source": "omni_multimodal",
+        "scenes": scenes,
+        "omni_multimodal_json_path": _to_web_path(mm_abs),
+        "omni_pipeline_meta": payload.get("omni_pipeline_meta") if isinstance(payload, dict) else None,
+    }
 
 
 class GenerateCopywritingService:
@@ -131,9 +248,10 @@ class GenerateCopywritingService:
             raise HTTPException(status_code=400, detail="视频文件不存在")
 
         project_type = str(getattr(p, "project_type", None) or "subtitle").strip().lower()
-        use_visual = project_type == "visual"
+        is_omni = project_type == "omni"
+        use_scene_data = project_type in {"visual", "omni"}
 
-        if not use_visual:
+        if not use_scene_data:
             subtitle_status = getattr(p, "subtitle_status", None)
             if subtitle_status and subtitle_status != "ready":
                 raise HTTPException(status_code=400, detail="字幕尚未就绪，请先提取字幕或上传字幕")
@@ -174,8 +292,12 @@ class GenerateCopywritingService:
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError()
 
-        subtitle_text = _load_subtitle_text(p, subtitle_path) if not use_visual else ""
-        scenes_data = _load_scenes_data(p, project_id) if use_visual else None
+        subtitle_text = _load_subtitle_text(p, subtitle_path) if not use_scene_data else ""
+        scenes_data = (
+            _load_omni_scenes_data(p, project_id)
+            if is_omni
+            else (_load_scenes_data(p, project_id) if use_scene_data else None)
+        )
         drama_name = p.name or "剧名"
 
         script_language = getattr(p, "script_language", None)
@@ -224,7 +346,7 @@ class GenerateCopywritingService:
         wash_applied = False
         copywriting_text = ""
         if reference_cw:
-            if use_visual and scenes_data is not None:
+            if use_scene_data and scenes_data is not None:
                 subs_for_wash = build_subs_text_from_scenes_data(scenes_data)
             else:
                 subs_for_wash = build_subs_text_from_subtitle_file_content(subtitle_text)
@@ -240,7 +362,7 @@ class GenerateCopywritingService:
                 wash_applied = True
 
         if not wash_applied:
-            if use_visual and scenes_data is not None:
+            if use_scene_data and scenes_data is not None:
                 copywriting_text = await ScriptGenerationService.generate_copywriting_pipeline_from_scenes(
                     scenes_data=scenes_data,
                     drama_name=drama_name,
@@ -273,7 +395,8 @@ class GenerateCopywritingService:
             "content": copywriting_text,
             "generated_at": _now_ts(),
             "metadata": {
-                "source": "scene" if use_visual else "subtitle",
+                "source": "scene" if use_scene_data else "subtitle",
+                "project_type": project_type,
                 "script_language": str(script_language) if script_language else "zh",
                 "script_length": str(script_length) if script_length else "",
                 "copywriting_word_count": int(copywriting_word_count) if copywriting_word_count else None,

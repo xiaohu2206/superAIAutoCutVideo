@@ -30,6 +30,10 @@ def _collect_vision_text(vision: Any) -> str:
     return "；".join(texts)
 
 
+def _is_summary_text(text: str) -> bool:
+    return str(text or "").strip().startswith("摘要：")
+
+
 def _build_scene_text(scene: Dict[str, Any], max_chars: int = 900) -> str:
     scene_id = scene.get("id") or scene.get("index") or scene.get("_id") or ""
     time_range = _clean_text(scene.get("time_range"))
@@ -44,7 +48,7 @@ def _build_scene_text(scene: Dict[str, Any], max_chars: int = 900) -> str:
     if subtitle:
         parts.append(f"字幕：{subtitle}")
     if vision_text:
-        parts.append(f"画面：{vision_text}")
+        parts.append(vision_text if _is_summary_text(vision_text) else f"画面：{vision_text}")
     if not subtitle and not vision_text:
         parts.append("画面：无有效信息")
 

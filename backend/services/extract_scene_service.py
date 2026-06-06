@@ -120,6 +120,21 @@ def _find_json_unsafe_path(value: Any, path: str = "$") -> Optional[Dict[str, An
         }
 
 
+def _subtitle_file_ready(path_str: Optional[str], *, status: str = "") -> bool:
+    """字幕是否已落盘且流程结束（含无声音视频写入的空字幕文件）。"""
+    if not path_str:
+        return False
+    try:
+        abs_sp = _resolve_path(path_str)
+        if not abs_sp.exists():
+            return False
+        if abs_sp.stat().st_size > 0:
+            return True
+        return str(status or "").strip().lower() == "ready"
+    except Exception:
+        return False
+
+
 class ExtractSceneService:
     SCOPE = "extract_scene"
     
@@ -149,10 +164,11 @@ class ExtractSceneService:
             sp = getattr(p, "subtitle_path", None)
             status = str(getattr(p, "subtitle_status", "") or "").strip().lower()
             if sp:
-                # 只有当字幕文件真实落盘且非空时才认为就绪
                 try:
                     abs_sp = _resolve_path(sp)
-                    if abs_sp.exists() and abs_sp.stat().st_size > 0:
+                    if abs_sp.exists() and (
+                        abs_sp.stat().st_size > 0 or status == "ready"
+                    ):
                         return str(sp)
                 except Exception:
                     # 若路径异常则继续等待或超时
@@ -943,20 +959,18 @@ class ExtractSceneService:
                         logger.info("复用历史视觉分析文件继续执行: project_id=%s path=%s", project_id, existing_path)
 
                 # 4.5 视觉分析 (Moondream or Online Vision)
-                # 要求：视觉分析前必须已经拿到整体字幕数据（有字幕文件且已落盘，部分字幕也算有）
-                has_subtitles_for_vision = False
-                if subtitle_path:
-                    try:
-                        abs_sp = _resolve_path(subtitle_path)
-                        has_subtitles_for_vision = abs_sp.exists() and abs_sp.stat().st_size > 0
-                    except Exception:
-                        has_subtitles_for_vision = False
-                if analyze_vision and not has_subtitles_for_vision:
+                # 要求：视觉分析前字幕流程已结束（有内容或已确认无声音的空字幕）
+                subtitles_ready_for_vision = _subtitle_file_ready(
+                    subtitle_path,
+                    status=subtitle_status,
+                )
+                if analyze_vision and not subtitles_ready_for_vision:
                     logger.info(
                         "Skip vision analysis because subtitles are not ready: "
-                        "project_id=%s, subtitle_status=%s",
+                        "project_id=%s, subtitle_status=%s, subtitle_path=%s",
                         project_id,
                         subtitle_status,
+                        subtitle_path,
                     )
                     task_progress_store.set_state(
                         scope=self.SCOPE,
@@ -966,7 +980,7 @@ class ExtractSceneService:
                         progress=90,
                         message="字幕尚未生成或未找到，已跳过视觉分析，仅基于镜头与字幕优化结果保存",
                     )
-                elif analyze_vision and has_subtitles_for_vision:
+                elif analyze_vision and subtitles_ready_for_vision:
                     try:
                         task_progress_store.set_state(
                             scope=self.SCOPE,

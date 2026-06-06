@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asr_bcut import BcutASR
+from .audio_chunking import probe_has_audio
 
 
 @dataclass
@@ -130,6 +131,9 @@ async def run_bcut_asr_with_retry(
     retry_max: int = 2,
     backoff_base_seconds: float = 2.0,
 ) -> Tuple[List[Dict[str, Any]], int]:
+    if not await probe_has_audio(audio_path):
+        return [], 0
+
     last_err: Optional[str] = None
     attempts = 0
     for i in range(max(0, int(retry_max)) + 1):
