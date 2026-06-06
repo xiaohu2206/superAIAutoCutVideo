@@ -1,5 +1,6 @@
 import { Eye, X } from "lucide-react";
 import React from "react";
+import { useThemeMode } from "../../hooks/useThemeMode";
 
 interface VisionAnalysisChoiceModalProps {
   isOpen: boolean;
@@ -17,6 +18,8 @@ const VisionAnalysisChoiceModal: React.FC<VisionAnalysisChoiceModalProps> = ({
   onContinueIncomplete,
   onRestartAll,
 }) => {
+  const isDark = useThemeMode() === "dark";
+
   if (!isOpen) return null;
 
   return (
@@ -68,7 +71,11 @@ const VisionAnalysisChoiceModal: React.FC<VisionAnalysisChoiceModalProps> = ({
             <button
               type="button"
               onClick={onRestartAll}
-              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-100"
+              className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                isDark
+                  ? "border-amber-700/40 bg-amber-900/20 text-amber-200 hover:bg-amber-900/30"
+                  : "border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              }`}
             >
               全部重新视觉分析
             </button>
