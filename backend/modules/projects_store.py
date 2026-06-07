@@ -46,6 +46,8 @@ class Project(BaseModel):
     interleave_mode: Optional[str] = Field(default="smart_interleave")
     script_language: str = Field(default="zh")
     copywriting_word_count: Optional[int] = None
+    one_click_generate_enabled: bool = Field(default=True)
+    one_click_generate_target: str = Field(default="draft")
     status: str = Field(default="draft")
     video_path: Optional[str] = None
     video_paths: List[str] = Field(default_factory=list)
@@ -170,6 +172,10 @@ class ProjectsStore:
                                 p["interleave_mode"] = "smart_interleave"
                             if "script_language" not in p:
                                 p["script_language"] = "zh"
+                            if "one_click_generate_enabled" not in p:
+                                p["one_click_generate_enabled"] = True
+                            if "one_click_generate_target" not in p:
+                                p["one_click_generate_target"] = "draft"
                             if "chunk_audio_paths" not in p:
                                 p["chunk_audio_paths"] = []
                             if "chunk_results" not in p:
@@ -282,6 +288,8 @@ class ProjectsStore:
             script_length="auto",
             script_language="zh",
             interleave_mode="smart_interleave",
+            one_click_generate_enabled=True,
+            one_click_generate_target="draft",
             status="draft",
             video_path=None,
             video_paths=[],
@@ -330,6 +338,8 @@ class ProjectsStore:
                 "interleave_mode",
                 "script_language",
                 "copywriting_word_count",
+                "one_click_generate_enabled",
+                "one_click_generate_target",
                 "status",
                 "video_path",
                 "video_paths",
@@ -380,6 +390,11 @@ class ProjectsStore:
                     continue
                 if key == "copywriting_word_count":
                     data[key] = updates[key]
+                elif key == "one_click_generate_enabled":
+                    data[key] = bool(updates.get(key))
+                elif key == "one_click_generate_target":
+                    v = str(updates.get(key) or "draft").strip().lower()
+                    data[key] = v if v in {"draft", "video"} else "draft"
                 elif key in ("narration_film_context", "narration_reference_copywriting"):
                     v = updates.get(key)
                     data[key] = None if v is None else str(v)

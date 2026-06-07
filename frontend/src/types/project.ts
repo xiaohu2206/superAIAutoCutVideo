@@ -134,6 +134,8 @@ export interface Project {
   interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
+  one_click_generate_enabled?: boolean;
+  one_click_generate_target?: "draft" | "video";
   status: ProjectStatus; // 项目状态
   video_path?: string; // 视频文件路径
   video_paths?: string[]; // 多个原始视频文件路径
@@ -188,6 +190,7 @@ export interface TaskProgressState {
 }
 
 export interface ProjectRunningTasks {
+  one_click_generate?: TaskProgressState | null;
   generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
@@ -203,6 +206,7 @@ export interface ProjectRunningTasks {
 }
 
 export interface ProjectLatestTasks {
+  one_click_generate?: TaskProgressState | null;
   generate_copywriting?: TaskProgressState | null;
   generate_script?: TaskProgressState | null;
   generate_video?: TaskProgressState | null;
@@ -226,6 +230,8 @@ export interface CreateProjectRequest {
   project_type?: "subtitle" | "visual" | "omni";
   narration_type?: NarrationType;
   omni_effect_tier?: OmniEffectTier;
+  one_click_generate_enabled?: boolean;
+  one_click_generate_target?: "draft" | "video";
 }
 
 /**
@@ -242,6 +248,8 @@ export interface UpdateProjectRequest {
   interleave_mode?: InterleaveMode | null;
   script_language?: ScriptLanguage;
   copywriting_word_count?: number | null;
+  one_click_generate_enabled?: boolean;
+  one_click_generate_target?: "draft" | "video";
   status?: ProjectStatus;
   video_path?: string;
   video_paths?: string[];

@@ -56,7 +56,7 @@ export const OmniStep2LocalPipelineSettings: React.FC = () => {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-slate-900 dark:text-gray-100">
-              使用本地模型（低并发）
+              使用本地模型（低并发，效果差到离谱）
             </span>
             {toggling && (
               <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-gray-400">

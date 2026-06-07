@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from modules.ffmpeg_utils import resolve_ffmpeg_bin, resolve_ffprobe_bin
+from modules.subprocess_no_console import run_no_console
 
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,18 @@ class AudioChunkPlan:
     end_ms: int
 
 
-async def probe_has_audio(path: Path | str) -> bool:
-    """探测媒体文件是否包含音频流。"""
+@dataclass(frozen=True)
+class AudioProbeResult:
+    ok: bool
+    has_audio: bool
+    error: Optional[str] = None
+
+
+async def probe_audio_stream(path: Path | str) -> AudioProbeResult:
+    """探测媒体文件是否包含音频流，并区分探测失败与确实无音轨。"""
     ffprobe_bin = resolve_ffprobe_bin()
     if not ffprobe_bin:
-        return False
+        return AudioProbeResult(ok=False, has_audio=False, error="未找到 ffprobe")
     try:
         cmd = [
             ffprobe_bin,
@@ -42,18 +50,31 @@ async def probe_has_audio(path: Path | str) -> bool:
             "default=nk=1:nw=1",
             str(path),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            creationflags=WIN_NO_WINDOW,
+        proc = await asyncio.to_thread(
+            run_no_console,
+            cmd,
+            capture_output=True,
+            timeout=30,
         )
-        out, _ = await proc.communicate()
+        out_text = (proc.stdout or b"").decode(errors="ignore").strip().lower()
+        err_text = (proc.stderr or b"").decode(errors="ignore").strip()
         if proc.returncode == 0:
-            return out.decode(errors="ignore").strip().lower() == "audio"
-        return False
-    except Exception:
-        return False
+            return AudioProbeResult(ok=True, has_audio=(out_text == "audio"))
+        return AudioProbeResult(
+            ok=False,
+            has_audio=False,
+            error=err_text or f"ffprobe 返回码 {proc.returncode}",
+        )
+    except Exception as e:
+        return AudioProbeResult(ok=False, has_audio=False, error=f"{type(e).__name__}: {e}")
+
+
+async def probe_has_audio(path: Path | str) -> bool:
+    """探测媒体文件是否包含音频流。"""
+    result = await probe_audio_stream(path)
+    if not result.ok and result.error:
+        logger.warning("音频流探测失败: path=%s error=%s", path, result.error)
+    return bool(result.ok and result.has_audio)
 
 
 async def get_audio_duration_ms(audio_path: Path) -> Optional[int]:

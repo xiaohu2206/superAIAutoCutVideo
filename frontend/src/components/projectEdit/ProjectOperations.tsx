@@ -7,6 +7,7 @@ import { Dropdown } from "../ui/Dropdown";
 
 interface ProjectOperationsProps {
   project: Project;
+  projectTaskBusy?: boolean;
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
   handleStopGenerateCopywriting: () => void;
@@ -48,6 +49,7 @@ interface ProjectOperationsProps {
 
 const ProjectOperations: React.FC<ProjectOperationsProps> = ({
   project,
+  projectTaskBusy = false,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
   handleStopGenerateCopywriting,
@@ -117,6 +119,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     isGeneratingScript ||
     isGeneratingVideo ||
     isGeneratingDraft ||
+    projectTaskBusy ||
     Boolean(isOmniFullPipelineRunning);
   const copywritingButtonDisabled =
     !project?.video_path ||
@@ -124,9 +127,51 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
     (project?.subtitle_status ? project.subtitle_status !== "ready" : false) ||
     isGeneratingAny;
   const scriptButtonDisabled =
-    generateScriptDisabled || isGeneratingCopywriting || isGeneratingVideo || isGeneratingDraft || isGeneratingScript;
+    generateScriptDisabled ||
+    isGeneratingCopywriting ||
+    isGeneratingVideo ||
+    isGeneratingDraft ||
+    isGeneratingScript ||
+    projectTaskBusy ||
+    Boolean(isOmniFullPipelineRunning);
+  const queueBusyReason = "当前项目已有任务在队列中，请等待完成后再操作";
+  const busyDisabledReason = projectTaskBusy
+    ? queueBusyReason
+    : isGeneratingCopywriting
+    ? "解说文案生成中，请等待完成"
+    : isGeneratingScript
+    ? "解说脚本生成中，请等待完成"
+    : isGeneratingVideo
+    ? "视频生成中，请等待完成"
+    : isGeneratingDraft
+    ? "剪映草稿生成中，请等待完成"
+    : isOmniFullPipelineRunning
+    ? "Omni 全链路任务运行中，请等待完成"
+    : undefined;
+  const copywritingDisabledReason =
+    busyDisabledReason ||
+    (!project?.video_path
+      ? "请先上传视频文件"
+      : !project?.subtitle_path
+      ? "请先提取或上传字幕"
+      : project?.subtitle_status && project.subtitle_status !== "ready"
+      ? "字幕尚未就绪，请等待字幕处理完成"
+      : undefined);
+  const scriptDisabledReason =
+    generateScriptDisabledReason ||
+    busyDisabledReason ||
+    (!project?.video_path ? "请先上传视频文件" : undefined);
+  const videoOperationDisabledReason =
+    busyDisabledReason ||
+    (!project?.script
+      ? "请先生成并保存解说脚本"
+      : !project?.video_path
+      ? "请先上传视频文件"
+      : undefined);
   const scriptButtonTitle = generateScriptDisabled
     ? (generateScriptDisabledReason || "暂不可生成脚本")
+    : projectTaskBusy
+    ? "当前项目已有任务在队列中"
     : isGeneratingVideo
     ? "视频生成中，暂不可生成脚本"
     : isGeneratingDraft
@@ -249,9 +294,15 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
       {!hideCopywritingOperations && (
         <div className="flex flex-col items-start space-y-2">
           <button
-            onClick={handleGenerateCopywriting}
-            disabled={copywritingButtonDisabled}
-            className="flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => {
+              if (copywritingButtonDisabled) {
+                message.warning(copywritingDisabledReason || "当前不可生成文案");
+                return;
+              }
+              handleGenerateCopywriting();
+            }}
+            aria-disabled={copywritingButtonDisabled}
+            className={`flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all ${copywritingButtonDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             {isGeneratingCopywriting ? (
               <>
@@ -300,10 +351,16 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
         omniScriptGenerateSlot ?? null
       ) : (
         <button
-          onClick={handleGenerateScript}
-          disabled={scriptButtonDisabled}
+          onClick={() => {
+            if (scriptButtonDisabled) {
+              message.warning(scriptDisabledReason || "当前不可生成脚本");
+              return;
+            }
+            handleGenerateScript();
+          }}
+          aria-disabled={scriptButtonDisabled}
           title={scriptButtonTitle}
-          className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-800 transition-all ${scriptButtonDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
         >
           {isGeneratingScript ? (
             <>
@@ -319,6 +376,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
        {project.script && project.video_path && 
        <Dropdown
         disabled={isGeneratingAny}
+        disabledReason={videoOperationDisabledReason || "当前不可进行视频操作"}
         trigger={
           <button className="flex items-center px-6 py-2 bg-violet-600 text-white rounded-lg font-medium shadow-md hover:bg-violet-700 transition-colors">
             视频操作
@@ -335,6 +393,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             ),
             onClick: handleGenerateDraft,
             disabled: !project.script || !project.video_path || isGeneratingAny,
+            disabledReason: videoOperationDisabledReason || "当前不可生成剪映草稿",
           },
           {
             label: (
@@ -345,6 +404,7 @@ const ProjectOperations: React.FC<ProjectOperationsProps> = ({
             ),
             onClick: handleGenerateVideo,
             disabled: !project.script || !project.video_path || isGeneratingAny,
+            disabledReason: videoOperationDisabledReason || "当前不可生成视频",
           },
         ]}
       />

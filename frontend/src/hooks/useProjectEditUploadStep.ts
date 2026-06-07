@@ -15,6 +15,7 @@ function readSacvAuthTokenTrimmed(): string {
 import type { OmniMultimodalResult } from "../types/omniMultimodal";
 import type { Project, SubtitleMeta, SubtitleSegment } from "../types/project";
 import { projectService } from "../services/projectService";
+import { TASK_SUBMITTED_EVENT } from "../components/projectEdit/TaskQueueFloatingBall";
 import { useTauriFileDrop } from "./useTauriFileDrop";
 import { useVideoOrderDrag } from "./useVideoOrderDrag";
 import { useWsTaskProgress, type WsProgressLog } from "./useWsTaskProgress";
@@ -33,6 +34,7 @@ export interface UseProjectEditUploadStepOptions {
   merging: boolean;
   mergeProgress: number;
   subtitleLoading: boolean;
+  projectTaskBusy?: boolean;
   subtitleMeta: SubtitleMeta | null;
   subtitleSegments: SubtitleSegment[] | null;
   uploadVideos: UploadVideosFn;
@@ -126,6 +128,11 @@ export interface UseProjectEditUploadStepReturn {
   onExtractSubtitle: () => void;
   subtitleAsr: { provider: "bcut" | "fun_asr"; modelKey: string; language: string };
   onSubtitleAsrChange: (next: { provider: "bcut" | "fun_asr"; modelKey: string; language: string }) => void;
+  oneClickGenerateEnabled: boolean;
+  onOneClickGenerateEnabledChange: (enabled: boolean) => void;
+  oneClickGenerateTarget: "draft" | "video";
+  onOneClickGenerateTargetChange: (target: "draft" | "video") => void;
+  isStartingOneClickGenerate: boolean;
   subtitleDraft: SubtitleSegment[];
   subtitleSaving: boolean;
   onReloadSubtitle: () => void;
@@ -188,6 +195,9 @@ export function useProjectEditUploadStep(
     modelKey: "fun_asr_nano_2512",
     language: "中文",
   });
+  const [oneClickGenerateEnabled, setOneClickGenerateEnabled] = useState(true);
+  const [oneClickGenerateTarget, setOneClickGenerateTarget] = useState<"draft" | "video">("draft");
+  const [isStartingOneClickGenerate, setIsStartingOneClickGenerate] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const uploadingVideoRef = useRef(false);
@@ -221,6 +231,13 @@ export function useProjectEditUploadStep(
     const language = String((p as any).asr_language || "中文").trim() || "中文";
     setSubtitleAsr({ provider, modelKey, language });
   }, [options.project?.id, (options.project as any)?.asr_provider, (options.project as any)?.asr_model_key, (options.project as any)?.asr_language]);
+
+  useEffect(() => {
+    const p = options.project;
+    if (!p) return;
+    setOneClickGenerateEnabled(p.one_click_generate_enabled !== false);
+    setOneClickGenerateTarget(p.one_click_generate_target === "video" ? "video" : "draft");
+  }, [options.project?.id, options.project?.one_click_generate_enabled, options.project?.one_click_generate_target]);
 
   useEffect(() => {
     uploadingVideoRef.current = uploadingVideo;
@@ -473,6 +490,60 @@ export function useProjectEditUploadStep(
     r?.(false);
   }, []);
 
+  const startOneClickGenerate = useCallback(async (opts?: {
+    force?: boolean;
+    analyzeVision?: boolean;
+    visionMode?: string;
+    visionKeyFrames?: 1 | 3;
+    visionAction?: "auto" | "continue" | "restart";
+    multimodalAction?: "auto" | "continue" | "restart";
+  }) => {
+    const project = options.project;
+    if (!project) return;
+    if (!project.video_path) {
+      options.showErrorText("请先上传视频文件");
+      return;
+    }
+    if (project.project_type === "omni" && !readSacvAuthTokenTrimmed()) {
+      if (!isAuthenticated) options.onShowLogin?.();
+      else options.onShowProfile?.();
+      return;
+    }
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
+    setIsStartingOneClickGenerate(true);
+    try {
+      const isFun = subtitleAsr.provider === "fun_asr";
+      await projectService.flushPendingUpdates(project.id);
+      await projectService.updateProjectQueued(project.id, {
+        one_click_generate_enabled: true,
+        one_click_generate_target: oneClickGenerateTarget,
+      });
+      const res = await projectService.startOneClickGenerate(project.id, {
+        target: oneClickGenerateTarget,
+        force: Boolean(opts?.force),
+        asr_provider: subtitleAsr.provider,
+        asr_model_key: isFun ? subtitleAsr.modelKey : null,
+        asr_language: isFun ? subtitleAsr.language : "中文",
+        analyzeVision: Boolean(opts?.analyzeVision),
+        visionMode: opts?.visionMode ?? "all",
+        visionKeyFrames: opts?.visionKeyFrames,
+        visionAction: opts?.visionAction ?? "auto",
+        multimodal_action: opts?.multimodalAction ?? "auto",
+      });
+      window.dispatchEvent(new CustomEvent(TASK_SUBMITTED_EVENT));
+      const label = oneClickGenerateTarget === "video" ? "视频" : "剪映草稿";
+      options.showSuccess(res?.task_id ? `一键生成${label}任务已提交` : "一键生成任务已提交");
+      void options.refreshProject();
+    } catch (err) {
+      options.showError(err, oneClickGenerateTarget === "video" ? "一键生成视频失败" : "一键生成草稿失败");
+    } finally {
+      setIsStartingOneClickGenerate(false);
+    }
+  }, [oneClickGenerateTarget, options, subtitleAsr, isAuthenticated]);
+
   const onExtractSubtitle = useCallback(async () => {
     const project = options.project;
     if (!project) return;
@@ -480,7 +551,11 @@ export function useProjectEditUploadStep(
       options.showErrorText("请先上传视频文件");
       return;
     }
-    if (project.subtitle_source === "user" && project.subtitle_path) {
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
+    if (project.subtitle_source === "user" && project.subtitle_path && !oneClickGenerateEnabled) {
       options.showErrorText("已上传字幕，需先删除才能提取");
       return;
     }
@@ -489,6 +564,11 @@ export function useProjectEditUploadStep(
       const ok = await askSubtitleOverwrite();
       if (!ok) return;
       forceOverwrite = true;
+    }
+
+    if (oneClickGenerateEnabled && project.project_type === "subtitle") {
+      await startOneClickGenerate({ force: forceOverwrite });
+      return;
     }
 
     setExtractingSubtitle(true);
@@ -521,7 +601,7 @@ export function useProjectEditUploadStep(
       setExtractingSubtitle(false);
       setSubtitleExtractProgress(0);
     }
-  }, [options, subtitleAsr, askSubtitleOverwrite]);
+  }, [options, subtitleAsr, askSubtitleOverwrite, oneClickGenerateEnabled, startOneClickGenerate]);
 
   useWsTaskProgress({
     scope: "extract_subtitle",
@@ -681,6 +761,26 @@ export function useProjectEditUploadStep(
     }
   }, [options, subtitleDraft]);
 
+  const onOneClickGenerateEnabledChange = useCallback((enabled: boolean) => {
+    setOneClickGenerateEnabled(enabled);
+    const projectId = options.project?.id;
+    if (projectId) {
+      void projectService.updateProjectQueued(projectId, {
+        one_click_generate_enabled: enabled,
+      }).catch(() => void 0);
+    }
+  }, [options.project?.id]);
+
+  const onOneClickGenerateTargetChange = useCallback((target: "draft" | "video") => {
+    setOneClickGenerateTarget(target);
+    const projectId = options.project?.id;
+    if (projectId) {
+      void projectService.updateProjectQueued(projectId, {
+        one_click_generate_target: target,
+      }).catch(() => void 0);
+    }
+  }, [options.project?.id]);
+
   const executeExtractScenes = useCallback(
     async (
       opts: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" } | undefined,
@@ -753,18 +853,26 @@ export function useProjectEditUploadStep(
     const opts = pendingVisionExtractOptsRef.current;
     pendingVisionExtractOptsRef.current = null;
     if (opts) {
-      void executeExtractScenes(opts, "continue").catch((err) => options.showError(err, "镜头提取失败"));
+      if (oneClickGenerateEnabled && options.project?.project_type === "visual") {
+        void startOneClickGenerate({ ...opts, visionAction: "continue" }).catch((err) => options.showError(err, "一键生成失败"));
+      } else {
+        void executeExtractScenes(opts, "continue").catch((err) => options.showError(err, "镜头提取失败"));
+      }
     }
-  }, [executeExtractScenes, options]);
+  }, [executeExtractScenes, oneClickGenerateEnabled, options, startOneClickGenerate]);
 
   const onVisionChoiceRestart = useCallback(() => {
     setVisionChoiceModalOpen(false);
     const opts = pendingVisionExtractOptsRef.current;
     pendingVisionExtractOptsRef.current = null;
     if (opts) {
-      void executeExtractScenes(opts, "restart").catch((err) => options.showError(err, "镜头提取失败"));
+      if (oneClickGenerateEnabled && options.project?.project_type === "visual") {
+        void startOneClickGenerate({ ...opts, visionAction: "restart" }).catch((err) => options.showError(err, "一键生成失败"));
+      } else {
+        void executeExtractScenes(opts, "restart").catch((err) => options.showError(err, "镜头提取失败"));
+      }
     }
-  }, [executeExtractScenes, options]);
+  }, [executeExtractScenes, oneClickGenerateEnabled, options, startOneClickGenerate]);
 
   const onVisionChoiceCancel = useCallback(() => {
     setVisionChoiceModalOpen(false);
@@ -778,6 +886,10 @@ export function useProjectEditUploadStep(
         options.showErrorText("请先上传视频文件");
         return;
       }
+      if (options.projectTaskBusy) {
+        options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+        return;
+      }
       try {
         const p = options.project;
         const visionAction: "auto" | "continue" | "restart" = opts?.visionAction ?? "auto";
@@ -786,12 +898,22 @@ export function useProjectEditUploadStep(
           setVisionChoiceModalOpen(true);
           return;
         }
+        if (oneClickGenerateEnabled && p.project_type === "visual") {
+          let forceOverwrite = false;
+          if (p.subtitle_updated_by_user) {
+            const ok = await askSubtitleOverwrite();
+            if (!ok) return;
+            forceOverwrite = true;
+          }
+          await startOneClickGenerate({ ...(opts || {}), visionAction, force: forceOverwrite });
+          return;
+        }
         await executeExtractScenes(opts, visionAction);
       } catch (err) {
         options.showError(err, "镜头提取失败");
       }
     },
-    [options, executeExtractScenes]
+    [options, executeExtractScenes, oneClickGenerateEnabled, askSubtitleOverwrite, startOneClickGenerate]
   );
 
   const onStopSceneExtraction = useCallback(async () => {
@@ -864,6 +986,15 @@ export function useProjectEditUploadStep(
       const ok = await askSubtitleOverwrite();
       if (!ok) return;
       subtitleForce = true;
+    }
+
+    if (oneClickGenerateEnabled) {
+      if (p.omni_multimodal_json_path) {
+        setOmniMultimodalChoiceModalOpen(true);
+        return;
+      }
+      await startOneClickGenerate({ force: subtitleForce, multimodalAction: "auto" });
+      return;
     }
 
     if (needSubtitlePhase) {
@@ -939,7 +1070,7 @@ export function useProjectEditUploadStep(
         needSubtitlePhase && !/Omni|管线|license|401|403|登录/i.test(msg) ? "提取字幕或 Omni 管线失败" : "Omni 管线失败";
       options.showError(err, fallback);
     }
-  }, [options, subtitleAsr, askSubtitleOverwrite, isAuthenticated]);
+  }, [options, subtitleAsr, askSubtitleOverwrite, isAuthenticated, oneClickGenerateEnabled, startOneClickGenerate]);
 
   const onOmniMultimodalChoiceContinue = useCallback(() => {
     if (!readSacvAuthTokenTrimmed()) {
@@ -947,6 +1078,17 @@ export function useProjectEditUploadStep(
       return;
     }
     setOmniMultimodalChoiceModalOpen(false);
+    if (oneClickGenerateEnabled && options.project?.project_type === "omni") {
+      void startOneClickGenerate({ multimodalAction: "continue" }).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+          if (!isAuthenticated) options.onShowLogin?.();
+          else options.onShowProfile?.();
+        }
+        options.showError(err, "Omni 一键生成失败");
+      });
+      return;
+    }
     void options
       .runOmniPipeline({ multimodal_action: "continue" })
       .then(() => options.showSuccess("Omni 管线任务已提交"))
@@ -958,7 +1100,7 @@ export function useProjectEditUploadStep(
         }
         options.showError(err, "Omni 管线失败");
       });
-  }, [options, isAuthenticated]);
+  }, [options, isAuthenticated, oneClickGenerateEnabled, startOneClickGenerate]);
 
   const onOmniMultimodalChoiceRestart = useCallback(() => {
     if (!readSacvAuthTokenTrimmed()) {
@@ -966,6 +1108,17 @@ export function useProjectEditUploadStep(
       return;
     }
     setOmniMultimodalChoiceModalOpen(false);
+    if (oneClickGenerateEnabled && options.project?.project_type === "omni") {
+      void startOneClickGenerate({ force: true, multimodalAction: "restart" }).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (OMNI_LICENSE_ERROR_RE.test(msg)) {
+          if (!isAuthenticated) options.onShowLogin?.();
+          else options.onShowProfile?.();
+        }
+        options.showError(err, "Omni 一键生成失败");
+      });
+      return;
+    }
     void options
       .runOmniPipeline({ multimodal_action: "restart" })
       .then(() => options.showSuccess("Omni 管线任务已提交"))
@@ -977,7 +1130,7 @@ export function useProjectEditUploadStep(
         }
         options.showError(err, "Omni 管线失败");
       });
-  }, [options, isAuthenticated]);
+  }, [options, isAuthenticated, oneClickGenerateEnabled, startOneClickGenerate]);
 
   const onOmniMultimodalChoiceCancel = useCallback(() => {
     setOmniMultimodalChoiceModalOpen(false);
@@ -1031,6 +1184,11 @@ export function useProjectEditUploadStep(
     onExtractSubtitle,
     subtitleAsr,
     onSubtitleAsrChange: setSubtitleAsr,
+    oneClickGenerateEnabled,
+    onOneClickGenerateEnabledChange,
+    oneClickGenerateTarget,
+    onOneClickGenerateTargetChange,
+    isStartingOneClickGenerate,
     subtitleDraft,
     subtitleSaving,
     onReloadSubtitle,

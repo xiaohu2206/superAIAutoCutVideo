@@ -282,6 +282,8 @@ class CreateProjectRequest(BaseModel):
     project_type: Optional[str] = Field(default="subtitle")
     narration_type: Optional[str] = Field(default="短剧解说")
     omni_effect_tier: Optional[str] = Field(default=None)
+    one_click_generate_enabled: Optional[bool] = Field(default=True)
+    one_click_generate_target: Optional[str] = Field(default="draft")
 
 
 class UpdateProjectRequest(BaseModel):
@@ -294,6 +296,8 @@ class UpdateProjectRequest(BaseModel):
     interleave_mode: Optional[str] = None
     script_language: Optional[str] = None
     copywriting_word_count: Optional[int] = None
+    one_click_generate_enabled: Optional[bool] = None
+    one_click_generate_target: Optional[str] = None
     status: Optional[str] = None
     video_path: Optional[str] = None
     subtitle_path: Optional[str] = None
@@ -468,6 +472,7 @@ def read_video_duration(video_path: Path) -> float:
 # ========================= 项目状态辅助 =========================
 
 _ALL_TASK_SCOPES = [
+    "one_click_generate",
     "generate_copywriting",
     "generate_script",
     "generate_video",
@@ -559,6 +564,13 @@ async def create_project(req: CreateProjectRequest, request: Request):
         req.project_type or "subtitle",
         omni_effect_tier=req.omni_effect_tier,
     )
+    target = str(req.one_click_generate_target or "draft").strip().lower()
+    if target not in {"draft", "video"}:
+        target = "draft"
+    p = projects_store.update_project(p.id, {
+        "one_click_generate_enabled": bool(req.one_click_generate_enabled),
+        "one_click_generate_target": target,
+    }) or p
     return JSONResponse(status_code=201, content={
         "message": "项目创建成功",
         "data": p.model_dump(),
@@ -603,6 +615,13 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
             updates["script_language"] = "en"
         else:
             raise HTTPException(status_code=400, detail="脚本语言仅支持 zh 或 en")
+    if "one_click_generate_target" in updates:
+        target_raw = str(updates.get("one_click_generate_target") or "draft").strip().lower()
+        if target_raw not in {"draft", "video"}:
+            raise HTTPException(status_code=400, detail="一键生成目标仅支持 draft 或 video")
+        updates["one_click_generate_target"] = target_raw
+    if "one_click_generate_enabled" in updates:
+        updates["one_click_generate_enabled"] = bool(updates.get("one_click_generate_enabled"))
     p = projects_store.update_project(project_id, updates)
     if not p:
         raise HTTPException(status_code=404, detail="项目不存在")

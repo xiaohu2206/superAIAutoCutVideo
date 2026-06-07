@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { message } from '../../services/message';
 
 interface DropdownItem {
   label: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  disabledReason?: string;
   className?: string;
 }
 
@@ -13,6 +15,7 @@ interface DropdownProps {
   className?: string;
   menuClassName?: string;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 export const Dropdown: React.FC<DropdownProps> = ({ 
@@ -20,7 +23,8 @@ export const Dropdown: React.FC<DropdownProps> = ({
   items, 
   className = '',
   menuClassName = '',
-  disabled = false
+  disabled = false,
+  disabledReason
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -45,10 +49,13 @@ export const Dropdown: React.FC<DropdownProps> = ({
     <div className={`relative inline-block text-left ${className}`} ref={ref}>
       <div
         onClick={() => {
-          if (!disabled) {
-            setIsOpen(!isOpen);
+          if (disabled) {
+            message.warning(disabledReason || '当前不可操作');
+            return;
           }
+          setIsOpen(!isOpen);
         }}
+        aria-disabled={disabled}
         className={disabled ? 'opacity-50 cursor-not-allowed' : ''}
       >
         {trigger}
@@ -59,8 +66,12 @@ export const Dropdown: React.FC<DropdownProps> = ({
             {items.map((item, index) => (
               <button
                 key={index}
-                disabled={item.disabled}
+                aria-disabled={item.disabled}
                 onClick={() => {
+                  if (item.disabled) {
+                    message.warning(item.disabledReason || disabledReason || '当前不可操作');
+                    return;
+                  }
                   item.onClick();
                   setIsOpen(false);
                 }}

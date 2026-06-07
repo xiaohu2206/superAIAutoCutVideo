@@ -22,7 +22,7 @@ from modules.fun_asr_service import fun_asr_service
 from modules.fun_asr_model_manager import FunASRPathManager, validate_model_dir
 from .asr_bcut import BcutASR
 from .asr_utils import utterances_to_srt
-from .audio_chunking import probe_has_audio
+from .audio_chunking import probe_audio_stream
 
 
 logger = logging.getLogger(__name__)
@@ -332,7 +332,14 @@ class ExtractSubtitleService:
 
         await _ws(project_id, "progress", "start", "开始提取字幕", 1, task_id=run_id)
 
-        video_has_audio = await probe_has_audio(video_abs)
+        audio_probe = await probe_audio_stream(video_abs)
+        if not audio_probe.ok:
+            detail = audio_probe.error or "音频流探测失败"
+            logger.warning("字幕提取音频探测失败: project_id=%s path=%s error=%s", project_id, video_abs, detail)
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "audio_probe_failed", f"音频流探测失败：{detail}", task_id=run_id)
+            raise HTTPException(status_code=500, detail=f"音频流探测失败：{detail}")
+        video_has_audio = bool(audio_probe.has_audio)
 
         if video_has_audio:
             if provider == "bcut":
@@ -471,6 +478,10 @@ class ExtractSubtitleService:
             await _ws(project_id, "progress", "subtitle_ready", "字幕生成完成", 90, task_id=run_id)
         srt_text = utterances_to_srt(utterances)
         compressed = _compress_srt(srt_text)
+        if video_has_audio and not compressed.strip():
+            _update_project_if_latest(project_id, run_id, {"subtitle_status": "failed"})
+            await _ws(project_id, "error", "asr_empty_text", "语音识别结果为空，未生成字幕文件", task_id=run_id)
+            raise HTTPException(status_code=500, detail="语音识别结果为空，未生成字幕文件")
 
         if not _is_latest_subtitle_run(project_id, run_id):
             await _ws(project_id, "cancelled", "stale", "检测到新的字幕提取任务，本次结果已丢弃", 100, task_id=run_id)

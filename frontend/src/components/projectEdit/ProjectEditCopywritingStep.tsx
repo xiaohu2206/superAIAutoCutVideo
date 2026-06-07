@@ -12,6 +12,7 @@ import { NarrationType } from "../../types/project";
 interface ProjectEditCopywritingStepProps {
   project: Project;
   refreshProject: () => Promise<void>;
+  projectTaskBusy?: boolean;
 
   isGeneratingCopywriting: boolean;
   handleGenerateCopywriting: () => void;
@@ -31,6 +32,7 @@ interface ProjectEditCopywritingStepProps {
 const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
   project,
   refreshProject,
+  projectTaskBusy = false,
   isGeneratingCopywriting,
   handleGenerateCopywriting,
   handleStopGenerateCopywriting,
@@ -77,7 +79,20 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
     !project?.video_path ||
     !project?.subtitle_path ||
     (project?.subtitle_status ? project.subtitle_status !== "ready" : false) ||
+    projectTaskBusy ||
     isGeneratingCopywriting;
+  const copywritingDisabledReason =
+    projectTaskBusy
+      ? "当前项目已有任务在队列中，请等待完成后再操作"
+      : isGeneratingCopywriting
+      ? "解说文案生成中，请等待完成"
+      : !project?.video_path
+      ? "请先上传视频文件"
+      : !project?.subtitle_path
+      ? "请先提取或上传字幕"
+      : project?.subtitle_status && project.subtitle_status !== "ready"
+      ? "字幕尚未就绪，请等待字幕处理完成"
+      : undefined;
 
   const handleCopyFilmPrompt = async () => {
     try {
@@ -148,9 +163,15 @@ const ProjectEditCopywritingStep: React.FC<ProjectEditCopywritingStepProps> = ({
         <div className="pt-4 border-t border-gray-200 flex flex-wrap items-start gap-3 dark:border-[#2a2a2a]">
           <div className="flex flex-col items-start space-y-2">
             <button
-              onClick={handleGenerateCopywriting}
-              disabled={copywritingButtonDisabled}
-              className="flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => {
+                if (copywritingButtonDisabled) {
+                  message.warning(copywritingDisabledReason || "当前不可生成文案");
+                  return;
+                }
+                handleGenerateCopywriting();
+              }}
+              aria-disabled={copywritingButtonDisabled}
+              className={`flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-sm hover:bg-indigo-700 transition-all ${copywritingButtonDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {isGeneratingCopywriting ? (
                 <>

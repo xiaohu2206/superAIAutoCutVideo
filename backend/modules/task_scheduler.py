@@ -35,6 +35,7 @@ class ScopeState:
         self.queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         self.pending: Dict[str, TaskItem] = {}
         self.running: Dict[str, asyncio.Task] = {}
+        self.running_projects: Dict[str, str] = {}
         self.dedup: Dict[str, str] = {}
         self.workers: list[asyncio.Task] = []
         self.lock = asyncio.Lock()
@@ -68,6 +69,32 @@ class TaskScheduler:
                 "running": int(len(s.running)),
                 "dedup": int(len(s.dedup)),
             }
+
+    async def list_tasks(self, scopes: Optional[list[str]] = None) -> list[Dict[str, Any]]:
+        scope_names = list(scopes or self._scopes.keys())
+        rows: list[Dict[str, Any]] = []
+        for scope in scope_names:
+            s = self._scopes.get(scope)
+            if not s:
+                continue
+            async with s.lock:
+                self._cleanup_workers(s)
+                for item in s.pending.values():
+                    rows.append({
+                        "scope": s.scope,
+                        "project_id": item.project_id,
+                        "task_id": item.task_id,
+                        "scheduler_status": "queued",
+                    })
+                for task_id in s.running.keys():
+                    project_id = str(s.running_projects.get(task_id) or "")
+                    rows.append({
+                        "scope": s.scope,
+                        "project_id": project_id,
+                        "task_id": task_id,
+                        "scheduler_status": "running",
+                    })
+        return rows
 
     async def ensure_scope(self, scope: str, concurrency: int) -> ScopeState:
         if not scope:
@@ -329,6 +356,7 @@ class TaskScheduler:
 
                 exec_task = asyncio.create_task(item.run_fn(item.project_id, item.task_id, cancel_event))
                 s.running[item.task_id] = exec_task
+                s.running_projects[item.task_id] = item.project_id
                 if item.handle_update:
                     try:
                         item.handle_update(item.task_id, exec_task)
@@ -396,6 +424,7 @@ class TaskScheduler:
                             pass
                     try:
                         s.running.pop(item.task_id, None)
+                        s.running_projects.pop(item.task_id, None)
                     except Exception:
                         pass
                     try:

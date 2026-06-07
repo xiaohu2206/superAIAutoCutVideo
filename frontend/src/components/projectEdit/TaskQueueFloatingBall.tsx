@@ -40,6 +40,7 @@ const POLL_INTERVAL_MS = 3000;
 const CATCH_UP_MAX_TICKS = 40;
 
 const SCOPE_LABELS: Record<string, string> = {
+  one_click_generate: "一键生成",
   generate_copywriting: "文案生成",
   generate_script: "脚本生成",
   generate_video: "视频生成",

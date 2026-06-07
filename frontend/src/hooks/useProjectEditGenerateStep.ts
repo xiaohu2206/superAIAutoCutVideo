@@ -42,6 +42,7 @@ const taskLog = (task: TaskProgressState): WsProgressLog | null => {
 export interface UseProjectEditGenerateStepOptions {
   project?: Project | null;
   extractingSubtitle: boolean;
+  projectTaskBusy?: boolean;
   generateCopywriting: (data: GenerateCopywritingRequest) => Promise<NarrationCopywriting>;
   saveCopywriting: (copywriting: NarrationCopywriting) => Promise<void>;
   generateScript: (data: GenerateScriptRequest) => Promise<VideoScript>;
@@ -250,6 +251,7 @@ export function useProjectEditGenerateStep(
     (project?.subtitle_status ? project.subtitle_status === "ready" : true);
 
   const generateScriptDisabledReason = useMemo(() => {
+    if (options.projectTaskBusy) return "当前项目已有任务在队列中";
     if (!project?.video_path) return "请先上传视频";
     if (options.extractingSubtitle || project?.subtitle_status === "extracting") return "字幕提取中";
     if (!subtitleReady) return "请先提取字幕或上传字幕";
@@ -257,13 +259,14 @@ export function useProjectEditGenerateStep(
     return undefined;
   }, [
     options.extractingSubtitle,
+    options.projectTaskBusy,
     project?.narration_copywriting?.content,
     project?.subtitle_status,
     project?.video_path,
     subtitleReady,
   ]);
 
-  const generateScriptDisabled = Boolean(generateScriptDisabledReason);
+  const generateScriptDisabled = Boolean(generateScriptDisabledReason || options.projectTaskBusy);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -412,6 +415,10 @@ export function useProjectEditGenerateStep(
 
   const handleGenerateCopywriting = useCallback(async () => {
     if (!project) return;
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
     if (!project?.video_path) {
       options.showErrorText("请先上传视频文件");
       return;
@@ -468,6 +475,10 @@ export function useProjectEditGenerateStep(
 
   const handleGenerateScript = useCallback(async () => {
     if (!project) return;
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
     if (!project?.video_path) {
       options.showErrorText("请先上传视频文件");
       return;
@@ -576,6 +587,10 @@ export function useProjectEditGenerateStep(
 
   const handleGenerateVideo = useCallback(async () => {
     if (!project) return;
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
     if (!project?.script) {
       options.showErrorText("请先生成并保存脚本");
       return;
@@ -606,6 +621,10 @@ export function useProjectEditGenerateStep(
 
   const handleGenerateDraft = useCallback(async () => {
     if (!project) return;
+    if (options.projectTaskBusy) {
+      options.showErrorText("当前项目已有任务在队列中，请等待完成后再操作");
+      return;
+    }
     if (!project?.video_path) {
       options.showErrorText("请先上传原始视频文件");
       return;

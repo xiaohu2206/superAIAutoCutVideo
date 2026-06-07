@@ -125,6 +125,7 @@ export const useProjects = (): UseProjectsReturn => {
 
   // 所有会改变项目运行状态的任务 scope 集合
   const TASK_SCOPES = useMemo(() => new Set([
+    "one_click_generate",
     "generate_copywriting",
     "generate_script",
     "generate_video",

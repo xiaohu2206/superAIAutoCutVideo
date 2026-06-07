@@ -13,6 +13,7 @@ import VisionAnalysisChoiceModal from "./VisionAnalysisChoiceModal";
 import OmniMultimodalChoiceModal from "./OmniMultimodalChoiceModal";
 import OverwriteConfirmModal from "./OverwriteConfirmModal";
 import { projectService } from "../../services/projectService";
+import { message } from "../../services/message";
 import { useAuth } from "../auth/AuthContext";
 import { videoVisionAnalysisScopeLabel } from "@/features/visionModel/constants";
 import { videoModelService } from "@/services/videoModelService";
@@ -41,6 +42,7 @@ interface ProjectEditUploadStepProps {
   uploadingVideo: boolean;
   merging: boolean;
   mergeProgress: number;
+  projectTaskBusy?: boolean;
   videoUploadProgress: number;
   videoInputRef: React.RefObject<HTMLInputElement>;
   onVideoDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
@@ -60,6 +62,11 @@ interface ProjectEditUploadStepProps {
   onExtractSubtitle: () => void;
   subtitleAsr: { provider: "bcut" | "fun_asr"; modelKey: string; language: string };
   onSubtitleAsrChange: (next: { provider: "bcut" | "fun_asr"; modelKey: string; language: string }) => void;
+  oneClickGenerateEnabled: boolean;
+  onOneClickGenerateEnabledChange: (enabled: boolean) => void;
+  oneClickGenerateTarget: "draft" | "video";
+  onOneClickGenerateTargetChange: (target: "draft" | "video") => void;
+  isStartingOneClickGenerate: boolean;
 
   subtitleDraft: SubtitleSegment[];
   subtitleMeta: SubtitleMeta | null;
@@ -122,6 +129,7 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   uploadingVideo,
   merging,
   mergeProgress,
+  projectTaskBusy = false,
   videoUploadProgress,
   videoInputRef,
   onVideoDragOver,
@@ -140,6 +148,11 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   onExtractSubtitle,
   subtitleAsr,
   onSubtitleAsrChange,
+  oneClickGenerateEnabled,
+  onOneClickGenerateEnabledChange,
+  oneClickGenerateTarget,
+  onOneClickGenerateTargetChange,
+  isStartingOneClickGenerate,
   subtitleDraft,
   subtitleMeta,
   subtitleSaving,
@@ -204,6 +217,51 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
   const analyzeVision = true;
 
   const [visionScopeLabel, setVisionScopeLabel] = React.useState("视觉分析");
+  const oneClickTargetLabel = oneClickGenerateTarget === "video" ? "视频" : "草稿";
+  const queueBusyReason = "当前项目已有任务在队列中，请等待完成后再操作";
+  const visualActionDisabledReason =
+    subtitleLoading
+      ? "字幕加载中，请稍后再操作"
+      : extractingSubtitle
+      ? "字幕提取中，请等待完成"
+      : extractingScene
+      ? "镜头分析中，请等待完成"
+      : isStartingOneClickGenerate
+      ? "一键生成任务提交中，请稍后"
+      : projectTaskBusy
+      ? queueBusyReason
+      : !project.video_path && !project.merged_video_path
+      ? "请先上传视频文件"
+      : undefined;
+  const subtitleActionDisabledReason =
+    subtitleLoading
+      ? "字幕加载中，请稍后再操作"
+      : extractingSubtitle
+      ? "字幕提取中，请等待完成"
+      : isStartingOneClickGenerate
+      ? "一键生成任务提交中，请稍后"
+      : projectTaskBusy
+      ? queueBusyReason
+      : !project.video_path && !project.merged_video_path
+      ? "请先上传视频文件"
+      : !oneClickGenerateEnabled && project.subtitle_source === "user" && Boolean(project.subtitle_path)
+      ? "已上传字幕，需先删除才能提取"
+      : undefined;
+  const omniActionDisabledReason =
+    subtitleLoading
+      ? "字幕加载中，请稍后再操作"
+      : extractingSubtitle
+      ? "字幕提取中，请等待完成"
+      : extractingOmniPipeline
+      ? "Omni 全感知推理中，请等待完成"
+      : isStartingOneClickGenerate
+      ? "一键生成任务提交中，请稍后"
+      : projectTaskBusy
+      ? queueBusyReason
+      : !project.video_path && !project.merged_video_path
+      ? "请先上传视频文件"
+      : undefined;
+  const disabledButtonClass = "opacity-50 cursor-not-allowed";
 
   React.useEffect(() => {
     if (project.project_type !== "visual") return;
@@ -329,6 +387,36 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
           
           {project.project_type === "visual" ? (
             <div className="flex flex-col gap-2 items-end">
+              <div className="flex items-center gap-2 text-xs text-gray-700 dark:text-zinc-300">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={oneClickGenerateEnabled}
+                    onChange={(e) => onOneClickGenerateEnabledChange(e.target.checked)}
+                    disabled={extractingScene || isStartingOneClickGenerate || projectTaskBusy}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  是否一键生成
+                </label>
+                {oneClickGenerateEnabled ? (
+                  <div className="flex rounded-md bg-gray-100 p-0.5 dark:bg-[#242424]">
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("draft")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "draft" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      草稿
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("video")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "video" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      视频
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div className="flex flex-col gap-1.5 items-end text-xs text-gray-700 bg-gray-50 px-2 py-1.5 rounded dark:bg-[#242424] dark:text-zinc-300">
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                   <span className="text-gray-600 select-none dark:text-zinc-400">{visionScopeLabel}</span>
@@ -360,83 +448,165 @@ const ProjectEditUploadStep: React.FC<ProjectEditUploadStepProps> = ({
                 </div>
               </div>
               <button
-                onClick={() => onExtractScenes({ analyzeVision, visionMode, visionKeyFrames })}
-                disabled={
-                  subtitleLoading ||
-                  extractingSubtitle ||
-                  extractingScene ||
-                  (!project.video_path && !project.merged_video_path)
-                }
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => {
+                  if (visualActionDisabledReason) {
+                    message.warning(visualActionDisabledReason);
+                    return;
+                  }
+                  onExtractScenes({ analyzeVision, visionMode, visionKeyFrames });
+                }}
+                aria-disabled={Boolean(visualActionDisabledReason)}
+                className={`flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors ${visualActionDisabledReason ? disabledButtonClass : ""}`}
               >
-                {extractingScene ? (
+                {isStartingOneClickGenerate ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    提交中...
+                  </>
+                ) : extractingScene ? (
                   <>
                     <Loader className="h-4 w-4 mr-2 animate-spin" />
                     镜头提取中...
                   </>
                 ) : (
-                  <>{canReExtractScenes ? "重新分析镜头" : "分析镜头"}</>
+                  <>{oneClickGenerateEnabled ? `一键生成${oneClickTargetLabel}` : (canReExtractScenes ? "重新分析镜头" : "分析镜头")}</>
                 )}
               </button>
             </div>
           ) : project.project_type === "omni" ? (
-            <button
-              onClick={onRunOmniPipelineWithSubtitle}
-              disabled={
-                subtitleLoading ||
-                extractingSubtitle ||
-                extractingOmniPipeline ||
-                (!project.video_path && !project.merged_video_path)
-              }
-              title={
-                !isAuthenticated
-                  ? "请先登录；点击可打开登录"
-                  : !omniRunPipelineAuthReady
-                    ? "登录后需带有效凭据；点击前往个人中心绑定 License"
-                    : undefined
-              }
-              className="flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {extractingOmniPipeline ? (
-                <>
-                  <Loader className="h-4 w-4 mr-2 animate-spin" />
-                  运行中...
-                </>
-              ) : extractingSubtitle ? (
-                <>
-                  <Loader className="h-4 w-4 mr-2 animate-spin" />
-                  提取中...
-                </>
-              ) : (
-                <>{canReRunOmniPipeline ? "重新分析镜头" : "分析镜头"}</>
-              )}
-            </button>
+            <div className="flex flex-col gap-2 items-end">
+              <div className="flex items-center gap-2 text-xs text-gray-700 dark:text-zinc-300">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={oneClickGenerateEnabled}
+                    onChange={(e) => onOneClickGenerateEnabledChange(e.target.checked)}
+                    disabled={extractingOmniPipeline || isStartingOneClickGenerate || projectTaskBusy}
+                    className="rounded border-gray-300 text-fuchsia-600 focus:ring-fuchsia-500"
+                  />
+                  是否一键生成
+                </label>
+                {oneClickGenerateEnabled ? (
+                  <div className="flex rounded-md bg-gray-100 p-0.5 dark:bg-[#242424]">
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("draft")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "draft" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      草稿
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("video")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "video" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      视频
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <button
+                onClick={() => {
+                  if (omniActionDisabledReason) {
+                    message.warning(omniActionDisabledReason);
+                    return;
+                  }
+                  onRunOmniPipelineWithSubtitle();
+                }}
+                aria-disabled={Boolean(omniActionDisabledReason)}
+                title={
+                  !isAuthenticated
+                    ? "请先登录；点击可打开登录"
+                    : !omniRunPipelineAuthReady
+                      ? "登录后需带有效凭据；点击前往个人中心绑定 License"
+                      : undefined
+                }
+                className={`flex items-center justify-center px-4 py-2 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-800 transition-colors ${omniActionDisabledReason ? disabledButtonClass : ""}`}
+              >
+                {isStartingOneClickGenerate ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    提交中...
+                  </>
+                ) : extractingOmniPipeline ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    运行中...
+                  </>
+                ) : extractingSubtitle ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    提取中...
+                  </>
+                ) : (
+                  <>{oneClickGenerateEnabled ? `一键生成${oneClickTargetLabel}` : (canReRunOmniPipeline ? "重新分析镜头" : "分析镜头")}</>
+                )}
+              </button>
+            </div>
           ) : (
-            <button
-              onClick={onExtractSubtitle}
-              disabled={
-                subtitleLoading ||
-                extractingSubtitle ||
-                (!project.video_path && !project.merged_video_path) ||
-                (project.subtitle_source === "user" && Boolean(project.subtitle_path))
-              }
-              className="flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {extractingSubtitle ? (
-                <>
-                  <Loader className="h-4 w-4 mr-2 animate-spin" />
-                  提取中...
-                </>
-              ) : (
-                <>{canReExtractSubtitle ? "重新提取字幕" : "提取字幕"}</>
-              )}
-            </button>
+            <div className="flex flex-col gap-2 items-end">
+              <div className="flex items-center gap-2 text-xs text-gray-700 dark:text-zinc-300">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={oneClickGenerateEnabled}
+                    onChange={(e) => onOneClickGenerateEnabledChange(e.target.checked)}
+                    disabled={extractingSubtitle || isStartingOneClickGenerate || projectTaskBusy}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  是否一键生成
+                </label>
+                {oneClickGenerateEnabled ? (
+                  <div className="flex rounded-md bg-gray-100 p-0.5 dark:bg-[#242424]">
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("draft")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "draft" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      草稿
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOneClickGenerateTargetChange("video")}
+                      className={`px-2 py-0.5 rounded text-xs ${oneClickGenerateTarget === "video" ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100" : "text-gray-500 dark:text-zinc-400"}`}
+                    >
+                      视频
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <button
+                onClick={() => {
+                  if (subtitleActionDisabledReason) {
+                    message.warning(subtitleActionDisabledReason);
+                    return;
+                  }
+                  onExtractSubtitle();
+                }}
+                aria-disabled={Boolean(subtitleActionDisabledReason)}
+                className={`flex items-center px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors ${subtitleActionDisabledReason ? disabledButtonClass : ""}`}
+              >
+                {isStartingOneClickGenerate ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    提交中...
+                  </>
+                ) : extractingSubtitle ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    提取中...
+                  </>
+                ) : (
+                  <>{oneClickGenerateEnabled ? `一键生成${oneClickTargetLabel}` : (canReExtractSubtitle ? "重新提取字幕" : "提取字幕")}</>
+                )}
+              </button>
+            </div>
           )}
         </div>
 
         <SubtitleAsrSelector
           value={subtitleAsr}
-          disabled={subtitleLoading || extractingSubtitle || extractingOmniPipeline}
+          disabled={subtitleLoading || extractingSubtitle || extractingOmniPipeline || isStartingOneClickGenerate || projectTaskBusy}
           onChange={onSubtitleAsrChange}
         />
 

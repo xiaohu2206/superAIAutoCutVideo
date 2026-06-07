@@ -629,6 +629,52 @@ export class ProjectService {
     return response.data ?? null;
   }
 
+  async startOneClickGenerate(
+    projectId: string,
+    options?: {
+      target?: "draft" | "video";
+      force?: boolean;
+      task_id?: string | null;
+      asr_provider?: "bcut" | "fun_asr";
+      asr_model_key?: string | null;
+      asr_language?: string | null;
+      itn?: boolean;
+      hotwords?: string[];
+      analyzeVision?: boolean;
+      visionMode?: string;
+      visionKeyFrames?: 1 | 3;
+      visionAction?: "auto" | "continue" | "restart";
+      multimodal_action?: "auto" | "continue" | "restart";
+    }
+  ): Promise<{ task_id: string; scope?: string; target?: "draft" | "video" } | null> {
+    const payload = {
+      target: options?.target ?? "draft",
+      force: Boolean(options?.force),
+      task_id: options?.task_id ?? undefined,
+      asr_provider: options?.asr_provider,
+      asr_model_key: options?.asr_model_key ?? undefined,
+      asr_language: options?.asr_language ?? undefined,
+      itn: typeof options?.itn === "boolean" ? options?.itn : undefined,
+      hotwords: Array.isArray(options?.hotwords) ? options?.hotwords : undefined,
+      analyzeVision: Boolean(options?.analyzeVision),
+      visionMode: options?.visionMode ?? "all",
+      visionKeyFrames: options?.visionKeyFrames === 3 ? 3 : 1,
+      visionAction: options?.visionAction ?? "auto",
+      multimodal_action: options?.multimodal_action ?? "auto",
+    };
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("sacv_auth_token") : null;
+    const trimmed = token?.trim();
+    const authHeaders = trimmed ? { Authorization: `Bearer ${trimmed}` } : undefined;
+    const response = await apiClient.post<ApiResponse<{ task_id: string; scope?: string; target?: "draft" | "video" }>>(
+      `/api/projects/${projectId}/one-click-generate`,
+      payload,
+      undefined,
+      authHeaders
+    );
+    return response.data ?? null;
+  }
+
   /**
    * 停止任务（停止生成）
    */

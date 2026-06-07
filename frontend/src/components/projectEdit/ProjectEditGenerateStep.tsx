@@ -11,6 +11,7 @@ import ScriptJsonEditor from "./ScriptJsonEditor";
 interface ProjectEditGenerateStepProps {
   project: Project;
   refreshProject: () => Promise<void>;
+  projectTaskBusy?: boolean;
   onShowLogin?: () => void;
   onShowProfile?: () => void;
 
@@ -54,6 +55,7 @@ interface ProjectEditGenerateStepProps {
 const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
   project,
   refreshProject,
+  projectTaskBusy = false,
   onShowLogin,
   onShowProfile,
   isGeneratingCopywriting,
@@ -116,6 +118,7 @@ const ProjectEditGenerateStep: React.FC<ProjectEditGenerateStepProps> = ({
 
         <ProjectOperations
           project={project}
+          projectTaskBusy={projectTaskBusy}
           refreshProject={refreshProject}
           isGeneratingCopywriting={isGeneratingCopywriting}
           handleGenerateCopywriting={handleGenerateCopywriting}

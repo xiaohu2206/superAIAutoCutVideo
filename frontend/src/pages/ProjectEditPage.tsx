@@ -9,6 +9,7 @@ import { useProjectEditGenerateStep } from "../hooks/useProjectEditGenerateStep"
 import { useProjectEditUploadStep } from "../hooks/useProjectEditUploadStep";
 import { useProjectDetail } from "../hooks/useProjects";
 import { message } from "../services/message";
+import { projectService } from "../services/projectService";
 
 type StepKey = "upload" | "copywriting" | "generate";
 
@@ -70,6 +71,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   const [currentStep, setCurrentStep] = useState<StepKey>("upload");
   const [hasInitializedStep, setHasInitializedStep] = useState(false);
+  const [projectTaskBusy, setProjectTaskBusy] = useState(false);
 
   // 判断上传步骤是否完成
   const isUploadReady = useCallback(() => {
@@ -128,12 +130,44 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
     if (error) showErrorText(error);
   }, [error, showErrorText]);
 
+  useEffect(() => {
+    if (!project?.id) {
+      setProjectTaskBusy(false);
+      return;
+    }
+    let stopped = false;
+    const terminal = new Set(["completed", "failed", "cancelled"]);
+    const checkBusy = async () => {
+      try {
+        const queue = await projectService.getTaskQueue();
+        if (stopped) return;
+        const activeHit = (queue.active_tasks || []).some((task: any) => {
+          if (task?.project_id !== project.id) return false;
+          const status = String(task.status || "").toLowerCase();
+          const type = String(task.type || "").toLowerCase();
+          return !terminal.has(status) && type !== "completed" && type !== "error" && type !== "cancelled";
+        });
+        const waitingHit = (queue.waiting_projects || []).some((wp: any) => wp?.project_id === project.id);
+        setProjectTaskBusy(Boolean(activeHit || waitingHit || queue.active_project === project.id));
+      } catch {
+        if (!stopped) setProjectTaskBusy(false);
+      }
+    };
+    void checkBusy();
+    const timer = window.setInterval(() => void checkBusy(), 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [project?.id]);
+
   const uploadStep = useProjectEditUploadStep({
     projectId,
     project,
     merging,
     mergeProgress,
     subtitleLoading,
+    projectTaskBusy,
     subtitleMeta,
     subtitleSegments: subtitleSegments || [],
     uploadVideos,
@@ -173,6 +207,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
   const generateStep = useProjectEditGenerateStep({
     project,
     extractingSubtitle: uploadStep.extractingSubtitle,
+    projectTaskBusy,
     generateCopywriting,
     saveCopywriting,
     generateScript,
@@ -210,49 +245,13 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
 
   // 点击步骤标签的处理
   const handleStepClick = useCallback((step: StepKey) => {
-    if (step === "upload") {
-      setCurrentStep("upload");
-      return;
-    }
-    if (step === "copywriting") {
-      if (!isUploadReady()) {
-        message.warning(
-          project?.project_type === "subtitle"
-            ? "请先提取或上传字幕"
-            : project?.project_type === "omni"
-              ? "请先完成 Omni 管线（镜头拆分与多模态向量化）"
-              : "请先提取镜头"
-        );
-        return;
-      }
-      setCurrentStep("copywriting");
-      return;
-    }
-    if (step === "generate") {
-      if (!isUploadReady()) {
-        message.warning(
-          project?.project_type === "subtitle"
-            ? "请先提取或上传字幕"
-            : project?.project_type === "omni"
-              ? "请先完成 Omni 管线（镜头拆分与多模态向量化）"
-              : "请先提取镜头"
-        );
-        return;
-      }
-      if (!isCopywritingReady()) {
-        message.warning("请先生成解说文案");
-        return;
-      }
-      setCurrentStep("generate");
-      return;
-    }
-  }, [isUploadReady, isCopywritingReady, project]);
+    setCurrentStep(step);
+  }, []);
 
   // 步骤标签样式
-  const stepButtonClass = (step: StepKey, isReady: boolean) => {
+  const stepButtonClass = (step: StepKey) => {
     const isActive = currentStep === step;
     if (isActive) return "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-zinc-100";
-    if (!isReady) return "text-gray-400 cursor-not-allowed dark:text-zinc-500";
     return "text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-100";
   };
 
@@ -272,9 +271,6 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
       </div>
     );
   }
-
-  const uploadReady = isUploadReady();
-  const copywritingReady = isCopywritingReady();
 
   return (
     <div className="space-y-6">
@@ -297,19 +293,19 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           <div className="flex bg-gray-100 rounded-lg p-1 dark:bg-[#242424]">
             <button
               onClick={() => handleStepClick("upload")}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("upload", true)}`}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("upload")}`}
             >
               1. 上传视频
             </button>
             <button
               onClick={() => handleStepClick("copywriting")}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("copywriting", uploadReady)}`}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("copywriting")}`}
             >
               2. 文案生成
             </button>
             <button
               onClick={() => handleStepClick("generate")}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("generate", uploadReady && copywritingReady)}`}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${stepButtonClass("generate")}`}
             >
               3. 生成视频
             </button>
@@ -324,6 +320,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
           refreshProject={refreshProject}
           merging={merging}
           mergeProgress={mergeProgress}
+          projectTaskBusy={projectTaskBusy}
           subtitleLoading={subtitleLoading}
           subtitleMeta={subtitleMeta}
           onShowLogin={onShowLogin}
@@ -337,6 +334,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         <ProjectEditCopywritingStep
           project={project}
           refreshProject={refreshProject}
+          projectTaskBusy={projectTaskBusy}
           isGeneratingCopywriting={generateStep.isGeneratingCopywriting}
           handleGenerateCopywriting={generateStep.handleGenerateCopywriting}
           handleStopGenerateCopywriting={generateStep.handleStopGenerateCopywriting}
@@ -355,6 +353,7 @@ const ProjectEditPage: React.FC<ProjectEditPageProps> = ({
         <ProjectEditGenerateStep
           project={project}
           refreshProject={refreshProject}
+          projectTaskBusy={projectTaskBusy}
           onShowLogin={onShowLogin}
           onShowProfile={onShowProfile}
           {...generateStep}
