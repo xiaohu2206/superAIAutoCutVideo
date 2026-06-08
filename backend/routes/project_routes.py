@@ -282,7 +282,7 @@ class CreateProjectRequest(BaseModel):
     project_type: Optional[str] = Field(default="subtitle")
     narration_type: Optional[str] = Field(default="短剧解说")
     omni_effect_tier: Optional[str] = Field(default=None)
-    one_click_generate_enabled: Optional[bool] = Field(default=True)
+    one_click_generate_enabled: Optional[bool] = Field(default=False)
     one_click_generate_target: Optional[str] = Field(default="draft")
 
 

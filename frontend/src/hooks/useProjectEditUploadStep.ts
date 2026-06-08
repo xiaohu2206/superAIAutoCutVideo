@@ -195,7 +195,7 @@ export function useProjectEditUploadStep(
     modelKey: "fun_asr_nano_2512",
     language: "中文",
   });
-  const [oneClickGenerateEnabled, setOneClickGenerateEnabled] = useState(true);
+  const [oneClickGenerateEnabled, setOneClickGenerateEnabled] = useState(false);
   const [oneClickGenerateTarget, setOneClickGenerateTarget] = useState<"draft" | "video">("draft");
   const [isStartingOneClickGenerate, setIsStartingOneClickGenerate] = useState(false);
 
@@ -235,7 +235,7 @@ export function useProjectEditUploadStep(
   useEffect(() => {
     const p = options.project;
     if (!p) return;
-    setOneClickGenerateEnabled(p.one_click_generate_enabled !== false);
+    setOneClickGenerateEnabled(p.one_click_generate_enabled === true);
     setOneClickGenerateTarget(p.one_click_generate_target === "video" ? "video" : "draft");
   }, [options.project?.id, options.project?.one_click_generate_enabled, options.project?.one_click_generate_target]);
 

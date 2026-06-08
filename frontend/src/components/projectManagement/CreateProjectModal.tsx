@@ -118,7 +118,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         description: description.trim() || undefined,
         narration_type: narrationType,
         project_type: projectType,
-        one_click_generate_enabled: true,
+        one_click_generate_enabled: false,
         one_click_generate_target: "draft",
       };
       if (showOmniEffectTier) {
