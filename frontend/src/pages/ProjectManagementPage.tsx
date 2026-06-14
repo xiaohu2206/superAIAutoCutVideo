@@ -1,4 +1,6 @@
+import { Activity } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
+import BasicConfigCheckModal from "../components/projectManagement/BasicConfigCheckModal";
 import CreateProjectModal from "../components/projectManagement/CreateProjectModal";
 import DeleteConfirmModal from "../components/projectManagement/DeleteConfirmModal";
 import NarrationTypePicker from "../components/projectManagement/NarrationTypePicker";
@@ -34,6 +36,7 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createInitialNarrationType, setCreateInitialNarrationType] =
     useState<NarrationType>(NarrationType.MOVIE);
+  const [isBasicConfigCheckOpen, setIsBasicConfigCheckOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
@@ -99,6 +102,18 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 dark:bg-[#121212]">
+      <div className="flex shrink-0 justify-end">
+        <button
+          type="button"
+          onClick={() => setIsBasicConfigCheckOpen(true)}
+          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-600 shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-blue-400/25 dark:bg-white/5 dark:text-blue-300 dark:hover:border-blue-400/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-200"
+          title="检查模型、配音、字幕识别和剪映草稿路径配置"
+        >
+          <Activity className="h-4 w-4" aria-hidden />
+          基础连通检测
+        </button>
+      </div>
+
       <NarrationTypePicker
         onSelect={(narrationType) => {
           setCreateInitialNarrationType(narrationType);
@@ -132,6 +147,11 @@ const ProjectManagementPage: React.FC<ProjectManagementPageProps> = ({
           setSelectedProject(null);
         }}
         onConfirm={handleConfirmDelete}
+      />
+
+      <BasicConfigCheckModal
+        isOpen={isBasicConfigCheckOpen}
+        onClose={() => setIsBasicConfigCheckOpen(false)}
       />
     </div>
   );

@@ -1515,7 +1515,8 @@ class VisionFrameAnalyzer:
         mode: "no_subtitles" or "all"
         vision_key_frames: 1 或 3，每个镜头时间段抽取的关键帧数量，多帧按时间顺序一并送入模型。
         max_concurrency: 兼容旧参数；抽帧默认 8 并发，API 调用默认 64 并发，都会受该参数上限约束。
-        若设置页开启「本地模型」模式，则 api_concurrency / infer_wall_sec 改读 omni_step2_pipeline_config.json。
+        若设置页开启「视觉模型使用本地模型」，则 api_concurrency / infer_wall_sec
+        改读 omni_step2_pipeline_config.json；文案模型开关不影响这里。
         """
         step2_params = omni_step2_pipeline_config_manager.resolve_runtime_params()
         if step2_params.source == "local":

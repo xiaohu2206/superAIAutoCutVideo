@@ -29,7 +29,7 @@ from modules.projects_store import projects_store
 from modules.narration_types import DEFAULT_NARRATION_TYPE, is_valid_narration_type, normalize_narration_type
 from modules.runtime_log_store import runtime_log_store
 from modules.task_progress_store import task_progress_store
-from modules.subtitle_utils import format_ts_srt
+from modules.subtitle_utils import compress_srt_content, format_ts_srt
 from services.extract_scene_service import extract_scene_service
 from services.omni_multimodal_pipeline_service import omni_multimodal_pipeline_service
 from services.omni_copywriting_struct_embed_service import omni_copywriting_struct_embed_service
@@ -425,33 +425,7 @@ def _segments_to_compressed_srt(segments: List[SubtitleSegmentInput]) -> str:
 
 
 def compress_srt(content: str) -> str:
-    text = content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
-    blocks = [b for b in text.split("\n\n") if b.strip()]
-    out_lines: List[str] = []
-    for b in blocks:
-        lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
-        if not lines:
-            continue
-        timing_i = None
-        for i, ln in enumerate(lines[:3]):
-            if "-->" in ln:
-                timing_i = i
-                break
-        if timing_i is None:
-            continue
-        parts = lines[timing_i].split("-->")
-        if len(parts) < 2:
-            continue
-        start = parts[0].strip()
-        end = parts[1].strip()
-        text_lines = lines[timing_i + 1:]
-        t = " ".join(text_lines)
-        t = re.sub(r"\s+", " ", t).strip()
-        t = re.sub(r"<[^>]+>", "", t)
-        if not t:
-            continue
-        out_lines.append(f"[{start}-{end}] {t}")
-    return ("\n".join(out_lines) + ("\n" if out_lines else ""))
+    return compress_srt_content(content)
 
 
 def read_video_duration(video_path: Path) -> float:

@@ -193,6 +193,7 @@ test_data/
 !backend/tests/test_video_processor_concat.py
 !backend/tests/test_task_progress_store.py
 !backend/tests/test_auth_upstream.py
+!backend/tests/test_omni_multimodal_pipeline_subtitle.py
 .venv_pack_cpu
 backend/.venv_pack_gpu
 # 文档生成

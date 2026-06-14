@@ -45,7 +45,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
   }, [funModels, isFun, value.modelKey]);
 
   const languageOptions = useMemo(() => {
-    if (!isFun) return ["中文"];
+    if (!isFun) return ["中文", "英文"];
     const meta = funModels.find((m) => m.key === resolvedModelKey);
     const fromMeta = (meta?.languages || []).filter((x) => String(x || "").trim());
     if (fromMeta.length) return fromMeta;
@@ -53,9 +53,7 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
     return FUN_ASR_NANO_LANGUAGES;
   }, [funModels, isFun, resolvedModelKey]);
 
-  const normalizedLanguage = languageOptions.includes(value.language) ? value.language : languageOptions[0] || "中文";
-
-  const funAsrSelectable = !loading && funModels.length > 0;
+  const selectedLanguage = languageOptions.includes(value.language) ? value.language : "";
 
   useEffect(() => {
     if (funModels.length > 0) lastWarnKeyRef.current = "";
@@ -67,41 +65,31 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
     if (funModels.length > 0) return;
     if (lastWarnKeyRef.current === "no_fun_models") return;
     lastWarnKeyRef.current = "no_fun_models";
-    message.warning("未检测到可用 FunASR 模型，已自动切换为内置 API（仅中文）");
-    onChange({ provider: "bcut", modelKey: value.modelKey || "fun_asr_nano_2512", language: "中文" });
+    message.warning("未检测到可用 FunASR 模型，请前往「设置 > 字幕识别」安装并校验模型。");
+    onChange({ provider: "bcut", modelKey: value.modelKey || "fun_asr_nano_2512", language: "" });
   }, [funModels.length, loading, onChange, provider, value.modelKey]);
 
   useEffect(() => {
     if (!isFun) return;
     if (!funModels.length) return;
     if (value.modelKey !== resolvedModelKey) {
-      onChange({ provider, modelKey: resolvedModelKey, language: normalizedLanguage });
+      onChange({ provider, modelKey: resolvedModelKey, language: selectedLanguage });
     }
-  }, [funModels.length, isFun, normalizedLanguage, onChange, provider, resolvedModelKey, value.modelKey]);
+  }, [funModels.length, isFun, onChange, provider, resolvedModelKey, selectedLanguage, value.modelKey]);
 
   const setProvider = (p: SubtitleAsrProvider) => {
+    if (p === "fun_asr" && loading) {
+      message.info("正在检测 FunASR 本地模型，请稍后再试。");
+      return;
+    }
+    if (p === "fun_asr" && funModels.length === 0) {
+      message.warning("尚未安装可用的 FunASR 本地模型，请前往「设置 > 字幕识别」安装并校验模型。");
+      return;
+    }
     const next: SubtitleAsrSelectorValue = {
       provider: p,
       modelKey: resolvedModelKey,
-      language: p === "bcut" ? "中文" : normalizedLanguage,
-    };
-    onChange(next);
-  };
-
-  const setModelKey = (k: string) => {
-    const meta = funModels.find((m) => m.key === k);
-    const metaLangs = (meta?.languages || []).filter((x) => String(x || "").trim());
-    const nextLangs = metaLangs.length
-      ? metaLangs
-      : String(k).includes("mlt")
-        ? FUN_ASR_MLT_LANGUAGES.length
-          ? FUN_ASR_MLT_LANGUAGES
-          : ["中文"]
-        : FUN_ASR_NANO_LANGUAGES;
-    const next: SubtitleAsrSelectorValue = {
-      provider,
-      modelKey: k,
-      language: nextLangs.includes(normalizedLanguage) ? normalizedLanguage : nextLangs[0] || "中文",
+      language: "",
     };
     onChange(next);
   };
@@ -142,66 +130,44 @@ export const SubtitleAsrSelector: React.FC<SubtitleAsrSelectorProps> = ({ value,
             },
             <>
               <option value="bcut">内置（仅中英文）</option>
-              <option value="fun_asr" disabled={!funAsrSelectable}>
-                FunASR（本地模型）
+              <option value="fun_asr">
+                FunASR（本地模型）{!loading && funModels.length === 0 ? " - 未安装" : ""}
               </option>
             </>,
             "选择识别引擎",
           )}
         </div>
 
-        {isFun && (
-          <>
-            <div>
-              <label className="mb-1 block text-xs text-gray-600">模型</label>
-              {renderSelect(
-                {
-                  value: resolvedModelKey,
-                  disabled: disabled || loading || funModels.length === 0,
-                  onChange: (e) => setModelKey(e.target.value),
-                  title: "选择 FunASR 模型",
-                },
-                loading ? (
-                  <option value={resolvedModelKey}>加载模型状态中…</option>
-                ) : funModels.length === 0 ? (
-                  <option value={resolvedModelKey}>暂无可用模型（请先在设置下载并校验）</option>
-                ) : (
-                  <>
-                    {funModels.map((m) => (
-                      <option key={m.key} value={m.key}>
-                        {m.display_name || m.key}
-                      </option>
-                    ))}
-                  </>
-                ),
-                "选择 FunASR 模型",
-              )}
-            </div>
 
-            <div>
-              <label className="mb-1 block text-xs text-gray-600">语言</label>
-              {renderSelect(
-                {
-                  value: normalizedLanguage,
-                  disabled: disabled || loading || funModels.length === 0,
-                  onChange: (e) => setLanguage(e.target.value),
-                  title: "选择识别语言",
-                },
-                <>
-                  {languageOptions.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </>,
-                "选择识别语言",
-              )}
-            </div>
-          </>
-        )}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-700">
+            声音语言 <span className="text-red-500">*</span>
+          </label>
+          {renderSelect(
+            {
+              value: selectedLanguage,
+              required: true,
+              disabled: disabled || (isFun && (loading || funModels.length === 0)),
+              onChange: (e) => setLanguage(e.target.value),
+              title: "请选择视频中说话声音的语言",
+            },
+            <>
+              <option value="" disabled>
+                请选择声音语言（必选）
+              </option>
+              {languageOptions.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </>,
+            "选择视频声音语言（必选）",
+          )}
+        </div>
       </div>
 
       <div className="mt-2 text-[11px] text-gray-600">
+        <div className="font-medium text-amber-700">请选择视频中人物说话/声音的语言；这里识别的是音频语音，不是 OCR 识别画面中的字幕文字。</div>
         {provider === "bcut"
           ? "内置 API 识别字幕只支持中英文"
           : loading

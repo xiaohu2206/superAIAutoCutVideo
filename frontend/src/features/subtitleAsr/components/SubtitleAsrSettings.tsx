@@ -2,11 +2,13 @@ import { message } from "@/services/message";
 import { Loader, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import AppSelect from "@/components/ui/AppSelect";
-import { FUN_ASR_MODEL_OPTIONS } from "../constants";
+import { FUN_ASR_MLT_LANGUAGES, FUN_ASR_MODEL_OPTIONS } from "../constants";
 import { useFunAsrModels } from "../hooks/useFunAsrModels";
 import { funAsrService } from "../services/funAsrService";
 import type { FunAsrDownloadProvider, FunAsrModelStatus } from "../types";
 import FunAsrModelOptionsList from "./FunAsrModelOptionsList";
+
+const TEST_MODEL_KEY = "fun_asr_mlt_nano_2512";
 
 const badgeInfo = (st: { existsAll: boolean; validAll: boolean }) => {
   if (st.validAll) return { className: "bg-green-50 text-green-700 border-green-200", text: "可用" };
@@ -112,18 +114,17 @@ export const SubtitleAsrSettings: React.FC = () => {
     void refreshAcceleration();
   }, []);
 
-  const [testModelKey, setTestModelKey] = useState<string>("fun_asr_nano_2512");
   const [testLanguage, setTestLanguage] = useState<string>("中文");
   const [testItn, setTestItn] = useState<boolean>(true);
   const [testing, setTesting] = useState(false);
   const [testText, setTestText] = useState<string>("");
 
   const supportedLangs = useMemo(() => {
-    const m = modelByKey.get(testModelKey);
+    const m = modelByKey.get(TEST_MODEL_KEY);
     const langs = (m?.languages || []).filter(Boolean);
     if (langs.length) return langs;
-    return testModelKey.includes("mlt") ? FUN_ASR_MODEL_OPTIONS[1].recommendedLanguages : FUN_ASR_MODEL_OPTIONS[0].recommendedLanguages;
-  }, [modelByKey, testModelKey]);
+    return FUN_ASR_MLT_LANGUAGES;
+  }, [modelByKey]);
 
   useEffect(() => {
     if (supportedLangs.length && !supportedLangs.includes(testLanguage)) {
@@ -135,7 +136,7 @@ export const SubtitleAsrSettings: React.FC = () => {
     setTesting(true);
     setTestText("");
     try {
-      const res = await funAsrService.testModel({ key: testModelKey, language: testLanguage, itn: testItn });
+      const res = await funAsrService.testModel({ key: TEST_MODEL_KEY, language: testLanguage, itn: testItn });
       if (!res?.success) throw new Error(res?.message || "测试失败");
       const t = String(res.data?.text || "").trim();
       setTestText(t || "(未识别到文本)");
@@ -230,18 +231,7 @@ export const SubtitleAsrSettings: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">模型</label>
-            <AppSelect
-              value={testModelKey}
-              onChange={(e) => setTestModelKey(e.target.value)}
-              disabled={testing}
-            >
-              <option value="fun_asr_nano_2512">Fun-ASR-Nano-2512</option>
-              <option value="fun_asr_mlt_nano_2512">Fun-ASR-MLT-Nano-2512</option>
-            </AppSelect>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm text-gray-700 mb-1">语言</label>
             <AppSelect

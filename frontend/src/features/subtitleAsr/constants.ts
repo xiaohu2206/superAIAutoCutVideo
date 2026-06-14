@@ -8,13 +8,6 @@ export type FunAsrModelOption = {
 
 export const FUN_ASR_MODEL_OPTIONS: FunAsrModelOption[] = [
   {
-    id: "nano_2512",
-    label: "Fun-ASR-Nano-2512",
-    keys: ["fun_asr_nano_2512", "fsmn_vad"],
-    description: "中文/英文/日文（中文含多方言/口音）；推荐多数中文场景。",
-    recommendedLanguages: ["中文", "英文", "日文"],
-  },
-  {
     id: "mlt_nano_2512",
     label: "Fun-ASR-MLT-Nano-2512",
     keys: ["fun_asr_mlt_nano_2512", "fsmn_vad"],

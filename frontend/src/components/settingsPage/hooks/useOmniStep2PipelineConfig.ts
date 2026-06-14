@@ -6,28 +6,46 @@ import type { OmniStep2LocalSettings, OmniStep2PipelinePayload } from "../types"
 const DEFAULT_LOCAL: OmniStep2LocalSettings = {
   vl_batch_size: 1,
   infer_wall_sec: 1200,
-  api_concurrency: 1,
+  vision_api_concurrency: 1,
+  text_api_concurrency: 1,
 };
 
 function normalizePayload(data: Record<string, unknown>): OmniStep2PipelinePayload {
   const localRaw = data.local;
-  const local =
+  const localData =
     localRaw && typeof localRaw === "object"
-      ? { ...DEFAULT_LOCAL, ...(localRaw as Partial<OmniStep2LocalSettings>) }
-      : { ...DEFAULT_LOCAL };
+      ? (localRaw as Partial<OmniStep2LocalSettings> & { api_concurrency?: number })
+      : {};
+  const legacyConcurrency = Number(localData.api_concurrency) || 1;
+  const local: OmniStep2LocalSettings = {
+    vl_batch_size: localData.vl_batch_size ?? DEFAULT_LOCAL.vl_batch_size,
+    infer_wall_sec: localData.infer_wall_sec ?? DEFAULT_LOCAL.infer_wall_sec,
+    vision_api_concurrency:
+      localData.vision_api_concurrency ?? legacyConcurrency,
+    text_api_concurrency: localData.text_api_concurrency ?? legacyConcurrency,
+  };
   const effective =
     data.effective && typeof data.effective === "object"
       ? (data.effective as OmniStep2PipelinePayload["effective"])
       : undefined;
+  const legacyEnabled = Boolean(data.use_local_model_pipeline);
   return {
-    use_local_model_pipeline: Boolean(data.use_local_model_pipeline),
+    use_local_vision_model:
+      typeof data.use_local_vision_model === "boolean"
+        ? data.use_local_vision_model
+        : legacyEnabled,
+    use_local_text_model:
+      typeof data.use_local_text_model === "boolean"
+        ? data.use_local_text_model
+        : legacyEnabled,
     local,
     effective,
   };
 }
 
 const emptyRoot = (): OmniStep2PipelinePayload => ({
-  use_local_model_pipeline: false,
+  use_local_vision_model: false,
+  use_local_text_model: false,
   local: { ...DEFAULT_LOCAL },
 });
 
@@ -39,7 +57,7 @@ export const useOmniStep2PipelineConfig = () => {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [toggling, setToggling] = useState(false);
+  const [togglingModel, setTogglingModel] = useState<"vision" | "text" | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -77,7 +95,8 @@ export const useOmniStep2PipelineConfig = () => {
     try {
       setSaving(true);
       const res = await omniStep2PipelineService.update({
-        use_local_model_pipeline: payload.use_local_model_pipeline,
+        use_local_vision_model: payload.use_local_vision_model,
+        use_local_text_model: payload.use_local_text_model,
         local: payload.local,
       });
       const data = res?.data;
@@ -105,17 +124,20 @@ export const useOmniStep2PipelineConfig = () => {
     }, AUTOSAVE_DEBOUNCE_MS);
   }, [persist]);
 
-  const setUseLocalModelPipeline = useCallback(
-    async (value: boolean) => {
+  const setUseLocalModel = useCallback(
+    async (model: "vision" | "text", value: boolean) => {
       try {
-        setToggling(true);
+        setTogglingModel(model);
+        const field =
+          model === "vision" ? "use_local_vision_model" : "use_local_text_model";
         const res = await omniStep2PipelineService.update({
-          use_local_model_pipeline: value,
+          [field]: value,
         });
         const data = res?.data;
         if (res?.success && data && typeof data === "object") {
           setRoot(normalizePayload(data as Record<string, unknown>));
-          message.success(value ? "已开启本地模型低并发模式" : "已恢复云端默认参数");
+          const label = model === "vision" ? "视觉模型" : "文案模型";
+          message.success(value ? `已开启本地${label}模式` : `已关闭本地${label}模式`);
         } else {
           message.error("切换失败");
         }
@@ -124,7 +146,7 @@ export const useOmniStep2PipelineConfig = () => {
         message.error(msg);
         await load();
       } finally {
-        setToggling(false);
+        setTogglingModel(null);
       }
     },
     [load]
@@ -145,9 +167,11 @@ export const useOmniStep2PipelineConfig = () => {
     root,
     loading,
     saving,
-    toggling,
+    toggling: togglingModel !== null,
+    togglingVision: togglingModel === "vision",
+    togglingText: togglingModel === "text",
     load,
-    setUseLocalModelPipeline,
+    setUseLocalModel,
     setLocalField,
   };
 };

@@ -134,7 +134,7 @@ const NarrationTypePicker: React.FC<NarrationTypePickerProps> = ({
         <div className="flex min-w-0 items-center gap-2">
           <Sparkles className="h-6 w-6 shrink-0 text-blue-400 drop-shadow-[0_0_12px_rgba(59,130,246,0.75)]" aria-hidden />
           <h3 className="truncate text-lg font-semibold text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.28)] sm:text-2xl">
-            选择解说类型创建项目
+            创建项目
           </h3>
         </div>
       </div>

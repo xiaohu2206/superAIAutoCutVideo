@@ -91,7 +91,7 @@ async def _call_structuring_chunk(
     prompt = prompt_template.replace("{copywriting}", chunk_text)
     messages = [ChatMessage(role="user", content=prompt)]
 
-    use_content_model = omni_step2_pipeline_config_manager.resolve_runtime_params().source == "local"
+    use_content_model = omni_step2_pipeline_config_manager.is_local_text_model_enabled()
     active_vl: Optional[Any] = None
     if not use_content_model:
         active_vl = resolve_video_model_for_online_vision()

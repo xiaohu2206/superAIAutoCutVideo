@@ -193,7 +193,7 @@ export function useProjectEditUploadStep(
   const [subtitleAsr, setSubtitleAsr] = useState<{ provider: "bcut" | "fun_asr"; modelKey: string; language: string }>({
     provider: "bcut",
     modelKey: "fun_asr_nano_2512",
-    language: "中文",
+    language: "",
   });
   const [oneClickGenerateEnabled, setOneClickGenerateEnabled] = useState(false);
   const [oneClickGenerateTarget, setOneClickGenerateTarget] = useState<"draft" | "video">("draft");
@@ -228,7 +228,7 @@ export function useProjectEditUploadStep(
       | "bcut"
       | "fun_asr";
     const modelKey = String((p as any).asr_model_key || "fun_asr_nano_2512").trim() || "fun_asr_nano_2512";
-    const language = String((p as any).asr_language || "中文").trim() || "中文";
+    const language = String((p as any).asr_language || "").trim();
     setSubtitleAsr({ provider, modelKey, language });
   }, [options.project?.id, (options.project as any)?.asr_provider, (options.project as any)?.asr_model_key, (options.project as any)?.asr_language]);
 
@@ -504,6 +504,10 @@ export function useProjectEditUploadStep(
       options.showErrorText("请先上传视频文件");
       return;
     }
+    if (!subtitleAsr.language.trim()) {
+      options.showErrorText("请选择视频中说话声音的语言（识别音频语音，不是 OCR 画面字幕）");
+      return;
+    }
     if (project.project_type === "omni" && !readSacvAuthTokenTrimmed()) {
       if (!isAuthenticated) options.onShowLogin?.();
       else options.onShowProfile?.();
@@ -549,6 +553,10 @@ export function useProjectEditUploadStep(
     if (!project) return;
     if (!project.video_path) {
       options.showErrorText("请先上传视频文件");
+      return;
+    }
+    if (!subtitleAsr.language.trim()) {
+      options.showErrorText("请选择视频中说话声音的语言（识别音频语音，不是 OCR 画面字幕）");
       return;
     }
     if (options.projectTaskBusy) {
@@ -882,6 +890,10 @@ export function useProjectEditUploadStep(
   const onExtractScenes = useCallback(
     async (opts?: { analyzeVision: boolean; visionMode: string; visionKeyFrames?: 1 | 3; visionAction?: "auto" | "continue" | "restart" }) => {
       if (!options.project) return;
+      if (!subtitleAsr.language.trim()) {
+        options.showErrorText("请选择视频中说话声音的语言（识别音频语音，不是 OCR 画面字幕）");
+        return;
+      }
       if (!options.project.video_path) {
         options.showErrorText("请先上传视频文件");
         return;
@@ -913,7 +925,7 @@ export function useProjectEditUploadStep(
         options.showError(err, "镜头提取失败");
       }
     },
-    [options, executeExtractScenes, oneClickGenerateEnabled, askSubtitleOverwrite, startOneClickGenerate]
+    [options, subtitleAsr.language, executeExtractScenes, oneClickGenerateEnabled, askSubtitleOverwrite, startOneClickGenerate]
   );
 
   const onStopSceneExtraction = useCallback(async () => {
@@ -976,6 +988,10 @@ export function useProjectEditUploadStep(
 
     const needSubtitlePhase =
       !p.subtitle_path || (Boolean(p.subtitle_status) && p.subtitle_status !== "ready");
+    if (needSubtitlePhase && !subtitleAsr.language.trim()) {
+      options.showErrorText("请选择视频中说话声音的语言（识别音频语音，不是 OCR 画面字幕）");
+      return;
+    }
     if (needSubtitlePhase && p.subtitle_source === "user" && Boolean(p.subtitle_path)) {
       options.showErrorText("已上传字幕，需先删除才能提取");
       return;

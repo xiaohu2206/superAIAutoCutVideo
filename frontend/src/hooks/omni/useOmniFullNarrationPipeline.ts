@@ -187,15 +187,23 @@ export function useOmniFullNarrationPipeline(
     setSkipGenerateScriptLlmState(value);
   }, []);
 
-  // 读取「使用本地模型」配置：开启本地模型时复选框默认勾选（用户未手动改过才跟随）
+  // 只跟随「文案模型使用本地模型」配置，视觉开关不应影响脚本 LLM。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const res = await omniStep2PipelineService.get();
-        const data = res?.data as { use_local_model_pipeline?: boolean } | undefined;
+        const data = res?.data as
+          | {
+              use_local_text_model?: boolean;
+              use_local_model_pipeline?: boolean;
+            }
+          | undefined;
         if (cancelled || !data) return;
-        const enabled = Boolean(data.use_local_model_pipeline);
+        const enabled =
+          typeof data.use_local_text_model === "boolean"
+            ? data.use_local_text_model
+            : Boolean(data.use_local_model_pipeline);
         setLocalModelPipelineEnabled(enabled);
         if (!skipGenerateScriptLlmTouchedRef.current) {
           setSkipGenerateScriptLlmState(enabled);

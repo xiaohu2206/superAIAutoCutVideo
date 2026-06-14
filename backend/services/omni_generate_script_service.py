@@ -305,10 +305,10 @@ class OmniGenerateScriptService:
         if str(getattr(p, "project_type", "") or "").strip().lower() != "omni":
             raise ValueError("仅 omni 类型项目可生成解说脚本")
 
-        # 省成本开关：为 None 时跟随「使用本地模型」配置；本地模型默认跳过大模型直接拼装。
+        # 省成本开关：为 None 时只跟随「本地文案模型」配置。
         if use_prev_result_directly is None:
-            use_prev_result_directly = bool(
-                omni_step2_pipeline_config_manager.get_root().use_local_model_pipeline
+            use_prev_result_directly = (
+                omni_step2_pipeline_config_manager.is_local_text_model_enabled()
             )
         skip_llm = bool(use_prev_result_directly)
 

@@ -25,11 +25,15 @@ def _now_ts() -> str:
 class OmniStep2LocalPatch(BaseModel):
     vl_batch_size: Optional[int] = Field(default=None, ge=1, le=32)
     infer_wall_sec: Optional[int] = Field(default=None, ge=30, le=7200)
-    api_concurrency: Optional[int] = Field(default=None, ge=1, le=64)
+    vision_api_concurrency: Optional[int] = Field(default=None, ge=1, le=64)
+    text_api_concurrency: Optional[int] = Field(default=None, ge=1, le=64)
+    api_concurrency: Optional[int] = Field(default=None, ge=1, le=64, exclude=True)
 
 
 class OmniStep2PipelineUpdateRequest(BaseModel):
-    use_local_model_pipeline: Optional[bool] = None
+    use_local_vision_model: Optional[bool] = None
+    use_local_text_model: Optional[bool] = None
+    use_local_model_pipeline: Optional[bool] = Field(default=None, exclude=True)
     local: Optional[OmniStep2LocalPatch] = None
 
 
@@ -44,13 +48,21 @@ async def update_omni_step2_pipeline_config(
     req: OmniStep2PipelineUpdateRequest = Body(...),
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
+    if req.use_local_vision_model is not None:
+        payload["use_local_vision_model"] = req.use_local_vision_model
+    if req.use_local_text_model is not None:
+        payload["use_local_text_model"] = req.use_local_text_model
     if req.use_local_model_pipeline is not None:
         payload["use_local_model_pipeline"] = req.use_local_model_pipeline
     if req.local is not None:
         cur_local = omni_step2_pipeline_config_manager.get_root().local
+        local_patch = req.local.model_dump(exclude_none=True, exclude={"api_concurrency"})
+        if req.local.api_concurrency is not None:
+            local_patch.setdefault("vision_api_concurrency", req.local.api_concurrency)
+            local_patch.setdefault("text_api_concurrency", req.local.api_concurrency)
         merged = {
             **cur_local.model_dump(),
-            **{k: v for k, v in req.local.model_dump().items() if v is not None},
+            **local_patch,
         }
         payload["local"] = OmniStep2LocalSettings(**merged).model_dump()
     snap = omni_step2_pipeline_config_manager.update(payload)

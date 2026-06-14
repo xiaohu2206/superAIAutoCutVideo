@@ -29,7 +29,7 @@ from modules.config.omni_step2_pipeline_config import (
 )
 from services.ai_models.unified_model_usage import resolve_video_model_for_online_vision
 from modules.projects_store import projects_store
-from modules.subtitle_utils import parse_srt
+from modules.subtitle_utils import SUBTITLE_PARSER_VERSION, parse_srt
 from modules.task_cancel_store import task_cancel_store
 from modules.task_progress_store import task_progress_store
 from modules.project_task_queue import project_task_queue
@@ -104,6 +104,10 @@ def _needs_subtitle_extract_for_omni(p: Any) -> bool:
     sp = getattr(p, "subtitle_path", None)
     if not sp or not str(sp).strip():
         return True
+    # 手动上传的字幕就是 Omni 的输入，不应再交给 ASR 提取。上传接口会
+    # 写入 ready，但这里也兼容旧项目中状态缺失或未正确迁移的记录。
+    if str(getattr(p, "subtitle_source", "") or "").strip().lower() == "user":
+        return False
     st = getattr(p, "subtitle_status", None)
     if st is None or str(st).strip() == "":
         return False
@@ -368,6 +372,8 @@ def _step1_snapshot_matches_sources(prev: Dict[str, Any], video_abs: Path, srt_a
     """已有 Step1 JSON 是否与当前磁盘上的视频、字幕一致（未改动则可复用）。"""
     if not isinstance(prev, dict):
         return False
+    if prev.get("subtitle_parser_version") != SUBTITLE_PARSER_VERSION:
+        return False
     shots = prev.get("shots")
     if not isinstance(shots, list) or not shots:
         return False
@@ -379,6 +385,21 @@ def _step1_snapshot_matches_sources(prev: Dict[str, Any], video_abs: Path, srt_a
     if not isinstance(v, dict) or not isinstance(s, dict):
         return False
     return _fingerprints_equal(v, video_abs) and _fingerprints_equal(s, srt_abs)
+
+
+def _step1_sources_equal(left: Any, right: Any) -> bool:
+    """Whether two Step1 payloads were built from the same video and subtitle files."""
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    left_sources = left.get("step1_sources")
+    right_sources = right.get("step1_sources")
+    if not isinstance(left_sources, dict) or not isinstance(right_sources, dict):
+        return False
+    return (
+        left_sources == right_sources
+        and left.get("subtitle_parser_version") == SUBTITLE_PARSER_VERSION
+        and right.get("subtitle_parser_version") == SUBTITLE_PARSER_VERSION
+    )
 
 
 def _step1_task_progress_hook(scope: str, project_id: str, task_id: str) -> Callable[[str, float], None]:
@@ -451,6 +472,7 @@ def _build_step1_export(
     return {
         "video_path": video_path,
         "srt_path": srt_path,
+        "subtitle_parser_version": SUBTITLE_PARSER_VERSION,
         "step1_sources": {
             "video": _path_stat_fingerprint(vp),
             "subtitle": _path_stat_fingerprint(sp),
@@ -633,7 +655,11 @@ async def _ensure_step1_shot_segmentation(
                 project_id,
                 e,
             )
-        if isinstance(prev_step1, dict):
+        if isinstance(prev_step1, dict) and _step1_snapshot_matches_sources(
+            prev_step1,
+            video_abs,
+            subtitle_abs,
+        ):
             shots = prev_step1.get("shots")
             if isinstance(shots, list) and shots:
                 step1 = prev_step1
@@ -655,7 +681,7 @@ async def _ensure_step1_shot_segmentation(
                 )
         if step1 is None:
             logger.warning(
-                "[omni-pipeline] Step1 缓存文件无效，将重新分割 project_id=%s task_id=%s",
+                "[omni-pipeline] Step1 缓存无效或输入文件已变化，将重新分割 project_id=%s task_id=%s",
                 project_id,
                 task_id,
             )
@@ -855,6 +881,13 @@ class OmniMultimodalPipelineService:
                 existing_payload: Optional[Dict[str, Any]] = None
                 if mma in ("auto", "continue") and out_path.exists():
                     existing_payload = _try_load_existing_multimodal_json(out_path)
+                    if existing_payload is not None and not _step1_sources_equal(existing_payload, step1):
+                        logger.info(
+                            "[omni-pipeline] Step2 历史结果来源已变化，不复用旧字幕/摘要/向量 project_id=%s task_id=%s",
+                            project_id,
+                            task_id,
+                        )
+                        existing_payload = None
 
                 enriched: List[Optional[Dict[str, Any]]] = [None] * len(shots)
                 if mma in ("auto", "continue") and existing_payload is not None:

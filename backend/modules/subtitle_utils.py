@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+
+SUBTITLE_PARSER_VERSION = 2
 
 def format_ts_srt(seconds: float) -> str:
     """Format seconds to HH:MM:SS,mmm for SRT"""
@@ -15,15 +18,52 @@ def format_ts_srt(seconds: float) -> str:
     h = m_total // 60
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
+
+def compress_srt_content(content: str) -> str:
+    def normalize_timestamp(raw: str) -> Optional[str]:
+        match = re.fullmatch(r"(\d+):(\d{1,2}):(\d{1,2})[,.](\d{1,3})", raw.strip())
+        if not match:
+            return None
+        hours, minutes, seconds, fraction = match.groups()
+        total = (
+            int(hours) * 3600
+            + int(minutes) * 60
+            + int(seconds)
+            + int(fraction) / (10 ** len(fraction))
+        )
+        return format_ts_srt(total)
+
+    text = content.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    blocks = [block for block in text.split("\n\n") if block.strip()]
+    out_lines: List[str] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        timing_index = next((i for i, line in enumerate(lines[:3]) if "-->" in line), None)
+        if timing_index is None:
+            continue
+        parts = lines[timing_index].split("-->")
+        if len(parts) < 2:
+            continue
+        start = normalize_timestamp(parts[0])
+        end = normalize_timestamp(parts[1])
+        if not start or not end:
+            continue
+        subtitle_text = " ".join(lines[timing_index + 1 :])
+        subtitle_text = re.sub(r"\s+", " ", subtitle_text).strip()
+        subtitle_text = re.sub(r"<[^>]+>", "", subtitle_text)
+        if subtitle_text:
+            out_lines.append(f"[{start}-{end}] {subtitle_text}")
+    return "\n".join(out_lines) + ("\n" if out_lines else "")
+
 def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
     """简易SRT解析，返回包含 start/end/text 的列表"""
     def _parse_ts(ts: str) -> float:
         # format: HH:MM:SS,mmm
         try:
-            parts = ts.replace(",", ":").split(":")
+            parts = ts.replace(".", ",").replace(",", ":").split(":")
             if len(parts) == 4:
                 h, m, s, ms = parts
-                return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+                return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / (10 ** len(ms))
             elif len(parts) == 3:
                  # maybe HH:MM:SS.mmm or HH:MM:SS
                  if "." in parts[2]:
@@ -40,12 +80,13 @@ def parse_srt(srt_path: Path) -> List[Dict[str, Any]]:
         return segments
 
     try:
-        content = srt_path.read_text(encoding="utf-8", errors="ignore")
+        content = srt_path.read_text(encoding="utf-8", errors="ignore").replace("\x00", "")
         norm = content.replace("\r\n", "\n").replace("\r", "\n").strip()
         lines = [ln.strip() for ln in norm.splitlines() if ln.strip()]
         
         # 优先检测压缩后的行格式：[HH:MM:SS,mmm-HH:MM:SS,mmm] text
-        bracket_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2},\d{3})-(\d{2}:\d{2}:\d{2},\d{3})\]\s*(.+)$")
+        timestamp = r"\d+:\d{1,2}:\d{1,2}[,.]\d{1,3}"
+        bracket_pattern = re.compile(rf"^\[({timestamp})-({timestamp})\]\s*(.+)$")
         bracket_matches = [bracket_pattern.match(ln) for ln in lines]
         
         if any(bracket_matches):

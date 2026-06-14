@@ -102,11 +102,14 @@ export interface UnifiedYunwuModelsPayload {
 export interface OmniStep2LocalSettings {
   vl_batch_size: number;
   infer_wall_sec: number;
-  api_concurrency: number;
+  vision_api_concurrency: number;
+  text_api_concurrency: number;
 }
 
 export interface OmniStep2EffectiveParams {
   source: "cloud" | "local";
+  vision_source: "cloud" | "local";
+  text_source: "cloud" | "local";
   vl_batch_size: number;
   frames_per_shot: number;
   vl_batch_images: number;
@@ -114,11 +117,14 @@ export interface OmniStep2EffectiveParams {
   max_concurrency: number;
   extract_concurrency: number;
   api_concurrency: number;
+  vision_api_concurrency: number;
+  text_api_concurrency: number;
   bge_encode_concurrency: number | null;
 }
 
 export interface OmniStep2PipelinePayload {
-  use_local_model_pipeline: boolean;
+  use_local_vision_model: boolean;
+  use_local_text_model: boolean;
   local: OmniStep2LocalSettings;
   effective?: OmniStep2EffectiveParams;
 }

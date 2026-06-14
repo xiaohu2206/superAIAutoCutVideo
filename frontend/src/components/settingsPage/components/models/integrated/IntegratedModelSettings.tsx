@@ -320,7 +320,11 @@ export const IntegratedModelSettings: React.FC<IntegratedModelSettingsProps> = (
         )}
       </div>
 
-      {useCustom && <OmniStep2LocalPipelineSettings />}
+      {useCustom && subTab !== "yunwu" && (
+        <OmniStep2LocalPipelineSettings
+          modelType={subTab === "content" ? "text" : "vision"}
+        />
+      )}
 
       {useCustom && (
         <p className="text-xs text-slate-500">

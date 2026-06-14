@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Omni Step2 / 镜头视觉分析 共用参数配置（本地模型 / 云端模型两套策略）。
+Omni Step2 / 镜头视觉分析 / 文本 LLM 共用的本地模型参数配置。
 
 持久化：user_config_dir() / omni_step2_pipeline_config.json
-- use_local_model_pipeline=False（默认）：沿用云端硬编码参数，行为与改造前一致。
-- use_local_model_pipeline=True：使用 local 段可自定义的低并发 / 长超时参数。
+- use_local_vision_model：只控制视觉模型批大小、超时和 API 并发。
+- use_local_text_model：只控制文案、脚本等文本 LLM 的 API 并发。
+
+旧版 use_local_model_pipeline / local.api_concurrency 会在加载时自动迁移为两套配置。
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ _CLOUD_INFER_WALL_SEC = 40.0
 
 
 class OmniStep2LocalSettings(BaseModel):
-    """本地模型模式下的 Step2 参数（可在设置页调整）。"""
+    """本地模型模式下的视觉与文本参数（可在设置页调整）。"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -46,20 +48,30 @@ class OmniStep2LocalSettings(BaseModel):
         le=7200,
         description="单次视觉模型调用墙钟超时（秒）",
     )
-    api_concurrency: int = Field(
+    vision_api_concurrency: int = Field(
         1,
         ge=1,
         le=64,
         description="视觉模型 API 并发上限",
+    )
+    text_api_concurrency: int = Field(
+        1,
+        ge=1,
+        le=64,
+        description="文案、脚本等文本 LLM API 并发上限",
     )
 
 
 class OmniStep2PipelineRoot(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    use_local_model_pipeline: bool = Field(
+    use_local_vision_model: bool = Field(
         False,
-        description="开启后使用 local 段参数（适合本地部署的视觉模型）",
+        description="视觉模型是否使用本地部署的低并发、长超时参数",
+    )
+    use_local_text_model: bool = Field(
+        False,
+        description="文案、脚本等文本 LLM 是否使用本地部署的低并发参数",
     )
     local: OmniStep2LocalSettings = Field(default_factory=OmniStep2LocalSettings)
 
@@ -94,7 +106,7 @@ def _cloud_runtime_params() -> OmniStep2RuntimeParams:
 
 def _local_runtime_params(local: OmniStep2LocalSettings) -> OmniStep2RuntimeParams:
     vl_batch = max(1, int(local.vl_batch_size))
-    api_c = max(1, int(local.api_concurrency))
+    api_c = max(1, int(local.vision_api_concurrency))
     cap = max(1, _CLOUD_MAX_CONCURRENCY)
     return OmniStep2RuntimeParams(
         vl_batch_size=vl_batch,
@@ -124,13 +136,37 @@ class OmniStep2PipelineConfigManager:
             if self.config_file.exists():
                 data = json.loads(self.config_file.read_text("utf-8"))
                 if isinstance(data, dict):
-                    self.root = OmniStep2PipelineRoot(**data)
+                    migrated = self._migrate_legacy_data(data)
+                    self.root = OmniStep2PipelineRoot(**migrated)
+                    if migrated != data:
+                        self.save()
             else:
                 self.save()
         except Exception as e:
             logger.error("加载 omni_step2_pipeline_config 失败: %s", e)
             self.root = OmniStep2PipelineRoot()
             self.save()
+
+    @staticmethod
+    def _migrate_legacy_data(data: Dict[str, Any]) -> Dict[str, Any]:
+        """把旧版单开关、单并发配置无损展开为视觉与文本两套配置。"""
+        migrated = dict(data)
+        legacy_enabled = migrated.get("use_local_model_pipeline")
+        if "use_local_vision_model" not in migrated and legacy_enabled is not None:
+            migrated["use_local_vision_model"] = bool(legacy_enabled)
+        if "use_local_text_model" not in migrated and legacy_enabled is not None:
+            migrated["use_local_text_model"] = bool(legacy_enabled)
+
+        local_raw = migrated.get("local")
+        if isinstance(local_raw, dict):
+            local = dict(local_raw)
+            legacy_concurrency = local.get("api_concurrency")
+            if "vision_api_concurrency" not in local and legacy_concurrency is not None:
+                local["vision_api_concurrency"] = legacy_concurrency
+            if "text_api_concurrency" not in local and legacy_concurrency is not None:
+                local["text_api_concurrency"] = legacy_concurrency
+            migrated["local"] = local
+        return migrated
 
     def save(self) -> None:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -143,24 +179,33 @@ class OmniStep2PipelineConfigManager:
         return self.root.model_copy(deep=True)
 
     def resolve_runtime_params(self) -> OmniStep2RuntimeParams:
-        if self.root.use_local_model_pipeline:
+        """解析视觉模型运行参数；不受文本模型开关影响。"""
+        if self.root.use_local_vision_model:
             return _local_runtime_params(self.root.local)
         return _cloud_runtime_params()
 
     def resolve_llm_api_concurrency(self, default_cloud: int = 3) -> int:
-        """文案生成等 LLM 并行调用上限；本地模型模式使用 api_concurrency。"""
-        params = self.resolve_runtime_params()
-        if params.source == "local":
-            return max(1, int(params.api_concurrency))
+        """解析文本 LLM 并发；不受视觉模型开关影响。"""
+        if self.root.use_local_text_model:
+            return max(1, int(self.root.local.text_api_concurrency))
         return max(1, int(default_cloud))
+
+    def is_local_vision_model_enabled(self) -> bool:
+        return bool(self.root.use_local_vision_model)
+
+    def is_local_text_model_enabled(self) -> bool:
+        return bool(self.root.use_local_text_model)
 
     def snapshot(self) -> Dict[str, Any]:
         effective = self.resolve_runtime_params()
         return {
-            "use_local_model_pipeline": self.root.use_local_model_pipeline,
+            "use_local_vision_model": self.root.use_local_vision_model,
+            "use_local_text_model": self.root.use_local_text_model,
             "local": self.root.local.model_dump(),
             "effective": {
                 "source": effective.source,
+                "vision_source": effective.source,
+                "text_source": "local" if self.root.use_local_text_model else "cloud",
                 "vl_batch_size": effective.vl_batch_size,
                 "frames_per_shot": effective.frames_per_shot,
                 "vl_batch_images": effective.vl_batch_images,
@@ -168,16 +213,31 @@ class OmniStep2PipelineConfigManager:
                 "max_concurrency": effective.max_concurrency,
                 "extract_concurrency": effective.extract_concurrency,
                 "api_concurrency": effective.api_concurrency,
+                "vision_api_concurrency": effective.api_concurrency,
+                "text_api_concurrency": self.resolve_llm_api_concurrency(),
                 "bge_encode_concurrency": effective.bge_encode_concurrency,
             },
         }
 
     def update(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         cur = self.get_root()
+        if "use_local_vision_model" in payload and payload["use_local_vision_model"] is not None:
+            cur.use_local_vision_model = bool(payload["use_local_vision_model"])
+        if "use_local_text_model" in payload and payload["use_local_text_model"] is not None:
+            cur.use_local_text_model = bool(payload["use_local_text_model"])
+
+        # 兼容尚未升级的调用方：旧开关仍表示视觉与文本同时切换。
         if "use_local_model_pipeline" in payload and payload["use_local_model_pipeline"] is not None:
-            cur.use_local_model_pipeline = bool(payload["use_local_model_pipeline"])
+            legacy_enabled = bool(payload["use_local_model_pipeline"])
+            cur.use_local_vision_model = legacy_enabled
+            cur.use_local_text_model = legacy_enabled
         if isinstance(payload.get("local"), dict):
-            merged = {**cur.local.model_dump(), **payload["local"]}
+            local_patch = dict(payload["local"])
+            legacy_concurrency = local_patch.pop("api_concurrency", None)
+            if legacy_concurrency is not None:
+                local_patch.setdefault("vision_api_concurrency", legacy_concurrency)
+                local_patch.setdefault("text_api_concurrency", legacy_concurrency)
+            merged = {**cur.local.model_dump(), **local_patch}
             cur.local = OmniStep2LocalSettings(**merged)
         self.root = cur
         self.save()
